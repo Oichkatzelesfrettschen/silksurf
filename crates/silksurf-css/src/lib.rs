@@ -23,6 +23,7 @@ pub enum CssToken {
     Whitespace,
     Cdo,
     Cdc,
+    Url(String),
     Eof,
 }
 
@@ -193,11 +194,21 @@ impl CssTokenizer {
                         cursor += 1;
                     }
                     let ident = self.buffer[start..cursor].to_string();
-                    self.cursor = cursor;
-                    if self.cursor < bytes.len() && bytes[self.cursor] == b'(' {
-                        self.cursor += 1;
-                        tokens.push(CssToken::Function(ident));
+                    if cursor < bytes.len() && bytes[cursor] == b'(' {
+                        if ident.eq_ignore_ascii_case("url") {
+                            match self.parse_url(cursor + 1) {
+                                UrlParse::Parsed(value, next) => {
+                                    self.cursor = next;
+                                    tokens.push(CssToken::Url(value));
+                                }
+                                UrlParse::Incomplete => break,
+                            }
+                        } else {
+                            self.cursor = cursor + 1;
+                            tokens.push(CssToken::Function(ident));
+                        }
                     } else {
+                        self.cursor = cursor;
                         tokens.push(CssToken::Ident(ident));
                     }
                 }
@@ -264,6 +275,58 @@ impl CssTokenizer {
         }
         Some((self.buffer[start..cursor].to_string(), cursor))
     }
+
+    fn parse_url(&self, start: usize) -> UrlParse {
+        let bytes = self.buffer.as_bytes();
+        let mut cursor = start;
+        while cursor < bytes.len() && is_whitespace(bytes[cursor]) {
+            cursor += 1;
+        }
+        if cursor >= bytes.len() {
+            return UrlParse::Incomplete;
+        }
+        let value;
+        match bytes[cursor] {
+            b'"' | b'\'' => {
+                let quote = bytes[cursor];
+                cursor += 1;
+                let value_start = cursor;
+                while cursor < bytes.len() && bytes[cursor] != quote {
+                    cursor += 1;
+                }
+                if cursor >= bytes.len() {
+                    return UrlParse::Incomplete;
+                }
+                value = self.buffer[value_start..cursor].to_string();
+                cursor += 1;
+            }
+            _ => {
+                let value_start = cursor;
+                while cursor < bytes.len()
+                    && bytes[cursor] != b')'
+                    && !is_whitespace(bytes[cursor])
+                {
+                    cursor += 1;
+                }
+                if cursor == value_start {
+                    value = String::new();
+                } else {
+                    value = self.buffer[value_start..cursor].to_string();
+                }
+            }
+        }
+
+        while cursor < bytes.len() && is_whitespace(bytes[cursor]) {
+            cursor += 1;
+        }
+        if cursor >= bytes.len() {
+            return UrlParse::Incomplete;
+        }
+        if bytes[cursor] != b')' {
+            return UrlParse::Incomplete;
+        }
+        UrlParse::Parsed(value, cursor + 1)
+    }
 }
 
 fn is_whitespace(byte: u8) -> bool {
@@ -283,4 +346,9 @@ fn find_subsequence(haystack: &[u8], start: usize, needle: &[u8]) -> Option<usiz
         .windows(needle.len())
         .position(|window| window == needle)
         .map(|pos| start + pos)
+}
+
+enum UrlParse {
+    Parsed(String, usize),
+    Incomplete,
 }
