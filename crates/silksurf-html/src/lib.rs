@@ -1,5 +1,7 @@
 //! HTML5 tokenizer and parser (cleanroom).
 
+use memchr::memchr;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
     Doctype {
@@ -75,7 +77,7 @@ impl Tokenizer {
             }
 
             let remainder = &self.buffer[self.cursor..];
-            match remainder.find('<') {
+            match memchr(b'<', remainder.as_bytes()) {
                 Some(0) => {
                     if !self.parse_tag(&mut tokens)? {
                         break;

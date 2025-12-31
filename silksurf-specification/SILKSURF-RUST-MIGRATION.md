@@ -44,6 +44,8 @@
 - Test orchestration: `cargo-nextest`.
 - Benchmarks: `criterion`.
 
+See `SILKSURF-DEPENDENCY-STRATEGY.md` for workspace dependency alignment.
+
 ## Parser/Support Crates (Optional, Not Full Engines)
 - HTML: `html5ever` (HTML5 parser) or custom tokenizer + tree builder.
 - CSS: `cssparser` (syntax), `selectors` (matching).
