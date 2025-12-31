@@ -127,6 +127,33 @@ impl Dom {
         Ok(self.nodes[index].parent)
     }
 
+    pub fn first_child(&self, id: NodeId) -> Result<Option<NodeId>, DomError> {
+        let index = self.node_index(id)?;
+        Ok(self.nodes[index].children.first().copied())
+    }
+
+    pub fn next_sibling(&self, id: NodeId) -> Result<Option<NodeId>, DomError> {
+        let parent = match self.parent(id)? {
+            Some(parent) => parent,
+            None => return Ok(None),
+        };
+        let siblings = self.children(parent)?;
+        for (idx, sibling) in siblings.iter().enumerate() {
+            if *sibling == id {
+                return Ok(siblings.get(idx + 1).copied());
+            }
+        }
+        Ok(None)
+    }
+
+    pub fn element_name(&self, id: NodeId) -> Result<Option<&str>, DomError> {
+        let index = self.node_index(id)?;
+        match &self.nodes[index].kind {
+            NodeKind::Element { name, .. } => Ok(Some(name.as_str())),
+            _ => Ok(None),
+        }
+    }
+
     fn push_node(&mut self, kind: NodeKind) -> NodeId {
         let id = NodeId(self.nodes.len());
         self.nodes.push(Node {
