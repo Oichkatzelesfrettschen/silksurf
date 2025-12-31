@@ -2,6 +2,10 @@
 
 use memchr::memchr;
 
+mod tree_builder;
+
+pub use tree_builder::TreeBuilder;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
     Doctype {
