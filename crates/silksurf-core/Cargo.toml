@@ -1,0 +1,10 @@
+[package]
+name = "silksurf-core"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+bumpalo = { workspace = true }
+lasso = { workspace = true }
+thiserror = { workspace = true }

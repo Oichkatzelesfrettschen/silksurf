@@ -3,6 +3,7 @@ members = [
   "silksurf-js",
   "crates/silksurf-app",
   "crates/silksurf-engine",
+  "crates/silksurf-core",
   "crates/silksurf-html",
   "crates/silksurf-css",
   "crates/silksurf-dom",
