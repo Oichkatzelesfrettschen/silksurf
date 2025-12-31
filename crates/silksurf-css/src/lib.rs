@@ -2,10 +2,14 @@
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CssToken {
+    AtKeyword(String),
     Ident(String),
+    Function(String),
     Hash(String),
     String(String),
     Number(String),
+    Percentage(String),
+    Dimension { value: String, unit: String },
     Delim(char),
     Colon,
     Semicolon,
@@ -17,6 +21,8 @@ pub enum CssToken {
     BracketOpen,
     BracketClose,
     Whitespace,
+    Cdo,
+    Cdc,
     Eof,
 }
 
@@ -69,6 +75,22 @@ impl CssTokenizer {
                 break;
             }
 
+            if current == b'<' && self.cursor + 3 < bytes.len() {
+                if &bytes[self.cursor..self.cursor + 4] == b"<!--" {
+                    self.cursor += 4;
+                    tokens.push(CssToken::Cdo);
+                    continue;
+                }
+            }
+
+            if current == b'-' && self.cursor + 2 < bytes.len() {
+                if &bytes[self.cursor..self.cursor + 3] == b"-->" {
+                    self.cursor += 3;
+                    tokens.push(CssToken::Cdc);
+                    continue;
+                }
+            }
+
             match current {
                 b'"' | b'\'' => {
                     let quote = current;
@@ -96,6 +118,15 @@ impl CssTokenizer {
                         let name = self.buffer[self.cursor + 1..cursor].to_string();
                         self.cursor = cursor;
                         tokens.push(CssToken::Hash(name));
+                    }
+                }
+                b'@' => {
+                    if let Some((name, next)) = self.parse_ident(self.cursor + 1) {
+                        self.cursor = next;
+                        tokens.push(CssToken::AtKeyword(name));
+                    } else {
+                        self.cursor += 1;
+                        tokens.push(CssToken::Delim('@'));
                     }
                 }
                 b':' => {
@@ -134,25 +165,26 @@ impl CssTokenizer {
                     self.cursor += 1;
                     tokens.push(CssToken::BracketClose);
                 }
-                b'0'..=b'9' | b'.' => {
-                    let start = self.cursor;
-                    let mut cursor = self.cursor;
-                    if bytes[cursor] == b'.' {
-                        if cursor + 1 >= bytes.len() || !bytes[cursor + 1].is_ascii_digit() {
-                            self.cursor += 1;
-                            tokens.push(CssToken::Delim('.'));
+                b'0'..=b'9' | b'.' | b'+' | b'-' => {
+                    if let Some((number, mut cursor)) = self.parse_number(self.cursor) {
+                        if cursor < bytes.len() && bytes[cursor] == b'%' {
+                            cursor += 1;
+                            self.cursor = cursor;
+                            tokens.push(CssToken::Percentage(number));
                             continue;
                         }
+                        if let Some((unit, next)) = self.parse_ident(cursor) {
+                            self.cursor = next;
+                            tokens.push(CssToken::Dimension { value: number, unit });
+                            continue;
+                        }
+                        self.cursor = cursor;
+                        tokens.push(CssToken::Number(number));
+                    } else {
+                        let delim = self.buffer[self.cursor..].chars().next().unwrap();
+                        self.cursor += delim.len_utf8();
+                        tokens.push(CssToken::Delim(delim));
                     }
-                    cursor += 1;
-                    while cursor < bytes.len()
-                        && (bytes[cursor].is_ascii_digit() || bytes[cursor] == b'.')
-                    {
-                        cursor += 1;
-                    }
-                    let number = self.buffer[start..cursor].to_string();
-                    self.cursor = cursor;
-                    tokens.push(CssToken::Number(number));
                 }
                 _ if is_ident_start(current) => {
                     let start = self.cursor;
@@ -162,7 +194,12 @@ impl CssTokenizer {
                     }
                     let ident = self.buffer[start..cursor].to_string();
                     self.cursor = cursor;
-                    tokens.push(CssToken::Ident(ident));
+                    if self.cursor < bytes.len() && bytes[self.cursor] == b'(' {
+                        self.cursor += 1;
+                        tokens.push(CssToken::Function(ident));
+                    } else {
+                        tokens.push(CssToken::Ident(ident));
+                    }
                 }
                 _ => {
                     let delim = self.buffer[self.cursor..].chars().next().unwrap();
@@ -185,6 +222,48 @@ impl CssTokenizer {
         tokens.push(CssToken::Eof);
         Ok(tokens)
     }
+
+    fn parse_ident(&self, start: usize) -> Option<(String, usize)> {
+        let bytes = self.buffer.as_bytes();
+        if start >= bytes.len() || !is_ident_start(bytes[start]) {
+            return None;
+        }
+        let mut cursor = start + 1;
+        while cursor < bytes.len() && is_ident_char(bytes[cursor]) {
+            cursor += 1;
+        }
+        Some((self.buffer[start..cursor].to_string(), cursor))
+    }
+
+    fn parse_number(&self, start: usize) -> Option<(String, usize)> {
+        let bytes = self.buffer.as_bytes();
+        if start >= bytes.len() {
+            return None;
+        }
+        let mut cursor = start;
+        if matches!(bytes[cursor], b'+' | b'-') {
+            cursor += 1;
+            if cursor >= bytes.len() {
+                return None;
+            }
+        }
+        let mut has_digit = false;
+        while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
+            cursor += 1;
+            has_digit = true;
+        }
+        if cursor < bytes.len() && bytes[cursor] == b'.' {
+            cursor += 1;
+            while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
+                cursor += 1;
+                has_digit = true;
+            }
+        }
+        if !has_digit {
+            return None;
+        }
+        Some((self.buffer[start..cursor].to_string(), cursor))
+    }
 }
 
 fn is_whitespace(byte: u8) -> bool {
@@ -192,11 +271,11 @@ fn is_whitespace(byte: u8) -> bool {
 }
 
 fn is_ident_start(byte: u8) -> bool {
-    matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'_')
+    matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'-')
 }
 
 fn is_ident_char(byte: u8) -> bool {
-    is_ident_start(byte) || matches!(byte, b'0'..=b'9' | b'-')
+    is_ident_start(byte) || matches!(byte, b'0'..=b'9')
 }
 
 fn find_subsequence(haystack: &[u8], start: usize, needle: &[u8]) -> Option<usize> {
