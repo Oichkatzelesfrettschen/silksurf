@@ -15,7 +15,7 @@ fn append_child_sets_relationships() {
     assert_eq!(dom.parent(text).unwrap(), Some(html));
 
     match dom.node(html).unwrap().kind() {
-        NodeKind::Element { name } => assert_eq!(name, "html"),
+        NodeKind::Element { name, .. } => assert_eq!(name, "html"),
         _ => panic!("expected element node"),
     }
 
@@ -36,4 +36,24 @@ fn append_child_rejects_second_parent() {
     let result = dom.append_child(second, first);
 
     assert_eq!(result, Err(DomError::AlreadyHasParent(first)));
+}
+
+#[test]
+fn sets_attributes_and_namespace() {
+    let mut dom = Dom::new();
+    let node = dom.create_element("div");
+    dom.set_attribute(node, "class", "hero").unwrap();
+
+    let attrs = dom.attributes(node).unwrap();
+    assert_eq!(attrs.len(), 1);
+    assert_eq!(attrs[0].name, "class");
+    assert_eq!(attrs[0].value, "hero");
+
+    let svg = dom.create_element_ns("svg", silksurf_dom::Namespace::Svg);
+    match dom.node(svg).unwrap().kind() {
+        NodeKind::Element { namespace, .. } => {
+            assert_eq!(namespace, &silksurf_dom::Namespace::Svg)
+        }
+        _ => panic!("expected element node"),
+    }
 }

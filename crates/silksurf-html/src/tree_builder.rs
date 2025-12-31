@@ -47,8 +47,12 @@ impl TreeBuilder {
     {
         for token in tokens {
             match token {
-                Token::StartTag { name, self_closing, .. } => {
-                    self.handle_start_tag(&name, self_closing)?;
+                Token::StartTag {
+                    name,
+                    attributes,
+                    self_closing,
+                } => {
+                    self.handle_start_tag(&name, &attributes, self_closing)?;
                 }
                 Token::EndTag { name } => {
                     self.handle_end_tag(&name)?;
@@ -64,10 +68,21 @@ impl TreeBuilder {
         Ok(())
     }
 
-    fn handle_start_tag(&mut self, name: &str, self_closing: bool) -> Result<(), TreeBuildError> {
+    fn handle_start_tag(
+        &mut self,
+        name: &str,
+        attributes: &[crate::Attribute],
+        self_closing: bool,
+    ) -> Result<(), TreeBuildError> {
         let element = self.dom.create_element(name);
         let parent = self.current_node();
         self.dom.append_child(parent, element).map_err(TreeBuildError::Dom)?;
+        for attr in attributes {
+            let value = attr.value.as_deref().unwrap_or("");
+            self.dom
+                .set_attribute(element, &attr.name, value)
+                .map_err(TreeBuildError::Dom)?;
+        }
         if !self_closing {
             self.open_elements.push(element);
         }
@@ -79,7 +94,7 @@ impl TreeBuilder {
         for idx in (0..self.open_elements.len()).rev() {
             let node_id = self.open_elements[idx];
             let node = self.dom.node(node_id).map_err(TreeBuildError::Dom)?;
-            if let NodeKind::Element { name: node_name } = node.kind() {
+            if let NodeKind::Element { name: node_name, .. } = node.kind() {
                 if node_name.eq_ignore_ascii_case(name) {
                     match_index = Some(idx);
                     break;
