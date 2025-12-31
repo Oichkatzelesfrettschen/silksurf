@@ -6,3 +6,4 @@ publish = false
 
 [dependencies]
 memchr = { workspace = true }
+silksurf-dom = { path = "../silksurf-dom" }
