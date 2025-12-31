@@ -1,0 +1,69 @@
+# cbindgen configuration for SilkSurfJS C FFI
+# Generate headers with: cbindgen --config cbindgen.toml --output silksurf.h
+
+language = "C"
+
+# Header configuration
+header = """
+/**
+ * SilkSurfJS - Pure Rust JavaScript Engine
+ *
+ * C API for embedding SilkSurfJS in non-Rust applications.
+ *
+ * Thread Safety: Currently single-threaded. Each engine instance
+ * must be used from one thread only.
+ *
+ * Error Handling: Functions return status codes or null pointers.
+ * Use silksurf_last_error() to get error details.
+ *
+ * Example:
+ *   SilkSurfEngine* engine = silksurf_engine_new();
+ *   SilkSurfStatus status = silksurf_eval(engine, "console.log('Hello')");
+ *   silksurf_engine_free(engine);
+ */
+"""
+
+include_guard = "SILKSURF_JS_H"
+pragma_once = true
+include_version = true
+
+# Include documentation
+documentation = true
+documentation_style = "doxy"
+
+# Naming conventions
+[export]
+include = [
+    "SilkSurfEngine",
+    "SilkSurfScript",
+    "SilkSurfValue",
+    "SilkSurfStatus",
+    "SilkSurfHeapStats",
+]
+prefix = ""
+
+[export.rename]
+# Keep original names
+
+[fn]
+# Prefix all function names
+prefix = ""
+sort_by = "Name"
+
+[struct]
+# Derive eq, copy, etc.
+derive_eq = true
+derive_neq = true
+
+[enum]
+rename_variants = "None"
+prefix_with_name = false
+
+# Type mappings
+[parse]
+parse_deps = false
+clean = true
+
+[defines]
+# Feature flags
+"feature = wasm" = "SILKSURF_WASM"

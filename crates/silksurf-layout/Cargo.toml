@@ -1,0 +1,9 @@
+[package]
+name = "silksurf-layout"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+silksurf-dom = { path = "../silksurf-dom" }
+silksurf-css = { path = "../silksurf-css" }

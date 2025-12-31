@@ -1,0 +1,1423 @@
+19,8,73,3,19,"wtf_push_iso2022@51-69@./libwc/iso2022.c","./libwc/iso2022.c","wtf_push_iso2022","wtf_push_iso2022( Str os , wc_ccs ccs , wc_uint32 code)",51,69
+178,56,1087,2,181,"wc_conv_from_iso2022@72-252@./libwc/iso2022.c","./libwc/iso2022.c","wc_conv_from_iso2022","wc_conv_from_iso2022( Str is , wc_ces ces)",72,252
+139,57,661,2,140,"wc_parse_iso2022_esc@255-394@./libwc/iso2022.c","./libwc/iso2022.c","wc_parse_iso2022_esc","wc_parse_iso2022_esc( wc_uchar ** ptr , wc_status * st)",255,394
+103,47,656,3,111,"wc_push_to_iso2022@397-507@./libwc/iso2022.c","./libwc/iso2022.c","wc_push_to_iso2022","wc_push_to_iso2022( Str os , wc_wchar_t cc , wc_status * st)",397,507
+6,3,63,2,6,"wc_push_to_iso2022_end@510-515@./libwc/iso2022.c","./libwc/iso2022.c","wc_push_to_iso2022_end","wc_push_to_iso2022_end( Str os , wc_status * st)",510,515
+45,15,252,5,47,"wc_push_iso2022_esc@518-564@./libwc/iso2022.c","./libwc/iso2022.c","wc_push_iso2022_esc","wc_push_iso2022_esc( Str os , wc_ccs ccs , wc_uchar g , wc_uint8 invoke , wc_status * st)",518,564
+41,17,239,3,44,"wc_push_to_euc@567-610@./libwc/iso2022.c","./libwc/iso2022.c","wc_push_to_euc","wc_push_to_euc( Str os , wc_wchar_t cc , wc_status * st)",567,610
+70,30,378,3,78,"wc_push_to_eucjp@613-690@./libwc/iso2022.c","./libwc/iso2022.c","wc_push_to_eucjp","wc_push_to_eucjp( Str os , wc_wchar_t cc , wc_status * st)",613,690
+53,27,290,3,55,"wc_push_to_euctw@693-747@./libwc/iso2022.c","./libwc/iso2022.c","wc_push_to_euctw","wc_push_to_euctw( Str os , wc_wchar_t cc , wc_status * st)",693,747
+32,12,181,3,35,"wc_push_to_iso8859@750-784@./libwc/iso2022.c","./libwc/iso2022.c","wc_push_to_iso8859","wc_push_to_iso8859( Str os , wc_wchar_t cc , wc_status * st)",750,784
+60,17,357,1,61,"wc_create_gmap@787-847@./libwc/iso2022.c","./libwc/iso2022.c","wc_create_gmap","wc_create_gmap( wc_status * st)",787,847
+214,76,1091,2,217,"wc_char_conv_from_iso2022@850-1066@./libwc/iso2022.c","./libwc/iso2022.c","wc_char_conv_from_iso2022","wc_char_conv_from_iso2022( wc_uchar c , wc_status * st)",850,1066
+83,30,523,2,85,"wc_conv_from_hz@11-95@./libwc/hz.c","./libwc/hz.c","wc_conv_from_hz","wc_conv_from_hz( Str is , wc_ces ces)",11,95
+52,16,293,3,54,"wc_push_to_hz@98-151@./libwc/hz.c","./libwc/hz.c","wc_push_to_hz","wc_push_to_hz( Str os , wc_wchar_t cc , wc_status * st)",98,151
+8,2,39,2,8,"wc_push_to_hz_end@154-161@./libwc/hz.c","./libwc/hz.c","wc_push_to_hz_end","wc_push_to_hz_end( Str os , wc_status * st)",154,161
+9,3,57,3,9,"wc_Str_conv@18-26@./libwc/conv.c","./libwc/conv.c","wc_Str_conv","wc_Str_conv( Str is , wc_ces f_ces , wc_ces t_ces)",18,26
+11,1,57,3,12,"wc_Str_conv_strict@29-40@./libwc/conv.c","./libwc/conv.c","wc_Str_conv_strict","wc_Str_conv_strict( Str is , wc_ces f_ces , wc_ces t_ces)",29,40
+59,32,337,2,67,"wc_conv_to_ces@43-109@./libwc/conv.c","./libwc/conv.c","wc_conv_to_ces","wc_conv_to_ces( Str is , wc_ces ces)",43,109
+24,11,165,4,25,"wc_Str_conv_with_detect@112-136@./libwc/conv.c","./libwc/conv.c","wc_Str_conv_with_detect","wc_Str_conv_with_detect( Str is , wc_ces * f_ces , wc_ces hint , wc_ces t_ces)",112,136
+11,6,82,2,13,"wc_push_end@139-151@./libwc/conv.c","./libwc/conv.c","wc_push_end","wc_push_end( Str os , wc_status * st)",139,151
+79,26,473,2,82,"wc_conv_from_utf7@62-143@./libwc/utf7.c","./libwc/utf7.c","wc_conv_from_utf7","wc_conv_from_utf7( Str is , wc_ces ces)",62,143
+56,15,357,3,56,"wc_push_ucs_to_utf7@146-201@./libwc/utf7.c","./libwc/utf7.c","wc_push_ucs_to_utf7","wc_push_ucs_to_utf7( Str os , wc_uint32 ucs , wc_status * st)",146,201
+16,5,90,3,17,"wc_push_tag_to_utf7@204-220@./libwc/utf7.c","./libwc/utf7.c","wc_push_tag_to_utf7","wc_push_tag_to_utf7( Str os , int ntag , wc_status * st)",204,220
+52,23,355,3,53,"wc_push_to_utf7@223-275@./libwc/utf7.c","./libwc/utf7.c","wc_push_to_utf7","wc_push_to_utf7( Str os , wc_wchar_t cc , wc_status * st)",223,275
+11,4,67,2,11,"wc_push_to_utf7_end@278-288@./libwc/utf7.c","./libwc/utf7.c","wc_push_to_utf7_end","wc_push_to_utf7_end( Str os , wc_status * st)",278,288
+71,21,380,2,74,"wc_char_conv_from_utf7@291-364@./libwc/utf7.c","./libwc/utf7.c","wc_char_conv_from_utf7","wc_char_conv_from_utf7( wc_uchar c , wc_status * st)",291,364
+7,1,33,2,7,"wc_char_conv_init@8-14@./libwc/char_conv.c","./libwc/char_conv.c","wc_char_conv_init","wc_char_conv_init( wc_ces f_ces , wc_ces t_ces)",8,14
+5,1,33,1,5,"wc_char_conv@17-21@./libwc/char_conv.c","./libwc/char_conv.c","wc_char_conv","wc_char_conv( char c)",17,21
+31,14,179,2,34,"wc_create_detect_map@41-74@./libwc/detect.c","./libwc/detect.c","wc_create_detect_map","wc_create_detect_map( wc_ces ces , wc_bool esc)",41,74
+441,170,1916,3,468,"wc_auto_detect@77-544@./libwc/detect.c","./libwc/detect.c","wc_auto_detect","wc_auto_detect( char * is , size_t len , wc_ces hint)",77,544
+5,2,21,1,5,"wc_gb2312_or_gbk@40-44@./libwc/gbk.c","./libwc/gbk.c","wc_gb2312_or_gbk","wc_gb2312_or_gbk( wc_uint16 code)",40,44
+12,2,61,1,12,"wc_gbk_to_cs128w@47-58@./libwc/gbk.c","./libwc/gbk.c","wc_gbk_to_cs128w","wc_gbk_to_cs128w( wc_wchar_t cc)",47,58
+9,2,52,1,9,"wc_cs128w_to_gbk@61-69@./libwc/gbk.c","./libwc/gbk.c","wc_cs128w_to_gbk","wc_cs128w_to_gbk( wc_wchar_t cc)",61,69
+16,7,185,1,17,"wc_gbk_to_N@72-88@./libwc/gbk.c","./libwc/gbk.c","wc_gbk_to_N","wc_gbk_to_N( wc_uint32 c)",72,88
+53,15,314,2,55,"wc_conv_from_gbk@91-145@./libwc/gbk.c","./libwc/gbk.c","wc_conv_from_gbk","wc_conv_from_gbk( Str is , wc_ces ces)",91,145
+38,15,236,3,40,"wc_push_to_gbk@148-187@./libwc/gbk.c","./libwc/gbk.c","wc_push_to_gbk","wc_push_to_gbk( Str os , wc_wchar_t cc , wc_status * st)",148,187
+39,10,189,2,41,"wc_char_conv_from_gbk@190-230@./libwc/gbk.c","./libwc/gbk.c","wc_char_conv_from_gbk","wc_char_conv_from_gbk( wc_uchar c , wc_status * st)",190,230
+12,2,61,1,12,"wc_uhc_to_cs128w@36-47@./libwc/uhc.c","./libwc/uhc.c","wc_uhc_to_cs128w","wc_uhc_to_cs128w( wc_wchar_t cc)",36,47
+9,2,52,1,9,"wc_cs128w_to_uhc@50-58@./libwc/uhc.c","./libwc/uhc.c","wc_cs128w_to_uhc","wc_cs128w_to_uhc( wc_wchar_t cc)",50,58
+10,4,72,1,11,"wc_uhc_to_N@61-71@./libwc/uhc.c","./libwc/uhc.c","wc_uhc_to_N","wc_uhc_to_N( wc_uint32 c)",61,71
+51,16,304,2,53,"wc_conv_from_uhc@74-126@./libwc/uhc.c","./libwc/uhc.c","wc_conv_from_uhc","wc_conv_from_uhc( Str is , wc_ces ces)",74,126
+35,14,215,3,37,"wc_push_to_uhc@129-165@./libwc/uhc.c","./libwc/uhc.c","wc_push_to_uhc","wc_push_to_uhc( Str os , wc_wchar_t cc , wc_status * st)",129,165
+37,11,180,2,39,"wc_char_conv_from_uhc@168-206@./libwc/uhc.c","./libwc/uhc.c","wc_char_conv_from_uhc","wc_char_conv_from_uhc( wc_uchar c , wc_status * st)",168,206
+29,7,194,2,32,"main@7-38@./libwc/test.c","./libwc/test.c","main","main( int argc , char ** argv)",7,38
+7,3,43,2,7,"wc_tcvn5712_precompose@77-83@./libwc/viet.c","./libwc/viet.c","wc_tcvn5712_precompose","wc_tcvn5712_precompose( wc_uchar c1 , wc_uchar c2)",77,83
+13,3,75,1,14,"wc_tcvn57123_to_tcvn5712@86-99@./libwc/viet.c","./libwc/viet.c","wc_tcvn57123_to_tcvn5712","wc_tcvn57123_to_tcvn5712( wc_wchar_t cc)",86,99
+7,3,43,2,7,"wc_cp1258_precompose@102-108@./libwc/viet.c","./libwc/viet.c","wc_cp1258_precompose","wc_cp1258_precompose( wc_uchar c1 , wc_uchar c2)",102,108
+38,12,258,2,41,"wc_conv_from_viet@111-151@./libwc/viet.c","./libwc/viet.c","wc_conv_from_viet","wc_conv_from_viet( Str is , wc_ces ces)",111,151
+59,20,386,3,63,"wc_push_to_viet@154-216@./libwc/viet.c","./libwc/viet.c","wc_push_to_viet","wc_push_to_viet( Str os , wc_wchar_t cc , wc_status * st)",154,216
+23,7,136,2,25,"wc_char_conv_from_viet@219-243@./libwc/viet.c","./libwc/viet.c","wc_char_conv_from_viet","wc_char_conv_from_viet( wc_uchar c , wc_status * st)",219,243
+26,13,142,1,28,"wc_is_combining@16-43@./libwc/combining.c","./libwc/combining.c","wc_is_combining","wc_is_combining( wc_wchar_t cc)",16,43
+12,2,61,1,12,"wc_gbk_ext_to_cs128w@39-50@./libwc/gb18030.c","./libwc/gb18030.c","wc_gbk_ext_to_cs128w","wc_gbk_ext_to_cs128w( wc_wchar_t cc)",39,50
+9,2,52,1,9,"wc_cs128w_to_gbk_ext@53-61@./libwc/gb18030.c","./libwc/gb18030.c","wc_cs128w_to_gbk_ext","wc_cs128w_to_gbk_ext( wc_wchar_t cc)",53,61
+5,2,21,1,5,"wc_gbk_or_gbk_ext@64-68@./libwc/gb18030.c","./libwc/gb18030.c","wc_gbk_or_gbk_ext","wc_gbk_or_gbk_ext( wc_uint16 code)",64,68
+43,15,277,1,45,"wc_gb18030_to_ucs@72-116@./libwc/gb18030.c","./libwc/gb18030.c","wc_gb18030_to_ucs","wc_gb18030_to_ucs( wc_wchar_t cc)",72,116
+37,7,239,1,38,"wc_ucs_to_gb18030@119-156@./libwc/gb18030.c","./libwc/gb18030.c","wc_ucs_to_gb18030","wc_ucs_to_gb18030( wc_uint32 ucs)",119,156
+87,25,556,2,93,"wc_conv_from_gb18030@160-252@./libwc/gb18030.c","./libwc/gb18030.c","wc_conv_from_gb18030","wc_conv_from_gb18030( Str is , wc_ces ces)",160,252
+48,18,353,3,50,"wc_push_to_gb18030@255-304@./libwc/gb18030.c","./libwc/gb18030.c","wc_push_to_gb18030","wc_push_to_gb18030( Str os , wc_wchar_t cc , wc_status * st)",255,304
+65,18,390,2,71,"wc_char_conv_from_gb18030@307-377@./libwc/gb18030.c","./libwc/gb18030.c","wc_char_conv_from_gb18030","wc_char_conv_from_gb18030( wc_uchar c , wc_status * st)",307,377
+36,22,204,1,37,"wc_get_ucs_table@38-74@./libwc/ucs.c","./libwc/ucs.c","wc_get_ucs_table","wc_get_ucs_table( wc_ccs ccs)",38,74
+29,14,214,2,30,"wc_ucs_to_any@77-106@./libwc/ucs.c","./libwc/ucs.c","wc_ucs_to_any","wc_ucs_to_any( wc_uint32 ucs , wc_table * t)",77,106
+176,72,998,1,177,"wc_any_to_ucs@109-285@./libwc/ucs.c","./libwc/ucs.c","wc_any_to_ucs","wc_any_to_ucs( wc_wchar_t cc)",109,285
+18,6,109,2,20,"wc_any_to_any@288-307@./libwc/ucs.c","./libwc/ucs.c","wc_any_to_any","wc_any_to_any( wc_wchar_t cc , wc_table * t)",288,307
+16,5,87,2,17,"wc_ucs_to_any_list@310-326@./libwc/ucs.c","./libwc/ucs.c","wc_ucs_to_any_list","wc_ucs_to_any_list( wc_uint32 ucs , wc_table ** tlist)",310,326
+60,26,401,2,62,"wc_any_to_any_ces@329-390@./libwc/ucs.c","./libwc/ucs.c","wc_any_to_any_ces","wc_any_to_any_ces( wc_wchar_t cc , wc_status * st)",329,390
+63,29,424,2,65,"wc_any_to_iso2022@393-457@./libwc/ucs.c","./libwc/ucs.c","wc_any_to_iso2022","wc_any_to_iso2022( wc_wchar_t cc , wc_status * st)",393,457
+34,11,214,1,35,"wc_ucs_to_iso2022@460-494@./libwc/ucs.c","./libwc/ucs.c","wc_ucs_to_iso2022","wc_ucs_to_iso2022( wc_uint32 ucs)",460,494
+26,8,154,1,27,"wc_ucs_to_iso2022w@497-523@./libwc/ucs.c","./libwc/ucs.c","wc_ucs_to_iso2022w","wc_ucs_to_iso2022w( wc_uint32 ucs)",497,523
+10,8,72,1,10,"wc_ucs_to_ccs@526-535@./libwc/ucs.c","./libwc/ucs.c","wc_ucs_to_ccs","wc_ucs_to_ccs( wc_uint32 ucs)",526,535
+11,8,72,1,11,"wc_is_ucs_ambiguous_width@538-548@./libwc/ucs.c","./libwc/ucs.c","wc_is_ucs_ambiguous_width","wc_is_ucs_ambiguous_width( wc_uint32 ucs)",538,548
+9,3,50,1,9,"wc_is_ucs_wide@551-559@./libwc/ucs.c","./libwc/ucs.c","wc_is_ucs_wide","wc_is_ucs_wide( wc_uint32 ucs)",551,559
+6,3,32,1,6,"wc_is_ucs_combining@562-567@./libwc/ucs.c","./libwc/ucs.c","wc_is_ucs_combining","wc_is_ucs_combining( wc_uint32 ucs)",562,567
+6,2,28,1,6,"wc_is_ucs_hangul@570-575@./libwc/ucs.c","./libwc/ucs.c","wc_is_ucs_hangul","wc_is_ucs_hangul( wc_uint32 ucs)",570,575
+6,2,28,1,6,"wc_is_ucs_alpha@578-583@./libwc/ucs.c","./libwc/ucs.c","wc_is_ucs_alpha","wc_is_ucs_alpha( wc_uint32 ucs)",578,583
+6,2,28,1,6,"wc_is_ucs_digit@586-591@./libwc/ucs.c","./libwc/ucs.c","wc_is_ucs_digit","wc_is_ucs_digit( wc_uint32 ucs)",586,591
+4,2,20,1,4,"wc_is_ucs_alnum@594-597@./libwc/ucs.c","./libwc/ucs.c","wc_is_ucs_alnum","wc_is_ucs_alnum( wc_uint32 ucs)",594,597
+6,2,28,1,6,"wc_is_ucs_lower@600-605@./libwc/ucs.c","./libwc/ucs.c","wc_is_ucs_lower","wc_is_ucs_lower( wc_uint32 ucs)",600,605
+6,2,28,1,6,"wc_is_ucs_upper@608-613@./libwc/ucs.c","./libwc/ucs.c","wc_is_ucs_upper","wc_is_ucs_upper( wc_uint32 ucs)",608,613
+8,3,47,1,8,"wc_ucs_toupper@616-623@./libwc/ucs.c","./libwc/ucs.c","wc_ucs_toupper","wc_ucs_toupper( wc_uint32 ucs)",616,623
+8,3,47,1,8,"wc_ucs_tolower@626-633@./libwc/ucs.c","./libwc/ucs.c","wc_ucs_tolower","wc_ucs_tolower( wc_uint32 ucs)",626,633
+8,3,47,1,8,"wc_ucs_totitle@636-643@./libwc/ucs.c","./libwc/ucs.c","wc_ucs_totitle","wc_ucs_totitle( wc_uint32 ucs)",636,643
+10,4,59,2,11,"wc_ucs_precompose@646-656@./libwc/ucs.c","./libwc/ucs.c","wc_ucs_precompose","wc_ucs_precompose( wc_uint32 ucs1 , wc_uint32 ucs2)",646,656
+9,2,43,1,10,"wc_ucs_to_fullwidth@659-668@./libwc/ucs.c","./libwc/ucs.c","wc_ucs_to_fullwidth","wc_ucs_to_fullwidth( wc_uint32 ucs)",659,668
+15,6,80,1,16,"wc_ucs_put_tag@671-686@./libwc/ucs.c","./libwc/ucs.c","wc_ucs_put_tag","wc_ucs_put_tag( char * p)",671,686
+6,3,26,1,6,"wc_ucs_get_tag@689-694@./libwc/ucs.c","./libwc/ucs.c","wc_ucs_get_tag","wc_ucs_get_tag( int ntag)",689,694
+39,16,255,3,40,"wtf_push_ucs@697-736@./libwc/ucs.c","./libwc/ucs.c","wtf_push_ucs","wtf_push_ucs( Str os , wc_uint32 ucs , wc_status * st)",697,736
+46,7,459,2,46,"wc_ucs_to_utf8@32-77@./libwc/utf8.c","./libwc/utf8.c","wc_ucs_to_utf8","wc_ucs_to_utf8( wc_uint32 ucs , wc_uchar * utf8)",32,77
+54,13,449,1,55,"wc_utf8_to_ucs@80-134@./libwc/utf8.c","./libwc/utf8.c","wc_utf8_to_ucs","wc_utf8_to_ucs( wc_uchar * utf8)",80,134
+67,19,367,2,69,"wc_conv_from_utf8@137-205@./libwc/utf8.c","./libwc/utf8.c","wc_conv_from_utf8","wc_conv_from_utf8( Str is , wc_ces ces)",137,205
+21,5,117,2,22,"wc_push_tag_to_utf8@208-229@./libwc/utf8.c","./libwc/utf8.c","wc_push_tag_to_utf8","wc_push_tag_to_utf8( Str os , int ntag)",208,229
+52,20,342,3,52,"wc_push_to_utf8@232-283@./libwc/utf8.c","./libwc/utf8.c","wc_push_to_utf8","wc_push_to_utf8( Str os , wc_wchar_t cc , wc_status * st)",232,283
+6,2,30,2,6,"wc_push_to_utf8_end@286-291@./libwc/utf8.c","./libwc/utf8.c","wc_push_to_utf8_end","wc_push_to_utf8_end( Str os , wc_status * st)",286,291
+49,14,237,2,51,"wc_char_conv_from_utf8@294-344@./libwc/utf8.c","./libwc/utf8.c","wc_char_conv_from_utf8","wc_char_conv_from_utf8( wc_uchar c , wc_status * st)",294,344
+15,2,85,1,16,"wc_sjis_to_jis@80-95@./libwc/sjis.c","./libwc/sjis.c","wc_sjis_to_jis","wc_sjis_to_jis( wc_wchar_t cc)",80,95
+17,3,95,1,18,"wc_jis_to_sjis@98-115@./libwc/sjis.c","./libwc/sjis.c","wc_jis_to_sjis","wc_jis_to_sjis( wc_wchar_t cc)",98,115
+15,2,82,1,16,"wc_sjis_ext_to_cs94w@118-133@./libwc/sjis.c","./libwc/sjis.c","wc_sjis_ext_to_cs94w","wc_sjis_ext_to_cs94w( wc_wchar_t cc)",118,133
+12,2,77,1,13,"wc_cs94w_to_sjis_ext@136-148@./libwc/sjis.c","./libwc/sjis.c","wc_cs94w_to_sjis_ext","wc_cs94w_to_sjis_ext( wc_wchar_t cc)",136,148
+19,6,72,1,20,"wc_sjis_ext1_to_N@151-170@./libwc/sjis.c","./libwc/sjis.c","wc_sjis_ext1_to_N","wc_sjis_ext1_to_N( wc_uint32 c)",151,170
+17,6,66,1,18,"wc_sjis_ext2_to_N@173-190@./libwc/sjis.c","./libwc/sjis.c","wc_sjis_ext2_to_N","wc_sjis_ext2_to_N( wc_uint32 c)",173,190
+76,23,463,2,78,"wc_conv_from_sjis@193-270@./libwc/sjis.c","./libwc/sjis.c","wc_conv_from_sjis","wc_conv_from_sjis( Str is , wc_ces ces)",193,270
+76,22,464,2,78,"wc_conv_from_sjisx0213@273-350@./libwc/sjis.c","./libwc/sjis.c","wc_conv_from_sjisx0213","wc_conv_from_sjisx0213( Str is , wc_ces ces)",273,350
+48,17,265,3,51,"wc_push_to_sjis@353-403@./libwc/sjis.c","./libwc/sjis.c","wc_push_to_sjis","wc_push_to_sjis( Str os , wc_wchar_t cc , wc_status * st)",353,403
+59,19,304,3,62,"wc_push_to_sjisx0213@406-467@./libwc/sjis.c","./libwc/sjis.c","wc_push_to_sjisx0213","wc_push_to_sjisx0213( Str os , wc_wchar_t cc , wc_status * st)",406,467
+61,16,359,2,63,"wc_char_conv_from_sjis@470-532@./libwc/sjis.c","./libwc/sjis.c","wc_char_conv_from_sjis","wc_char_conv_from_sjis( wc_uchar c , wc_status * st)",470,532
+59,15,338,2,61,"wc_char_conv_from_sjisx0213@535-595@./libwc/sjis.c","./libwc/sjis.c","wc_char_conv_from_sjisx0213","wc_char_conv_from_sjisx0213( wc_uchar c , wc_status * st)",535,595
+38,33,208,1,38,"wc_codepage@35-72@./libwc/charset.c","./libwc/charset.c","wc_codepage","wc_codepage( int n)",35,72
+8,4,42,2,9,"wc_guess_charset@75-83@./libwc/charset.c","./libwc/charset.c","wc_guess_charset","wc_guess_charset( char * charset , wc_ces orig)",75,83
+8,4,42,2,9,"wc_guess_charset_short@86-94@./libwc/charset.c","./libwc/charset.c","wc_guess_charset_short","wc_guess_charset_short( char * charset , wc_ces orig)",86,94
+8,4,42,2,9,"wc_guess_locale_charset@97-105@./libwc/charset.c","./libwc/charset.c","wc_guess_locale_charset","wc_guess_locale_charset( char * locale , wc_ces orig)",97,105
+166,89,1033,1,169,"wc_charset_to_ces@108-276@./libwc/charset.c","./libwc/charset.c","wc_charset_to_ces","wc_charset_to_ces( char * charset)",108,276
+82,42,408,1,86,"wc_charset_short_to_ces@279-364@./libwc/charset.c","./libwc/charset.c","wc_charset_short_to_ces","wc_charset_short_to_ces( char * charset)",279,364
+53,22,306,1,57,"wc_locale_to_ces@367-423@./libwc/charset.c","./libwc/charset.c","wc_locale_to_ces","wc_locale_to_ces( char * locale)",367,423
+6,2,27,1,6,"wc_ces_to_charset@426-431@./libwc/charset.c","./libwc/charset.c","wc_ces_to_charset","wc_ces_to_charset( wc_ces ces)",426,431
+6,2,27,1,6,"wc_ces_to_charset_desc@434-439@./libwc/charset.c","./libwc/charset.c","wc_ces_to_charset_desc","wc_ces_to_charset_desc( wc_ces ces)",434,439
+17,8,49,1,17,"wc_guess_8bit_charset@442-458@./libwc/charset.c","./libwc/charset.c","wc_guess_8bit_charset","wc_guess_8bit_charset( wc_ces orig)",442,458
+5,2,31,1,6,"wc_check_ces@461-466@./libwc/charset.c","./libwc/charset.c","wc_check_ces","wc_check_ces( wc_ces ces)",461,466
+4,1,38,2,4,"wc_ces_list_cmp@469-472@./libwc/charset.c","./libwc/charset.c","wc_ces_list_cmp","wc_ces_list_cmp( const * a , const * b)",469,472
+25,6,170,0,26,"wc_get_ces_list@477-502@./libwc/charset.c","./libwc/charset.c","wc_get_ces_list","wc_get_ces_list()",477,502
+12,2,61,1,12,"wc_big5_to_cs94w@37-48@./libwc/big5.c","./libwc/big5.c","wc_big5_to_cs94w","wc_big5_to_cs94w( wc_wchar_t cc)",37,48
+9,2,52,1,9,"wc_cs94w_to_big5@51-59@./libwc/big5.c","./libwc/big5.c","wc_cs94w_to_big5","wc_cs94w_to_big5( wc_wchar_t cc)",51,59
+45,12,261,2,47,"wc_conv_from_big5@62-108@./libwc/big5.c","./libwc/big5.c","wc_conv_from_big5","wc_conv_from_big5( Str is , wc_ces ces)",62,108
+31,13,169,3,33,"wc_push_to_big5@111-143@./libwc/big5.c","./libwc/big5.c","wc_push_to_big5","wc_push_to_big5( Str os , wc_wchar_t cc , wc_status * st)",111,143
+30,7,143,2,32,"wc_char_conv_from_big5@146-177@./libwc/big5.c","./libwc/big5.c","wc_char_conv_from_big5","wc_char_conv_from_big5( wc_uchar c , wc_status * st)",146,177
+22,7,165,2,24,"wc_conv_from_priv1@6-29@./libwc/priv.c","./libwc/priv.c","wc_conv_from_priv1","wc_conv_from_priv1( Str is , wc_ces ces)",6,29
+9,2,60,2,10,"wc_char_conv_from_priv1@32-41@./libwc/priv.c","./libwc/priv.c","wc_char_conv_from_priv1","wc_char_conv_from_priv1( wc_uchar c , wc_status * st)",32,41
+21,7,143,2,23,"wc_conv_from_ascii@44-66@./libwc/priv.c","./libwc/priv.c","wc_conv_from_ascii","wc_conv_from_ascii( Str is , wc_ces ces)",44,66
+9,3,42,3,10,"wc_push_to_raw@69-78@./libwc/priv.c","./libwc/priv.c","wc_push_to_raw","wc_push_to_raw( Str os , wc_wchar_t cc , wc_status * st)",69,78
+7,1,33,2,7,"wc_putc_init@10-16@./libwc/putc.c","./libwc/putc.c","wc_putc_init","wc_putc_init( wc_ces f_ces , wc_ces t_ces)",10,16
+12,3,94,2,14,"wc_putc@19-32@./libwc/putc.c","./libwc/putc.c","wc_putc","wc_putc( char * c , FILE * f)",19,32
+7,2,42,1,7,"wc_putc_end@35-41@./libwc/putc.c","./libwc/putc.c","wc_putc_end","wc_putc_end( FILE * f)",35,41
+12,2,72,0,12,"wc_putc_clear_status@44-55@./libwc/putc.c","./libwc/putc.c","wc_putc_clear_status","wc_putc_clear_status()",44,55
+24,10,108,1,29,"wc_johab_to_ksx1001@74-102@./libwc/johab.c","./libwc/johab.c","wc_johab_to_ksx1001","wc_johab_to_ksx1001( wc_wchar_t cc)",74,102
+15,9,94,1,17,"wc_ksx1001_to_johab@105-121@./libwc/johab.c","./libwc/johab.c","wc_ksx1001_to_johab","wc_ksx1001_to_johab( wc_wchar_t cc)",105,121
+17,5,96,1,18,"wc_ucs_to_johab@125-142@./libwc/johab.c","./libwc/johab.c","wc_ucs_to_johab","wc_ucs_to_johab( wc_uint32 ucs)",125,142
+10,4,96,1,11,"wc_johab1_to_N@146-156@./libwc/johab.c","./libwc/johab.c","wc_johab1_to_N","wc_johab1_to_N( wc_uint32 code)",146,156
+8,1,83,1,9,"wc_N_to_johab1@159-167@./libwc/johab.c","./libwc/johab.c","wc_N_to_johab1","wc_N_to_johab1( wc_uint32 code)",159,167
+23,3,136,1,24,"wc_johab_to_cs128w@200-223@./libwc/johab.c","./libwc/johab.c","wc_johab_to_cs128w","wc_johab_to_cs128w( wc_wchar_t cc)",200,223
+22,4,125,1,23,"wc_cs128w_to_johab@226-248@./libwc/johab.c","./libwc/johab.c","wc_cs128w_to_johab","wc_cs128w_to_johab( wc_wchar_t cc)",226,248
+56,16,327,2,58,"wc_conv_from_johab@251-308@./libwc/johab.c","./libwc/johab.c","wc_conv_from_johab","wc_conv_from_johab( Str is , wc_ces ces)",251,308
+35,15,184,3,37,"wc_push_to_johab@311-347@./libwc/johab.c","./libwc/johab.c","wc_push_to_johab","wc_push_to_johab( Str os , wc_wchar_t cc , wc_status * st)",311,347
+38,10,194,2,40,"wc_char_conv_from_johab@350-389@./libwc/johab.c","./libwc/johab.c","wc_char_conv_from_johab","wc_char_conv_from_johab( wc_uchar c , wc_status * st)",350,389
+12,2,61,1,12,"wc_hkscs_to_cs128w@39-50@./libwc/hkscs.c","./libwc/hkscs.c","wc_hkscs_to_cs128w","wc_hkscs_to_cs128w( wc_wchar_t cc)",39,50
+9,2,52,1,9,"wc_cs128w_to_hkscs@53-61@./libwc/hkscs.c","./libwc/hkscs.c","wc_cs128w_to_hkscs","wc_cs128w_to_hkscs( wc_wchar_t cc)",53,61
+6,2,29,1,7,"wc_hkscs_to_N@64-70@./libwc/hkscs.c","./libwc/hkscs.c","wc_hkscs_to_N","wc_hkscs_to_N( wc_uint32 c)",64,70
+51,15,303,2,53,"wc_conv_from_hkscs@73-125@./libwc/hkscs.c","./libwc/hkscs.c","wc_conv_from_hkscs","wc_conv_from_hkscs( Str is , wc_ces ces)",73,125
+38,16,220,3,40,"wc_push_to_hkscs@128-167@./libwc/hkscs.c","./libwc/hkscs.c","wc_push_to_hkscs","wc_push_to_hkscs( Str os , wc_wchar_t cc , wc_status * st)",128,167
+37,11,179,2,39,"wc_char_conv_from_hkscs@170-208@./libwc/hkscs.c","./libwc/hkscs.c","wc_char_conv_from_hkscs","wc_char_conv_from_hkscs( wc_uchar c , wc_status * st)",170,208
+26,5,199,2,32,"wc_input_init@38-69@./libwc/status.c","./libwc/status.c","wc_input_init","wc_input_init( wc_ces ces , wc_status * st)",38,69
+79,31,527,2,91,"wc_output_init@72-162@./libwc/status.c","./libwc/status.c","wc_output_init","wc_output_init( wc_ces ces , wc_status * st)",72,162
+10,3,59,2,11,"wc_ces_has_ccs@165-175@./libwc/status.c","./libwc/status.c","wc_ces_has_ccs","wc_ces_has_ccs( wc_ccs ccs , wc_status * st)",165,175
+4,1,32,2,4,"map_cmp@6-9@./libwc/search.c","./libwc/search.c","map_cmp","map_cmp( const * a , const * b)",6,9
+4,1,52,2,4,"map3_cmp@12-15@./libwc/search.c","./libwc/search.c","map3_cmp","map3_cmp( const * a , const * b)",12,15
+5,3,62,2,5,"map_range_cmp@18-22@./libwc/search.c","./libwc/search.c","map_range_cmp","map_range_cmp( const * a , const * b)",18,22
+5,3,64,2,5,"map2_range_cmp@25-29@./libwc/search.c","./libwc/search.c","map2_range_cmp","map2_range_cmp( const * a , const * b)",25,29
+5,3,62,2,5,"map3_range_cmp@32-36@./libwc/search.c","./libwc/search.c","map3_range_cmp","map3_range_cmp( const * a , const * b)",32,36
+5,1,44,3,5,"wc_map_search@39-43@./libwc/search.c","./libwc/search.c","wc_map_search","wc_map_search( wc_uint16 code , wc_map * map , size_t n)",39,43
+6,1,62,4,6,"wc_map3_search@46-51@./libwc/search.c","./libwc/search.c","wc_map3_search","wc_map3_search( wc_uint16 c1 , wc_uint16 c2 , wc_map3 * map , size_t n)",46,51
+5,1,44,3,5,"wc_map_range_search@54-58@./libwc/search.c","./libwc/search.c","wc_map_range_search","wc_map_range_search( wc_uint16 code , wc_map * map , size_t n)",54,58
+5,1,44,3,5,"wc_map2_range_search@61-65@./libwc/search.c","./libwc/search.c","wc_map2_range_search","wc_map2_range_search( wc_uint16 code , wc_map * map , size_t n)",61,65
+5,1,44,3,5,"wc_map3_range_search@68-72@./libwc/search.c","./libwc/search.c","wc_map3_range_search","wc_map3_range_search( wc_uint16 code , wc_map3 * map , size_t n)",68,72
+27,9,173,2,30,"wtf_init@80-109@./libwc/wtf.c","./libwc/wtf.c","wtf_init","wtf_init( wc_ces ces1 , wc_ces ces2)",80,109
+10,2,54,1,11,"wtf_strwidth@120-130@./libwc/wtf.c","./libwc/wtf.c","wtf_strwidth","wtf_strwidth( wc_uchar * p)",120,130
+10,4,56,1,11,"wtf_len1@133-143@./libwc/wtf.c","./libwc/wtf.c","wtf_len1","wtf_len1( wc_uchar * p)",133,143
+9,3,63,1,10,"wtf_len@146-155@./libwc/wtf.c","./libwc/wtf.c","wtf_len","wtf_len( wc_uchar * p)",146,155
+184,59,1370,3,188,"wtf_push@189-376@./libwc/wtf.c","./libwc/wtf.c","wtf_push","wtf_push( Str os , wc_ccs ccs , wc_uint32 code)",189,376
+9,3,54,3,9,"wtf_push_unknown@379-387@./libwc/wtf.c","./libwc/wtf.c","wtf_push_unknown","wtf_push_unknown( Str os , wc_uchar * p , size_t len)",379,387
+97,45,592,1,100,"wtf_parse1@390-489@./libwc/wtf.c","./libwc/wtf.c","wtf_parse1","wtf_parse1( wc_uchar ** p)",390,489
+57,24,406,1,61,"wtf_parse@492-552@./libwc/wtf.c","./libwc/wtf.c","wtf_parse","wtf_parse( wc_uchar ** p)",492,552
+4,1,17,1,4,"wtf_get_ccs@555-558@./libwc/wtf.c","./libwc/wtf.c","wtf_get_ccs","wtf_get_ccs( wc_uchar * p)",555,558
+4,1,17,1,4,"wtf_get_code@561-564@./libwc/wtf.c","./libwc/wtf.c","wtf_get_code","wtf_get_code( wc_uchar * p)",561,564
+22,14,183,1,24,"wtf_is_hangul@567-590@./libwc/wtf.c","./libwc/wtf.c","wtf_is_hangul","wtf_is_hangul( wc_uchar * p)",567,590
+31,8,194,2,35,"wtf_conv_fit@593-627@./libwc/wtf.c","./libwc/wtf.c","wtf_conv_fit","wtf_conv_fit( char * s , wc_ces ces)",593,627
+6,2,35,1,6,"wc_jisx0201k_to_jisx0208@13-18@./libwc/jis.c","./libwc/jis.c","wc_jisx0201k_to_jisx0208","wc_jisx0201k_to_jisx0208( wc_wchar_t cc)",13,18
+16,4,83,1,20,"wc_jisx0212_to_jisx0213@21-40@./libwc/jis.c","./libwc/jis.c","wc_jisx0212_to_jisx0213","wc_jisx0212_to_jisx0213( wc_wchar_t cc)",21,40
+9,3,44,1,13,"wc_jisx0213_to_jisx0212@43-55@./libwc/jis.c","./libwc/jis.c","wc_jisx0213_to_jisx0212","wc_jisx0213_to_jisx0212( wc_wchar_t cc)",43,55
+6,2,23,1,6,"wc_jisx0208_or_jisx02131@58-63@./libwc/jis.c","./libwc/jis.c","wc_jisx0208_or_jisx02131","wc_jisx0208_or_jisx02131( wc_uint16 code)",58,63
+5,2,24,1,5,"wc_jisx0212_or_jisx02132@66-70@./libwc/jis.c","./libwc/jis.c","wc_jisx0212_or_jisx02132","wc_jisx0212_or_jisx02132( wc_uint16 code)",66,70
+4,1,25,1,4,"die_oom@7-10@./fuzz/fuzz-conv.c","./fuzz/fuzz-conv.c","die_oom","die_oom( size_t bytes)",7,10
+29,8,223,2,45,"LLVMFuzzerTestOneInput@12-56@./fuzz/fuzz-conv.c","./fuzz/fuzz-conv.c","LLVMFuzzerTestOneInput","LLVMFuzzerTestOneInput( const uint8_t * data , size_t size)",12,56
+4,1,7,0,4,"fb_image_init@14-17@./w3mimg/fb/fb_imlib2.c","./w3mimg/fb/fb_imlib2.c","fb_image_init","fb_image_init()",14,17
+14,3,70,3,18,"get_image_size@20-37@./w3mimg/fb/fb_imlib2.c","./w3mimg/fb/fb_imlib2.c","get_image_size","get_image_size( char * filename , int * w , int * h)",20,37
+24,5,129,4,34,"fb_image_load@40-73@./w3mimg/fb/fb_imlib2.c","./w3mimg/fb/fb_imlib2.c","fb_image_load","fb_image_load( char * filename , int w , int h , int n)",40,73
+27,6,205,2,32,"draw@76-107@./w3mimg/fb/fb_imlib2.c","./w3mimg/fb/fb_imlib2.c","draw","draw( FB_IMAGE * img , Imlib_Image image)",76,107
+18,6,97,3,25,"resize_image@110-134@./w3mimg/fb/fb_imlib2.c","./w3mimg/fb/fb_imlib2.c","resize_image","resize_image( Imlib_Image image , int width , int height)",110,134
+6,1,25,3,6,"fb_image_set_bg@21-26@./w3mimg/fb/fb_img.c","./w3mimg/fb/fb_img.c","fb_image_set_bg","fb_image_set_bg( int r , int g , int b)",21,26
+4,1,34,4,4,"fb_image_clear@29-32@./w3mimg/fb/fb_img.c","./w3mimg/fb/fb_img.c","fb_image_clear","fb_image_clear( int x , int y , int w , int h)",29,32
+6,2,20,1,7,"w3mfb_init@16-22@./w3mimg/fb/fb_w3mimg.c","./w3mimg/fb/fb_w3mimg.c","w3mfb_init","w3mfb_init( w3mimg_op * self)",16,22
+6,2,20,1,6,"w3mfb_finish@25-30@./w3mimg/fb/fb_w3mimg.c","./w3mimg/fb/fb_w3mimg.c","w3mfb_finish","w3mfb_finish( w3mimg_op * self)",25,30
+6,2,20,1,6,"w3mfb_active@33-38@./w3mimg/fb/fb_w3mimg.c","./w3mimg/fb/fb_w3mimg.c","w3mfb_active","w3mfb_active( w3mimg_op * self)",33,38
+10,4,62,2,10,"w3mfb_set_background@41-50@./w3mimg/fb/fb_w3mimg.c","./w3mimg/fb/fb_w3mimg.c","w3mfb_set_background","w3mfb_set_background( w3mimg_op * self , char * background)",41,50
+4,1,10,1,4,"w3mfb_sync@53-56@./w3mimg/fb/fb_w3mimg.c","./w3mimg/fb/fb_w3mimg.c","w3mfb_sync","w3mfb_sync( w3mimg_op * self)",53,56
+4,1,12,1,4,"w3mfb_close@59-62@./w3mimg/fb/fb_w3mimg.c","./w3mimg/fb/fb_w3mimg.c","w3mfb_close","w3mfb_close( w3mimg_op * self)",59,62
+7,2,43,5,7,"w3mfb_clear@65-71@./w3mimg/fb/fb_w3mimg.c","./w3mimg/fb/fb_w3mimg.c","w3mfb_clear","w3mfb_clear( w3mimg_op * self , int x , int y , int w , int h)",65,71
+13,3,89,5,14,"w3mfb_load_image@74-87@./w3mimg/fb/fb_w3mimg.c","./w3mimg/fb/fb_w3mimg.c","w3mfb_load_image","w3mfb_load_image( w3mimg_op * self , W3MImage * img , char * fname , int w , int h)",74,87
+26,8,201,8,30,"w3mfb_show_image@90-119@./w3mimg/fb/fb_w3mimg.c","./w3mimg/fb/fb_w3mimg.c","w3mfb_show_image","w3mfb_show_image( w3mimg_op * self , W3MImage * img , int sx , int sy , int sw , int sh , int x , int y)",90,119
+11,4,59,2,11,"w3mfb_free_image@122-132@./w3mimg/fb/fb_w3mimg.c","./w3mimg/fb/fb_w3mimg.c","w3mfb_free_image","w3mfb_free_image( w3mimg_op * self , W3MImage * img)",122,132
+11,3,57,5,12,"w3mfb_get_image_size@135-146@./w3mimg/fb/fb_w3mimg.c","./w3mimg/fb/fb_w3mimg.c","w3mfb_get_image_size","w3mfb_get_image_size( w3mimg_op * self , W3MImage * img , char * fname , int * w , int * h)",135,146
+14,12,120,1,17,"check_tty_console@150-166@./w3mimg/fb/fb_w3mimg.c","./w3mimg/fb/fb_w3mimg.c","check_tty_console","check_tty_console( char * tty)",150,166
+34,6,205,0,42,"w3mimg_fbopen@172-213@./w3mimg/fb/fb_w3mimg.c","./w3mimg/fb/fb_w3mimg.c","w3mimg_fbopen","w3mimg_fbopen()",172,213
+25,4,149,4,26,"get_animation_size@21-46@./w3mimg/fb/fb_gdkpixbuf.c","./w3mimg/fb/fb_gdkpixbuf.c","get_animation_size","get_animation_size( GdkPixbufAnimation * animation , int * w , int * h , int * delay)",21,46
+30,6,191,4,32,"get_animation_size@49-80@./w3mimg/fb/fb_gdkpixbuf.c","./w3mimg/fb/fb_gdkpixbuf.c","get_animation_size","get_animation_size( GdkPixbufAnimation * animation , int * w , int * h , int * delay)",49,80
+4,2,9,0,6,"fb_image_init@84-89@./w3mimg/fb/fb_gdkpixbuf.c","./w3mimg/fb/fb_gdkpixbuf.c","fb_image_init","fb_image_init()",84,89
+14,5,81,3,20,"get_image_size@92-111@./w3mimg/fb/fb_gdkpixbuf.c","./w3mimg/fb/fb_gdkpixbuf.c","get_image_size","get_image_size( char * filename , int * w , int * h)",92,111
+121,36,816,4,146,"fb_image_load@114-259@./w3mimg/fb/fb_gdkpixbuf.c","./w3mimg/fb/fb_gdkpixbuf.c","fb_image_load","fb_image_load( char * filename , int w , int h , int max_anim)",114,259
+24,7,189,6,24,"draw@261-284@./w3mimg/fb/fb_gdkpixbuf.c","./w3mimg/fb/fb_gdkpixbuf.c","draw","draw( FB_IMAGE * img , int x , int y , int w , int h , GdkPixbuf * pixbuf)",261,284
+18,7,97,3,18,"resize_image@286-303@./w3mimg/fb/fb_gdkpixbuf.c","./w3mimg/fb/fb_gdkpixbuf.c","resize_image","resize_image( GdkPixbuf * pixbuf , int width , int height)",286,303
+25,4,149,4,26,"get_animation_size@54-79@./w3mimg/x11/x11_w3mimg.c","./w3mimg/x11/x11_w3mimg.c","get_animation_size","get_animation_size( GdkPixbufAnimation * animation , int * w , int * h , int * delay)",54,79
+30,6,191,4,32,"get_animation_size@82-113@./w3mimg/x11/x11_w3mimg.c","./w3mimg/x11/x11_w3mimg.c","get_animation_size","get_animation_size( GdkPixbufAnimation * animation , int * w , int * h , int * delay)",82,113
+30,14,176,1,38,"x11_init@118-155@./w3mimg/x11/x11_w3mimg.c","./w3mimg/x11/x11_w3mimg.c","x11_init","x11_init( w3mimg_op * self)",118,155
+14,4,70,1,14,"x11_finish@158-171@./w3mimg/x11/x11_w3mimg.c","./w3mimg/x11/x11_w3mimg.c","x11_finish","x11_finish( w3mimg_op * self)",158,171
+15,5,98,5,17,"x11_clear@174-190@./w3mimg/x11/x11_w3mimg.c","./w3mimg/x11/x11_w3mimg.c","x11_clear","x11_clear( w3mimg_op * self , int x , int y , int w , int h)",174,190
+12,4,55,1,12,"x11_active@193-204@./w3mimg/x11/x11_w3mimg.c","./w3mimg/x11/x11_w3mimg.c","x11_active","x11_active( w3mimg_op * self)",193,204
+37,10,290,2,39,"x11_set_background@207-245@./w3mimg/x11/x11_w3mimg.c","./w3mimg/x11/x11_w3mimg.c","x11_set_background","x11_set_background( w3mimg_op * self , char * background)",207,245
+10,3,49,1,10,"x11_sync@248-257@./w3mimg/x11/x11_w3mimg.c","./w3mimg/x11/x11_w3mimg.c","x11_sync","x11_sync( w3mimg_op * self)",248,257
+3,1,8,1,4,"x11_close@260-263@./w3mimg/x11/x11_w3mimg.c","./w3mimg/x11/x11_w3mimg.c","x11_close","x11_close( w3mimg_op * self)",260,263
+39,9,291,4,45,"x11_img_new@267-311@./w3mimg/x11/x11_w3mimg.c","./w3mimg/x11/x11_w3mimg.c","x11_img_new","x11_img_new( struct x11_info * xi , int w , int h , int n)",267,311
+18,7,97,3,19,"resize_image@314-332@./w3mimg/x11/x11_w3mimg.c","./w3mimg/x11/x11_w3mimg.c","resize_image","resize_image( GdkPixbuf * pixbuf , int width , int height)",314,332
+25,5,220,4,31,"render_pixbuf_to_pixmap_32@336-366@./w3mimg/x11/x11_w3mimg.c","./w3mimg/x11/x11_w3mimg.c","render_pixbuf_to_pixmap_32","render_pixbuf_to_pixmap_32( Display * display , GC gc , Pixmap pixmap , GdkPixbuf * pixbuf)",336,366
+197,51,1497,5,241,"x11_load_image@371-611@./w3mimg/x11/x11_w3mimg.c","./w3mimg/x11/x11_w3mimg.c","x11_load_image","x11_load_image( w3mimg_op * self , W3MImage * img , char * fname , int w , int h)",371,611
+37,15,286,8,46,"x11_show_image@614-659@./w3mimg/x11/x11_w3mimg.c","./w3mimg/x11/x11_w3mimg.c","x11_show_image","x11_show_image( w3mimg_op * self , W3MImage * img , int sx , int sy , int sw , int sh , int x , int y)",614,659
+31,12,195,2,34,"x11_free_image@662-695@./w3mimg/x11/x11_w3mimg.c","./w3mimg/x11/x11_w3mimg.c","x11_free_image","x11_free_image( w3mimg_op * self , W3MImage * img)",662,695
+34,15,201,5,55,"x11_get_image_size@698-752@./w3mimg/x11/x11_w3mimg.c","./w3mimg/x11/x11_w3mimg.c","x11_get_image_size","x11_get_image_size( w3mimg_op * self , W3MImage * img , char * fname , int * w , int * h)",698,752
+78,17,541,0,91,"w3mimg_x11open@801-891@./w3mimg/x11/x11_w3mimg.c","./w3mimg/x11/x11_w3mimg.c","w3mimg_x11open","w3mimg_x11open()",801,891
+2,1,6,1,2,"nframe@101-102@./w3mimg/win/win_w3mimg.cpp","./w3mimg/win/win_w3mimg.cpp","nframe","nframe( 0)",101,102
+11,3,61,0,11,"win_image::~win_image@104-114@./w3mimg/win/win_w3mimg.cpp","./w3mimg/win/win_w3mimg.cpp","win_image::~win_image","win_image::~win_image()",104,114
+140,41,1077,4,153,"win_image::load@117-269@./w3mimg/win/win_w3mimg.cpp","./w3mimg/win/win_w3mimg.cpp","win_image::load","win_image::load( w3mimg_op * wop , Gdiplus :: Bitmap ** p_gpbitmap , int * wreturn , int * hreturn)",117,269
+68,17,527,7,76,"win_image::show@272-347@./w3mimg/win/win_w3mimg.cpp","./w3mimg/win/win_w3mimg.cpp","win_image::show","win_image::show( w3mimg_op * wop , int sx , int sy , int sw , int sh , int x , int y)",272,347
+40,13,244,1,43,"win_image::animate@350-392@./w3mimg/win/win_w3mimg.cpp","./w3mimg/win/win_w3mimg.cpp","win_image::animate","win_image::animate( w3mimg_op * wop)",350,392
+13,4,70,1,13,"window_alive@395-407@./w3mimg/win/win_w3mimg.cpp","./w3mimg/win/win_w3mimg.cpp","window_alive","window_alive( w3mimg_op * wop)",395,407
+4,1,11,0,5,"win_init@410-414@./w3mimg/win/win_w3mimg.cpp","./w3mimg/win/win_w3mimg.cpp","win_init","win_init( w3mimg_op *)",410,414
+4,1,11,0,5,"win_finish@417-421@./w3mimg/win/win_w3mimg.cpp","./w3mimg/win/win_w3mimg.cpp","win_finish","win_finish( w3mimg_op *)",417,421
+35,9,243,5,36,"win_clear@424-459@./w3mimg/win/win_w3mimg.cpp","./w3mimg/win/win_w3mimg.cpp","win_clear","win_clear( w3mimg_op * wop , int x , int y , int w , int h)",424,459
+4,1,15,1,4,"win_active@462-465@./w3mimg/win/win_w3mimg.cpp","./w3mimg/win/win_w3mimg.cpp","win_active","win_active( w3mimg_op * wop)",462,465
+37,12,299,2,45,"win_set_background@468-512@./w3mimg/win/win_w3mimg.cpp","./w3mimg/win/win_w3mimg.cpp","win_set_background","win_set_background( w3mimg_op * wop , char * background)",468,512
+4,1,10,0,5,"win_sync@515-519@./w3mimg/win/win_w3mimg.cpp","./w3mimg/win/win_w3mimg.cpp","win_sync","win_sync( w3mimg_op *)",515,519
+12,3,63,1,13,"win_close@522-534@./w3mimg/win/win_w3mimg.cpp","./w3mimg/win/win_w3mimg.cpp","win_close","win_close( w3mimg_op * wop)",522,534
+39,8,205,2,41,"read_image_file@537-577@./w3mimg/win/win_w3mimg.cpp","./w3mimg/win/win_w3mimg.cpp","read_image_file","read_image_file( w3mimg_op * wop , const char * fname)",537,577
+33,9,219,5,34,"win_load_image@580-613@./w3mimg/win/win_w3mimg.cpp","./w3mimg/win/win_w3mimg.cpp","win_load_image","win_load_image( w3mimg_op * wop , W3MImage * img , char * fname , int w , int h)",580,613
+19,6,169,8,21,"win_show_image@616-636@./w3mimg/win/win_w3mimg.cpp","./w3mimg/win/win_w3mimg.cpp","win_show_image","win_show_image( w3mimg_op * wop , W3MImage * img , int sx , int sy , int sw , int sh , int x , int y)",616,636
+11,2,78,2,12,"win_free_image@639-650@./w3mimg/win/win_w3mimg.cpp","./w3mimg/win/win_w3mimg.cpp","win_free_image","win_free_image( w3mimg_op * wop , W3MImage * img)",639,650
+27,5,165,5,28,"win_get_image_size@653-680@./w3mimg/win/win_w3mimg.cpp","./w3mimg/win/win_w3mimg.cpp","win_get_image_size","win_get_image_size( w3mimg_op * wop , W3MImage * img_unused , char * fname , int * w , int * h)",653,680
+104,24,757,0,127,"w3mimg_winopen@683-809@./w3mimg/win/win_w3mimg.cpp","./w3mimg/win/win_w3mimg.cpp","w3mimg_winopen","w3mimg_winopen()",683,809
+16,4,122,2,17,"store_to_window_list@812-828@./w3mimg/win/win_w3mimg.cpp","./w3mimg/win/win_w3mimg.cpp","store_to_window_list","store_to_window_list( HWND hWnd , LPARAM wndlist)",812,828
+7,1,35,1,7,"clear_window_list@831-837@./w3mimg/win/win_w3mimg.cpp","./w3mimg/win/win_w3mimg.cpp","clear_window_list","clear_window_list( struct window_list * wl)",831,837
+36,3,191,1,38,"gdip_strerror@840-877@./w3mimg/win/win_w3mimg.cpp","./w3mimg/win/win_w3mimg.cpp","gdip_strerror","gdip_strerror( Gdiplus :: Status status)",840,877
+11,4,93,3,11,"gdip_perror@880-890@./w3mimg/win/win_w3mimg.cpp","./w3mimg/win/win_w3mimg.cpp","gdip_perror","gdip_perror( w3mimg_op * wop , Gdiplus :: Status status , const char * func)",880,890
+15,4,85,1,16,"win32_strerror_alloc@894-909@./w3mimg/win/win_w3mimg.cpp","./w3mimg/win/win_w3mimg.cpp","win32_strerror_alloc","win32_strerror_alloc( DWORD status)",894,909
+14,5,108,3,15,"win32_perror@912-926@./w3mimg/win/win_w3mimg.cpp","./w3mimg/win/win_w3mimg.cpp","win32_perror","win32_perror( w3mimg_op * wop , DWORD status , const char * func)",912,926
+24,4,144,1,25,"mb2wstr_alloc@930-954@./w3mimg/win/win_w3mimg.cpp","./w3mimg/win/win_w3mimg.cpp","mb2wstr_alloc","mb2wstr_alloc( const char * s)",930,954
+24,4,147,1,25,"wstr2mb_alloc@957-981@./w3mimg/win/win_w3mimg.cpp","./w3mimg/win/win_w3mimg.cpp","wstr2mb_alloc","wstr2mb_alloc( const WCHAR * ws)",957,981
+15,10,78,0,29,"w3mimg_open@10-38@./w3mimg/w3mimg.c","./w3mimg/w3mimg.c","w3mimg_open","w3mimg_open()",10,38
+24,4,144,1,29,"newBuffer@25-53@./buffer.c","./buffer.c","newBuffer","newBuffer( int width)",25,53
+7,1,26,0,8,"nullBuffer@59-66@./buffer.c","./buffer.c","nullBuffer","nullBuffer()",59,66
+5,1,32,1,5,"clearBuffer@72-76@./buffer.c","./buffer.c","clearBuffer","clearBuffer( Buffer * buf)",72,76
+32,15,209,1,35,"discardBuffer@83-117@./buffer.c","./buffer.c","discardBuffer","discardBuffer( Buffer * buf)",83,117
+13,4,77,2,14,"namedBuffer@123-136@./buffer.c","./buffer.c","namedBuffer","namedBuffer( Buffer * first , char * name)",123,136
+15,4,86,2,16,"deleteBuffer@142-157@./buffer.c","./buffer.c","deleteBuffer","deleteBuffer( Buffer * first , Buffer * delbuf)",142,157
+21,4,109,3,22,"replaceBuffer@163-184@./buffer.c","./buffer.c","replaceBuffer","replaceBuffer( Buffer * first , Buffer * delbuf , Buffer * newbuf)",163,184
+13,4,62,2,14,"nthBuffer@187-200@./buffer.c","./buffer.c","nthBuffer","nthBuffer( Buffer * firstbuf , int n)",187,200
+29,9,170,2,31,"writeBufferName@203-233@./buffer.c","./buffer.c","writeBufferName","writeBufferName( Buffer * buf , int n)",203,233
+37,13,282,2,40,"gotoLine@240-279@./buffer.c","./buffer.c","gotoLine","gotoLine( Buffer * buf , int n)",240,279
+37,13,282,2,40,"gotoRealLine@285-324@./buffer.c","./buffer.c","gotoRealLine","gotoRealLine( Buffer * buf , int n)",285,324
+39,8,186,2,47,"listBuffer@328-374@./buffer.c","./buffer.c","listBuffer","listBuffer( Buffer * top , Buffer * current)",328,374
+111,28,512,3,120,"selectBuffer@381-500@./buffer.c","./buffer.c","selectBuffer","selectBuffer( Buffer * firstbuf , Buffer * currentbuf , char * selectchar)",381,500
+91,32,618,1,105,"reshapeBuffer@506-610@./buffer.c","./buffer.c","reshapeBuffer","reshapeBuffer( Buffer * buf)",506,610
+5,1,37,2,5,"copyBuffer@614-618@./buffer.c","./buffer.c","copyBuffer","copyBuffer( Buffer * a , Buffer * b)",614,618
+6,3,42,2,7,"prevBuffer@621-627@./buffer.c","./buffer.c","prevBuffer","prevBuffer( Buffer * first , Buffer * buf)",621,627
+51,24,349,1,61,"writeBufferCache@633-693@./buffer.c","./buffer.c","writeBufferCache","writeBufferCache( Buffer * buf)",633,693
+73,25,491,1,80,"readBufferCache@696-775@./buffer.c","./buffer.c","readBufferCache","readBufferCache( Buffer * buf)",696,775
+87,25,567,3,93,"setKeymap@24-116@./func.c","./func.c","setKeymap","setKeymap( char * p , int lineno , int verbose)",24,116
+53,21,346,3,61,"interpret_keymap@119-179@./func.c","./func.c","interpret_keymap","interpret_keymap( FILE * kf , struct stat * current , int force)",119,179
+15,5,91,1,16,"initKeymap@182-197@./func.c","./func.c","initKeymap","initKeymap( int force)",182,197
+4,1,20,1,4,"getFuncList@200-203@./func.c","./func.c","getFuncList","getFuncList( char * id)",200,203
+6,2,30,1,6,"getKeyData@206-211@./func.c","./func.c","getKeyData","getKeyData( int key)",206,211
+127,49,753,1,134,"getKey2@214-347@./func.c","./func.c","getKey2","getKey2( char ** str)",214,347
+16,6,87,1,17,"getKey@350-366@./func.c","./func.c","getKey","getKey( char * s)",350,366
+9,4,67,1,10,"getWord@369-378@./func.c","./func.c","getWord","getWord( char ** str)",369,378
+56,22,291,1,57,"getQWord@381-437@./func.c","./func.c","getQWord","getQWord( char ** str)",381,437
+62,20,349,2,76,"getRegexWord@449-524@./func.c","./func.c","getRegexWord","getRegexWord( const char ** str , Regex ** regex_ret)",449,524
+29,8,202,4,30,"setMouseAction0@548-577@./func.c","./func.c","setMouseAction0","setMouseAction0( char ** str , int * width , MouseActionMap ** map , char * p)",548,577
+29,12,237,3,30,"setMouseAction1@580-609@./func.c","./func.c","setMouseAction1","setMouseAction1( MouseActionMap ** map , int width , char * p)",580,609
+12,3,77,2,13,"setMouseAction2@612-624@./func.c","./func.c","setMouseAction2","setMouseAction2( MouseActionMap * map , char * p)",612,624
+59,18,393,1,60,"interpret_mouse_action@627-686@./func.c","./func.c","interpret_mouse_action","interpret_mouse_action( FILE * mf)",627,686
+25,4,175,0,30,"initMouseAction@689-718@./func.c","./func.c","initMouseAction","initMouseAction()",689,718
+5,1,15,1,5,"KeyAbort@49-53@./ftp.c","./ftp.c","KeyAbort","KeyAbort( SIGNAL_ARG)",49,53
+34,17,268,4,45,"ftp_command@56-100@./ftp.c","./ftp.c","ftp_command","ftp_command( FTP ftp , char * cmd , char * arg , int * status)",56,100
+20,5,96,1,20,"ftp_close@103-122@./ftp.c","./ftp.c","ftp_close","ftp_close( FTP ftp)",103,122
+72,21,489,1,86,"ftp_login@125-210@./ftp.c","./ftp.c","ftp_login","ftp_login( FTP ftp)",125,210
+55,22,421,1,66,"ftp_pasv@213-278@./ftp.c","./ftp.c","ftp_pasv","ftp_pasv( FTP ftp)",213,278
+23,5,187,2,24,"ftp_modtime@281-304@./ftp.c","./ftp.c","ftp_modtime","ftp_modtime( FTP ftp , char * path)",281,304
+6,1,26,1,13,"ftp_quit@307-319@./ftp.c","./ftp.c","ftp_quit","ftp_quit( FTP ftp)",307,319
+10,3,49,1,11,"closeFTPdata@333-343@./ftp.c","./ftp.c","closeFTPdata","closeFTPdata( FILE * f)",333,343
+4,1,12,0,4,"closeFTP@346-349@./ftp.c","./ftp.c","closeFTP","closeFTP()",346,349
+102,33,672,2,117,"openFTPStream@352-468@./ftp.c","./ftp.c","openFTPStream","openFTPStream( ParsedURL * pu , URLFile * uf)",352,468
+168,37,1124,1,177,"loadFTPDir0@475-651@./ftp.c","./ftp.c","loadFTPDir0","loadFTPDir0( ParsedURL * pu)",475,651
+4,1,12,0,4,"disconnectFTP@654-657@./ftp.c","./ftp.c","disconnectFTP","disconnectFTP()",654,657
+68,7,354,5,84,"ex_ftpdir_name_size_date@680-763@./ftp.c","./ftp.c","ex_ftpdir_name_size_date","ex_ftpdir_name_size_date( char * line , char ** name , char ** link , char ** date , char ** sizep)",680,763
+39,9,152,1,41,"size_int2str@766-806@./ftp.c","./ftp.c","size_int2str","size_int2str( clen_t size)",766,806
+5,1,20,2,5,"noConv@36-40@./parsetagx.c","./parsetagx.c","noConv","noConv( char * oval , char ** str)",36,40
+12,2,51,2,14,"toNumber@43-56@./parsetagx.c","./parsetagx.c","toNumber","toNumber( char * oval , int * num)",43,56
+16,5,84,2,16,"toLength@59-74@./parsetagx.c","./parsetagx.c","toLength","toLength( char * oval , int * len)",59,74
+18,7,120,2,18,"toAlign@77-94@./parsetagx.c","./parsetagx.c","toAlign","toAlign( char * oval , int * align)",77,94
+12,5,78,2,12,"toVAlign@97-108@./parsetagx.c","./parsetagx.c","toVAlign","toVAlign( char * oval , int * valign)",97,108
+146,73,1028,2,158,"parse_tag@114-271@./parsetagx.c","./parsetagx.c","parse_tag","parse_tag( char ** s , int internal)",114,271
+14,3,88,3,16,"parsedtag_set_value@274-289@./parsetagx.c","./parsetagx.c","parsedtag_set_value","parsedtag_set_value( struct parsed_tag * tag , int id , char * value)",274,289
+7,3,68,3,7,"parsedtag_get_value@292-298@./parsetagx.c","./parsetagx.c","parsedtag_get_value","parsedtag_get_value( struct parsed_tag * tag , int id , * value)",292,298
+19,4,146,1,19,"parsedtag2str@301-319@./parsetagx.c","./parsetagx.c","parsedtag2str","parsedtag2str( struct parsed_tag * tag)",301,319
+7,3,21,0,7,"initImage@39-45@./image.c","./image.c","initImage","initImage()",39,45
+40,11,248,0,46,"getCharSize@50-95@./image.c","./image.c","getCharSize","getCharSize()",50,95
+11,3,38,0,11,"termImage@98-108@./image.c","./image.c","termImage","termImage()",98,108
+21,4,104,0,24,"openImgdisplay@111-134@./image.c","./image.c","openImgdisplay","openImgdisplay()",111,134
+14,4,54,0,15,"closeImgdisplay@137-151@./image.c","./image.c","closeImgdisplay","closeImgdisplay()",137,151
+20,4,121,7,21,"addImage@154-174@./image.c","./image.c","addImage","addImage( ImageCache * cache , int x , int y , int sx , int sy , int w , int h)",154,174
+19,5,76,0,20,"syncImage@177-196@./image.c","./image.c","syncImage","syncImage()",177,196
+80,27,682,0,100,"drawImage@199-298@./image.c","./image.c","drawImage","drawImage()",199,298
+24,8,134,0,25,"clearImage@301-325@./image.c","./image.c","clearImage","clearImage()",301,325
+19,9,128,1,20,"deleteImage@340-359@./image.c","./image.c","deleteImage","deleteImage( Buffer * buf)",340,359
+23,7,137,1,24,"getAllImage@362-385@./image.c","./image.c","getAllImage","getAllImage( Buffer * buf)",362,385
+25,11,167,1,26,"showImageProgress@388-413@./image.c","./image.c","showImageProgress","showImageProgress( Buffer * buf)",388,413
+122,40,719,2,162,"loadImage@416-577@./image.c","./image.c","loadImage","loadImage( Buffer * buf , int flag)",416,577
+61,22,455,3,66,"getImage@580-645@./image.c","./image.c","getImage","getImage( Image * image , ParsedURL * current , int flag)",580,645
+57,22,589,3,70,"parseImageHeader@648-717@./image.c","./image.c","parseImageHeader","parseImageHeader( char * path , u_int * width , u_int * height)",648,717
+53,25,458,1,58,"getImageSize@720-777@./image.c","./image.c","getImageSize","getImageSize( ImageCache * cache)",720,777
+47,14,401,2,53,"LUfactor@63-115@./matrix.c","./matrix.c","LUfactor","LUfactor( Matrix A , int * indexarray)",63,115
+9,4,93,4,11,"LUsolve@122-132@./matrix.c","./matrix.c","LUsolve","LUsolve( Matrix A , int * indexarray , Vector b , Vector x)",122,132
+8,1,57,2,8,"m_inverse@138-145@./matrix.c","./matrix.c","m_inverse","m_inverse( Matrix A , Matrix out)",138,145
+19,6,153,3,20,"LUinverse@149-168@./matrix.c","./matrix.c","LUinverse","LUinverse( Matrix A , int * indexarray , Matrix out)",149,168
+26,7,197,4,29,"Usolve@176-204@./matrix.c","./matrix.c","Usolve","Usolve( Matrix mat , Vector b , Vector out , double diag)",176,204
+26,7,193,4,29,"Lsolve@211-239@./matrix.c","./matrix.c","Lsolve","Lsolve( Matrix mat , Vector b , Vector out , double diag)",211,239
+8,1,40,1,9,"new_matrix@246-254@./matrix.c","./matrix.c","new_matrix","new_matrix( int n)",246,254
+8,1,38,1,9,"new_vector@261-269@./matrix.c","./matrix.c","new_vector","new_vector( int n)",261,269
+4,1,14,1,4,"hashfunc@19-22@./mktable.c","./mktable.c","hashfunc","hashfunc( HashItem_ss * x)",19,22
+95,22,643,1,100,"main@29-128@./mktable.c","./mktable.c","main","main( int argc , char * argv [ ])",29,128
+17,7,125,2,20,"print_headers@66-85@./backend.c","./backend.c","print_headers","print_headers( Buffer * buf , int len)",66,85
+45,10,321,3,46,"internal_get@89-134@./backend.c","./backend.c","internal_get","internal_get( char * url , int flag , FormList * request)",89,134
+14,4,69,1,15,"get@139-153@./backend.c","./backend.c","get","get( TextList * argv)",139,153
+33,12,267,1,34,"post@158-191@./backend.c","./backend.c","post","post( TextList * argv)",158,191
+14,5,86,1,14,"set@196-209@./backend.c","./backend.c","set","set( TextList * argv)",196,209
+14,5,86,1,14,"show@214-227@./backend.c","./backend.c","show","show( TextList * argv)",214,227
+5,2,17,1,7,"quit@232-238@./backend.c","./backend.c","quit","quit( TextList * argv)",232,238
+8,2,53,1,8,"help@243-250@./backend.c","./backend.c","help","help( TextList * argv)",243,250
+6,2,29,1,6,"set_column@255-260@./backend.c","./backend.c","set_column","set_column( TextList * argv)",255,260
+4,1,17,1,4,"show_column@264-267@./backend.c","./backend.c","show_column","show_column( TextList * argv)",264,267
+15,5,95,1,15,"call_command_function@272-286@./backend.c","./backend.c","call_command_function","call_command_function( char * str)",272,286
+18,6,77,0,22,"backend@291-312@./backend.c","./backend.c","backend","backend()",291,312
+11,3,57,1,11,"readline@318-328@./backend.c","./backend.c","readline","readline( char * prompt)",318,328
+67,22,282,1,70,"split@334-403@./backend.c","./backend.c","split","split( char * p)",334,403
+10,2,71,1,10,"do_update@41-50@./istream.c","./istream.c","do_update","do_update( BaseStream base)",41,50
+11,3,74,3,11,"buffer_read@53-63@./istream.c","./istream.c","buffer_read","buffer_read( StreamBuffer sb , char * obuf , int count)",53,63
+15,2,83,3,15,"init_buffer@66-80@./istream.c","./istream.c","init_buffer","init_buffer( BaseStream base , char * buf , int bufsize)",66,80
+4,1,19,2,4,"init_base_stream@83-86@./istream.c","./istream.c","init_base_stream","init_base_stream( BaseStream base , int bufsize)",83,86
+4,1,23,2,4,"init_str_stream@89-92@./istream.c","./istream.c","init_str_stream","init_str_stream( BaseStream base , Str s)",89,92
+14,2,104,1,14,"newInputStream@95-108@./istream.c","./istream.c","newInputStream","newInputStream( int des)",95,108
+18,3,144,1,18,"newFileStream@111-128@./istream.c","./istream.c","newFileStream","newFileStream( FILE * f ,(*closep)())",111,128
+13,2,80,1,13,"newStrStream@131-143@./istream.c","./istream.c","newStrStream","newStrStream( Str s)",131,143
+15,2,116,2,15,"newSSLStream@147-161@./istream.c","./istream.c","newSSLStream","newSSLStream( SSL * ssl , int sock)",147,161
+18,5,151,2,18,"newEncodedStream@165-182@./istream.c","./istream.c","newEncodedStream","newEncodedStream( InputStream is , char encoding)",165,182
+17,4,101,1,17,"ISclose@185-201@./istream.c","./istream.c","ISclose","ISclose( InputStream stream)",185,201
+10,4,49,1,10,"ISgetc@204-213@./istream.c","./istream.c","ISgetc","ISgetc( InputStream stream)",204,213
+12,3,51,1,12,"ISundogetc@216-227@./istream.c","./istream.c","ISundogetc","ISundogetc( InputStream stream)",216,227
+9,2,46,2,10,"StrISgets2@230-239@./istream.c","./istream.c","StrISgets2","StrISgets2( InputStream stream , char crnl)",230,239
+33,13,243,3,36,"ISgets_to_growbuf@242-277@./istream.c","./istream.c","ISgets_to_growbuf","ISgets_to_growbuf( InputStream stream , struct growbuf * gb , char crnl)",242,277
+15,4,124,3,16,"ISread@281-296@./istream.c","./istream.c","ISread","ISread( InputStream stream , Str buf , int count)",281,296
+19,6,123,3,21,"ISread_n@300-320@./istream.c","./istream.c","ISread_n","ISread_n( InputStream stream , char * dst , int count)",300,320
+17,7,91,1,19,"ISfileno@323-341@./istream.c","./istream.c","ISfileno","ISfileno( InputStream stream)",323,341
+7,3,37,1,7,"ISeos@344-350@./istream.c","./istream.c","ISeos","ISeos( InputStream stream)",344,350
+7,2,24,1,7,"ssl_accept_this_site@356-362@./istream.c","./istream.c","ssl_accept_this_site","ssl_accept_this_site( char * hostname)",356,362
+20,9,131,3,29,"ssl_match_cert_ident@365-393@./istream.c","./istream.c","ssl_match_cert_ident","ssl_match_cert_ident( char * ident , int ilen , char * hostname)",365,393
+73,23,478,2,103,"ssl_check_cert_ident@396-498@./istream.c","./istream.c","ssl_check_cert_ident","ssl_check_cert_ident( X509 * x , char * hostname)",396,498
+112,26,649,2,130,"ssl_get_certificate@501-630@./istream.c","./istream.c","ssl_get_certificate","ssl_get_certificate( SSL * ssl , char * hostname)",501,630
+6,2,33,1,9,"basic_close@636-644@./istream.c","./istream.c","basic_close","basic_close( int * handle)",636,644
+5,2,47,3,8,"basic_read@647-654@./istream.c","./istream.c","basic_read","basic_read( int * handle , char * buf , int len)",647,654
+5,1,23,1,5,"file_close@657-661@./istream.c","./istream.c","file_close","file_close( struct io_file_handle * handle)",657,661
+4,1,30,3,4,"file_read@664-667@./istream.c","./istream.c","file_read","file_read( struct io_file_handle * handle , char * buf , int len)",664,667
+4,1,17,3,4,"str_read@670-673@./istream.c","./istream.c","str_read","str_read( Str handle , char * buf , int len)",670,673
+7,2,34,1,7,"ssl_close@677-683@./istream.c","./istream.c","ssl_close","ssl_close( struct ssl_handle * handle)",677,683
+23,7,112,3,26,"ssl_read@686-711@./istream.c","./istream.c","ssl_read","ssl_read( struct ssl_handle * handle , char * buf , int len)",686,711
+6,1,29,1,6,"ens_close@715-720@./istream.c","./istream.c","ens_close","ens_close( struct ens_handle * handle)",715,720
+34,11,295,3,37,"ens_read@723-759@./istream.c","./istream.c","ens_read","ens_read( struct ens_handle * handle , char * buf , int len)",723,759
+12,5,77,2,13,"memchop@762-774@./istream.c","./istream.c","memchop","memchop( char * p , int * len)",762,774
+34,12,229,7,45,"newFormList@42-86@./form.c","./form.c","newFormList","newFormList( char * action , char * method , char * charset , char * enctype , char * target , char * name , struct form_list * _next)",42,86
+67,25,496,2,76,"formList_addInput@92-167@./form.c","./form.c","formList_addInput","formList_addInput( struct form_list * fl , struct parsed_tag * tag)",92,167
+15,9,155,1,16,"form2str@179-194@./form.c","./form.c","form2str","form2str( FormItemList * fi)",179,194
+9,3,46,1,9,"formtype@197-205@./form.c","./form.c","formtype","formtype( char * typestr)",197,205
+17,6,133,3,18,"formRecheckRadio@208-225@./form.c","./form.c","formRecheckRadio","formRecheckRadio( Anchor * a , Buffer * buf , FormItemList * fi)",208,225
+45,19,307,2,48,"formResetBuffer@228-275@./form.c","./form.c","formResetBuffer","formResetBuffer( Buffer * buf , AnchorList * formitem)",228,275
+118,39,785,7,138,"form_update_line@278-415@./form.c","./form.c","form_update_line","form_update_line( Line * line , char ** str , int spos , int epos , int width , int newline , int password)",278,415
+96,44,650,3,101,"formUpdateBuffer@418-518@./form.c","./form.c","formUpdateBuffer","formUpdateBuffer( Anchor * a , Buffer * buf , FormItemList * form)",418,518
+32,11,245,2,35,"textfieldrep@522-556@./form.c","./form.c","textfieldrep","textfieldrep( Str s , int width)",522,556
+18,6,93,2,25,"form_fputs_decode@559-583@./form.c","./form.c","form_fputs_decode","form_fputs_decode( Str s , FILE * f)",559,583
+44,15,298,1,56,"input_textarea@587-642@./form.c","./form.c","input_textarea","input_textarea( FormItemList * fi)",587,642
+11,4,75,2,12,"do_internal@645-656@./form.c","./form.c","do_internal","do_internal( char * action , char * data)",645,656
+19,3,107,4,19,"addSelectOption@660-678@./form.c","./form.c","addSelectOption","addSelectOption( FormSelectOption * fso , Str value , Str label , int chk)",660,678
+22,4,133,2,23,"chooseSelectOption@681-703@./form.c","./form.c","chooseSelectOption","chooseSelectOption( FormItemList * fi , FormSelectOptionItem * item)",681,703
+12,5,69,2,13,"updateSelectOption@706-718@./form.c","./form.c","updateSelectOption","updateSelectOption( FormItemList * fi , FormSelectOptionItem * item)",706,718
+24,6,216,3,27,"formChooseOptionByMenu@721-747@./form.c","./form.c","formChooseOptionByMenu","formChooseOptionByMenu( struct form_item_list * fi , int x , int y)",721,747
+6,1,47,4,6,"form_write_data@751-756@./form.c","./form.c","form_write_data","form_write_data( FILE * f , char * boundary , char * name , char * value)",751,756
+27,6,160,5,29,"form_write_from_file@759-787@./form.c","./form.c","form_write_from_file","form_write_from_file( FILE * f , char * boundary , char * name , char * filename , char * file)",759,787
+21,8,149,5,22,"add_pre_form@809-830@./form.c","./form.c","add_pre_form","add_pre_form( struct pre_form * prev , char * url , Regex * re_url , char * name , char * action)",809,830
+22,8,144,6,23,"add_pre_form_item@833-855@./form.c","./form.c","add_pre_form_item","add_pre_form_item( struct pre_form * pf , struct pre_form_item * prev , int type , char * name , char * value , char * checked)",833,855
+98,34,644,0,103,"loadPreForm@874-976@./form.c","./form.c","loadPreForm","loadPreForm()",874,976
+86,50,607,1,92,"preFormUpdateBuffer@979-1070@./form.c","./form.c","preFormUpdateBuffer","preFormUpdateBuffer( Buffer * buf)",979,1070
+24,8,164,1,29,"set_longchar@77-105@./regex.c","./regex.c","set_longchar","set_longchar( char * str)",77,105
+6,1,31,2,6,"regexCompile@121-126@./regex.c","./regex.c","regexCompile","regexCompile( char * ex , int igncase)",121,126
+153,47,862,5,154,"newRegex0@129-282@./regex.c","./regex.c","newRegex0","newRegex0( char ** ex , int igncase , Regex * regex , char ** msg , int level)",129,282
+4,1,34,4,4,"newRegex@285-288@./regex.c","./regex.c","newRegex","newRegex( char * ex , int igncase , Regex * regex , char ** msg)",285,288
+4,1,27,3,4,"regexMatch@294-297@./regex.c","./regex.c","regexMatch","regexMatch( char * str , int len , int firstp)",294,297
+33,11,206,4,35,"RegexMatch@300-334@./regex.c","./regex.c","RegexMatch","RegexMatch( Regex * re , char * str , int len , int firstp)",300,334
+5,1,30,3,5,"MatchedPosition@340-344@./regex.c","./regex.c","MatchedPosition","MatchedPosition( Regex * re , char ** first , char ** last)",340,344
+5,1,26,2,5,"matchedPosition@347-351@./regex.c","./regex.c","matchedPosition","matchedPosition( char ** first , char ** last)",347,351
+50,12,352,7,51,"regmatch_sub_anytime@389-439@./regex.c","./regex.c","regmatch_sub_anytime","regmatch_sub_anytime( struct MatchingContext2 * c , Regex * regex , regexchar * pat2 , char * str , char * end_p , int iter_limit , int firstp)",389,439
+143,36,888,5,146,"regmatch_iter@442-587@./regex.c","./regex.c","regmatch_iter","regmatch_iter( struct MatchingContext1 * c , regexchar * re , char * str , char * end_p , int firstp)",442,587
+20,8,131,5,24,"regmatch@590-613@./regex.c","./regex.c","regmatch","regmatch( regexchar * re , char * str , char * end_p , int firstp , char ** lastpos)",590,613
+23,11,157,2,30,"regmatch1@617-646@./regex.c","./regex.c","regmatch1","regmatch1( regexchar * re , longchar * c)",617,646
+26,10,149,3,31,"matchWhich@649-679@./regex.c","./regex.c","matchWhich","matchWhich( longchar * pattern , longchar * c , int igncase)",649,679
+19,13,166,3,23,"match_longchar@682-704@./regex.c","./regex.c","match_longchar","match_longchar( longchar * a , longchar * b , int ignore)",682,704
+28,22,290,4,34,"match_range_longchar@707-740@./regex.c","./regex.c","match_range_longchar","match_range_longchar( longchar * a , longchar * b , longchar * c , int ignore)",707,740
+23,6,173,2,26,"lc2c@744-769@./regex.c","./regex.c","lc2c","lc2c( longchar * x , int len)",744,769
+46,13,220,1,47,"debugre@772-818@./regex.c","./regex.c","debugre","debugre( regexchar * re)",772,818
+40,11,261,2,47,"main@824-870@./regex.c","./regex.c","main","main( int argc , char ** argv)",824,870
+4,1,30,2,4,"compare_table@808-811@./rc.c","./rc.c","compare_table","compare_table( struct rc_search_table * a , struct rc_search_table * b)",808,811
+38,10,298,0,43,"create_option_search_table@814-856@./rc.c","./rc.c","create_option_search_table","create_option_search_table()",814,856
+34,9,190,1,37,"search_param@859-895@./rc.c","./rc.c","search_param","search_param( char * name)",859,895
+62,25,357,1,78,"show_params@899-976@./rc.c","./rc.c","show_params","show_params( FILE * fp)",899,976
+25,13,104,2,25,"str_to_bool@979-1003@./rc.c","./rc.c","str_to_bool","str_to_bool( char * value , int old)",979,1003
+38,20,127,1,38,"str_to_color@1007-1044@./rc.c","./rc.c","str_to_color","str_to_color( char * value)",1007,1044
+60,28,414,2,67,"set_param@1048-1114@./rc.c","./rc.c","set_param","set_param( char * name , char * value)",1048,1114
+32,15,187,1,33,"set_param_option@1117-1149@./rc.c","./rc.c","set_param_option","set_param_option( char * option)",1117,1149
+6,2,32,1,7,"get_param_option@1152-1158@./rc.c","./rc.c","get_param_option","get_param_option( char * name)",1152,1158
+25,9,136,1,26,"interpret_rc@1161-1186@./rc.c","./rc.c","interpret_rc","interpret_rc( FILE * f)",1161,1186
+13,8,86,0,17,"parse_proxy@1189-1205@./rc.c","./rc.c","parse_proxy","parse_proxy()",1189,1205
+10,4,48,0,10,"parse_cookie@1209-1218@./rc.c","./rc.c","parse_cookie","parse_cookie()",1209,1218
+11,3,77,2,15,"do_mkdir@1223-1237@./rc.c","./rc.c","do_mkdir","do_mkdir( const char * dir , long mode)",1223,1237
+36,12,205,1,46,"do_recursive_mkdir@1247-1292@./rc.c","./rc.c","do_recursive_mkdir","do_recursive_mkdir( const char * dir)",1247,1292
+33,20,162,0,56,"sync_with_option@1297-1352@./rc.c","./rc.c","sync_with_option","sync_with_option()",1297,1352
+44,14,266,0,58,"init_rc@1355-1412@./rc.c","./rc.c","init_rc","init_rc()",1355,1412
+35,16,208,0,43,"init_tmp@1415-1457@./rc.c","./rc.c","init_tmp","init_tmp()",1415,1457
+24,15,164,1,32,"to_str@1473-1504@./rc.c","./rc.c","to_str","to_str( struct param_ptr * p)",1473,1504
+108,32,786,0,124,"load_option_panel@1507-1630@./rc.c","./rc.c","load_option_panel","load_option_panel()",1507,1630
+32,7,164,1,34,"panel_set_option@1633-1666@./rc.c","./rc.c","panel_set_option","panel_set_option( struct parsed_tagarg * arg)",1633,1666
+10,9,94,1,11,"rcFile@1669-1679@./rc.c","./rc.c","rcFile","rcFile( char * base)",1669,1679
+4,1,27,1,4,"auxbinFile@1682-1685@./rc.c","./rc.c","auxbinFile","auxbinFile( char * base)",1682,1685
+4,1,27,1,4,"libFile@1689-1692@./rc.c","./rc.c","libFile","libFile( char * base)",1689,1692
+4,1,27,1,4,"etcFile@1696-1699@./rc.c","./rc.c","etcFile","etcFile( char * base)",1696,1699
+4,1,27,1,4,"confFile@1702-1705@./rc.c","./rc.c","confFile","confFile( char * base)",1702,1705
+4,1,27,1,4,"helpFile@1709-1712@./rc.c","./rc.c","helpFile","helpFile( char * base)",1709,1712
+14,2,80,0,18,"newSiteconfRec@1750-1767@./rc.c","./rc.c","newSiteconfRec","newSiteconfRec()",1750,1767
+83,25,511,0,99,"loadSiteconf@1770-1868@./rc.c","./rc.c","loadSiteconf","loadSiteconf()",1770,1868
+64,38,445,2,69,"querySiteconf@1871-1939@./rc.c","./rc.c","querySiteconf","querySiteconf( const ParsedURL * query_pu , int field)",1871,1939
+8,3,46,2,8,"tag_get_value@8-15@./parsetag.c","./parsetag.c","tag_get_value","tag_get_value( struct parsed_tagarg * t , char * arg)",8,15
+8,3,44,2,8,"tag_exists@18-25@./parsetag.c","./parsetag.c","tag_exists","tag_exists( struct parsed_tagarg * t , char * arg)",18,25
+29,10,175,1,30,"cgistr2tagarg@28-57@./parsetag.c","./parsetag.c","cgistr2tagarg","cgistr2tagarg( char * cgistr)",28,57
+11,5,65,3,12,"total_dot_number@26-37@./cookie.c","./cookie.c","total_dot_number","total_dot_number( char * p , char * ep , unsigned int max_count)",26,37
+31,15,227,2,44,"domain_match@41-84@./cookie.c","./cookie.c","domain_match","domain_match( char * host , char * domain)",41,84
+22,7,130,1,23,"make_portlist@88-110@./cookie.c","./cookie.c","make_portlist","make_portlist( Str port)",88,110
+9,2,61,1,10,"portlist2str@113-122@./cookie.c","./cookie.c","portlist2str","portlist2str( struct portlist * first)",113,122
+9,3,47,2,10,"port_match@125-134@./cookie.c","./cookie.c","port_match","port_match( struct portlist * first , int port)",125,134
+21,10,141,0,24,"check_expired_cookies@137-160@./cookie.c","./cookie.c","check_expired_cookies","check_expired_cookies()",137,160
+7,1,38,1,7,"make_cookie@163-169@./cookie.c","./cookie.c","make_cookie","make_cookie( struct cookie * cookie)",163,169
+16,10,120,3,21,"match_cookie@172-192@./cookie.c","./cookie.c","match_cookie","match_cookie( ParsedURL * pu , struct cookie * cookie , char * domainname)",172,192
+10,5,75,3,11,"get_cookie_info@195-205@./cookie.c","./cookie.c","get_cookie_info","get_cookie_info( Str domain , Str path , Str name)",195,205
+44,16,338,1,48,"find_cookie@208-255@./cookie.c","./cookie.c","find_cookie","find_cookie( ParsedURL * pu)",208,255
+20,6,86,1,22,"check_avoid_wrong_number_of_dots_domain@258-279@./cookie.c","./cookie.c","check_avoid_wrong_number_of_dots_domain","check_avoid_wrong_number_of_dots_domain( Str domain)",258,279
+105,37,728,11,132,"add_cookie@282-413@./cookie.c","./cookie.c","add_cookie","add_cookie( ParsedURL * pu , Str name , Str value , time_t expires , Str domain , Str path , int flag , Str comment , int version , Str port , Str commentURL)",282,413
+10,3,50,1,10,"nth_cookie@416-425@./cookie.c","./cookie.c","nth_cookie","nth_cookie( int n)",416,425
+25,9,193,0,29,"save_cookies@430-458@./cookie.c","./cookie.c","save_cookies","save_cookies()",430,458
+9,6,65,1,9,"readcol@461-469@./cookie.c","./cookie.c","readcol","readcol( char ** p)",461,469
+70,19,433,0,75,"load_cookies@472-546@./cookie.c","./cookie.c","load_cookies","load_cookies()",472,546
+5,1,14,0,5,"initCookie@549-553@./cookie.c","./cookie.c","initCookie","initCookie()",549,553
+105,18,788,0,113,"cookie_list_panel@556-668@./cookie.c","./cookie.c","cookie_list_panel","cookie_list_panel()",556,668
+21,12,142,1,22,"set_cookie_flag@671-692@./cookie.c","./cookie.c","set_cookie_flag","set_cookie_flag( struct parsed_tagarg * arg)",671,692
+19,10,116,1,21,"check_cookie_accept_domain@695-715@./cookie.c","./cookie.c","check_cookie_accept_domain","check_cookie_accept_domain( char * domain)",695,715
+11,4,62,2,12,"searchMapList@9-20@./map.c","./map.c","searchMapList","searchMapList( Buffer * buf , char * name)",9,20
+48,15,484,3,49,"inMapArea@24-72@./map.c","./map.c","inMapArea","inMapArea( MapArea * a , int x , int y)",24,72
+21,8,168,3,22,"nearestMapArea@75-96@./map.c","./map.c","nearestMapArea","nearestMapArea( MapList * ml , int x , int y)",75,96
+30,13,213,3,31,"searchMapArea@99-129@./map.c","./map.c","searchMapArea","searchMapArea( Buffer * buf , MapList * ml , Anchor * a_img)",99,129
+31,15,222,1,32,"retrieveCurrentMapArea@132-163@./map.c","./map.c","retrieveCurrentMapArea","retrieveCurrentMapArea( Buffer * buf)",132,163
+15,8,142,4,15,"getMapXY@166-180@./map.c","./map.c","getMapXY","getMapXY( Buffer * buf , Anchor * a , int * x , int * y)",166,180
+13,5,74,1,14,"retrieveCurrentMap@184-197@./map.c","./map.c","retrieveCurrentMap","retrieveCurrentMap( Buffer * buf)",184,197
+37,17,292,5,50,"follow_map_menu@201-250@./map.c","./map.c","follow_map_menu","follow_map_menu( Buffer * buf , char * name , Anchor * a_img , int x , int y)",201,250
+34,8,223,2,39,"follow_map_panel@259-297@./map.c","./map.c","follow_map_panel","follow_map_panel( Buffer * buf , char * name)",259,297
+90,37,675,5,95,"newMapArea@301-395@./map.c","./map.c","newMapArea","newMapArea( char * url , char * target , char * alt , char * shape , char * coords)",301,395
+27,6,201,3,29,"append_map_info@399-427@./map.c","./map.c","append_map_info","append_map_info( Buffer * buf , Str tmp , FormItemList * fi)",399,427
+33,9,231,3,35,"append_link_info@431-465@./map.c","./map.c","append_link_info","append_link_info( Buffer * buf , Str html , LinkList * link)",431,465
+42,13,282,4,46,"append_frame_info@469-514@./map.c","./map.c","append_frame_info","append_frame_info( Buffer * buf , Str html , struct frameset * set , int level)",469,514
+117,30,775,1,135,"page_info_panel@520-654@./map.c","./map.c","page_info_panel","page_info_panel( Buffer * buf)",520,654
+47,10,344,9,48,"putAnchor@9-56@./anchor.c","./anchor.c","putAnchor","putAnchor( AnchorList * al , char * url , char * target , Anchor ** anchor_return , char * referer , char * title , unsigned char key , int line , int pos)",9,56
+8,1,69,8,8,"registerHref@60-67@./anchor.c","./anchor.c","registerHref","registerHref( Buffer * buf , char * url , char * target , char * referer , char * title , unsigned char key , int line , int pos)",60,67
+7,1,53,4,7,"registerName@70-76@./anchor.c","./anchor.c","registerName","registerName( Buffer * buf , char * url , int line , int pos)",70,76
+7,1,57,5,7,"registerImg@79-85@./anchor.c","./anchor.c","registerImg","registerImg( Buffer * buf , char * url , char * title , int line , int pos)",79,85
+12,2,86,5,13,"registerForm@88-100@./anchor.c","./anchor.c","registerForm","registerForm( Buffer * buf , FormList * flist , struct parsed_tag * tag , int line , int pos)",88,100
+11,3,65,3,12,"onAnchor@103-114@./anchor.c","./anchor.c","onAnchor","onAnchor( Anchor * a , int line , int pos)",103,114
+23,9,166,3,26,"retrieveAnchor@117-142@./anchor.c","./anchor.c","retrieveAnchor","retrieveAnchor( AnchorList * al , int line , int pos)",117,142
+6,2,37,1,6,"retrieveCurrentAnchor@145-150@./anchor.c","./anchor.c","retrieveCurrentAnchor","retrieveCurrentAnchor( Buffer * buf)",145,150
+6,2,37,1,6,"retrieveCurrentImg@153-158@./anchor.c","./anchor.c","retrieveCurrentImg","retrieveCurrentImg( Buffer * buf)",153,158
+7,2,37,1,7,"retrieveCurrentForm@161-167@./anchor.c","./anchor.c","retrieveCurrentForm","retrieveCurrentForm( Buffer * buf)",161,167
+15,5,83,2,15,"searchAnchor@170-184@./anchor.c","./anchor.c","searchAnchor","searchAnchor( AnchorList * al , char * str)",170,184
+4,1,22,2,4,"searchURLLabel@187-190@./anchor.c","./anchor.c","searchURLLabel","searchURLLabel( Buffer * buf , char * url)",187,190
+15,3,103,5,16,"_put_anchor_news@194-209@./anchor.c","./anchor.c","_put_anchor_news","_put_anchor_news( Buffer * buf , char * p1 , char * p2 , int line , int pos)",194,209
+9,1,70,5,10,"_put_anchor_all@213-222@./anchor.c","./anchor.c","_put_anchor_all","_put_anchor_all( Buffer * buf , char * p1 , char * p2 , int line , int pos)",213,222
+13,4,74,2,15,"reseq_anchor0@225-239@./anchor.c","./anchor.c","reseq_anchor0","reseq_anchor0( AnchorList * al , short * seqmap)",225,239
+45,13,384,1,53,"reseq_anchor@243-295@./anchor.c","./anchor.c","reseq_anchor","reseq_anchor( Buffer * buf)",243,295
+40,12,288,4,41,"reAnchorPos@298-338@./anchor.c","./anchor.c","reAnchorPos","reAnchorPos( Buffer * buf , Line * l , char * p1 , char * p2 , Anchor *(*anchorproc)(Buffer*,char*,char*,int,int))",298,338
+4,1,43,4,4,"reAnchorWord@341-344@./anchor.c","./anchor.c","reAnchorWord","reAnchorWord( Buffer * buf , Line * l , int spos , int epos)",341,344
+32,16,242,2,33,"reAnchorAny@349-381@./anchor.c","./anchor.c","reAnchorAny","reAnchorAny( Buffer * buf , char * re , Anchor *(*anchorproc)(Buffer*,char*,char*,int,int))",349,381
+4,1,22,2,4,"reAnchor@384-387@./anchor.c","./anchor.c","reAnchor","reAnchor( Buffer * buf , char * re)",384,387
+4,1,22,2,4,"reAnchorNews@391-394@./anchor.c","./anchor.c","reAnchorNews","reAnchorNews( Buffer * buf , char * re)",391,394
+54,14,310,1,55,"reAnchorNewsheader@397-451@./anchor.c","./anchor.c","reAnchorNewsheader","reAnchorNewsheader( Buffer * buf)",397,451
+25,5,195,4,25,"putHmarker@456-480@./anchor.c","./anchor.c","putHmarker","putHmarker( HmarkerList * ml , int line , int pos , int seq)",456,480
+18,12,185,4,19,"closest_next_anchor@483-501@./anchor.c","./anchor.c","closest_next_anchor","closest_next_anchor( AnchorList * a , Anchor * an , int x , int y)",483,501
+18,12,185,4,19,"closest_prev_anchor@504-522@./anchor.c","./anchor.c","closest_prev_anchor","closest_prev_anchor( AnchorList * a , Anchor * an , int x , int y)",504,522
+35,15,267,5,37,"shiftAnchorPosition@525-561@./anchor.c","./anchor.c","shiftAnchorPosition","shiftAnchorPosition( AnchorList * al , HmarkerList * hl , int line , int pos , int shift)",525,561
+74,24,613,2,75,"addMultirowsImg@565-639@./anchor.c","./anchor.c","addMultirowsImg","addMultirowsImg( Buffer * buf , AnchorList * al)",565,639
+54,21,462,2,55,"addMultirowsForm@643-697@./anchor.c","./anchor.c","addMultirowsForm","addMultirowsForm( Buffer * buf , AnchorList * al)",643,697
+33,13,225,3,34,"getAnchorText@700-733@./anchor.c","./anchor.c","getAnchorText","getAnchorText( Buffer * buf , AnchorList * al , Anchor * a)",700,733
+121,34,877,1,127,"link_list_panel@736-862@./anchor.c","./anchor.c","link_list_panel","link_list_panel( Buffer * buf)",736,862
+15,3,53,1,15,"hashfunc@7-21@./hash.c","./hash.c","hashfunc","hashfunc( char * s)",7,21
+14,9,83,1,14,"c2e@23-36@./mimehead.c","./mimehead.c","c2e","c2e( char x)",23,36
+18,13,130,2,23,"ha2d@40-62@./mimehead.c","./mimehead.c","ha2d","ha2d( char x , char y)",40,62
+7,1,33,1,8,"decodeB@65-72@./mimehead.c","./mimehead.c","decodeB","decodeB( char ** ww)",65,72
+48,14,358,2,49,"decodeB_to_growbuf@75-123@./mimehead.c","./mimehead.c","decodeB_to_growbuf","decodeB_to_growbuf( struct growbuf * gb , char ** ww)",75,123
+7,1,33,1,8,"decodeU@126-133@./mimehead.c","./mimehead.c","decodeU","decodeU( char ** ww)",126,133
+25,6,175,2,26,"decodeU_to_growbuf@136-161@./mimehead.c","./mimehead.c","decodeU_to_growbuf","decodeU_to_growbuf( struct growbuf * gb , char ** ww)",136,161
+19,5,111,1,20,"decodeQ@165-184@./mimehead.c","./mimehead.c","decodeQ","decodeQ( char ** ww)",165,184
+7,1,33,1,8,"decodeQP@188-195@./mimehead.c","./mimehead.c","decodeQP","decodeQP( char ** ww)",188,195
+27,12,184,2,28,"decodeQP_to_growbuf@198-225@./mimehead.c","./mimehead.c","decodeQP_to_growbuf","decodeQP_to_growbuf( struct growbuf * gb , char ** ww)",198,225
+49,17,256,1,60,"decodeWord0@232-291@./mimehead.c","./mimehead.c","decodeWord0","decodeWord0( char ** ow)",232,291
+47,15,223,1,51,"decodeMIME0@301-351@./mimehead.c","./mimehead.c","decodeMIME0","decodeMIME0( Str orgstr)",301,351
+30,7,201,4,31,"print_bookmark_panel@55-85@./w3mbookmark.c","./w3mbookmark.c","print_bookmark_panel","print_bookmark_panel( char * bmark , char * url , char * title , char * charset)",55,85
+20,2,116,5,20,"create_new_bookmark@89-108@./w3mbookmark.c","./w3mbookmark.c","create_new_bookmark","create_new_bookmark( char * bmark , char * section , char * title , char * url , char * mode)",89,108
+64,21,434,2,71,"insert_bookmark@111-181@./w3mbookmark.c","./w3mbookmark.c","insert_bookmark","insert_bookmark( char * bmark , struct parsed_tagarg * data)",111,181
+66,20,399,0,72,"main@184-255@./w3mbookmark.c","./w3mbookmark.c","main","main()",184,255
+37,25,254,1,46,"conv_entity@37-82@./entity.c","./entity.c","conv_entity","conv_entity( unsigned int c)",37,82
+8,5,47,1,14,"strtoclen@56-69@./indep.c","./indep.c","strtoclen","strtoclen( const char * s)",56,69
+14,5,112,3,14,"bcopy@73-86@./indep.c","./indep.c","bcopy","bcopy( const * src , * dest , int len)",73,86
+7,2,41,2,7,"bzero@89-95@./indep.c","./indep.c","bzero","bzero( * ptr , int len)",89,95
+18,6,105,2,19,"allocStr@99-117@./indep.c","./indep.c","allocStr","allocStr( const char * s , int len)",99,117
+4,1,34,2,4,"strCmp@120-123@./indep.c","./indep.c","strCmp","strCmp( const * s1 , const * s2)",120,123
+21,6,119,0,30,"currentdir@126-155@./indep.c","./indep.c","currentdir","currentdir()",126,155
+55,19,337,1,61,"cleanupName@158-218@./indep.c","./indep.c","cleanupName","cleanupName( char * name)",158,218
+37,10,196,1,40,"expandPath@221-260@./indep.c","./indep.c","expandPath","expandPath( char * name)",221,260
+9,3,43,2,9,"strchr@264-272@./indep.c","./indep.c","strchr","strchr( const char * s , int c)",264,272
+12,3,61,2,12,"strcasecmp@277-288@./indep.c","./indep.c","strcasecmp","strcasecmp( const char * s1 , const char * s2)",277,288
+13,5,73,3,13,"strncasecmp@291-303@./indep.c","./indep.c","strncasecmp","strncasecmp( const char * s1 , const char * s2 , size_t n)",291,303
+17,6,100,2,17,"strcasestr@309-325@./indep.c","./indep.c","strcasestr","strcasestr( const char * s1 , const char * s2)",309,325
+14,4,68,2,14,"strcasematch@329-342@./indep.c","./indep.c","strcasematch","strcasematch( char * s1 , char * s2)",329,342
+15,5,77,2,15,"strcasemstr@346-360@./indep.c","./indep.c","strcasemstr","strcasemstr( char * str , char * srch [ ] , char ** ret_ptr)",346,360
+9,5,64,3,12,"strmatchlen@363-374@./indep.c","./indep.c","strmatchlen","strmatchlen( const char * s1 , const char * s2 , int maxlen)",363,374
+10,7,90,1,11,"remove_space@377-387@./indep.c","./indep.c","remove_space","remove_space( char * str)",377,387
+11,4,42,1,11,"non_null@390-400@./indep.c","./indep.c","non_null","non_null( char * s)",390,400
+19,9,148,2,19,"cleanup_line@403-421@./indep.c","./indep.c","cleanup_line","cleanup_line( Str s , int mode)",403,421
+54,17,328,1,63,"getescapechar@424-486@./indep.c","./indep.c","getescapechar","getescapechar( char ** str)",424,486
+14,3,76,1,16,"getescapecmd@489-504@./indep.c","./indep.c","getescapecmd","getescapecmd( char ** s)",489,504
+20,6,104,1,21,"html_quote@507-527@./indep.c","./indep.c","html_quote","html_quote( char * str)",507,527
+21,6,108,1,23,"html_unquote@530-552@./indep.c","./indep.c","html_unquote","html_unquote( char * str)",530,552
+21,6,136,1,22,"url_quote@562-583@./indep.c","./indep.c","url_quote","url_quote( char * str)",562,583
+21,6,117,1,22,"file_quote@586-607@./indep.c","./indep.c","file_quote","file_quote( char * str)",586,607
+26,10,143,1,27,"file_unquote@610-636@./indep.c","./indep.c","file_unquote","file_unquote( char * str)",610,636
+26,8,174,1,27,"Str_form_quote@639-665@./indep.c","./indep.c","Str_form_quote","Str_form_quote( Str x)",639,665
+32,13,216,3,33,"Str_url_unquote@669-701@./indep.c","./indep.c","Str_url_unquote","Str_url_unquote( Str x , int is_form , int safe)",669,701
+20,6,105,1,21,"shell_quote@704-724@./indep.c","./indep.c","shell_quote","shell_quote( char * str)",704,724
+9,2,46,2,9,"xrealloc@727-735@./indep.c","./indep.c","xrealloc","xrealloc( * ptr , size_t size)",727,735
+4,1,13,1,4,"xfree@740-743@./indep.c","./indep.c","xfree","xfree( * ptr)",740,743
+4,2,26,2,4,"w3m_GC_realloc_atomic@746-749@./indep.c","./indep.c","w3m_GC_realloc_atomic","w3m_GC_realloc_atomic( * ptr , size_t size)",746,749
+4,1,13,1,4,"w3m_GC_free@752-755@./indep.c","./indep.c","w3m_GC_free","w3m_GC_free( * ptr)",752,755
+8,1,41,1,8,"growbuf_init@758-765@./indep.c","./indep.c","growbuf_init","growbuf_init( struct growbuf * gb)",758,765
+8,1,41,1,8,"growbuf_init_without_GC@768-775@./indep.c","./indep.c","growbuf_init_without_GC","growbuf_init_without_GC( struct growbuf * gb)",768,775
+7,1,39,1,7,"growbuf_clear@778-784@./indep.c","./indep.c","growbuf_clear","growbuf_clear( struct growbuf * gb)",778,784
+19,2,126,1,20,"growbuf_to_Str@787-806@./indep.c","./indep.c","growbuf_to_Str","growbuf_to_Str( struct growbuf * gb)",787,806
+12,3,73,2,13,"growbuf_reserve@809-821@./indep.c","./indep.c","growbuf_reserve","growbuf_reserve( struct growbuf * gb , int leastarea)",809,821
+6,1,52,3,6,"growbuf_append@824-829@./indep.c","./indep.c","growbuf_append","growbuf_append( struct growbuf * gb , const unsigned char * src , int len)",824,829
+6,3,32,2,9,"w3m_dir@832-840@./indep.c","./indep.c","w3m_dir","w3m_dir( const char * name , char * dft)",832,840
+4,1,14,0,4,"w3m_auxbin_dir@843-846@./indep.c","./indep.c","w3m_auxbin_dir","w3m_auxbin_dir()",843,846
+4,1,14,0,5,"w3m_lib_dir@849-853@./indep.c","./indep.c","w3m_lib_dir","w3m_lib_dir()",849,853
+4,1,14,0,4,"w3m_etc_dir@856-859@./indep.c","./indep.c","w3m_etc_dir","w3m_etc_dir()",856,859
+4,1,14,0,4,"w3m_conf_dir@862-865@./indep.c","./indep.c","w3m_conf_dir","w3m_conf_dir()",862,865
+4,1,14,0,4,"w3m_help_dir@868-871@./indep.c","./indep.c","w3m_help_dir","w3m_help_dir()",868,871
+7,2,37,1,8,"weight@70-77@./table.c","./table.c","weight","weight( int x)",70,77
+4,1,19,1,4,"weight2@80-83@./table.c","./table.c","weight2","weight2( int a)",80,83
+9,3,46,1,9,"weight3@92-100@./table.c","./table.c","weight3","weight3( int x)",92,100
+24,4,132,7,25,"bsearch_2short@104-128@./table.c","./table.c","bsearch_2short","bsearch_2short( short e1 , short * ent1 , short e2 , short * ent2 , int base , short * indexarray , int nent)",104,128
+22,4,106,4,23,"bsearch_double@131-153@./table.c","./table.c","bsearch_double","bsearch_double( double e , double * ent , short * indexarray , int nent)",131,153
+9,3,43,2,9,"ceil_at_intervals@156-164@./table.c","./table.c","ceil_at_intervals","ceil_at_intervals( int x , int step)",156,164
+9,3,43,2,9,"floor_at_intervals@167-175@./table.c","./table.c","floor_at_intervals","floor_at_intervals( int x , int step)",167,175
+35,9,279,3,37,"dv2sv@181-217@./table.c","./table.c","dv2sv","dv2sv( double * dv , short * iv , int size)",181,217
+6,3,55,3,6,"table_colspan@221-226@./table.c","./table.c","table_colspan","table_colspan( struct table * t , int row , int col)",221,226
+9,5,75,3,9,"table_rowspan@229-237@./table.c","./table.c","table_rowspan","table_rowspan( struct table * t , int row , int col)",229,237
+13,5,36,1,14,"minimum_cellspacing@240-253@./table.c","./table.c","minimum_cellspacing","minimum_cellspacing( int border_mode)",240,253
+13,5,62,1,14,"table_border_width@256-269@./table.c","./table.c","table_border_width","table_border_width( struct table * t)",256,269
+42,8,319,0,55,"newTable@272-326@./table.c","./table.c","newTable","newTable()",272,326
+51,17,404,2,67,"check_row@329-395@./table.c","./table.c","check_row","check_row( struct table * t , int row)",329,395
+7,3,73,4,8,"pushdata@398-405@./table.c","./table.c","pushdata","pushdata( struct table * t , int row , int col , char * data)",398,405
+10,4,67,2,10,"suspend_or_pushdata@408-417@./table.c","./table.c","suspend_or_pushdata","suspend_or_pushdata( struct table * tbl , char * line)",408,417
+69,26,357,1,76,"visible_length@427-502@./table.c","./table.c","visible_length","visible_length( char * str)",427,502
+6,3,46,1,6,"if@503-508@./table.c","./table.c","if","if( status == R_ST_AMP)",503,508
+25,9,119,1,29,"visible_length_plain@513-541@./table.c","./table.c","visible_length_plain","visible_length_plain( char * str)",513,541
+5,1,21,2,5,"maximum_visible_length@544-548@./table.c","./table.c","maximum_visible_length","maximum_visible_length( char * str , int offset)",544,548
+5,1,21,2,5,"maximum_visible_length_plain@551-555@./table.c","./table.c","maximum_visible_length_plain","maximum_visible_length_plain( char * str , int offset)",551,555
+39,11,242,3,40,"align@558-597@./table.c","./table.c","align","align( TextLine * lbuf , int width , int mode)",558,597
+31,9,218,5,33,"print_item@600-632@./table.c","./table.c","print_item","print_item( struct table * t , int row , int col , int width , Str buf)",600,632
+86,33,630,5,87,"print_sep@640-726@./table.c","./table.c","print_sep","print_sep( struct table * t , int row , int type , int maxcol , Str buf)",640,726
+13,3,88,3,14,"get_spec_cell_width@729-742@./table.c","./table.c","get_spec_cell_width","get_spec_cell_width( struct table * tbl , int row , int col)",729,742
+102,31,884,4,105,"do_refill@745-849@./table.c","./table.c","do_refill","do_refill( struct table * tbl , int row , int col , int maxlimit)",745,849
+6,2,23,1,6,"table_rule_width@852-857@./table.c","./table.c","table_rule_width","table_rule_width( struct table * t)",852,857
+28,9,234,8,31,"check_cell_height@860-890@./table.c","./table.c","check_cell_height","check_cell_height( int * tabheight , int * cellheight , short * row , short * rowspan , short maxcell , short * indexarray , int space , int dir)",860,890
+28,9,234,8,31,"check_cell_width@893-923@./table.c","./table.c","check_cell_width","check_cell_width( short * tabwidth , short * cellwidth , short * col , short * colspan , short maxcell , short * indexarray , int space , int dir)",893,923
+11,3,100,2,13,"check_minimum_width@926-938@./table.c","./table.c","check_minimum_width","check_minimum_width( struct table * t , short * tabwidth)",926,938
+22,5,192,1,27,"check_maximum_width@941-967@./table.c","./table.c","check_maximum_width","check_maximum_width( struct table * t)",941,967
+117,41,985,3,120,"set_integered_width@972-1091@./table.c","./table.c","set_integered_width","set_integered_width( struct table * t , double * dwidth , short * iwidth)",972,1091
+13,4,66,3,13,"correlation_coefficient@1094-1106@./table.c","./table.c","correlation_coefficient","correlation_coefficient( double sxx , double syy , double sxy)",1094,1106
+13,4,78,3,13,"correlation_coefficient2@1109-1121@./table.c","./table.c","correlation_coefficient2","correlation_coefficient2( double sxx , double syy , double sxy)",1109,1121
+39,15,250,7,39,"recalc_width@1124-1162@./table.c","./table.c","recalc_width","recalc_width( double old , double swidth , int cwidth , double sxx , double syy , double sxy , int is_inclusive)",1124,1162
+88,25,668,11,91,"check_compressible_cell@1165-1255@./table.c","./table.c","check_compressible_cell","check_compressible_cell( struct table * t , MAT * minv , double * newwidth , double * swidth , short * cwidth , double totalwidth , double * Sxx , int icol , int icell , double sxx , int corr)",1165,1255
+115,42,1031,4,134,"check_table_width@1259-1392@./table.c","./table.c","check_table_width","check_table_width( struct table * t , double * newwidth , MAT * minv , int itr)",1259,1392
+110,30,863,3,118,"set_table_width@1396-1513@./table.c","./table.c","set_table_width","set_table_width( struct table * t , short * newwidth , int maxwidth)",1396,1513
+88,22,657,1,94,"check_table_height@1517-1610@./table.c","./table.c","check_table_height","check_table_height( struct table * t)",1517,1610
+38,13,343,4,47,"get_table_width@1616-1662@./table.c","./table.c","get_table_width","get_table_width( struct table * t , short * orgwidth , short * cellwidth , int flag)",1616,1662
+4,1,10,0,4,"initRenderTable@1675-1678@./table.c","./table.c","initRenderTable","initRenderTable()",1675,1678
+32,7,237,2,35,"renderCoTable@1681-1715@./table.c","./table.c","renderCoTable","renderCoTable( struct table * tbl , int maxlimit)",1681,1715
+26,4,190,2,29,"make_caption@1718-1746@./table.c","./table.c","make_caption","make_caption( struct table * t , struct html_feed_environ * h_env)",1718,1746
+239,77,1992,3,278,"renderTable@1749-2026@./table.c","./table.c","renderTable","renderTable( struct table * t , int max_width , struct html_feed_environ * h_env)",1749,2026
+66,18,343,4,72,"begin_table@2035-2106@./table.c","./table.c","begin_table","begin_table( int border , int spacing , int padding , int vspace)",2035,2106
+28,8,255,1,28,"end_table@2109-2136@./table.c","./table.c","end_table","end_table( struct table * tbl)",2109,2136
+26,10,196,2,27,"check_minimum0@2139-2165@./table.c","./table.c","check_minimum0","check_minimum0( struct table * t , int min)",2139,2165
+23,8,175,2,24,"setwidth0@2168-2191@./table.c","./table.c","setwidth0","setwidth0( struct table * t , struct table_mode * mode)",2168,2191
+11,6,88,2,13,"setwidth@2194-2206@./table.c","./table.c","setwidth","setwidth( struct table * t , struct table_mode * mode)",2194,2206
+9,3,52,2,10,"addcontentssize@2209-2218@./table.c","./table.c","addcontentssize","addcontentssize( struct table * t , int width)",2209,2218
+10,1,67,2,10,"clearcontentssize@2223-2232@./table.c","./table.c","clearcontentssize","clearcontentssize( struct table * t , struct table_mode * mode)",2223,2232
+17,3,135,2,18,"begin_cell@2235-2252@./table.c","./table.c","begin_cell","begin_cell( struct table * t , struct table_mode * mode)",2235,2252
+33,15,262,2,36,"check_rowcol@2255-2290@./table.c","./table.c","check_rowcol","check_rowcol( struct table * tbl , struct table_mode * mode)",2255,2290
+73,20,407,4,79,"skip_space@2293-2371@./table.c","./table.c","skip_space","skip_space( struct table * t , char * line , struct table_linfo * linfo , int checkminimum)",2293,2371
+11,2,72,4,11,"feed_table_inline_tag@2374-2384@./table.c","./table.c","feed_table_inline_tag","feed_table_inline_tag( struct table * tbl , char * line , struct table_mode * mode , int width)",2374,2384
+35,15,218,5,35,"feed_table_block_tag@2387-2421@./table.c","./table.c","feed_table_block_tag","feed_table_block_tag( struct table * tbl , char * line , struct table_mode * mode , int indent , int cmd)",2387,2421
+7,1,47,3,7,"table_close_select@2424-2430@./table.c","./table.c","table_close_select","table_close_select( struct table * tbl , struct table_mode * mode , int width)",2424,2430
+7,1,47,3,7,"table_close_textarea@2433-2439@./table.c","./table.c","table_close_textarea","table_close_textarea( struct table * tbl , struct table_mode * mode , int width)",2433,2439
+16,6,108,2,16,"table_close_anchor0@2442-2457@./table.c","./table.c","table_close_anchor0","table_close_anchor0( struct table * tbl , struct table_mode * mode)",2442,2457
+669,270,3857,5,702,"feed_table_tag@2487-3188@./table.c","./table.c","feed_table_tag","feed_table_tag( struct table * tbl , char * line , struct table_mode * mode , int width , struct parsed_tag * tag)",2487,3188
+161,53,969,5,166,"feed_table@3192-3357@./table.c","./table.c","feed_table","feed_table( struct table * tbl , char * line , struct table_mode * mode , int width , int internal)",3192,3357
+14,3,89,4,14,"feed_table1@3360-3373@./table.c","./table.c","feed_table1","feed_table1( struct table * tbl , Str tok , struct table_mode * mode , int width)",3360,3373
+30,9,271,2,33,"pushTable@3376-3408@./table.c","./table.c","pushTable","pushTable( struct table * tbl , struct table * tbl1)",3376,3408
+14,3,125,5,15,"correct_table_matrix@3412-3426@./table.c","./table.c","correct_table_matrix","correct_table_matrix( struct table * t , int col , int cspan , int a , double b)",3412,3426
+19,11,174,5,20,"correct_table_matrix2@3429-3448@./table.c","./table.c","correct_table_matrix2","correct_table_matrix2( struct table * t , int col , int cspan , double s , double b)",3429,3448
+24,15,220,5,25,"correct_table_matrix3@3451-3475@./table.c","./table.c","correct_table_matrix3","correct_table_matrix3( struct table * t , int col , char * flags , double s , double b)",3451,3475
+24,17,218,6,25,"correct_table_matrix4@3478-3502@./table.c","./table.c","correct_table_matrix4","correct_table_matrix4( struct table * t , int col , int cspan , char * flags , double s , double b)",3478,3502
+73,16,617,2,83,"set_table_matrix0@3505-3587@./table.c","./table.c","set_table_matrix0","set_table_matrix0( struct table * t , int maxwidth)",3505,3587
+73,25,591,2,81,"check_relative_width@3590-3670@./table.c","./table.c","check_relative_width","check_relative_width( struct table * t , int maxwidth)",3590,3670
+50,11,446,2,57,"set_table_matrix@3673-3729@./table.c","./table.c","set_table_matrix","set_table_matrix( struct table * t , int width)",3673,3729
+5,1,15,1,5,"KeyAbort@29-33@./news.c","./news.c","KeyAbort","KeyAbort( SIGNAL_ARG)",29,33
+21,7,136,4,22,"news_command@36-57@./news.c","./news.c","news_command","news_command( News * news , char * cmd , char * arg , int * status)",36,57
+15,4,74,1,15,"news_close@60-74@./news.c","./news.c","news_close","news_close( News * news)",60,74
+26,10,172,1,27,"news_open@77-103@./news.c","./news.c","news_open","news_open( News * news)",77,103
+5,1,24,1,5,"news_quit@106-110@./news.c","./news.c","news_quit","news_quit( News * news)",106,110
+41,11,254,2,42,"name_from_address@113-154@./news.c","./news.c","name_from_address","name_from_address( char * str , int n)",113,154
+30,8,140,1,31,"html_quote_s@157-187@./news.c","./news.c","html_quote_s","html_quote_s( char * str)",157,187
+18,2,144,8,19,"add_news_message@190-208@./news.c","./news.c","add_news_message","add_news_message( Str str , int index , char * date , char * name , char * subject , char * mid , char * scheme , char * group)",190,208
+68,28,445,1,70,"openNewsStream@235-304@./news.c","./news.c","openNewsStream","openNewsStream( ParsedURL * pu)",235,304
+185,62,1348,1,196,"loadNewsgroup0@312-507@./news.c","./news.c","loadNewsgroup0","loadNewsgroup0( ParsedURL * pu)",312,507
+4,1,12,0,4,"closeNews@510-513@./news.c","./news.c","closeNews","closeNews()",510,513
+4,1,12,0,4,"disconnectNews@516-519@./news.c","./news.c","disconnectNews","disconnectNews()",516,519
+67,14,468,2,69,"main@15-83@./inflate.c","./inflate.c","main","main( int argc , char ** argv)",15,83
+23,8,160,2,25,"columnSkip@39-63@./etc.c","./etc.c","columnSkip","columnSkip( Buffer * buf , int offset)",39,63
+11,6,74,2,15,"columnPos@66-80@./etc.c","./etc.c","columnPos","columnPos( Line * line , int column)",66,80
+10,4,88,4,11,"lineSkip@83-93@./etc.c","./etc.c","lineSkip","lineSkip( Buffer * buf , Line * line , int offset , int last)",83,93
+21,14,191,4,23,"currentLineSkip@96-118@./etc.c","./etc.c","currentLineSkip","currentLineSkip( Buffer * buf , Line * line , int offset , int last)",96,118
+32,12,208,1,37,"gethtmlcmd@123-159@./etc.c","./etc.c","gethtmlcmd","gethtmlcmd( char ** s)",123,159
+68,23,346,3,69,"parse_ansi_color@163-231@./etc.c","./etc.c","parse_ansi_color","parse_ansi_color( char ** str , Lineprop * effect , Linecolor * color)",163,231
+229,97,1399,3,281,"checkType@238-518@./etc.c","./etc.c","checkType","checkType( Str s , Lineprop ** oprop , Linecolor ** ocolor)",238,518
+16,7,100,3,19,"nextColumn@521-539@./etc.c","./etc.c","nextColumn","nextColumn( int n , char * p , Lineprop * pr)",521,539
+38,22,283,6,43,"calcPosition@542-584@./etc.c","./etc.c","calcPosition","calcPosition( char * l , Lineprop * pr , int len , int pos , int bpos , int mode)",542,584
+13,6,95,2,16,"columnLen@587-602@./etc.c","./etc.c","columnLen","columnLen( Line * line , int column)",587,602
+11,3,55,1,13,"lastFileName@605-617@./etc.c","./etc.c","lastFileName","lastFileName( char * path)",605,617
+5,1,19,1,5,"srand48@627-631@./etc.c","./etc.c","srand48","srand48( long seed)",627,631
+6,1,61,0,6,"lrand48@634-639@./etc.c","./etc.c","lrand48","lrand48()",634,639
+13,5,60,1,13,"mybasename@643-655@./etc.c","./etc.c","mybasename","mybasename( char * s)",643,655
+17,10,101,1,17,"mydirname@658-674@./etc.c","./etc.c","mydirname","mydirname( char * s)",658,674
+5,1,20,1,5,"strerror@678-682@./etc.c","./etc.c","strerror","strerror( int errno)",678,682
+141,48,545,2,145,"next_status@686-830@./etc.c","./etc.c","next_status","next_status( char c , int * status)",686,830
+85,46,469,5,93,"read_token@833-925@./etc.c","./etc.c","read_token","read_token( Str buf , char ** instr , int * status , int pre , int append)",833,925
+38,16,126,1,39,"correct_irrtag@928-966@./etc.c","./etc.c","correct_irrtag","correct_irrtag( int status)",928,966
+24,12,146,3,25,"add_auth_pass_entry@980-1004@./etc.c","./etc.c","add_auth_pass_entry","add_auth_pass_entry( const struct auth_pass * ent , int netrc , int override)",980,1004
+16,14,137,5,16,"find_auth_pass_entry@1007-1022@./etc.c","./etc.c","find_auth_pass_entry","find_auth_pass_entry( char * host , int port , char * realm , char * uname , int is_proxy)",1007,1022
+17,4,110,5,18,"find_auth_user_passwd@1025-1042@./etc.c","./etc.c","find_auth_user_passwd","find_auth_user_passwd( ParsedURL * pu , char * realm , Str * uname , Str * pwd , int is_proxy)",1025,1042
+13,1,94,5,14,"add_auth_user_passwd@1045-1058@./etc.c","./etc.c","add_auth_user_passwd","add_auth_user_passwd( ParsedURL * pu , char * realm , Str uname , Str pwd , int is_proxy)",1045,1058
+10,2,59,5,10,"invalidate_auth_user_passwd@1061-1070@./etc.c","./etc.c","invalidate_auth_user_passwd","invalidate_auth_user_passwd( ParsedURL * pu , char * realm , Str uname , Str pwd , int is_proxy)",1061,1070
+17,5,86,1,17,"next_token@1086-1102@./etc.c","./etc.c","next_token","next_token( Str arg)",1086,1102
+73,31,473,2,80,"parsePasswd@1105-1184@./etc.c","./etc.c","parsePasswd","parsePasswd( FILE * fp , int netrc)",1105,1184
+25,6,137,1,37,"openSecretFile@1190-1226@./etc.c","./etc.c","openSecretFile","openSecretFile( char * fname)",1190,1226
+16,3,70,0,19,"loadPasswd@1229-1247@./etc.c","./etc.c","loadPasswd","loadPasswd()",1229,1247
+19,6,115,1,20,"last_modified@1251-1270@./etc.c","./etc.c","last_modified","last_modified( Buffer * buf)",1251,1270
+29,12,156,2,30,"romanNum2@1280-1309@./etc.c","./etc.c","romanNum2","romanNum2( int l , int n)",1280,1309
+15,3,108,1,17,"romanNumeral@1312-1328@./etc.c","./etc.c","romanNumeral","romanNumeral( int n)",1312,1328
+17,4,94,1,20,"romanAlphabet@1331-1350@./etc.c","./etc.c","romanAlphabet","romanAlphabet( int n)",1331,1350
+13,6,76,0,23,"reset_signals@1357-1379@./etc.c","./etc.c","reset_signals","reset_signals()",1357,1379
+15,6,87,2,16,"close_all_fds_except@1386-1401@./etc.c","./etc.c","close_all_fds_except","close_all_fds_except( int i , int f)",1386,1401
+12,3,56,3,20,"setup_child@1404-1423@./etc.c","./etc.c","setup_child","setup_child( int child , int i , int f)",1404,1423
+53,15,283,2,56,"open_pipe_rw@1427-1482@./etc.c","./etc.c","open_pipe_rw","open_pipe_rw( FILE ** fr , FILE ** fw)",1427,1482
+6,1,33,1,6,"myExec@1486-1491@./etc.c","./etc.c","myExec","myExec( char * command)",1486,1491
+15,3,73,2,20,"mySystem@1494-1513@./etc.c","./etc.c","mySystem","mySystem( char * command , int background)",1494,1513
+26,9,158,3,27,"myExtCommand@1516-1542@./etc.c","./etc.c","myExtCommand","myExtCommand( char * cmd , char * arg , int redirect)",1516,1542
+34,17,248,3,35,"myEditor@1545-1579@./etc.c","./etc.c","myEditor","myEditor( char * cmd , char * file , int line)",1545,1579
+4,1,14,1,4,"expandName@1583-1586@./etc.c","./etc.c","expandName","expandName( char * name)",1583,1586
+41,12,219,1,42,"expandName@1589-1630@./etc.c","./etc.c","expandName","expandName( char * name)",1589,1630
+8,7,56,1,8,"is_localhost@1634-1641@./etc.c","./etc.c","is_localhost","is_localhost( const char * host)",1634,1641
+38,19,236,1,51,"file_to_url@1644-1694@./etc.c","./etc.c","file_to_url","file_to_url( char * file)",1644,1694
+12,5,77,1,17,"url_unquote_conv0@1701-1717@./etc.c","./etc.c","url_unquote_conv0","url_unquote_conv0( char * url)",1701,1717
+23,8,96,2,25,"tmpfname@1725-1749@./etc.c","./etc.c","tmpfname","tmpfname( int type , char * ext)",1725,1749
+16,6,93,1,20,"get_day@1757-1776@./etc.c","./etc.c","get_day","get_day( char ** s)",1757,1776
+26,11,168,1,28,"get_month@1779-1806@./etc.c","./etc.c","get_month","get_month( char ** s)",1779,1806
+22,8,122,1,25,"get_year@1809-1833@./etc.c","./etc.c","get_year","get_year( char ** s)",1809,1833
+34,16,253,4,39,"get_time@1836-1874@./etc.c","./etc.c","get_time","get_time( char ** s , int * hour , int * min , int * sec)",1836,1874
+21,11,175,3,24,"get_zone@1877-1900@./etc.c","./etc.c","get_zone","get_zone( char ** s , int * z_hour , int * z_min)",1877,1900
+71,38,543,1,88,"mymktime@1904-1991@./etc.c","./etc.c","mymktime","mymktime( char * timestr)",1904,1991
+45,13,260,1,62,"FQDN@2003-2064@./etc.c","./etc.c","FQDN","FQDN( char * host)",2003,2064
+15,4,82,1,22,"void( * mySignal(int signal_number,void(*action)(int)))@2068-2089@./etc.c","./etc.c","void( * mySignal(int signal_number,void(*action)(int)))","void( * mySignal(int signal_number,void(*action)(int)))( int)",2068,2089
+49,8,393,2,59,"base64_encode@2095-2153@./etc.c","./etc.c","base64_encode","base64_encode( const char * src , size_t len)",2095,2153
+15,3,63,0,16,"check_win9x@80-95@./terms.c","./terms.c","check_win9x","check_win9x()",80,95
+12,6,55,0,12,"enable_win9x_console_input@98-109@./terms.c","./terms.c","enable_win9x_console_input","enable_win9x_console_input()",98,109
+7,2,23,0,7,"disable_win9x_console_input@112-118@./terms.c","./terms.c","disable_win9x_console_input","disable_win9x_console_input()",112,118
+10,2,57,1,11,"expand_win32_console_input_buffer@121-131@./terms.c","./terms.c","expand_win32_console_input_buffer","expand_win32_console_input_buffer( int n)",121,131
+20,5,98,0,24,"read_win32_console_input@134-157@./terms.c","./terms.c","read_win32_console_input","read_win32_console_input()",134,157
+20,8,110,2,28,"read_win32_console@160-187@./terms.c","./terms.c","read_win32_console","read_win32_console( char * s , int n)",160,187
+14,1,72,0,16,"GetConsoleHwnd@192-207@./terms.c","./terms.c","GetConsoleHwnd","GetConsoleHwnd()",192,207
+9,2,47,0,10,"cygwin_version@211-220@./terms.c","./terms.c","cygwin_version","cygwin_version()",211,220
+31,16,169,0,37,"check_cygwin_console@224-260@./terms.c","./terms.c","check_cygwin_console","check_cygwin_console()",224,260
+4,1,17,1,4,"writestr@464-467@./terms.c","./terms.c","writestr","writestr( char * s)",464,467
+13,3,111,9,15,"put_image_osc5379@473-487@./terms.c","./terms.c","put_image_osc5379","put_image_osc5379( char * url , int x , int y , int w , int h , int sx , int sy , int sw , int sh)",473,487
+44,7,222,5,52,"put_image_iterm2@491-542@./terms.c","./terms.c","put_image_iterm2","put_image_iterm2( char * url , int x , int y , int w , int h)",491,542
+107,22,714,11,132,"put_image_kitty@548-679@./terms.c","./terms.c","put_image_kitty","put_image_kitty( char * url , int x , int y , int w , int h , int sx , int sy , int sw , int sh , int cols , int rows)",548,679
+10,2,79,5,11,"save_gif@682-692@./terms.c","./terms.c","save_gif","save_gif( const char * path , u_char * header , size_t header_size , u_char * body , size_t body_size)",682,692
+9,2,50,1,12,"skip_gif_header@695-706@./terms.c","./terms.c","skip_gif_header","skip_gif_header( u_char * p)",695,706
+46,14,291,1,61,"save_first_animation_frame@709-769@./terms.c","./terms.c","save_first_animation_frame","save_first_animation_frame( const char * path)",709,769
+79,20,620,10,86,"put_image_sixel@772-857@./terms.c","./terms.c","put_image_sixel","put_image_sixel( char * url , int x , int y , int w , int h , int sx , int sy , int sw , int sh , int n_terminal_image)",772,857
+45,16,318,2,53,"get_pixel_per_cell@860-912@./terms.c","./terms.c","get_pixel_per_cell","get_pixel_per_cell( int * ppc , int * ppl)",860,912
+37,11,203,0,43,"set_tty@956-998@./terms.c","./terms.c","set_tty","set_tty()",956,998
+13,4,76,2,19,"ttymode_set@1001-1019@./terms.c","./terms.c","ttymode_set","ttymode_set( int mode , int imode)",1001,1019
+13,4,76,2,19,"ttymode_reset@1022-1040@./terms.c","./terms.c","ttymode_reset","ttymode_reset( int mode , int imode)",1022,1040
+12,4,69,2,13,"set_cc@1044-1056@./terms.c","./terms.c","set_cc","set_cc( int spec , int val)",1044,1056
+5,2,17,0,5,"close_tty@1060-1064@./terms.c","./terms.c","close_tty","close_tty()",1060,1064
+4,1,12,0,4,"ttyname_tty@1067-1070@./terms.c","./terms.c","ttyname_tty","ttyname_tty()",1067,1070
+16,5,68,0,16,"reset_tty@1073-1088@./terms.c","./terms.c","reset_tty","reset_tty()",1073,1088
+8,3,28,2,10,"reset_exit_with_value@1091-1100@./terms.c","./terms.c","reset_exit_with_value","reset_exit_with_value( SIGNAL_ARG , int rval)",1091,1100
+4,1,13,1,4,"reset_error_exit@1103-1106@./terms.c","./terms.c","reset_error_exit","reset_error_exit( SIGNAL_ARG)",1103,1106
+4,1,13,1,4,"reset_exit@1109-1112@./terms.c","./terms.c","reset_exit","reset_exit( SIGNAL_ARG)",1109,1112
+7,1,23,1,7,"error_dump@1115-1121@./terms.c","./terms.c","error_dump","error_dump( SIGNAL_ARG)",1115,1121
+11,2,62,0,14,"set_int@1124-1137@./terms.c","./terms.c","set_int","set_int()",1124,1137
+14,6,106,0,17,"setgraphchar@1141-1157@./terms.c","./terms.c","setgraphchar","setgraphchar()",1141,1157
+64,10,369,0,74,"getTCstr@1163-1236@./terms.c","./terms.c","getTCstr","getTCstr()",1163,1236
+37,16,256,0,44,"setlinescols@1239-1282@./terms.c","./terms.c","setlinescols","setlinescols()",1239,1282
+28,7,216,0,33,"setupscreen@1285-1317@./terms.c","./terms.c","setupscreen","setupscreen()",1285,1317
+11,4,45,0,11,"initscr@1323-1333@./terms.c","./terms.c","initscr","initscr()",1323,1333
+6,2,21,1,8,"write1@1336-1343@./terms.c","./terms.c","write1","write1( char c)",1336,1343
+7,5,38,2,7,"move@1346-1352@./terms.c","./terms.c","move","move( int line , int column)",1346,1352
+159,62,1127,4,206,"need_redraw@1362-1567@./terms.c","./terms.c","need_redraw","need_redraw( char * c1 , l_prop pr1 , char * c2 , l_prop pr2)",1362,1567
+7,2,21,0,7,"wrap@1570-1576@./terms.c","./terms.c","wrap","wrap()",1570,1576
+5,3,29,1,5,"touch_column@1579-1583@./terms.c","./terms.c","touch_column","touch_column( int col)",1579,1583
+9,3,59,0,10,"touch_line@1586-1595@./terms.c","./terms.c","touch_line","touch_line()",1586,1595
+4,1,10,0,4,"standout@1598-1601@./terms.c","./terms.c","standout","standout()",1598,1601
+4,1,10,0,4,"standend@1604-1607@./terms.c","./terms.c","standend","standend()",1604,1607
+10,5,69,0,14,"toggle_stand@1610-1623@./terms.c","./terms.c","toggle_stand","toggle_stand()",1610,1623
+4,1,10,0,4,"bold@1626-1629@./terms.c","./terms.c","bold","bold()",1626,1629
+4,1,10,0,4,"boldend@1632-1635@./terms.c","./terms.c","boldend","boldend()",1632,1635
+4,1,10,0,4,"underline@1638-1641@./terms.c","./terms.c","underline","underline()",1638,1641
+4,1,10,0,4,"underlineend@1644-1647@./terms.c","./terms.c","underlineend","underlineend()",1644,1647
+4,1,10,0,4,"graphstart@1650-1653@./terms.c","./terms.c","graphstart","graphstart()",1650,1653
+4,1,10,0,4,"graphend@1656-1659@./terms.c","./terms.c","graphend","graphend()",1656,1659
+6,4,37,0,6,"graph_ok@1662-1667@./terms.c","./terms.c","graph_ok","graph_ok()",1662,1667
+6,2,38,1,6,"setfcolor@1670-1675@./terms.c","./terms.c","setfcolor","setfcolor( int color)",1670,1675
+6,2,43,1,6,"color_seq@1678-1683@./terms.c","./terms.c","color_seq","color_seq( int colmode)",1678,1683
+6,2,38,1,6,"setbcolor@1687-1692@./terms.c","./terms.c","setbcolor","setbcolor( int color)",1687,1692
+6,1,37,1,6,"bcolor_seq@1695-1700@./terms.c","./terms.c","bcolor_seq","bcolor_seq( int colmode)",1695,1700
+156,79,1064,0,197,"refresh@1712-1908@./terms.c","./terms.c","refresh","refresh()",1712,1908
+15,3,86,0,15,"clear@1911-1925@./terms.c","./terms.c","clear","clear()",1911,1925
+5,1,20,0,5,"scroll_raw@1929-1933@./terms.c","./terms.c","scroll_raw","scroll_raw()",1929,1933
+33,6,193,1,35,"scroll@1936-1970@./terms.c","./terms.c","scroll","scroll( int n)",1936,1970
+45,10,267,1,46,"rscroll@1973-2018@./terms.c","./terms.c","rscroll","rscroll( int n)",1973,2018
+10,4,73,0,14,"need_clrtoeol@2023-2036@./terms.c","./terms.c","need_clrtoeol","need_clrtoeol()",2023,2036
+15,6,114,0,18,"clrtoeol@2041-2058@./terms.c","./terms.c","clrtoeol","clrtoeol()",2041,2058
+17,3,88,0,18,"clrtoeol_with_bcolor@2062-2079@./terms.c","./terms.c","clrtoeol_with_bcolor","clrtoeol_with_bcolor()",2062,2079
+4,1,10,0,4,"clrtoeolx@2082-2085@./terms.c","./terms.c","clrtoeolx","clrtoeolx()",2082,2085
+4,1,10,0,4,"clrtoeolx@2089-2092@./terms.c","./terms.c","clrtoeolx","clrtoeolx()",2089,2092
+13,2,64,0,14,"clrtobot_eol@2096-2109@./terms.c","./terms.c","clrtobot_eol","clrtobot_eol((*clrtoeol)())",2096,2109
+4,1,11,0,4,"clrtobot@2112-2115@./terms.c","./terms.c","clrtobot","clrtobot()",2112,2115
+4,1,11,0,4,"clrtobotx@2118-2121@./terms.c","./terms.c","clrtobotx","clrtobotx()",2118,2121
+6,1,29,0,7,"no_clrtoeol@2125-2131@./terms.c","./terms.c","no_clrtoeol","no_clrtoeol()",2125,2131
+11,4,58,1,15,"addstr@2135-2149@./terms.c","./terms.c","addstr","addstr( char * s)",2135,2149
+16,6,107,2,20,"addnstr@2152-2171@./terms.c","./terms.c","addnstr","addnstr( char * s , int n)",2152,2171
+18,7,122,2,22,"addnstr_sup@2174-2195@./terms.c","./terms.c","addnstr_sup","addnstr_sup( char * s , int n)",2174,2195
+7,2,34,0,11,"crmode@2198-2208@./terms.c","./terms.c","crmode","crmode()",2198,2208
+6,2,27,0,10,"nocrmode@2216-2225@./terms.c","./terms.c","nocrmode","nocrmode()",2216,2225
+4,1,13,0,4,"term_echo@2233-2236@./terms.c","./terms.c","term_echo","term_echo()",2233,2236
+4,1,13,0,4,"term_noecho@2239-2242@./terms.c","./terms.c","term_noecho","term_noecho()",2239,2242
+6,2,29,0,15,"term_raw@2245-2259@./terms.c","./terms.c","term_raw","term_raw()",2245,2259
+7,3,38,0,17,"term_cooked@2267-2283@./terms.c","./terms.c","term_cooked","term_cooked()",2267,2283
+5,1,14,0,5,"term_cbreak@2291-2295@./terms.c","./terms.c","term_cbreak","term_cbreak()",2291,2295
+17,9,86,1,19,"term_title@2298-2316@./terms.c","./terms.c","term_title","term_title( char * s)",2298,2316
+14,5,56,0,19,"getch@2319-2337@./terms.c","./terms.c","getch","getch()",2319,2337
+11,4,51,1,14,"wgetch@2342-2355@./terms.c","./terms.c","wgetch","wgetch( * p)",2342,2355
+7,3,23,0,7,"do_getch@2358-2364@./terms.c","./terms.c","do_getch","do_getch()",2358,2364
+17,4,101,0,18,"sysm_getch@2369-2386@./terms.c","./terms.c","sysm_getch","sysm_getch()",2369,2386
+7,3,23,0,7,"do_getch@2389-2395@./terms.c","./terms.c","do_getch","do_getch()",2389,2395
+15,2,101,1,17,"sysmouse@2398-2414@./terms.c","./terms.c","sysmouse","sysmouse( SIGNAL_ARG)",2398,2414
+4,1,11,0,4,"bell@2419-2422@./terms.c","./terms.c","bell","bell()",2419,2422
+20,11,103,0,23,"skip_escseq@2425-2447@./terms.c","./terms.c","skip_escseq","skip_escseq()",2425,2447
+25,5,144,2,29,"sleep_till_anykey@2450-2478@./terms.c","./terms.c","sleep_till_anykey","sleep_till_anykey( int sec , int purge)",2450,2478
+26,5,116,0,35,"mouse_init@2491-2525@./terms.c","./terms.c","mouse_init","mouse_init()",2491,2525
+11,3,30,0,11,"mouse_end@2528-2538@./terms.c","./terms.c","mouse_end","mouse_end()",2528,2538
+30,7,163,0,39,"mouse_init@2543-2581@./terms.c","./terms.c","mouse_init","mouse_init()",2543,2581
+16,3,67,0,16,"mouse_end@2584-2599@./terms.c","./terms.c","mouse_end","mouse_end()",2584,2599
+12,5,36,0,14,"mouse_init@2605-2618@./terms.c","./terms.c","mouse_init","mouse_init()",2605,2618
+12,5,38,0,14,"mouse_end@2621-2634@./terms.c","./terms.c","mouse_end","mouse_end()",2621,2634
+5,2,14,0,5,"mouse_active@2640-2644@./terms.c","./terms.c","mouse_active","mouse_active()",2640,2644
+5,3,15,0,5,"mouse_inactive@2647-2651@./terms.c","./terms.c","mouse_inactive","mouse_inactive()",2647,2651
+5,2,15,0,5,"flush_tty@2656-2660@./terms.c","./terms.c","flush_tty","flush_tty()",2656,2660
+16,7,98,0,21,"touch_cursor@2664-2684@./terms.c","./terms.c","touch_cursor","touch_cursor()",2664,2684
+4,1,15,2,4,"tgetent@2689-2692@./terms.c","./terms.c","tgetent","tgetent( char * bp , char * name)",2689,2692
+4,1,12,1,4,"tgetnum@2694-2697@./terms.c","./terms.c","tgetnum","tgetnum( char * id)",2694,2697
+4,1,11,1,4,"tgetflag@2699-2702@./terms.c","./terms.c","tgetflag","tgetflag( char * id)",2699,2702
+4,1,16,2,4,"tgetstr@2704-2707@./terms.c","./terms.c","tgetstr","tgetstr( char * id , char ** area)",2704,2707
+3,1,14,3,3,"tgoto@2709-2711@./terms.c","./terms.c","tgoto","tgoto( char * cap , int col , int row)",2709,2711
+3,1,20,3,3,"tputs@2713-2715@./terms.c","./terms.c","tputs","tputs( char * str , int affcnt , int(*putc)(char))",2713,2715
+4,1,10,1,4,"ttyname@2717-2720@./terms.c","./terms.c","ttyname","ttyname( int tty)",2717,2720
+25,11,154,2,26,"main@15-40@./islang.c","./islang.c","main","main( int argc , char ** argv)",15,40
+37,10,221,0,38,"main@40-77@./scrsize.c","./scrsize.c","main","main()",40,77
+5,1,15,1,5,"KeyAbort@191-195@./file.c","./file.c","KeyAbort","KeyAbort( SIGNAL_ARG)",191,195
+15,5,46,1,17,"UFhalfclose@198-214@./file.c","./file.c","UFhalfclose","UFhalfclose( URLFile * f)",198,214
+7,2,27,1,8,"currentLn@217-224@./file.c","./file.c","currentLn","currentLn( Buffer * buf)",217,224
+23,12,174,2,27,"loadSomething@227-253@./file.c","./file.c","loadSomething","loadSomething( URLFile * f , Buffer *(*loadproc)(URLFile*,Buffer*) , Buffer * defaultbuf)",227,253
+9,4,50,1,10,"dir_exist@256-265@./file.c","./file.c","dir_exist","dir_exist( char * path)",256,265
+6,2,39,1,6,"is_dump_text_type@268-273@./file.c","./file.c","is_dump_text_type","is_dump_text_type( char * type)",268,273
+8,6,71,1,8,"is_text_type@276-283@./file.c","./file.c","is_text_type","is_text_type( char * type)",276,283
+5,4,37,1,5,"is_plain_text_type@286-290@./file.c","./file.c","is_plain_text_type","is_plain_text_type( char * type)",286,290
+5,3,33,1,5,"is_html_type@293-297@./file.c","./file.c","is_html_type","is_html_type( char * type)",293,297
+20,6,123,2,22,"check_compression@300-321@./file.c","./file.c","check_compression","check_compression( char * path , URLFile * uf)",300,321
+9,3,45,1,10,"compress_application_type@324-333@./file.c","./file.c","compress_application_type","compress_application_type( int compression)",324,333
+28,9,173,2,31,"uncompressed_file_type@336-366@./file.c","./file.c","uncompressed_file_type","uncompressed_file_type( char * path , char ** ext)",336,366
+11,2,64,2,12,"setModtime@369-380@./file.c","./file.c","setModtime","setModtime( char * path , time_t modtime)",369,380
+36,12,231,2,37,"examineFile@383-419@./file.c","./file.c","examineFile","examineFile( char * path , URLFile * uf)",383,419
+27,8,170,2,28,"check_command@424-451@./file.c","./file.c","check_command","check_command( char * cmd , int auxbin_p)",424,451
+22,6,129,0,23,"acceptableEncoding@454-476@./file.c","./file.c","acceptableEncoding","acceptableEncoding()",454,476
+9,6,57,3,14,"convertLine0@487-500@./file.c","./file.c","convertLine0","convertLine0( URLFile * uf , Str line , int mode)",487,500
+35,12,187,4,36,"matchattr@503-538@./file.c","./file.c","matchattr","matchattr( char * p , char * attr , int len , Str * value)",503,538
+28,6,188,1,30,"xface2xpm@543-572@./file.c","./file.c","xface2xpm","xface2xpm( char * xface)",543,572
+309,133,2103,4,346,"readHeader@577-922@./file.c","./file.c","readHeader","readHeader( URLFile * uf , Buffer * newBuf , int thru , ParsedURL * pu)",577,922
+16,6,104,2,17,"checkHeader@925-941@./file.c","./file.c","checkHeader","checkHeader( Buffer * buf , char * field)",925,941
+23,9,132,1,25,"checkContentType@944-968@./file.c","./file.c","checkContentType","checkContentType( Buffer * buf)",944,968
+43,24,154,1,46,"skip_auth_token@990-1035@./file.c","./file.c","skip_auth_token","skip_auth_token( char ** pp)",990,1035
+51,27,226,1,52,"extract_auth_val@1038-1089@./file.c","./file.c","extract_auth_val","extract_auth_val( char ** q)",1038,1089
+20,6,98,1,21,"qstr_unquote@1092-1112@./file.c","./file.c","qstr_unquote","qstr_unquote( Str s)",1092,1112
+47,15,265,2,51,"extract_auth_param@1115-1165@./file.c","./file.c","extract_auth_param","extract_auth_param( char * q , struct auth_param * auth)",1115,1165
+9,3,56,2,9,"get_auth_param@1168-1176@./file.c","./file.c","get_auth_param","get_auth_param( struct auth_param * auth , char * name)",1168,1176
+8,1,70,6,8,"AuthBasicCred@1179-1186@./file.c","./file.c","AuthBasicCred","AuthBasicCred( struct http_auth * ha , Str uname , Str pw , ParsedURL * pu , HRequest * hr , FormList * request)",1179,1186
+11,2,82,1,11,"digest_hex@1217-1227@./file.c","./file.c","digest_hex","digest_hex( unsigned char * p)",1217,1227
+133,31,1110,6,179,"AuthDigestCred@1236-1414@./file.c","./file.c","AuthDigestCred","AuthDigestCred( struct http_auth * ha , Str uname , Str pw , ParsedURL * pu , HRequest * hr , FormList * request)",1236,1414
+41,12,282,3,44,"findAuthentication@1468-1511@./file.c","./file.c","findAuthentication","findAuthentication( struct http_auth * hauth , Buffer * buf , char * auth_field)",1468,1511
+97,21,569,8,123,"getAuthCookie@1514-1636@./file.c","./file.c","getAuthCookie","getAuthCookie( struct http_auth * hauth , char * auth_header , TextList * extra_header , ParsedURL * pu , HRequest * hr , FormList * request , volatile Str * uname , volatile Str * pwd)",1514,1636
+7,8,83,2,7,"same_url_p@1639-1645@./file.c","./file.c","same_url_p","same_url_p( ParsedURL * pu1 , ParsedURL * pu2)",1639,1645
+36,8,226,1,39,"checkRedirection@1648-1686@./file.c","./file.c","checkRedirection","checkRedirection( ParsedURL * pu)",1648,1686
+4,1,17,1,4,"getLinkNumberStr@1689-1692@./file.c","./file.c","getLinkNumberStr","getLinkNumberStr( int correction)",1689,1692
+29,9,153,2,29,"mailcapMatch@19-47@./mailcap.c","./mailcap.c","mailcapMatch","mailcapMatch( struct mailcap * mcap , char * type)",19,47
+22,6,116,2,23,"searchMailcap@50-72@./mailcap.c","./mailcap.c","searchMailcap","searchMailcap( struct mailcap * table , char * type)",50,72
+36,14,191,4,37,"matchMailcapAttr@75-111@./mailcap.c","./mailcap.c","matchMailcapAttr","matchMailcapAttr( char * p , char * attr , size_t len , Str * value)",75,111
+64,27,469,2,67,"extractMailcapEntry@114-180@./mailcap.c","./mailcap.c","extractMailcapEntry","extractMailcapEntry( char * mcap_entry , struct mailcap * mcap)",114,180
+36,9,231,1,38,"loadMailcap@183-220@./mailcap.c","./mailcap.c","loadMailcap","loadMailcap( char * filename)",183,220
+14,4,88,0,16,"initMailcap@223-238@./mailcap.c","./mailcap.c","initMailcap","initMailcap()",223,238
+39,8,246,0,43,"acceptableMimeTypes@241-283@./mailcap.c","./mailcap.c","acceptableMimeTypes","acceptableMimeTypes()",241,283
+13,4,73,1,16,"searchExtViewer@286-301@./mailcap.c","./mailcap.c","searchExtViewer","searchExtViewer( char * type)",286,301
+34,16,146,2,37,"quote_mailcap@312-348@./mailcap.c","./mailcap.c","quote_mailcap","quote_mailcap( char * s , int flag)",312,348
+109,39,572,6,114,"unquote_mailcap_loop@352-465@./mailcap.c","./mailcap.c","unquote_mailcap_loop","unquote_mailcap_loop( char * qstr , char * type , char * name , char * attr , int * mc_stat , int flag0)",352,465
+4,1,40,5,4,"unquote_mailcap@468-471@./mailcap.c","./mailcap.c","unquote_mailcap","unquote_mailcap( char * qstr , char * type , char * name , char * attr , int * mc_stat)",468,471
+37,9,259,2,40,"new_menu@305-344@./menu.c","./menu.c","new_menu","new_menu( Menu * menu , MenuItem * item)",305,344
+33,9,232,4,36,"geom_menu@347-382@./menu.c","./menu.c","geom_menu","geom_menu( Menu * menu , int x , int y , int mselect)",347,382
+6,2,28,1,6,"draw_all_menu@385-390@./menu.c","./menu.c","draw_all_menu","draw_all_menu( Menu * menu)",385,390
+59,8,438,1,62,"draw_menu@393-454@./menu.c","./menu.c","draw_menu","draw_menu( Menu * menu)",393,454
+5,1,41,2,5,"draw_menu_item@457-461@./menu.c","./menu.c","draw_menu_item","draw_menu_item( Menu * menu , int mselect)",457,461
+20,7,163,2,24,"select_menu@464-487@./menu.c","./menu.c","select_menu","select_menu( Menu * menu , int mselect)",464,487
+29,8,150,3,29,"goto_menu@490-518@./menu.c","./menu.c","goto_menu","goto_menu( Menu * menu , int mselect , int down)",490,518
+9,4,50,2,10,"up_menu@521-530@./menu.c","./menu.c","up_menu","up_menu( Menu * menu , int n)",521,530
+9,4,68,2,10,"down_menu@533-542@./menu.c","./menu.c","down_menu","down_menu( Menu * menu , int n)",533,542
+53,21,293,1,61,"action_menu@545-605@./menu.c","./menu.c","action_menu","action_menu( Menu * menu)",545,605
+31,14,189,2,46,"popup_menu@608-653@./menu.c","./menu.c","popup_menu","popup_menu( Menu * parent , Menu * menu)",608,653
+11,4,117,4,11,"guess_menu_xy@656-666@./menu.c","./menu.c","guess_menu_xy","guess_menu_xy( Menu * parent , int width , int * x , int * y)",656,666
+25,6,207,3,30,"new_option_menu@669-698@./menu.c","./menu.c","new_option_menu","new_option_menu( Menu * menu , char ** label , int * variable ,(*func)())",669,698
+17,4,68,0,20,"set_menu_frame@701-720@./menu.c","./menu.c","set_menu_frame","set_menu_frame()",701,720
+5,1,27,1,5,"mPc@726-730@./menu.c","./menu.c","mPc","mPc( char c)",726,730
+5,1,27,1,5,"mEsc@734-738@./menu.c","./menu.c","mEsc","mEsc( char c)",734,738
+8,2,43,1,8,"mEscB@741-748@./menu.c","./menu.c","mEscB","mEscB( char c)",741,748
+14,3,82,1,15,"mEscD@751-765@./menu.c","./menu.c","mEscD","mEscD( char c)",751,765
+4,1,12,1,4,"mNull@768-771@./menu.c","./menu.c","mNull","mNull( char c)",768,771
+7,2,38,1,7,"mSelect@774-780@./menu.c","./menu.c","mSelect","mSelect( char c)",774,780
+7,2,42,1,7,"mDown@783-789@./menu.c","./menu.c","mDown","mDown( char c)",783,789
+7,2,39,1,7,"mUp@792-798@./menu.c","./menu.c","mUp","mUp( char c)",792,798
+5,1,26,1,5,"mLast@801-805@./menu.c","./menu.c","mLast","mLast( char c)",801,805
+5,1,21,1,5,"mTop@808-812@./menu.c","./menu.c","mTop","mTop( char c)",808,812
+9,2,56,1,10,"mNext@815-824@./menu.c","./menu.c","mNext","mNext( char c)",815,824
+9,2,53,1,10,"mPrev@827-836@./menu.c","./menu.c","mPrev","mPrev( char c)",827,836
+8,2,54,1,8,"mFore@839-846@./menu.c","./menu.c","mFore","mFore( char c)",839,846
+8,2,51,1,8,"mBack@849-856@./menu.c","./menu.c","mBack","mBack( char c)",849,856
+15,4,80,1,16,"mLineU@859-874@./menu.c","./menu.c","mLineU","mLineU( char c)",859,874
+15,4,77,1,16,"mLineD@877-892@./menu.c","./menu.c","mLineD","mLineD( char c)",877,892
+7,2,37,1,8,"mOk@895-902@./menu.c","./menu.c","mOk","mOk( char c)",895,902
+4,1,12,1,4,"mCancel@905-908@./menu.c","./menu.c","mCancel","mCancel( char c)",905,908
+4,1,12,1,4,"mClose@911-914@./menu.c","./menu.c","mClose","mClose( char c)",911,914
+7,1,30,1,7,"mSusp@917-923@./menu.c","./menu.c","mSusp","mSusp( char c)",917,923
+16,6,116,3,16,"menuForwardSearch@930-945@./menu.c","./menu.c","menuForwardSearch","menuForwardSearch( Menu * menu , char * str , int from)",930,945
+20,8,129,2,20,"menu_search_forward@948-967@./menu.c","./menu.c","menu_search_forward","menu_search_forward( Menu * menu , int from)",948,967
+8,2,41,1,8,"mSrchF@970-977@./menu.c","./menu.c","mSrchF","mSrchF( char c)",970,977
+16,6,120,3,16,"menuBackwardSearch@980-995@./menu.c","./menu.c","menuBackwardSearch","menuBackwardSearch( Menu * menu , char * str , int from)",980,995
+20,8,131,2,20,"menu_search_backward@998-1017@./menu.c","./menu.c","menu_search_backward","menu_search_backward( Menu * menu , int from)",998,1017
+8,2,42,1,8,"mSrchB@1020-1027@./menu.c","./menu.c","mSrchB","mSrchB( char c)",1020,1027
+24,8,170,3,25,"menu_search_next_previous@1030-1054@./menu.c","./menu.c","menu_search_next_previous","menu_search_next_previous( Menu * menu , int from , int reverse)",1030,1054
+8,2,43,1,8,"mSrchN@1057-1064@./menu.c","./menu.c","mSrchN","mSrchN( char c)",1057,1064
+8,2,44,1,8,"mSrchP@1067-1074@./menu.c","./menu.c","mSrchP","mSrchP( char c)",1067,1074
+9,3,41,0,9,"mMouse_scroll_line@1088-1096@./menu.c","./menu.c","mMouse_scroll_line","mMouse_scroll_line()",1088,1096
+76,33,482,3,80,"process_mMouse@1099-1178@./menu.c","./menu.c","process_mMouse","process_mMouse( int btn , int x , int y)",1099,1178
+18,7,107,1,24,"mMouse@1181-1204@./menu.c","./menu.c","mMouse","mMouse( char c)",1181,1204
+32,19,229,1,40,"mSgrMouse@1207-1246@./menu.c","./menu.c","mSgrMouse","mSgrMouse( char c)",1207,1246
+27,6,120,2,27,"gpm_process_menu_mouse@1250-1276@./menu.c","./menu.c","gpm_process_menu_mouse","gpm_process_menu_mouse( Gpm_Event * event , * data)",1250,1276
+17,6,91,4,18,"sysm_process_menu_mouse@1281-1298@./menu.c","./menu.c","sysm_process_menu_mouse","sysm_process_menu_mouse( int x , int y , int nbs , int obs)",1281,1298
+4,1,12,1,4,"mMouse@1302-1305@./menu.c","./menu.c","mMouse","mMouse( char c)",1302,1305
+4,1,12,1,4,"mSgrMouse@1308-1311@./menu.c","./menu.c","mSgrMouse","mSgrMouse( char c)",1308,1311
+11,1,75,3,14,"popupMenu@1319-1332@./menu.c","./menu.c","popupMenu","popupMenu( int x , int y , Menu * menu)",1319,1332
+4,1,20,2,4,"mainMenu@1335-1338@./menu.c","./menu.c","mainMenu","mainMenu( int x , int y)",1335,1338
+20,5,115,2,23,"DEFUN@1340-1362@./menu.c","./menu.c","DEFUN","DEFUN( mainMn , MAIN_MENU MENU , 'Pop up menu')",1340,1362
+10,3,61,2,13,"DEFUN@1368-1380@./menu.c","./menu.c","DEFUN","DEFUN( selMn , SELECT_MENU , 'Pop up buffer-stack menu')",1368,1380
+60,14,450,0,64,"initSelectMenu@1383-1446@./menu.c","./menu.c","initSelectMenu","initSelectMenu()",1383,1446
+16,8,95,0,19,"smChBuf@1449-1467@./menu.c","./menu.c","smChBuf","smChBuf()",1449,1467
+31,8,218,1,38,"smDelBuf@1470-1507@./menu.c","./menu.c","smDelBuf","smDelBuf( char c)",1470,1507
+10,3,61,2,13,"DEFUN@1513-1525@./menu.c","./menu.c","DEFUN","DEFUN( tabMn , TAB_MENU , 'Pop up tab selection menu')",1513,1525
+61,14,453,0,65,"initSelTabMenu@1528-1592@./menu.c","./menu.c","initSelTabMenu","initSelTabMenu()",1528,1592
+19,9,109,0,22,"smChTab@1595-1616@./menu.c","./menu.c","smChTab","smChTab()",1595,1616
+23,6,171,1,30,"smDelTab@1619-1648@./menu.c","./menu.c","smDelTab","smDelTab( char c)",1619,1648
+13,1,88,5,16,"optionMenu@1655-1670@./menu.c","./menu.c","optionMenu","optionMenu( int x , int y , char ** label , int * variable , int initial ,(*func)())",1655,1670
+52,16,336,1,59,"interpret_menu@1677-1735@./menu.c","./menu.c","interpret_menu","interpret_menu( FILE * mf)",1677,1735
+38,9,268,0,46,"initMenu@1738-1783@./menu.c","./menu.c","initMenu","initMenu()",1738,1783
+47,11,329,3,48,"setMenuItem@1786-1833@./menu.c","./menu.c","setMenuItem","setMenuItem( MenuItem * item , char * type , char * line)",1786,1833
+13,2,102,2,14,"addMenuList@1836-1849@./menu.c","./menu.c","addMenuList","addMenuList( MenuList ** mlist , char * id)",1836,1849
+9,3,55,2,10,"getMenuN@1852-1861@./menu.c","./menu.c","getMenuN","getMenuN( MenuList * list , char * id)",1852,1861
+47,12,352,1,54,"link_menu@1866-1919@./menu.c","./menu.c","link_menu","link_menu( Buffer * buf)",1866,1919
+68,23,569,1,75,"accesskey_menu@1924-1998@./menu.c","./menu.c","accesskey_menu","accesskey_menu( Buffer * buf)",1924,1998
+8,3,66,1,8,"lmGoto@2006-2013@./menu.c","./menu.c","lmGoto","lmGoto( char c)",2006,2013
+8,2,46,1,8,"lmSelect@2016-2023@./menu.c","./menu.c","lmSelect","lmSelect( char c)",2016,2023
+81,21,608,1,88,"list_menu@2026-2113@./menu.c","./menu.c","list_menu","list_menu( Buffer * buf)",2026,2113
+15,9,119,3,16,"extractMailcapEntry@35-50@./w3mhelperpanel.c","./w3mhelperpanel.c","extractMailcapEntry","extractMailcapEntry( char * mcap_entry , char ** type , char ** cmd)",35,50
+5,1,28,2,5,"bye@53-57@./w3mhelperpanel.c","./w3mhelperpanel.c","bye","bye( const char * action , const char * mailcap)",53,57
+53,10,290,1,60,"printMailcapPanel@60-119@./w3mhelperpanel.c","./w3mhelperpanel.c","printMailcapPanel","printMailcapPanel( char * mailcap)",60,119
+40,14,318,2,43,"editMailcap@122-164@./w3mhelperpanel.c","./w3mhelperpanel.c","editMailcap","editMailcap( char * mailcap , struct parsed_tagarg * args)",122,164
+55,17,335,0,65,"main@167-231@./w3mhelperpanel.c","./w3mhelperpanel.c","main","main()",167,231
+9,1,48,3,9,"newListItem@10-18@./textlist.c","./textlist.c","newListItem","newListItem( * s , ListItem * n , ListItem * p)",10,18
+7,1,33,0,7,"newGeneralList@21-27@./textlist.c","./textlist.c","newGeneralList","newGeneralList()",21,27
+17,5,97,2,17,"pushValue@30-46@./textlist.c","./textlist.c","pushValue","pushValue( GeneralList * tl , * s)",30,46
+14,4,72,1,15,"popValue@49-63@./textlist.c","./textlist.c","popValue","popValue( GeneralList * tl)",49,63
+14,4,72,1,15,"rpopValue@66-80@./textlist.c","./textlist.c","rpopValue","rpopValue( GeneralList * tl)",66,80
+12,3,67,2,12,"delValue@83-94@./textlist.c","./textlist.c","delValue","delValue( GeneralList * tl , ListItem * it)",83,94
+24,6,135,2,25,"appendGeneralList@97-121@./textlist.c","./textlist.c","appendGeneralList","appendGeneralList( GeneralList * tl , GeneralList * tl2)",97,121
+10,2,47,2,10,"newTextLine@127-136@./textlist.c","./textlist.c","newTextLine","newTextLine( Str line , int pos)",127,136
+15,3,82,3,16,"appendTextLine@139-154@./textlist.c","./textlist.c","appendTextLine","appendTextLine( TextLineList * tl , Str line , int pos)",139,154
+26,21,39,1,67,"fversion@133-199@./main.c","./main.c","fversion","fversion( FILE * f)",133,199
+65,11,380,2,85,"fusage@202-286@./main.c","./main.c","fusage","fusage( FILE * f , int err)",202,286
+33,6,219,2,41,"wrap_GC_warn_proc@298-338@./main.c","./main.c","wrap_GC_warn_proc","wrap_GC_warn_proc( char * msg , GC_word arg)",298,338
+21,9,127,1,27,"sig_chld@342-368@./main.c","./main.c","sig_chld","sig_chld( int signo)",342,368
+23,10,156,1,24,"make_optional_header_string@372-395@./main.c","./main.c","make_optional_header_string","make_optional_header_string( char * s)",372,395
+6,1,28,1,10,"die_oom@398-407@./main.c","./main.c","die_oom","die_oom( size_t bytes)",398,407
+725,296,4624,2,884,"main@410-1293@./main.c","./main.c","main","main( int argc , char ** argv)",410,1293
+5,1,26,1,5,"keyPressEventProc@1296-1300@./main.c","./main.c","keyPressEventProc","keyPressEventProc( int c)",1296,1300
+13,2,59,2,14,"pushEvent@1303-1316@./main.c","./main.c","pushEvent","pushEvent( int cmd , * data)",1303,1316
+14,4,69,1,14,"dump_source@1319-1332@./main.c","./main.c","dump_source","dump_source( Buffer * buf)",1319,1332
+16,5,89,1,20,"dump_head@1335-1354@./main.c","./main.c","dump_head","dump_head( Buffer * buf)",1335,1354
+23,10,164,1,27,"dump_extra@1357-1383@./main.c","./main.c","dump_extra","dump_extra( Buffer * buf)",1357,1383
+4,1,43,2,4,"cmp_anchor_hseq@1386-1389@./main.c","./main.c","cmp_anchor_hseq","cmp_anchor_hseq( const * a , const * b)",1386,1389
+37,11,272,1,38,"do_dump@1392-1429@./main.c","./main.c","do_dump","do_dump( Buffer * buf)",1392,1429
+3,1,14,1,3,"DEFUN@1431-1433@./main.c","./main.c","DEFUN","DEFUN( nulcmd , NOTHING NULL @ @ @ , 'Do nothing')",1431,1433
+4,1,30,2,4,"DEFUN@1436-1439@./main.c","./main.c","DEFUN","DEFUN( pcmap , PCMAP , 'pcmap')",1436,1439
+3,1,6,0,3,"pcmap@1442-1444@./main.c","./main.c","pcmap","pcmap()",1442,1444
+27,8,140,3,27,"escKeyProc@1448-1474@./main.c","./main.c","escKeyProc","escKeyProc( int c , int esc , unsigned char * map)",1448,1474
+7,2,38,2,7,"DEFUN@1476-1482@./main.c","./main.c","DEFUN","DEFUN( escmap , ESCMAP , 'ESC map')",1476,1482
+11,3,54,2,11,"DEFUN@1484-1494@./main.c","./main.c","DEFUN","DEFUN( escbmap , ESCBMAP , 'ESC [ map')",1484,1494
+12,3,77,1,12,"escdmap@1497-1508@./main.c","./main.c","escdmap","escdmap( char c)",1497,1508
+9,2,53,2,9,"DEFUN@1510-1518@./main.c","./main.c","DEFUN","DEFUN( multimap , MULTIMAP , 'multimap')",1510,1518
+9,3,49,1,9,"tmpClearBuffer@1521-1529@./main.c","./main.c","tmpClearBuffer","tmpClearBuffer( Buffer * buf)",1521,1529
+11,3,55,0,12,"saveBufferInfo@1535-1546@./main.c","./main.c","saveBufferInfo","saveBufferInfo()",1535,1546
+17,6,84,1,23,"pushBuffer@1550-1572@./main.c","./main.c","pushBuffer","pushBuffer( Buffer * buf)",1550,1572
+10,4,46,1,10,"delBuffer@1575-1584@./main.c","./main.c","delBuffer","delBuffer( Buffer * buf)",1575,1584
+5,1,27,2,5,"repBuffer@1587-1591@./main.c","./main.c","repBuffer","repBuffer( Buffer * oldbuf , Buffer * buf)",1587,1591
+5,1,15,1,5,"intTrap@1595-1599@./main.c","./main.c","intTrap","intTrap( SIGNAL_ARG)",1595,1599
+6,1,19,1,6,"resize_hook@1603-1608@./main.c","./main.c","resize_hook","resize_hook( SIGNAL_ARG)",1603,1608
+8,2,29,0,8,"resize_screen@1611-1618@./main.c","./main.c","resize_screen","resize_screen()",1611,1618
+6,2,19,1,8,"SigPipe@1623-1630@./main.c","./main.c","SigPipe","SigPipe( SIGNAL_ARG)",1623,1630
+54,18,364,2,55,"nscroll@1638-1692@./main.c","./main.c","nscroll","nscroll( int n , int mode)",1638,1692
+8,4,59,2,8,"DEFUN@1695-1702@./main.c","./main.c","DEFUN","DEFUN( pgFore , NEXT_PAGE , 'Scroll down one page')",1695,1702
+8,4,63,2,8,"DEFUN@1705-1712@./main.c","./main.c","DEFUN","DEFUN( pgBack , PREV_PAGE , 'Scroll up one page')",1705,1712
+4,1,29,2,4,"DEFUN@1715-1718@./main.c","./main.c","DEFUN","DEFUN( hpgFore , NEXT_HALF_PAGE , 'Scroll down half a page')",1715,1718
+4,1,30,2,4,"DEFUN@1721-1724@./main.c","./main.c","DEFUN","DEFUN( hpgBack , PREV_HALF_PAGE , 'Scroll up half a page')",1721,1724
+4,1,19,2,4,"DEFUN@1727-1730@./main.c","./main.c","DEFUN","DEFUN( lup1 , UP , 'Scroll the screen up one line')",1727,1730
+4,1,20,2,4,"DEFUN@1733-1736@./main.c","./main.c","DEFUN","DEFUN( ldown1 , DOWN , 'Scroll the screen down one line')",1733,1736
+16,4,90,2,18,"DEFUN@1739-1756@./main.c","./main.c","DEFUN","DEFUN( ctrCsrV , CENTER_V , 'Center on cursor line')",1739,1756
+12,3,62,2,12,"DEFUN@1758-1769@./main.c","./main.c","DEFUN","DEFUN( ctrCsrH , CENTER_H , 'Center on cursor column')",1758,1769
+6,1,26,2,6,"DEFUN@1772-1777@./main.c","./main.c","DEFUN","DEFUN( rdrwSc , REDRAW , 'Draw the screen anew')",1772,1777
+8,3,42,1,8,"clear_mark@1780-1787@./main.c","./main.c","clear_mark","clear_mark( Line * l)",1780,1787
+22,9,156,2,24,"srchcore@1791-1814@./main.c","./main.c","srchcore","srchcore( char * volatile str , int(*func)(Buffer*,char*))",1791,1814
+11,5,87,3,11,"disp_srchresult@1817-1827@./main.c","./main.c","disp_srchresult","disp_srchresult( int result , char * prompt , char * str)",1817,1827
+61,17,276,3,70,"dispincsrch@1830-1899@./main.c","./main.c","dispincsrch","dispincsrch( int ch , Str buf , Lineprop * prop)",1830,1899
+13,2,83,2,14,"isrch@1902-1915@./main.c","./main.c","isrch","isrch( int(*func)(Buffer*,char*) , char * prompt)",1902,1915
+30,9,173,2,31,"srch@1918-1948@./main.c","./main.c","srch","srch( int(*func)(Buffer*,char*) , char * prompt)",1918,1948
+4,1,19,2,4,"DEFUN@1952-1955@./main.c","./main.c","DEFUN","DEFUN( srchfor , SEARCH SEARCH_FORE WHEREIS , 'Search forward')",1952,1955
+4,1,17,2,4,"DEFUN@1957-1960@./main.c","./main.c","DEFUN","DEFUN( isrchfor , ISEARCH , 'Incremental search forward')",1957,1960
+4,1,17,2,4,"DEFUN@1964-1967@./main.c","./main.c","DEFUN","DEFUN( srchbak , SEARCH_BACK , 'Search backward')",1964,1967
+4,1,17,2,4,"DEFUN@1969-1972@./main.c","./main.c","DEFUN","DEFUN( isrchbak , ISEARCH_BACK , 'Incremental search backward')",1969,1972
+27,8,144,1,31,"srch_nxtprv@1975-2005@./main.c","./main.c","srch_nxtprv","srch_nxtprv( int reverse)",1975,2005
+4,1,15,2,4,"DEFUN@2008-2011@./main.c","./main.c","DEFUN","DEFUN( srchnxt , SEARCH_NEXT , 'Continue search forward')",2008,2011
+4,1,15,2,4,"DEFUN@2014-2017@./main.c","./main.c","DEFUN","DEFUN( srchprv , SEARCH_PREV , 'Continue search backward')",2014,2017
+12,5,106,2,12,"shiftvisualpos@2020-2031@./main.c","./main.c","shiftvisualpos","shiftvisualpos( Buffer * buf , int shift)",2020,2031
+10,2,67,2,11,"DEFUN@2034-2044@./main.c","./main.c","DEFUN","DEFUN( shiftl , SHIFT_LEFT , 'Shift screen left')",2034,2044
+10,2,66,2,11,"DEFUN@2047-2057@./main.c","./main.c","DEFUN","DEFUN( shiftr , SHIFT_RIGHT , 'Shift screen right')",2047,2057
+16,4,95,2,17,"DEFUN@2059-2075@./main.c","./main.c","DEFUN","DEFUN( col1R , RIGHT , 'Shift screen one column right')",2059,2075
+15,4,89,2,16,"DEFUN@2077-2092@./main.c","./main.c","DEFUN","DEFUN( col1L , LEFT , 'Shift screen one column left')",2077,2092
+22,10,157,2,23,"DEFUN@2094-2116@./main.c","./main.c","DEFUN","DEFUN( setEnv , SETENV , 'Set environment variable')",2094,2116
+41,9,261,2,44,"DEFUN@2118-2161@./main.c","./main.c","DEFUN","DEFUN( pipeBuf , PIPE_BUF , 'Pipe current buffer through a shell command and display output')",2118,2161
+28,8,152,2,29,"DEFUN@2164-2192@./main.c","./main.c","DEFUN","DEFUN( pipesh , PIPE_SHELL , 'Execute shell command and display output')",2164,2192
+33,8,184,2,35,"DEFUN@2195-2229@./main.c","./main.c","DEFUN","DEFUN( readsh , READ_SHELL , 'Execute shell command and display output')",2195,2229
+21,6,120,2,23,"DEFUN@2232-2254@./main.c","./main.c","DEFUN","DEFUN( execsh , EXEC_SHELL SHELL , 'Execute shell command and display output')",2232,2254
+15,6,84,2,17,"DEFUN@2257-2273@./main.c","./main.c","DEFUN","DEFUN( ldfile , LOAD , 'Open local file in a new buffer')",2257,2273
+13,2,92,2,17,"DEFUN@2276-2292@./main.c","./main.c","DEFUN","DEFUN( ldhelp , HELP , 'Show help panel')",2276,2292
+15,5,96,1,17,"cmd_loadfile@2295-2311@./main.c","./main.c","cmd_loadfile","cmd_loadfile( char * fn)",2295,2311
+9,3,53,1,9,"_movL@2315-2323@./main.c","./main.c","_movL","_movL( int n)",2315,2323
+4,1,19,2,4,"DEFUN@2325-2328@./main.c","./main.c","DEFUN","DEFUN( movL , MOVE_LEFT , 'Cursor left')",2325,2328
+4,1,15,2,4,"DEFUN@2330-2333@./main.c","./main.c","DEFUN","DEFUN( movL1 , MOVE_LEFT1 , 'Cursor left. With edge touched, slide')",2330,2333
+9,3,53,1,9,"_movD@2337-2345@./main.c","./main.c","_movD","_movD( int n)",2337,2345
+4,1,23,2,4,"DEFUN@2347-2350@./main.c","./main.c","DEFUN","DEFUN( movD , MOVE_DOWN , 'Cursor down')",2347,2350
+4,1,15,2,4,"DEFUN@2352-2355@./main.c","./main.c","DEFUN","DEFUN( movD1 , MOVE_DOWN1 , 'Cursor down. With edge touched, slide')",2352,2355
+9,3,53,1,9,"_movU@2359-2367@./main.c","./main.c","_movU","_movU( int n)",2359,2367
+4,1,23,2,4,"DEFUN@2369-2372@./main.c","./main.c","DEFUN","DEFUN( movU , MOVE_UP , 'Cursor up')",2369,2372
+4,1,15,2,4,"DEFUN@2374-2377@./main.c","./main.c","DEFUN","DEFUN( movU1 , MOVE_UP1 , 'Cursor up. With edge touched, slide')",2374,2377
+9,3,53,1,9,"_movR@2381-2389@./main.c","./main.c","_movR","_movR( int n)",2381,2389
+4,1,19,2,4,"DEFUN@2391-2394@./main.c","./main.c","DEFUN","DEFUN( movR , MOVE_RIGHT , 'Cursor right')",2391,2394
+4,1,15,2,4,"DEFUN@2396-2399@./main.c","./main.c","DEFUN","DEFUN( movR1 , MOVE_RIGHT1 , 'Cursor right. With edge touched, slide')",2396,2399
+4,1,22,1,4,"getChar@2411-2414@./main.c","./main.c","getChar","getChar( char * p)",2411,2414
+4,1,13,1,4,"is_wordchar@2417-2420@./main.c","./main.c","is_wordchar","is_wordchar( wc_uint32 c)",2417,2420
+4,1,13,1,4,"is_wordchar@2427-2430@./main.c","./main.c","is_wordchar","is_wordchar( int c)",2427,2430
+11,6,76,1,13,"prev_nonnull_line@2434-2446@./main.c","./main.c","prev_nonnull_line","prev_nonnull_line( Line * line)",2434,2446
+46,11,271,2,51,"DEFUN@2448-2498@./main.c","./main.c","DEFUN","DEFUN( movLW , PREV_WORD , 'Move to the previous word')",2448,2498
+11,6,72,1,14,"next_nonnull_line@2501-2514@./main.c","./main.c","next_nonnull_line","next_nonnull_line( Line * line)",2501,2514
+38,11,243,2,43,"DEFUN@2516-2558@./main.c","./main.c","DEFUN","DEFUN( movRW , NEXT_WORD , 'Move to the next word')",2516,2558
+21,11,104,1,31,"_quitfm@2561-2591@./main.c","./main.c","_quitfm","_quitfm( int confirm)",2561,2591
+4,1,16,2,4,"DEFUN@2594-2597@./main.c","./main.c","DEFUN","DEFUN( quitfm , ABORT EXIT , 'Quit without confirmation')",2594,2597
+4,1,15,2,4,"DEFUN@2600-2603@./main.c","./main.c","DEFUN","DEFUN( qquitfm , QUIT , 'Quit with confirmation request')",2600,2603
+41,13,169,2,46,"DEFUN@2606-2651@./main.c","./main.c","DEFUN","DEFUN( selBuf , SELECT , 'Display buffer-stack panel')",2606,2651
+17,3,91,2,30,"DEFUN@2654-2683@./main.c","./main.c","DEFUN","DEFUN( susp , INTERRUPT SUSPEND , 'Suspend w3m to background')",2654,2683
+24,9,160,1,24,"_goLine@2687-2710@./main.c","./main.c","_goLine","_goLine( char * l)",2687,2710
+10,3,48,2,12,"DEFUN@2712-2723@./main.c","./main.c","DEFUN","DEFUN( goLine , GOTO_LINE , 'Go to the specified line')",2712,2723
+4,1,15,2,4,"DEFUN@2726-2729@./main.c","./main.c","DEFUN","DEFUN( goLineF , BEGIN , 'Go to the first line')",2726,2729
+4,1,15,2,4,"DEFUN@2731-2734@./main.c","./main.c","DEFUN","DEFUN( goLineL , END , 'Go to the last line')",2731,2734
+10,4,59,2,10,"DEFUN@2737-2746@./main.c","./main.c","DEFUN","DEFUN( linbeg , LINE_BEGIN , 'Go to the beginning of the line')",2737,2746
+11,4,67,2,11,"DEFUN@2749-2759@./main.c","./main.c","DEFUN","DEFUN( linend , LINE_END , 'Go to the end of the line')",2749,2759
+13,7,84,1,14,"cur_real_linenumber@2762-2775@./main.c","./main.c","cur_real_linenumber","cur_real_linenumber( Buffer * buf)",2762,2775
+21,9,148,2,23,"DEFUN@2778-2800@./main.c","./main.c","DEFUN","DEFUN( editBf , EDIT , 'Edit local source')",2778,2800
+17,2,108,2,19,"DEFUN@2803-2821@./main.c","./main.c","DEFUN","DEFUN( editScr , EDIT_SCREEN , 'Edit rendered copy of document')",2803,2821
+11,3,55,2,11,"DEFUN@2826-2836@./main.c","./main.c","DEFUN","DEFUN( _mark , MARK , 'Set/unset mark')",2826,2836
+29,7,146,2,31,"DEFUN@2839-2869@./main.c","./main.c","DEFUN","DEFUN( nextMk , NEXT_MARK , 'Go to the next mark')",2839,2869
+31,9,162,2,33,"DEFUN@2872-2904@./main.c","./main.c","DEFUN","DEFUN( prevMk , PREV_MARK , 'Go to the previous mark')",2872,2904
+35,10,224,2,37,"DEFUN@2907-2943@./main.c","./main.c","DEFUN","DEFUN( reMark , REG_MARK , 'Mark all occurences of a pattern')",2907,2943
+7,4,35,2,7,"loadNormalBuf@2947-2953@./main.c","./main.c","loadNormalBuf","loadNormalBuf( Buffer * buf , int renderframe)",2947,2953
+78,22,526,4,94,"loadLink@2956-3049@./main.c","./main.c","loadLink","loadLink( char * url , char * target , char * referer , FormList * request)",2956,3049
+29,4,198,1,31,"gotoLabel@3052-3082@./main.c","./main.c","gotoLabel","gotoLabel( char * label)",3052,3082
+25,8,161,1,32,"handleMailto@3085-3116@./main.c","./main.c","handleMailto","handleMailto( char * url)",3085,3116
+63,27,410,2,79,"DEFUN@3119-3197@./main.c","./main.c","DEFUN","DEFUN( followA , GOTO_LINK , 'Follow current hyperlink in a new buffer')",3119,3197
+6,1,18,0,6,"bufferA@3201-3206@./main.c","./main.c","bufferA","bufferA()",3201,3206
+21,5,136,2,25,"DEFUN@3209-3233@./main.c","./main.c","DEFUN","DEFUN( followI , VIEW_IMAGE , 'Display image in viewer')",3209,3233
+66,12,422,1,77,"save_submit_formlist@3236-3312@./main.c","./main.c","save_submit_formlist","save_submit_formlist( FormItemList * src)",3236,3312
+9,4,65,3,10,"conv_form_encoding@3316-3325@./main.c","./main.c","conv_form_encoding","conv_form_encoding( Str val , FormItemList * fi , Buffer * buf)",3316,3325
+106,32,746,3,117,"query_from_followform@3331-3447@./main.c","./main.c","query_from_followform","query_from_followform( Str * query , FormItemList * fi , int multipart)",3331,3447
+4,1,15,2,4,"DEFUN@3450-3453@./main.c","./main.c","DEFUN","DEFUN( submitForm , SUBMIT , 'Submit form')",3450,3453
+4,1,11,0,4,"followForm@3457-3460@./main.c","./main.c","followForm","followForm()",3457,3460
+167,66,1109,1,189,"_followForm@3463-3651@./main.c","./main.c","_followForm","_followForm( int submit)",3463,3651
+28,9,183,2,31,"DEFUN@3654-3684@./main.c","./main.c","DEFUN","DEFUN( topA , LINK_BEGIN , 'Move to the first hyperlink')",3654,3684
+30,9,186,2,33,"DEFUN@3687-3719@./main.c","./main.c","DEFUN","DEFUN( lastA , LINK_END , 'Move to the last hyperlink')",3687,3719
+21,8,157,2,25,"DEFUN@3722-3746@./main.c","./main.c","DEFUN","DEFUN( nthA , LINK_N , 'Go to the nth link')",3722,3746
+4,1,15,2,4,"DEFUN@3749-3752@./main.c","./main.c","DEFUN","DEFUN( nextA , NEXT_LINK , 'Move to the next hyperlink')",3749,3752
+4,1,15,2,4,"DEFUN@3755-3758@./main.c","./main.c","DEFUN","DEFUN( prevA , PREV_LINK , 'Move to the previous hyperlink')",3755,3758
+4,1,15,2,4,"DEFUN@3761-3764@./main.c","./main.c","DEFUN","DEFUN( nextVA , NEXT_VISITED , 'Move to the next visited hyperlink')",3761,3764
+4,1,15,2,4,"DEFUN@3767-3770@./main.c","./main.c","DEFUN","DEFUN( prevVA , PREV_VISITED , 'Move to the previous visited hyperlink')",3767,3770
+75,27,483,1,81,"_nextA@3774-3854@./main.c","./main.c","_nextA","_nextA( int visited)",3774,3854
+75,28,479,1,81,"_prevA@3858-3938@./main.c","./main.c","_prevA","_prevA( int visited)",3858,3938
+49,20,318,2,53,"nextX@3942-3994@./main.c","./main.c","nextX","nextX( int d , int dy)",3942,3994
+39,14,249,1,43,"nextY@3998-4040@./main.c","./main.c","nextY","nextY( int d)",3998,4040
+4,1,18,2,4,"DEFUN@4043-4046@./main.c","./main.c","DEFUN","DEFUN( nextL , NEXT_LEFT , 'Move left to the next hyperlink')",4043,4046
+4,1,19,2,4,"DEFUN@4049-4052@./main.c","./main.c","DEFUN","DEFUN( nextLU , NEXT_LEFT_UP , 'Move left or upward to the next hyperlink')",4049,4052
+4,1,17,2,4,"DEFUN@4055-4058@./main.c","./main.c","DEFUN","DEFUN( nextR , NEXT_RIGHT , 'Move right to the next hyperlink')",4055,4058
+4,1,17,2,4,"DEFUN@4061-4064@./main.c","./main.c","DEFUN","DEFUN( nextRD , NEXT_RIGHT_DOWN , 'Move right or downward to the next hyperlink')",4061,4064
+4,1,15,2,4,"DEFUN@4067-4070@./main.c","./main.c","DEFUN","DEFUN( nextD , NEXT_DOWN , 'Move downward to the next hyperlink')",4067,4070
+4,1,16,2,4,"DEFUN@4073-4076@./main.c","./main.c","DEFUN","DEFUN( nextU , NEXT_UP , 'Move upward to the next hyperlink')",4073,4076
+15,4,69,2,16,"DEFUN@4079-4094@./main.c","./main.c","DEFUN","DEFUN( nextBf , NEXT , 'Switch to the next buffer')",4079,4094
+15,4,66,2,16,"DEFUN@4097-4112@./main.c","./main.c","DEFUN","DEFUN( prevBf , PREV , 'Switch to the previous buffer')",4097,4112
+17,7,73,1,22,"checkBackBuffer@4115-4136@./main.c","./main.c","checkBackBuffer","checkBackBuffer( Buffer * buf)",4115,4136
+42,9,243,2,48,"DEFUN@4139-4186@./main.c","./main.c","DEFUN","DEFUN( backBf , BACK , 'Close current buffer and return to the one below in stack')",4139,4186
+6,2,27,2,6,"DEFUN@4188-4193@./main.c","./main.c","DEFUN","DEFUN( deletePrevBuf , DELETE_PREVBUF , 'Delete previous buffer (mainly for local CGI-scripts)')",4188,4193
+22,9,150,4,29,"cmd_loadURL@4196-4224@./main.c","./main.c","cmd_loadURL","cmd_loadURL( char * url , ParsedURL * current , char * referer , FormList * request)",4196,4224
+63,18,396,2,65,"goURL0@4229-4293@./main.c","./main.c","goURL0","goURL0( char * prompt , int relative)",4229,4293
+4,1,17,2,4,"DEFUN@4295-4298@./main.c","./main.c","DEFUN","DEFUN( goURL , GOTO , 'Open specified document in a new buffer')",4295,4298
+16,4,120,2,16,"DEFUN@4300-4315@./main.c","./main.c","DEFUN","DEFUN( goHome , GOTO_HOME , 'Open home page in a new buffer')",4300,4315
+4,1,17,2,4,"DEFUN@4317-4320@./main.c","./main.c","DEFUN","DEFUN( gorURL , GOTO_RELATIVE , 'Go to relative address')",4317,4320
+17,5,113,3,17,"cmd_loadBuffer@4323-4339@./main.c","./main.c","cmd_loadBuffer","cmd_loadBuffer( Buffer * buf , int prop , int linkid)",4323,4339
+4,1,22,2,4,"DEFUN@4342-4345@./main.c","./main.c","DEFUN","DEFUN( ldBmark , BOOKMARK VIEW_BOOKMARK , 'View bookmarks')",4342,4345
+22,3,148,2,28,"DEFUN@4349-4376@./main.c","./main.c","DEFUN","DEFUN( adBmark , ADD_BOOKMARK , 'Add current page to bookmarks')",4349,4376
+4,1,21,2,4,"DEFUN@4379-4382@./main.c","./main.c","DEFUN","DEFUN( ldOpt , OPTIONS , 'Display options setting panel')",4379,4382
+20,10,136,2,21,"DEFUN@4385-4405@./main.c","./main.c","DEFUN","DEFUN( setOpt , SET_OPTION , 'Set option')",4385,4405
+4,1,21,2,4,"DEFUN@4408-4411@./main.c","./main.c","DEFUN","DEFUN( msgs , MSGS , 'Display error messages')",4408,4411
+13,3,80,2,14,"DEFUN@4414-4427@./main.c","./main.c","DEFUN","DEFUN( pginfo , INFO , 'Display information about the current document')",4414,4427
+40,14,301,1,49,"follow_map@4430-4478@./main.c","./main.c","follow_map","follow_map( struct parsed_tagarg * arg)",4430,4478
+15,4,110,2,16,"DEFUN@4482-4497@./main.c","./main.c","DEFUN","DEFUN( linkMn , LINK_MENU , 'Pop up link element menu')",4482,4497
+17,6,111,1,18,"anchorMn@4500-4517@./main.c","./main.c","anchorMn","anchorMn( Anchor *(*menu_func)(Buffer*) , int go)",4500,4517
+4,1,17,2,4,"DEFUN@4520-4523@./main.c","./main.c","DEFUN","DEFUN( accessKey , ACCESSKEY , 'Pop up accesskey menu')",4520,4523
+4,1,17,2,4,"DEFUN@4526-4529@./main.c","./main.c","DEFUN","DEFUN( listMn , LIST_MENU , 'Pop up menu for hyperlinks to browse to')",4526,4529
+4,1,17,2,4,"DEFUN@4531-4534@./main.c","./main.c","DEFUN","DEFUN( movlistMn , MOVE_LIST_MENU , 'Pop up menu to navigate between hyperlinks')",4531,4534
+9,3,46,2,12,"DEFUN@4538-4549@./main.c","./main.c","DEFUN","DEFUN( linkLst , LIST , 'Show all URLs referenced')",4538,4549
+7,2,35,2,8,"DEFUN@4553-4560@./main.c","./main.c","DEFUN","DEFUN( cooLst , COOKIE , 'View cookie list')",4553,4560
+4,1,22,2,4,"DEFUN@4565-4568@./main.c","./main.c","DEFUN","DEFUN( ldHist , HISTORY , 'Show browsing history')",4565,4568
+7,1,26,2,7,"DEFUN@4572-4578@./main.c","./main.c","DEFUN","DEFUN( svA , SAVE_LINK , 'Save hyperlink target')",4572,4578
+7,1,26,2,7,"DEFUN@4581-4587@./main.c","./main.c","DEFUN","DEFUN( svI , SAVE_IMAGE , 'Save inline image')",4581,4587
+44,11,252,2,47,"DEFUN@4590-4636@./main.c","./main.c","DEFUN","DEFUN( svBuf , PRINT SAVE_SCREEN , 'Save rendered document')",4590,4636
+17,3,91,2,18,"DEFUN@4639-4656@./main.c","./main.c","DEFUN","DEFUN( svSrc , DOWNLOAD SAVE , 'Save document source')",4639,4656
+49,20,346,1,57,"_peekURL@4659-4715@./main.c","./main.c","_peekURL","_peekURL( int only_img)",4659,4715
+4,1,15,2,4,"DEFUN@4718-4721@./main.c","./main.c","DEFUN","DEFUN( peekURL , PEEK_LINK , 'Show target address')",4718,4721
+4,1,15,2,4,"DEFUN@4724-4727@./main.c","./main.c","DEFUN","DEFUN( peekIMG , PEEK_IMG , 'Show image address')",4724,4727
+6,2,29,0,6,"currentURL@4731-4736@./main.c","./main.c","currentURL","currentURL()",4731,4736
+30,14,234,2,37,"DEFUN@4738-4774@./main.c","./main.c","DEFUN","DEFUN( curURL , PEEK , 'Show current address')",4738,4774
+77,20,480,2,89,"DEFUN@4777-4865@./main.c","./main.c","DEFUN","DEFUN( vwSrc , SOURCE VIEW , 'Toggle between HTML shown or processed')",4777,4865
+110,33,681,2,123,"DEFUN@4868-4990@./main.c","./main.c","DEFUN","DEFUN( reload , RELOAD , 'Load current document anew')",4868,4990
+6,1,28,2,6,"DEFUN@4993-4998@./main.c","./main.c","DEFUN","DEFUN( reshape , RESHAPE , 'Re-render document')",4993,4998
+12,3,55,1,12,"_docCSet@5002-5013@./main.c","./main.c","_docCSet","_docCSet( wc_ces charset)",5002,5013
+17,5,95,1,18,"change_charset@5016-5033@./main.c","./main.c","change_charset","change_charset( struct parsed_tagarg * arg)",5016,5033
+15,4,79,2,17,"DEFUN@5035-5051@./main.c","./main.c","DEFUN","DEFUN( docCSet , CHARSET , 'Change the character encoding for the current document')",5035,5051
+13,4,72,2,15,"DEFUN@5053-5067@./main.c","./main.c","DEFUN","DEFUN( defCSet , DEFAULT_CHARSET , 'Change the default character encoding')",5053,5067
+21,6,77,1,31,"chkURLBuffer@5072-5102@./main.c","./main.c","chkURLBuffer","chkURLBuffer( Buffer * buf)",5072,5102
+5,1,22,2,5,"DEFUN@5104-5108@./main.c","./main.c","DEFUN","DEFUN( chkURL , MARK_URL , 'Turn URL-like strings into hyperlinks')",5104,5108
+10,2,60,2,10,"DEFUN@5110-5119@./main.c","./main.c","DEFUN","DEFUN( chkWORD , MARK_WORD , 'Turn current word into hyperlink')",5110,5119
+12,2,57,1,12,"chkNMIDBuffer@5124-5135@./main.c","./main.c","chkNMIDBuffer","chkNMIDBuffer( Buffer * buf)",5124,5135
+5,1,22,2,5,"DEFUN@5137-5141@./main.c","./main.c","DEFUN","DEFUN( chkNMID , MARK_MID , 'Turn Message-ID-like strings into hyperlinks')",5137,5141
+30,8,165,2,31,"DEFUN@5145-5175@./main.c","./main.c","DEFUN","DEFUN( rFrame , FRAME , 'Toggle rendering HTML frames')",5145,5175
+63,21,295,1,65,"invoke_browser@5179-5243@./main.c","./main.c","invoke_browser","invoke_browser( char * url)",5179,5243
+13,4,75,2,16,"DEFUN@5245-5260@./main.c","./main.c","DEFUN","DEFUN( extbrz , EXTERN , 'Display using an external browser')",5245,5260
+12,3,68,2,13,"DEFUN@5262-5274@./main.c","./main.c","DEFUN","DEFUN( linkbrz , EXTERN_LINK , 'Display target using an external browser')",5262,5274
+26,10,228,2,30,"DEFUN@5277-5306@./main.c","./main.c","DEFUN","DEFUN( curlno , LINE_INFO , 'Display current position in document')",5277,5306
+11,3,49,2,15,"DEFUN@5309-5323@./main.c","./main.c","DEFUN","DEFUN( dispI , DISPLAY_IMAGE , 'Restart loading and drawing of images')",5309,5323
+7,2,30,2,11,"DEFUN@5325-5335@./main.c","./main.c","DEFUN","DEFUN( stopI , STOP_IMAGE , 'Stop loading and drawing of images')",5325,5335
+7,2,25,0,7,"mouse_scroll_line@5341-5347@./main.c","./main.c","mouse_scroll_line","mouse_scroll_line()",5341,5347
+13,9,86,2,14,"posTab@5350-5363@./main.c","./main.c","posTab","posTab( int x , int y)",5350,5363
+81,41,522,3,87,"do_mouse_action@5366-5452@./main.c","./main.c","do_mouse_action","do_mouse_action( int btn , int x , int y)",5366,5452
+107,43,622,3,113,"process_mouse@5455-5567@./main.c","./main.c","process_mouse","process_mouse( int btn , int x , int y)",5455,5567
+10,2,34,2,10,"DEFUN@5569-5578@./main.c","./main.c","DEFUN","DEFUN( msToggle , MOUSE_TOGGLE , 'Toggle mouse support')",5569,5578
+20,11,129,2,24,"DEFUN@5580-5603@./main.c","./main.c","DEFUN","DEFUN( mouse , MOUSE , 'mouse operation')",5580,5603
+46,21,246,2,53,"DEFUN@5605-5657@./main.c","./main.c","DEFUN","DEFUN( sgrmouse , SGRMOUSE , 'SGR 1006 mouse operation')",5605,5657
+27,6,118,2,27,"gpm_process_mouse@5661-5687@./main.c","./main.c","gpm_process_mouse","gpm_process_mouse( Gpm_Event * event , * data)",5661,5687
+17,6,89,4,18,"sysm_process_mouse@5692-5709@./main.c","./main.c","sysm_process_mouse","sysm_process_mouse( int x , int y , int nbs , int obs)",5692,5709
+14,7,90,2,14,"DEFUN@5712-5725@./main.c","./main.c","DEFUN","DEFUN( movMs , MOVE_MOUSE , 'Move cursor to mouse pointer')",5712,5725
+15,7,100,2,15,"DEFUN@5734-5748@./main.c","./main.c","DEFUN","DEFUN( menuMs , MENU_MOUSE , 'Pop up menu at mouse pointer')",5734,5748
+11,4,58,2,12,"DEFUN@5751-5762@./main.c","./main.c","DEFUN","DEFUN( tabMs , TAB_MOUSE , 'Select tab by mouse action')",5751,5762
+11,4,59,2,12,"DEFUN@5764-5775@./main.c","./main.c","DEFUN","DEFUN( closeTMs , CLOSE_TAB_MOUSE , 'Close tab at mouse pointer')",5764,5775
+4,1,24,2,4,"DEFUN@5778-5781@./main.c","./main.c","DEFUN","DEFUN( dispVer , VERSION , 'Display the version of w3m')",5778,5781
+11,2,41,2,13,"DEFUN@5783-5795@./main.c","./main.c","DEFUN","DEFUN( wrapToggle , WRAP_TOGGLE , 'Toggle wrapping mode in searches')",5783,5795
+29,9,197,3,30,"getCurWord@5798-5827@./main.c","./main.c","getCurWord","getCurWord( Buffer * buf , int * spos , int * epos)",5798,5827
+9,2,53,1,10,"GetWord@5830-5839@./main.c","./main.c","GetWord","GetWord( Buffer * buf)",5830,5839
+29,8,178,1,30,"execdict@5843-5872@./main.c","./main.c","execdict","execdict( char * word)",5843,5872
+4,1,20,2,4,"DEFUN@5874-5877@./main.c","./main.c","DEFUN","DEFUN( dictword , DICT_WORD , 'Execute dictionary command (see README.dict)')",5874,5877
+5,1,18,2,5,"DEFUN@5879-5883@./main.c","./main.c","DEFUN","DEFUN( dictwordat , DICT_WORD_AT , 'Execute dictionary command for word at cursor')",5879,5883
+59,14,408,1,62,"set_buffer_environ@5887-5948@./main.c","./main.c","set_buffer_environ","set_buffer_environ( Buffer * buf)",5887,5948
+15,8,88,0,16,"searchKeyData@5951-5966@./main.c","./main.c","searchKeyData","searchKeyData()",5951,5966
+9,2,39,0,10,"searchKeyNum@5969-5978@./main.c","./main.c","searchKeyNum","searchKeyNum()",5969,5978
+7,3,51,0,8,"getCodePage@5983-5990@./main.c","./main.c","getCodePage","getCodePage()",5983,5990
+20,7,120,0,21,"deleteFiles@5995-6015@./main.c","./main.c","deleteFiles","deleteFiles()",5995,6015
+16,8,69,1,26,"w3m_exit@6018-6043@./main.c","./main.c","w3m_exit","w3m_exit( int i)",6018,6043
+36,12,182,2,42,"DEFUN@6045-6086@./main.c","./main.c","DEFUN","DEFUN( execCmd , COMMAND , 'Invoke w3m function(s)')",6045,6086
+32,11,163,1,37,"SigAlarm@6090-6126@./main.c","./main.c","SigAlarm","SigAlarm( SIGNAL_ARG)",6090,6126
+29,7,195,2,30,"DEFUN@6129-6158@./main.c","./main.c","DEFUN","DEFUN( setAlarm , ALARM , 'Set alarm')",6129,6158
+10,2,61,5,10,"setAlarmEvent@6161-6170@./main.c","./main.c","setAlarmEvent","setAlarmEvent( AlarmEvent * event , int sec , short status , int cmd , * data)",6161,6170
+48,16,232,2,68,"DEFUN@6173-6240@./main.c","./main.c","DEFUN","DEFUN( reinit , REINIT , 'Reload configuration file')",6173,6240
+15,5,93,2,16,"DEFUN@6242-6257@./main.c","./main.c","DEFUN","DEFUN( defKey , DEFINE_KEY , 'Define a binding between a key stroke combination and a command')",6242,6257
+11,2,47,0,12,"newTab@6260-6271@./main.c","./main.c","newTab","newTab()",6260,6271
+25,4,138,0,28,"_newT@6274-6301@./main.c","./main.c","_newT","_newT()",6274,6301
+5,1,21,2,5,"DEFUN@6303-6307@./main.c","./main.c","DEFUN","DEFUN( newT , NEW_TAB , 'Open a new tab (with current document)')",6303,6307
+13,6,70,1,14,"numTab@6310-6323@./main.c","./main.c","numTab","numTab( int n)",6310,6323
+48,15,327,0,55,"calcTabPos@6326-6380@./main.c","./main.c","calcTabPos","calcTabPos()",6326,6380
+29,8,143,1,30,"deleteTab@6383-6412@./main.c","./main.c","deleteTab","deleteTab( TabBuffer * tab)",6383,6412
+13,4,54,2,14,"DEFUN@6414-6427@./main.c","./main.c","DEFUN","DEFUN( closeT , CLOSE_TAB , 'Close tab')",6414,6427
+13,4,60,2,14,"DEFUN@6429-6442@./main.c","./main.c","DEFUN","DEFUN( nextT , NEXT_TAB , 'Switch to the next tab')",6429,6442
+13,4,60,2,14,"DEFUN@6444-6457@./main.c","./main.c","DEFUN","DEFUN( prevT , PREV_TAB , 'Switch to the previous tab')",6444,6457
+41,12,209,1,47,"followTab@6460-6506@./main.c","./main.c","followTab","followTab( TabBuffer * tab)",6460,6506
+4,2,22,2,4,"DEFUN@6508-6511@./main.c","./main.c","DEFUN","DEFUN( tabA , TAB_LINK , 'Follow current hyperlink in a new tab')",6508,6511
+31,7,163,3,34,"tabURL0@6514-6547@./main.c","./main.c","tabURL0","tabURL0( TabBuffer * tab , char * prompt , int relative)",6514,6547
+5,2,26,2,5,"DEFUN@6549-6553@./main.c","./main.c","DEFUN","DEFUN( tabURL , TAB_GOTO , 'Open specified document in a new tab')",6549,6553
+5,2,26,2,5,"DEFUN@6555-6559@./main.c","./main.c","DEFUN","DEFUN( tabrURL , TAB_GOTO_RELATIVE , 'Open relative address in a new tab')",6555,6559
+37,11,195,3,37,"moveTab@6562-6598@./main.c","./main.c","moveTab","moveTab( TabBuffer * t , TabBuffer * t2 , int right)",6562,6598
+8,4,56,2,9,"DEFUN@6600-6608@./main.c","./main.c","DEFUN","DEFUN( tabR , TAB_RIGHT , 'Move right along the tab bar')",6600,6608
+8,4,56,2,9,"DEFUN@6610-6618@./main.c","./main.c","DEFUN","DEFUN( tabL , TAB_LEFT , 'Move left along the tab bar')",6610,6618
+23,4,153,5,24,"addDownloadList@6621-6644@./main.c","./main.c","addDownloadList","addDownloadList( pid_t pid , char * url , char * save , char * lock , clen_t size)",6621,6644
+12,5,63,0,13,"checkDownloadList@6647-6659@./main.c","./main.c","checkDownloadList","checkDownloadList()",6647,6659
+11,3,58,1,12,"convert_size3@6662-6673@./main.c","./main.c","convert_size3","convert_size3( clen_t size)",6662,6673
+87,23,588,0,89,"DownloadListBuffer@6676-6764@./main.c","./main.c","DownloadListBuffer","DownloadListBuffer()",6676,6764
+30,8,187,1,33,"download_action@6767-6799@./main.c","./main.c","download_action","download_action( struct parsed_tagarg * arg)",6767,6799
+12,4,60,0,15,"stopDownload@6802-6816@./main.c","./main.c","stopDownload","stopDownload()",6802,6816
+43,18,221,2,50,"DEFUN@6819-6868@./main.c","./main.c","DEFUN","DEFUN( ldDL , DOWNLOAD_LIST , 'Display downloads panel')",6819,6868
+21,9,156,1,22,"save_buffer_position@6871-6892@./main.c","./main.c","save_buffer_position","save_buffer_position( Buffer * buf)",6871,6892
+15,1,91,1,16,"resetPos@6895-6910@./main.c","./main.c","resetPos","resetPos( BufferPos * b)",6895,6910
+11,6,71,2,12,"DEFUN@6912-6923@./main.c","./main.c","DEFUN","DEFUN( undoPos , UNDO , 'Cancel the last cursor movement')",6912,6923
+11,6,71,2,12,"DEFUN@6925-6936@./main.c","./main.c","DEFUN","DEFUN( redoPos , REDO , 'Cancel the last undo')",6925,6936
+9,2,49,2,9,"DEFUN@6938-6946@./main.c","./main.c","DEFUN","DEFUN( cursorTop , CURSOR_TOP , 'Move cursor to the top of the screen')",6938,6946
+11,2,64,2,11,"DEFUN@6948-6958@./main.c","./main.c","DEFUN","DEFUN( cursorMiddle , CURSOR_MIDDLE , 'Move cursor to the middle of the screen')",6948,6958
+11,2,60,2,11,"DEFUN@6960-6970@./main.c","./main.c","DEFUN","DEFUN( cursorBottom , CURSOR_BOTTOM , 'Move cursor to the bottom of the screen')",6960,6970
+10,4,95,1,11,"encode_symbol@72-82@./symbol.c","./symbol.c","encode_symbol","encode_symbol( symbol_set * s)",72,82
+33,16,203,2,34,"get_symbol@85-118@./symbol.c","./symbol.c","get_symbol","get_symbol( wc_ces charset , int * width)",85,118
+24,6,158,1,25,"set_symbol@121-145@./symbol.c","./symbol.c","set_symbol","set_symbol( int width)",121,145
+11,4,56,0,11,"update_utf8_symbol@149-159@./symbol.c","./symbol.c","update_utf8_symbol","update_utf8_symbol()",149,159
+4,1,9,0,4,"get_symbol@165-168@./symbol.c","./symbol.c","get_symbol","get_symbol()",165,168
+15,7,138,4,19,"push_symbol@172-190@./symbol.c","./symbol.c","push_symbol","push_symbol( Str str , char symbol , int width , int n)",172,190
+9,3,53,2,9,"z_mult_no_oflow_@14-22@./alloc.h","./alloc.h","z_mult_no_oflow_","z_mult_no_oflow_( size_t n , size_t size)",14,22
+94,26,547,2,138,"main@28-165@./w3mimgdisplay.c","./w3mimgdisplay.c","main","main( int argc , char ** argv)",28,165
+50,17,320,2,51,"GetOption@168-218@./w3mimgdisplay.c","./w3mimgdisplay.c","GetOption","GetOption( int argc , char ** argv)",168,218
+77,35,659,2,82,"DrawImage@221-302@./w3mimgdisplay.c","./w3mimgdisplay.c","DrawImage","DrawImage( char * buf , int redraw)",221,302
+13,3,63,0,13,"TermImage@305-317@./w3mimgdisplay.c","./w3mimgdisplay.c","TermImage","TermImage()",305,317
+25,9,213,1,27,"ClearImage@320-346@./w3mimgdisplay.c","./w3mimgdisplay.c","ClearImage","ClearImage( char * buf)",320,346
+15,3,85,0,16,"writeLocalCookie@31-46@./local.c","./local.c","writeLocalCookie","writeLocalCookie()",31,46
+8,3,51,0,8,"localCookie@50-57@./local.c","./local.c","localCookie","localCookie()",50,57
+111,31,707,1,125,"loadLocalDir@60-184@./local.c","./local.c","loadLocalDir","loadLocalDir( char * dname)",60,184
+13,10,111,2,16,"check_local_cgi@187-202@./local.c","./local.c","check_local_cgi","check_local_cgi( char * file , int status)",187,202
+39,13,313,2,49,"set_environ@205-253@./local.c","./local.c","set_environ","set_environ( char * var , char * value)",205,253
+13,1,86,3,14,"set_cgi_environ@256-269@./local.c","./local.c","set_cgi_environ","set_cgi_environ( char * name , char * fn , char * req_uri)",256,269
+21,7,126,2,21,"checkPath@272-292@./local.c","./local.c","checkPath","checkPath( char * fn , char * path)",272,292
+48,14,355,4,54,"cgi_filename@295-348@./local.c","./local.c","cgi_filename","cgi_filename( char * uri , char ** fn , char ** name , char ** path_info)",295,348
+72,23,490,4,91,"localcgi_post@351-441@./local.c","./local.c","localcgi_post","localcgi_post( char * uri , char * qstr , FormList * request , char * referer)",351,441
+10,2,53,1,11,"sock_log@137-147@./url.c","./url.c","sock_log","sock_log( char * message , ...)",137,147
+47,11,299,1,48,"loadMimeTypes@155-202@./url.c","./url.c","loadMimeTypes","loadMimeTypes( char * filename)",155,202
+14,4,88,0,15,"initMimeTypes@205-219@./url.c","./url.c","initMimeTypes","initMimeTypes()",205,219
+16,10,64,1,20,"DefaultFile@222-241@./url.c","./url.c","DefaultFile","DefaultFile( int scheme)",222,241
+5,1,15,1,5,"KeyAbort@244-248@./url.c","./url.c","KeyAbort","KeyAbort( SIGNAL_ARG)",244,248
+7,2,26,0,7,"free_ssl_ctx@254-260@./url.c","./url.c","free_ssl_ctx","free_ssl_ctx()",254,260
+23,8,127,0,25,"init_PRNG@265-289@./url.c","./url.c","init_PRNG","init_PRNG()",265,289
+22,13,130,1,28,"str_to_ssl_version@294-321@./url.c","./url.c","str_to_ssl_version","str_to_ssl_version( const char * name)",294,321
+122,61,665,3,161,"openSSLHandle@325-485@./url.c","./url.c","openSSLHandle","openSSLHandle( int sock , char * hostname , char ** p_cert)",325,485
+14,3,78,2,14,"SSL_write_from_file@488-501@./url.c","./url.c","SSL_write_from_file","SSL_write_from_file( SSL * ssl , char * file)",488,501
+14,3,77,2,14,"write_from_file@506-519@./url.c","./url.c","write_from_file","write_from_file( int sock , char * file)",506,519
+13,4,57,1,15,"baseURL@522-536@./url.c","./url.c","baseURL","baseURL( Buffer * buf)",522,536
+154,41,1002,3,184,"openSocket@539-722@./url.c","./url.c","openSocket","openSocket( char * const hostname , char * remoteport_name , unsigned short remoteport_num)",539,722
+26,8,119,3,27,"copyPath@732-758@./url.c","./url.c","copyPath","copyPath( char * orgpath , int length , int option)",732,758
+213,106,1358,3,289,"parseURL@761-1049@./url.c","./url.c","parseURL","parseURL( char * url , ParsedURL * p_url , ParsedURL * current)",761,1049
+18,2,142,2,18,"copyParsedURL@1054-1071@./url.c","./url.c","copyParsedURL","copyParsedURL( ParsedURL * p , const ParsedURL * q)",1054,1071
+137,74,1031,3,181,"parseURL2@1074-1254@./url.c","./url.c","parseURL2","parseURL2( char * url , ParsedURL * pu , ParsedURL * current)",1074,1254
+79,38,550,4,91,"_parsedURL2Str@1257-1347@./url.c","./url.c","_parsedURL2Str","_parsedURL2Str( ParsedURL * pu , int pass , int user , int label)",1257,1347
+4,1,20,1,4,"parsedURL2Str@1350-1353@./url.c","./url.c","parsedURL2Str","parsedURL2Str( ParsedURL * pu)",1350,1353
+11,1,66,1,13,"parsedURL2RefererOriginStr@1356-1368@./url.c","./url.c","parsedURL2RefererOriginStr","parsedURL2RefererOriginStr( ParsedURL * pu)",1356,1368
+4,1,20,1,4,"parsedURL2RefererStr@1371-1374@./url.c","./url.c","parsedURL2RefererStr","parsedURL2RefererStr( ParsedURL * pu)",1371,1374
+20,10,148,1,21,"getURLScheme@1377-1397@./url.c","./url.c","getURLScheme","getURLScheme( char ** url)",1377,1397
+9,3,52,1,10,"schemeNumToName@1400-1409@./url.c","./url.c","schemeNumToName","schemeNumToName( int scheme)",1400,1409
+68,38,488,3,74,"otherinfo@1412-1485@./url.c","./url.c","otherinfo","otherinfo( ParsedURL * target , ParsedURL * current , char * referer)",1412,1485
+17,5,61,1,17,"HTTPrequestMethod@1488-1504@./url.c","./url.c","HTTPrequestMethod","HTTPrequestMethod( HRequest * hr)",1488,1504
+18,4,116,2,18,"HTTPrequestURI@1507-1524@./url.c","./url.c","HTTPrequestURI","HTTPrequestURI( ParsedURL * pu , HRequest * hr)",1507,1524
+67,22,449,4,79,"HTTPrequest@1527-1605@./url.c","./url.c","HTTPrequest","HTTPrequest( ParsedURL * pu , ParsedURL * current , HRequest * hr , TextList * extra)",1527,1605
+13,1,81,3,13,"init_stream@1608-1620@./url.c","./url.c","init_stream","init_stream( URLFile * uf , int scheme , InputStream stream)",1608,1620
+342,122,2084,9,380,"openURL@1623-2002@./url.c","./url.c","openURL","openURL( char * url , ParsedURL * pu , ParsedURL * current , URLOption * option , FormList * request , TextList * extra_header , URLFile * ouf , HRequest * hr , unsigned char * status)",1623,2002
+23,5,147,2,24,"add_index_file@2006-2029@./url.c","./url.c","add_index_file","add_index_file( ParsedURL * pu , URLFile * uf)",2006,2029
+22,9,137,2,22,"guessContentTypeFromTable@2032-2053@./url.c","./url.c","guessContentTypeFromTable","guessContentTypeFromTable( struct table2 * table , char * filename)",2032,2053
+16,5,81,1,19,"guessContentType@2056-2074@./url.c","./url.c","guessContentType","guessContentType( char * filename)",2056,2074
+25,12,142,1,26,"make_domain_list@2077-2102@./url.c","./url.c","make_domain_list","make_domain_list( char * domain_list)",2077,2102
+15,6,72,2,15,"domain_match@2105-2119@./url.c","./url.c","domain_match","domain_match( char * pat , char * domain)",2105,2119
+92,22,551,1,103,"check_no_proxy@2122-2224@./url.c","./url.c","check_no_proxy","check_no_proxy( char * domain)",2122,2224
+25,12,136,2,26,"filename_extension@2227-2252@./url.c","./url.c","filename_extension","filename_extension( char * path , int is_url)",2227,2252
+43,12,284,1,44,"loadURIMethods@2262-2305@./url.c","./url.c","loadURIMethods","loadURIMethods( char * filename)",2262,2305
+17,5,109,0,18,"initURIMethods@2308-2325@./url.c","./url.c","initURIMethods","initURIMethods()",2308,2325
+34,11,228,1,42,"searchURIMethods@2328-2369@./url.c","./url.c","searchURIMethods","searchURIMethods( ParsedURL * pu)",2328,2369
+13,4,105,1,14,"chkExternalURIBuffer@2385-2398@./url.c","./url.c","chkExternalURIBuffer","chkExternalURIBuffer( Buffer * buf)",2385,2398
+21,8,68,1,27,"schemeToProxy@2402-2428@./url.c","./url.c","schemeToProxy","schemeToProxy( int scheme)",2402,2428
+17,10,119,3,18,"url_to_charset@2432-2449@./url.c","./url.c","url_to_charset","url_to_charset( const char * url , const ParsedURL * base , wc_ces doc_charset)",2432,2449
+5,1,36,3,5,"url_encode@2452-2456@./url.c","./url.c","url_encode","url_encode( const char * url , const ParsedURL * base , wc_ces doc_charset)",2452,2456
+7,2,48,3,7,"url_decode@2460-2466@./url.c","./url.c","url_decode","url_decode( const char * url , const ParsedURL * base , wc_ces doc_charset)",2460,2466
+10,3,72,2,11,"url_decode2@2470-2480@./url.c","./url.c","url_decode2","url_decode2( const char * url , const Buffer * buf)",2470,2480
+6,2,33,1,6,"url_decode0@2485-2490@./url.c","./url.c","url_decode0","url_decode0( const char * url)",2485,2490
+4,1,13,1,4,"KeyAbort@12-15@./frame.c","./frame.c","KeyAbort","KeyAbort( SIGNAL_ARG)",12,15
+31,7,190,2,38,"parseFrameSetLength@18-55@./frame.c","./frame.c","parseFrameSetLength","parseFrameSetLength( char * s , char ** * ret)",18,55
+21,2,153,1,22,"newFrameSet@58-79@./frame.c","./frame.c","newFrameSet","newFrameSet( struct parsed_tag * tag)",58,79
+18,5,137,2,19,"newFrame@82-100@./frame.c","./frame.c","newFrame","newFrame( struct parsed_tag * tag , Buffer * buf)",82,100
+4,1,15,1,4,"unloadFrame@103-106@./frame.c","./frame.c","unloadFrame","unloadFrame( struct frame_body * b)",103,106
+7,2,37,1,7,"deleteFrame@109-115@./frame.c","./frame.c","deleteFrame","deleteFrame( struct frame_body * b)",109,115
+11,3,58,2,12,"addFrameSetElement@118-129@./frame.c","./frame.c","addFrameSetElement","addFrameSetElement( struct frameset * f , union frameset_element element)",118,129
+12,3,65,1,13,"deleteFrameSet@132-144@./frame.c","./frame.c","deleteFrameSet","deleteFrameSet( struct frameset * f)",132,144
+18,5,63,1,18,"deleteFrameSetElement@147-164@./frame.c","./frame.c","deleteFrameSetElement","deleteFrameSetElement( union frameset_element e)",147,164
+7,1,47,1,8,"copyFrame@167-174@./frame.c","./frame.c","copyFrame","copyFrame( struct frame_body * ob)",167,174
+34,6,271,1,35,"copyFrameSet@177-211@./frame.c","./frame.c","copyFrameSet","copyFrameSet( struct frameset * of)",177,211
+21,6,99,1,23,"flushFrameSet@214-236@./frame.c","./frame.c","flushFrameSet","flushFrameSet( struct frameset * fs)",214,236
+25,11,180,3,28,"pushFrameTree@239-266@./frame.c","./frame.c","pushFrameTree","pushFrameTree( struct frameset_queue ** fqpp , struct frameset * fs , Buffer * buf)",239,266
+17,4,110,1,19,"popFrameTree@269-287@./frame.c","./frame.c","popFrameTree","popFrameTree( struct frameset_queue ** fqpp)",269,287
+32,3,213,4,34,"resetFrameElement@290-323@./frame.c","./frame.c","resetFrameElement","resetFrameElement( union frameset_element * f_element , Buffer * buf , char * referer , FormList * request)",290,323
+51,16,334,4,58,"frame_download_source@326-383@./frame.c","./frame.c","frame_download_source","frame_download_source( struct frame_body * b , ParsedURL * currentURL , ParsedURL * baseURL , int flag)",326,383
+437,128,2541,5,475,"createFrameFile@403-877@./frame.c","./frame.c","createFrameFile","createFrameFile( struct frameset * f , FILE * f1 , Buffer * current , int level , int force_reload)",403,877
+35,11,214,2,46,"renderFrame@880-925@./frame.c","./frame.c","renderFrame","renderFrame( Buffer * Cbuf , int force_reload)",880,925
+18,6,123,2,19,"search_frame@928-946@./frame.c","./frame.c","search_frame","search_frame( struct frameset * fset , char * name)",928,946
+5,3,39,3,5,"set_mark@9-13@./search.c","./search.c","set_mark","set_mark( Line * l , int pos , int epos)",9,13
+12,4,54,0,12,"init_migemo@22-33@./search.c","./search.c","init_migemo","init_migemo()",22,33
+15,3,69,1,17,"open_migemo@36-52@./search.c","./search.c","open_migemo","open_migemo( char * migemo_command)",36,52
+26,7,128,1,27,"migemostr@55-81@./search.c","./search.c","migemostr","migemostr( char * str)",55,81
+7,4,40,2,7,"conv_search_string@87-93@./search.c","./search.c","conv_search_string","conv_search_string( char * str , wc_ces f_ces)",87,93
+88,33,560,2,93,"forwardSearch@97-189@./search.c","./search.c","forwardSearch","forwardSearch( Buffer * buf , char * str)",97,189
+107,40,694,2,116,"backwardSearch@192-307@./search.c","./search.c","backwardSearch","backwardSearch( Buffer * buf , char * str)",192,307
+12,4,35,1,14,"if@88-101@./display.c","./display.c","if","if( useColor)",88,101
+7,2,19,1,7,"if@109-115@./display.c","./display.c","if","if( useColor)",109,115
+7,2,19,1,7,"if@123-129@./display.c","./display.c","if","if( useVisitedColor)",123,129
+7,2,19,1,7,"if@135-141@./display.c","./display.c","if","if( useVisitedColor)",135,141
+14,6,54,0,18,"fmTerm@162-179@./display.c","./display.c","fmTerm","fmTerm()",162,179
+11,4,37,0,13,"fmInit@186-198@./display.c","./display.c","fmInit","fmInit()",186,198
+45,22,325,3,54,"make_lastline_link@235-288@./display.c","./display.c","make_lastline_link","make_lastline_link( Buffer * buf , char * title , char * url)",235,288
+64,29,417,1,76,"make_lastline_message@291-366@./display.c","./display.c","make_lastline_message","make_lastline_message( Buffer * buf)",291,366
+116,61,704,2,138,"displayBuffer@369-506@./display.c","./display.c","displayBuffer","displayBuffer( Buffer * buf , int mode)",369,506
+47,21,351,7,48,"drawAnchorCursor0@509-556@./display.c","./display.c","drawAnchorCursor0","drawAnchorCursor0( Buffer * buf , AnchorList * al , int hseq , int prevhseq , int tline , int eline , int active)",509,556
+29,9,211,1,32,"drawAnchorCursor@559-590@./display.c","./display.c","drawAnchorCursor","drawAnchorCursor( Buffer * buf)",559,590
+64,32,481,2,79,"redrawNLine@593-671@./display.c","./display.c","redrawNLine","redrawNLine( Buffer * buf , int n)",593,671
+136,51,839,3,157,"redrawLine@674-830@./display.c","./display.c","redrawLine","redrawLine( Buffer * buf , Line * l , int i)",674,830
+67,25,599,3,69,"redrawLineImage@834-902@./display.c","./display.c","redrawLineImage","redrawLineImage( Buffer * buf , Line * l , int i)",834,902
+107,40,638,5,127,"redrawLineRegion@906-1032@./display.c","./display.c","redrawLineRegion","redrawLineRegion( Buffer * buf , Line * l , int i , int bpos , int epos)",906,1032
+29,2,273,1,32,"do_effects@1049-1080@./display.c","./display.c","do_effects","do_effects( Lineprop m)",1049,1080
+12,6,66,1,14,"do_color@1084-1097@./display.c","./display.c","do_color","do_color( Linecolor c)",1084,1097
+4,1,20,2,4,"addChar@1102-1105@./display.c","./display.c","addChar","addChar( char c , Lineprop mode)",1102,1105
+61,22,346,2,77,"addChar@1111-1187@./display.c","./display.c","addChar","addChar( char c , Lineprop mode)",1111,1187
+10,4,51,1,10,"record_err_message@1192-1201@./display.c","./display.c","record_err_message","record_err_message( char * s)",1192,1201
+16,3,87,0,18,"message_list_panel@1207-1224@./display.c","./display.c","message_list_panel","message_list_panel()",1207,1224
+9,2,48,3,9,"message@1227-1235@./display.c","./display.c","message","message( char * s , int return_x , int return_y)",1227,1235
+5,1,23,2,5,"disp_err_message@1238-1242@./display.c","./display.c","disp_err_message","disp_err_message( char * s , int redraw_current)",1238,1242
+22,14,138,5,26,"disp_message_nsec@1245-1270@./display.c","./display.c","disp_message_nsec","disp_message_nsec( char * s , int redraw_current , int sec , int purge , int mouse)",1245,1270
+4,1,24,2,4,"disp_message@1273-1276@./display.c","./display.c","disp_message","disp_message( char * s , int redraw_current)",1273,1276
+4,1,24,2,4,"disp_message_nomouse@1279-1282@./display.c","./display.c","disp_message_nomouse","disp_message_nomouse( char * s , int redraw_current)",1279,1282
+4,1,18,1,4,"set_delayed_message@1286-1289@./display.c","./display.c","set_delayed_message","set_delayed_message( char * s)",1286,1289
+11,3,73,2,11,"cursorUp0@1292-1302@./display.c","./display.c","cursorUp0","cursorUp0( Buffer * buf , int n)",1292,1302
+17,8,120,2,17,"cursorUp@1305-1321@./display.c","./display.c","cursorUp","cursorUp( Buffer * buf , int n)",1305,1321
+11,3,75,2,11,"cursorDown0@1324-1334@./display.c","./display.c","cursorDown0","cursorDown0( Buffer * buf , int n)",1324,1334
+18,8,130,2,18,"cursorDown@1337-1354@./display.c","./display.c","cursorDown","cursorDown( Buffer * buf , int n)",1337,1354
+9,3,57,2,10,"cursorUpDown@1357-1366@./display.c","./display.c","cursorUpDown","cursorUpDown( Buffer * buf , int n)",1357,1366
+41,20,343,2,48,"cursorRight@1369-1416@./display.c","./display.c","cursorRight","cursorRight( Buffer * buf , int n)",1369,1416
+30,10,228,2,33,"cursorLeft@1419-1451@./display.c","./display.c","cursorLeft","cursorLeft( Buffer * buf , int n)",1419,1451
+5,1,24,1,5,"cursorHome@1454-1458@./display.c","./display.c","cursorHome","cursorHome( Buffer * buf)",1454,1458
+46,24,443,1,58,"arrangeCursor@1466-1523@./display.c","./display.c","arrangeCursor","arrangeCursor( Buffer * buf)",1466,1523
+26,5,168,1,29,"arrangeLine@1526-1554@./display.c","./display.c","arrangeLine","arrangeLine( Buffer * buf)",1526,1554
+19,7,124,3,23,"cursorXY@1557-1579@./display.c","./display.c","cursorXY","cursorXY( Buffer * buf , int x , int y)",1557,1579
+11,3,91,2,11,"restorePosition@1582-1592@./display.c","./display.c","restorePosition","restorePosition( Buffer * buf , Buffer * orig)",1582,1592
+13,3,74,0,13,"Strnew@37-49@./Str.c","./Str.c","Strnew","Strnew()",37,49
+17,6,111,1,17,"Strnew_size@52-68@./Str.c","./Str.c","Strnew_size","Strnew_size( int n)",52,68
+24,7,156,1,25,"Strnew_charp@71-95@./Str.c","./Str.c","Strnew_charp","Strnew_charp( const char * p)",71,95
+12,2,61,1,13,"Strnew_m_charp@98-110@./Str.c","./Str.c","Strnew_m_charp","Strnew_m_charp( const char * p , ...)",98,110
+23,7,157,2,24,"Strnew_charp_n@113-136@./Str.c","./Str.c","Strnew_charp_n","Strnew_charp_n( const char * p , int n)",113,136
+7,1,32,1,7,"Strdup@139-145@./Str.c","./Str.c","Strdup","Strdup( Str s)",139,145
+5,1,22,1,5,"Strclear@148-152@./Str.c","./Str.c","Strclear","Strclear( Str s)",148,152
+5,1,19,1,5,"Strfree@155-159@./Str.c","./Str.c","Strfree","Strfree( Str x)",155,159
+13,3,107,2,13,"Strcopy@162-174@./Str.c","./Str.c","Strcopy","Strcopy( Str x , Str y)",162,174
+22,6,150,2,23,"Strcopy_charp@177-199@./Str.c","./Str.c","Strcopy_charp","Strcopy_charp( Str x , const char * y)",177,199
+21,6,148,3,22,"Strcopy_charp_n@202-223@./Str.c","./Str.c","Strcopy_charp_n","Strcopy_charp_n( Str x , const char * y , int n)",202,223
+28,11,195,3,29,"Strcat_charp_n@226-254@./Str.c","./Str.c","Strcat_charp_n","Strcat_charp_n( Str x , const char * y , int n)",226,254
+5,1,28,2,5,"Strcat@257-261@./Str.c","./Str.c","Strcat","Strcat( Str x , Str y)",257,261
+6,2,32,2,6,"Strcat_charp@264-269@./Str.c","./Str.c","Strcat_charp","Strcat_charp( Str x , const char * y)",264,269
+9,2,56,1,10,"Strcat_m_charp@272-281@./Str.c","./Str.c","Strcat_m_charp","Strcat_m_charp( Str x , ...)",272,281
+23,8,140,1,24,"Strgrow@284-307@./Str.c","./Str.c","Strgrow","Strgrow( Str x)",284,307
+12,4,79,3,13,"Strsubstr@310-322@./Str.c","./Str.c","Strsubstr","Strsubstr( Str s , int beg , int len)",310,322
+7,2,47,1,7,"Strlower@325-331@./Str.c","./Str.c","Strlower","Strlower( Str s)",325,331
+7,2,47,1,7,"Strupper@334-340@./Str.c","./Str.c","Strupper","Strupper( Str s)",334,340
+9,4,66,1,9,"Strchop@343-351@./Str.c","./Str.c","Strchop","Strchop( Str s)",343,351
+15,6,114,3,15,"Strinsert_char@354-368@./Str.c","./Str.c","Strinsert_char","Strinsert_char( Str s , int pos , char c)",354,368
+6,2,39,3,6,"Strinsert_charp@371-376@./Str.c","./Str.c","Strinsert_charp","Strinsert_charp( Str s , int pos , const char * p)",371,376
+18,6,126,3,18,"Strdelete@379-396@./Str.c","./Str.c","Strdelete","Strdelete( Str s , int pos , int n)",379,396
+8,3,44,2,8,"Strtruncate@399-406@./Str.c","./Str.c","Strtruncate","Strtruncate( Str s , int pos)",399,406
+12,3,66,2,12,"Strshrink@409-420@./Str.c","./Str.c","Strshrink","Strshrink( Str s , int n)",409,420
+9,4,58,1,10,"Strremovefirstspaces@423-432@./Str.c","./Str.c","Strremovefirstspaces","Strremovefirstspaces( Str s)",423,432
+8,3,62,1,9,"Strremovetrailingspaces@435-443@./Str.c","./Str.c","Strremovetrailingspaces","Strremovetrailingspaces( Str s)",435,443
+13,3,74,2,14,"Stralign_left@446-459@./Str.c","./Str.c","Stralign_left","Stralign_left( Str s , int width)",446,459
+13,3,74,2,14,"Stralign_right@462-475@./Str.c","./Str.c","Stralign_right","Stralign_right( Str s , int width)",462,475
+16,4,110,2,17,"Stralign_center@478-494@./Str.c","./Str.c","Stralign_center","Stralign_center( Str s , int width)",478,494
+95,34,442,1,98,"Sprintf@501-598@./Str.c","./Str.c","Sprintf","Sprintf( char * fmt , ...)",501,598
+11,3,51,1,11,"Strfgets@601-611@./Str.c","./Str.c","Strfgets","Strfgets( FILE * f)",601,611
+9,2,43,1,9,"Strfgetall@614-622@./Str.c","./Str.c","Strfgetall","Strfgetall( FILE * f)",614,622
+179,69,1036,5,202,"inputLineHistSearch@83-284@./linein.c","./linein.c","inputLineHistSearch","inputLineHistSearch( char * prompt , char * def_str , int flag , Hist * hist , int(*incrfunc)(int ch,Str str,Lineprop*prop))",83,284
+26,12,77,0,26,"getcntrl@288-313@./linein.c","./linein.c","getcntrl","getcntrl()",288,313
+13,4,95,5,14,"addPasswd@317-330@./linein.c","./linein.c","addPasswd","addPasswd( char * p , Lineprop * pr , int len , int offset , int limit)",317,330
+35,14,268,5,43,"addStr@333-375@./linein.c","./linein.c","addStr","addStr( char * p , Lineprop * pr , int len , int offset , int limit)",333,375
+31,8,168,1,32,"ins_char@379-410@./linein.c","./linein.c","ins_char","ins_char( Str str)",379,410
+53,21,183,0,56,"_esc@414-469@./linein.c","./linein.c","_esc","_esc()",414,469
+9,2,51,0,10,"insC@472-481@./linein.c","./linein.c","insC","insC()",472,481
+14,6,84,0,17,"delC@484-500@./linein.c","./linein.c","delC","delC()",484,500
+7,5,31,0,9,"_mvL@503-511@./linein.c","./linein.c","_mvL","_mvL()",503,511
+12,8,66,0,14,"_mvLw@514-527@./linein.c","./linein.c","_mvLw","_mvLw()",514,527
+12,8,66,0,14,"_mvRw@530-543@./linein.c","./linein.c","_mvRw","_mvRw()",530,543
+7,5,31,0,9,"_mvR@546-554@./linein.c","./linein.c","_mvR","_mvR()",546,554
+7,2,22,0,7,"_bs@557-563@./linein.c","./linein.c","_bs","_bs()",557,563
+9,4,48,0,9,"_bsw@566-574@./linein.c","./linein.c","_bsw","_bsw()",566,574
+4,1,10,0,4,"_enter@577-580@./linein.c","./linein.c","_enter","_enter()",577,580
+9,3,44,1,9,"insertself@583-591@./linein.c","./linein.c","insertself","insertself( char c)",583,591
+4,1,10,0,4,"_quo@594-597@./linein.c","./linein.c","_quo","_quo()",594,597
+4,1,10,0,4,"_mvB@600-603@./linein.c","./linein.c","_mvB","_mvB()",600,603
+4,1,10,0,4,"_mvE@606-609@./linein.c","./linein.c","_mvE","_mvE()",606,609
+5,1,17,0,5,"killn@612-616@./linein.c","./linein.c","killn","killn()",612,616
+5,2,16,0,5,"killb@619-623@./linein.c","./linein.c","killb","killb()",619,623
+5,1,14,0,5,"_inbrk@626-630@./linein.c","./linein.c","_inbrk","_inbrk()",626,630
+4,1,11,0,4,"_compl@633-636@./linein.c","./linein.c","_compl","_compl()",633,636
+4,1,12,0,4,"_rcompl@639-642@./linein.c","./linein.c","_rcompl","_rcompl()",639,642
+7,3,27,0,7,"_tcompl@645-651@./linein.c","./linein.c","_tcompl","_tcompl()",645,651
+42,15,271,1,45,"next_compl@654-698@./linein.c","./linein.c","next_compl","next_compl( int next)",654,698
+4,1,11,0,4,"_dcompl@701-704@./linein.c","./linein.c","_dcompl","_dcompl()",701,704
+4,1,12,0,4,"_rdcompl@707-710@./linein.c","./linein.c","_rdcompl","_rdcompl()",707,710
+124,37,697,1,133,"next_dcompl@713-845@./linein.c","./linein.c","next_dcompl","next_dcompl( int next)",713,845
+19,8,110,1,20,"escape_spaces@849-868@./linein.c","./linein.c","escape_spaces","escape_spaces( Str s)",849,868
+20,9,121,1,21,"unescape_spaces@872-892@./linein.c","./linein.c","unescape_spaces","unescape_spaces( Str s)",872,892
+112,37,792,3,113,"doComplete@895-1007@./linein.c","./linein.c","doComplete","doComplete( Str ifn , int * status , int next)",895,1007
+23,7,107,0,24,"_prev@1010-1033@./linein.c","./linein.c","_prev","_prev()",1010,1033
+21,6,96,0,22,"_next@1036-1057@./linein.c","./linein.c","_next","_next()",1036,1057
+27,11,149,2,35,"setStrType@1060-1094@./linein.c","./linein.c","setStrType","setStrType( Str str , Lineprop * prop)",1060,1094
+11,3,61,1,13,"terminated@1097-1109@./linein.c","./linein.c","terminated","terminated( unsigned char c)",1097,1109
+20,6,117,0,24,"_editor@1112-1135@./linein.c","./linein.c","_editor","_editor()",1112,1135
+14,2,56,1,17,"exec_cmd@10-26@./util.c","./util.c","exec_cmd","exec_cmd( char * cmd)",10,26
+8,3,62,2,10,"mergeHistory@7-16@./history.c","./history.c","mergeHistory","mergeHistory( Hist * ours , Hist * theirs)",7,16
+25,5,165,1,27,"historyBuffer@19-45@./history.c","./history.c","historyBuffer","historyBuffer( Hist * hist)",19,45
+26,6,149,1,29,"loadHistory@48-76@./history.c","./history.c","loadHistory","loadHistory( Hist * hist)",48,76
+39,13,253,2,44,"saveHistory@79-122@./history.c","./history.c","saveHistory","saveHistory( Hist * hist , size_t size)",79,122
+9,1,44,0,10,"newHist@131-140@./history.c","./history.c","newHist","newHist()",131,140
+11,3,65,1,12,"copyHist@143-154@./history.c","./history.c","copyHist","copyHist( Hist * hist)",143,154
+16,5,117,2,17,"unshiftHist@157-173@./history.c","./history.c","unshiftHist","unshiftHist( Hist * hist , char * ptr)",157,173
+16,5,117,2,17,"pushHist@176-192@./history.c","./history.c","pushHist","pushHist( Hist * hist , char * ptr)",176,192
+22,7,142,2,23,"pushHashHist@197-219@./history.c","./history.c","pushHashHist","pushHashHist( Hist * hist , char * ptr)",197,219
+12,5,105,2,13,"getHashHist@222-234@./history.c","./history.c","getHashHist","getHashHist( Hist * hist , char * ptr)",222,234
+10,4,57,1,10,"lastHist@237-246@./history.c","./history.c","lastHist","lastHist( Hist * hist)",237,246
+10,5,61,1,10,"nextHist@249-258@./history.c","./history.c","nextHist","nextHist( Hist * hist)",249,258
+10,5,61,1,10,"prevHist@261-270@./history.c","./history.c","prevHist","prevHist( Hist * hist)",261,270

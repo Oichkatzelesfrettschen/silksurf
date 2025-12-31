@@ -1,0 +1,44 @@
+---------------- MODULE BrowserLoader ----------------
+EXTENDS Naturals, Sequences
+
+(* --algorithm AsyncFetch
+variables
+    resource_state = "empty",  \* empty, loading, loaded, failed
+    dom_node_alive = TRUE;     \* TRUE, FALSE (if user closed tab)
+
+process RenderThread = "Renderer"
+begin
+RenderLoop:
+    while dom_node_alive do
+        \* Simulate user closing the tab or navigating away
+        if resource_state = "loading" then
+            either
+                dom_node_alive := FALSE;
+            or
+                skip;
+            end either;
+        end if;
+    end while;
+end process;
+
+process NetworkThread = "Network"
+begin
+Fetch:
+    resource_state := "loading";
+FetchNext:
+    \* Simulate network delay
+    resource_state := "loaded";
+    
+    \* CRITICAL SECTION: Trying to update DOM
+UpdateDOM:
+    if dom_node_alive then
+        \* Successful update
+        skip;
+    else
+        \* Resource returned but node is gone (handled safely?)
+        skip;
+    end if;
+end process;
+
+end algorithm; *)
+======================================================

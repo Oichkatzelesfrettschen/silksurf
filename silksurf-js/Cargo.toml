@@ -1,0 +1,474 @@
+[package]
+name = "silksurf-js"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.83.0"
+authors = ["SilkSurf Project"]
+description = "Pure Rust JavaScript engine - cleanroom implementation with zero-copy lexer, arena GC, and bytecode VM"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/silksurf/silksurf"
+keywords = ["javascript", "js", "ecmascript", "vm", "interpreter"]
+categories = ["compilers", "parsing", "wasm"]
+
+# CLEANROOM NOTICE: This is an independent implementation.
+# No code from Boa, QuickJS, or other JS engines.
+# Design informed by studying patterns, not copying code.
+
+[lib]
+crate-type = ["lib", "staticlib", "cdylib"]
+
+# =============================================================================
+# Core Dependencies (Always Included)
+# =============================================================================
+
+[dependencies]
+# -----------------------------------------------------------------------------
+# Memory & Allocation
+# -----------------------------------------------------------------------------
+# Arena allocation (zero-copy, bump allocation)
+bumpalo = { version = "3.16", features = ["collections"] }
+
+# Fast memory allocator (optional global allocator)
+mimalloc = { version = "0.1", optional = true }
+
+# Memory-mapped I/O for bytecode caching (optional)
+memmap2 = { version = "0.9", optional = true }
+
+# -----------------------------------------------------------------------------
+# Zero-Copy & Serialization
+# -----------------------------------------------------------------------------
+# Safe transmutes for NaN-boxed values
+bytemuck = { version = "1.21", features = ["derive"] }
+
+# Zero-copy byte conversion
+zerocopy = { version = "0.8", features = ["derive"] }
+
+# Zero-copy serialization for bytecode caching
+rkyv = "0.8"
+
+# -----------------------------------------------------------------------------
+# String & Text Processing
+# -----------------------------------------------------------------------------
+# String interning (O(1) identifier comparison)
+lasso = "0.7"
+
+# Unicode support for JS identifiers
+unicode-xid = "0.2"
+
+# SIMD-accelerated byte searching (3-6x faster lexer scanning)
+memchr = "2.7"
+
+# -----------------------------------------------------------------------------
+# Compile-Time Utilities
+# -----------------------------------------------------------------------------
+# Perfect hash functions for O(1) keyword lookup
+phf = { version = "0.11", features = ["macros"] }
+
+# Compile-time size assertions
+static_assertions = "1.1"
+
+# Compile-time formatting
+const_format = "0.2"
+
+# Macro utilities: identifier concatenation
+paste = "1.0"
+
+# Sequential macro expansion
+seq-macro = "0.3"
+
+# -----------------------------------------------------------------------------
+# Bit Manipulation
+# -----------------------------------------------------------------------------
+# Efficient bit vectors for GC marking
+bitvec = "1.0"
+
+# Bitflags for compact option sets
+bitflags = "2.6"
+
+# Modular bitfield structs
+modular-bitfield = "0.11"
+
+# 4-bit unsigned integer type
+u4 = "0.1"
+
+# -----------------------------------------------------------------------------
+# Collections
+# -----------------------------------------------------------------------------
+# Inline/heap hybrid vector
+tinyvec = { version = "1.8", features = ["alloc"] }
+
+# Lock-free ring buffer
+ringbuf = "0.4"
+
+# Struct-of-arrays derive macro
+soa_derive = { version = "0.13", optional = true }
+
+# Unchecked indexing for hot paths
+unchecked-index = "0.2"
+
+# -----------------------------------------------------------------------------
+# Numeric & SIMD
+# -----------------------------------------------------------------------------
+# Numeric traits for generic math
+num-traits = "0.2"
+
+# SIMD abstraction layer
+simba = { version = "0.9", optional = true }
+
+# Linear algebra
+nalgebra = { version = "0.33", optional = true }
+
+# Branch prediction hints (stable Rust)
+likely_stable = "0.1"
+
+# -----------------------------------------------------------------------------
+# Error Handling
+# -----------------------------------------------------------------------------
+# Flexible error type
+anyhow = "1.0"
+
+# Derive macro for custom errors
+thiserror = "1.0"
+
+# -----------------------------------------------------------------------------
+# Concurrency
+# -----------------------------------------------------------------------------
+# Fast synchronization primitives
+parking_lot = "0.12"
+
+# Lazy initialization
+once_cell = "1.20"
+
+# Parallel processing (optional, for multi-file lexing)
+rayon = { version = "1.10", optional = true }
+
+# -----------------------------------------------------------------------------
+# Tracing & Diagnostics
+# -----------------------------------------------------------------------------
+# Structured logging/tracing
+tracing = "0.1"
+
+# Tracing subscriber configuration
+tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
+
+# -----------------------------------------------------------------------------
+# CLI
+# -----------------------------------------------------------------------------
+# Command-line argument parsing
+clap = { version = "4.5", features = ["derive"], optional = true }
+
+# -----------------------------------------------------------------------------
+# C FFI
+# -----------------------------------------------------------------------------
+libc = "0.2"
+
+# =============================================================================
+# TUI Dependencies (Optional)
+# =============================================================================
+
+# Terminal UI framework
+ratatui = { version = "0.29", optional = true }
+
+# Cross-platform terminal manipulation
+crossterm = { version = "0.28", optional = true }
+
+# Unicode sparklines for terminal display
+sparkline = { version = "0.1", optional = true }
+
+# notcurses bindings (optional, nightly)
+# notcurses = { version = "3.5", optional = true }
+
+# =============================================================================
+# Graphics Dependencies (Optional)
+# =============================================================================
+
+# Pixel buffer for graphics
+pixels = { version = "0.15", optional = true }
+
+# Window management
+winit = { version = "0.30", optional = true }
+
+# =============================================================================
+# Specialized Dependencies (Optional)
+# =============================================================================
+
+# 6502 CPU emulator (for retro computing features)
+r6502 = { version = "1.1", optional = true }
+
+# Waveform analysis (for debugging/visualization)
+wellen = { version = "0.20", optional = true }
+
+# =============================================================================
+# WebAssembly Dependencies (Optional)
+# =============================================================================
+
+wasm-bindgen = { version = "0.2", optional = true }
+console_error_panic_hook = { version = "0.1", optional = true }
+
+# =============================================================================
+# Node.js Bindings (Optional)
+# =============================================================================
+
+napi = { version = "2", optional = true, features = ["napi4"] }
+napi-derive = { version = "2", optional = true }
+
+# =============================================================================
+# JIT Compiler Dependencies (Optional)
+# =============================================================================
+
+cranelift-codegen = { version = "0.116", optional = true }
+cranelift-frontend = { version = "0.116", optional = true }
+cranelift-jit = { version = "0.116", optional = true }
+cranelift-module = { version = "0.116", optional = true }
+cranelift-native = { version = "0.116", optional = true }
+target-lexicon = { version = "0.12", optional = true }
+
+# =============================================================================
+# Build Dependencies
+# =============================================================================
+
+[build-dependencies]
+# PHF code generation for build scripts
+phf_codegen = "0.11"
+
+# =============================================================================
+# Development Dependencies
+# =============================================================================
+
+[dev-dependencies]
+# Benchmarking
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# Property-based testing
+proptest = "1.4"
+
+# Tracing for tests
+tracing-test = "0.2"
+
+# =============================================================================
+# Feature Flags
+# =============================================================================
+
+[features]
+default = []
+
+# Full feature set for development
+full = [
+    "jit",
+    "fast-alloc",
+    "mmap",
+    "parallel",
+    "cli",
+    "tui",
+    "tracing-full",
+    "math",
+    "soa",
+]
+
+# -----------------------------------------------------------------------------
+# Core Features
+# -----------------------------------------------------------------------------
+
+# JIT compilation via Cranelift
+jit = [
+    "cranelift-codegen",
+    "cranelift-frontend",
+    "cranelift-jit",
+    "cranelift-module",
+    "cranelift-native",
+    "target-lexicon",
+]
+
+# Fast global allocator
+fast-alloc = ["mimalloc"]
+
+# Memory-mapped bytecode cache
+mmap = ["memmap2"]
+
+# Parallel multi-file processing
+parallel = ["rayon"]
+
+# CLI tools
+cli = ["clap"]
+
+# Struct-of-arrays optimization
+soa = ["soa_derive"]
+
+# -----------------------------------------------------------------------------
+# Math & SIMD Features
+# -----------------------------------------------------------------------------
+
+# Linear algebra and SIMD
+math = ["nalgebra", "simba"]
+
+# -----------------------------------------------------------------------------
+# UI Features
+# -----------------------------------------------------------------------------
+
+# Terminal UI
+tui = ["ratatui", "crossterm", "sparkline"]
+
+# Graphics/Windowing
+graphics = ["pixels", "winit"]
+
+# -----------------------------------------------------------------------------
+# Tracing Features
+# -----------------------------------------------------------------------------
+
+# Full tracing with subscriber
+tracing-full = ["tracing-subscriber"]
+
+# -----------------------------------------------------------------------------
+# Platform Bindings
+# -----------------------------------------------------------------------------
+
+# WebAssembly target with wasm-bindgen
+wasm = ["wasm-bindgen", "console_error_panic_hook"]
+
+# Node.js native module via napi-rs
+napi = ["dep:napi", "napi-derive"]
+
+# -----------------------------------------------------------------------------
+# Experimental Features
+# -----------------------------------------------------------------------------
+
+# Neural BPE prediction (Phase 3+)
+neural = []
+
+# Constrained memory mode (embedded)
+constrained = []
+
+# Retro computing features (6502 emulation)
+retro = ["r6502"]
+
+# Waveform visualization
+waveform = ["wellen"]
+
+# =============================================================================
+# Binaries
+# =============================================================================
+
+[[bin]]
+name = "test262"
+path = "src/bin/test262.rs"
+
+[[bin]]
+name = "silksurf"
+path = "src/bin/main.rs"
+required-features = ["cli"]
+
+# =============================================================================
+# Benchmarks
+# =============================================================================
+
+[[bench]]
+name = "lexer_throughput"
+harness = false
+
+[[bench]]
+name = "vm_throughput"
+harness = false
+
+# =============================================================================
+# Build Profiles
+# =============================================================================
+
+[profile.dev]
+# Faster incremental builds with some optimization
+opt-level = 1
+debug = true
+debug-assertions = true
+overflow-checks = true
+incremental = true
+# Use more codegen units for faster compilation
+codegen-units = 256
+
+[profile.dev.package."*"]
+# Optimize dependencies in dev mode
+opt-level = 2
+
+[profile.test]
+# Same as dev but with test-specific settings
+inherits = "dev"
+debug-assertions = true
+overflow-checks = true
+
+[profile.release]
+# Maximum optimization for production
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+opt-level = 3
+debug = false
+debug-assertions = false
+overflow-checks = false
+incremental = false
+
+[profile.release-with-debug]
+# Release build with debug symbols for profiling
+inherits = "release"
+strip = false
+debug = true
+
+[profile.release-safe]
+# Release build with safety checks
+inherits = "release"
+overflow-checks = true
+debug-assertions = false
+
+[profile.release-bolt]
+# For BOLT post-link optimization
+inherits = "release"
+strip = false
+debug = 1
+
+[profile.release-profiling]
+# For sampling profilers (perf, flamegraph)
+inherits = "release"
+debug = true
+strip = false
+
+[profile.bench]
+# Benchmark profile
+lto = "thin"
+codegen-units = 1
+opt-level = 3
+debug = false
+
+[profile.miri]
+# Profile for Miri (needs debug info)
+inherits = "dev"
+opt-level = 0
+debug = true
+
+# =============================================================================
+# Lints
+# =============================================================================
+
+[lints.rust]
+# Compiler lints
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)', 'cfg(miri)'] }
+# unsafe_op_in_unsafe_fn = "warn"  # Enable after codebase update
+# missing_docs = "warn"  # Enable after documentation pass
+
+[lints.clippy]
+# Clippy lint groups - start permissive, tighten over time
+all = "warn"
+# pedantic = "warn"  # Enable later after fixing existing code
+# nursery = "warn"   # Enable later after stabilizing
+cargo = "warn"
+
+# Specific allows for this project
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+too_many_lines = "allow"
+cognitive_complexity = "allow"
+similar_names = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_precision_loss = "allow"
+cast_possible_wrap = "allow"
+cast_lossless = "allow"

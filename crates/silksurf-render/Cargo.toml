@@ -1,0 +1,8 @@
+[package]
+name = "silksurf-render"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+silksurf-layout = { path = "../silksurf-layout" }

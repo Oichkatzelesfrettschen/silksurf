@@ -1,0 +1,1252 @@
+11,4,74,1,11,"SgmlHash@43-53@./tools/sgmlparse.c","./tools/sgmlparse.c","SgmlHash","SgmlHash( const char * zName)",43,53
+96,46,779,2,101,"SgmlParse@61-161@./tools/sgmlparse.c","./tools/sgmlparse.c","SgmlParse","SgmlParse( FILE * in , * pArg)",61,161
+12,3,67,0,13,"SgmlHandlerReset@166-178@./tools/sgmlparse.c","./tools/sgmlparse.c","SgmlHandlerReset","SgmlHandlerReset()",166,178
+11,2,112,1,11,"SgmlHandler@182-192@./tools/sgmlparse.c","./tools/sgmlparse.c","SgmlHandler","SgmlHandler( const char * zName ,(*xFunc)(int,const char**,void*))",182,192
+3,1,22,0,3,"SgmlWordHandler@196-198@./tools/sgmlparse.c","./tools/sgmlparse.c","SgmlWordHandler","SgmlWordHandler((*xWord)(const char*,void*))",196,198
+3,1,22,0,3,"SgmlSpaceHandler@199-201@./tools/sgmlparse.c","./tools/sgmlparse.c","SgmlSpaceHandler","SgmlSpaceHandler((*xSpace)(const char*,void*))",199,201
+3,1,22,0,3,"SgmlCommentHandler@202-204@./tools/sgmlparse.c","./tools/sgmlparse.c","SgmlCommentHandler","SgmlCommentHandler((*xComment)(const char*,void*))",202,204
+3,1,24,0,3,"SgmlDefaultMarkupHandler@205-207@./tools/sgmlparse.c","./tools/sgmlparse.c","SgmlDefaultMarkupHandler","SgmlDefaultMarkupHandler((*xMarkup)(int,const char**,void*))",205,207
+9,2,50,1,9,"SafeMalloc@113-121@./tools/mktclapp.c","./tools/mktclapp.c","SafeMalloc","SafeMalloc( int nByte)",113,121
+10,3,61,2,10,"SafeRealloc@122-131@./tools/mktclapp.c","./tools/mktclapp.c","SafeRealloc","SafeRealloc( * old , int nByte)",122,131
+3,2,17,1,3,"SafeFree@136-138@./tools/mktclapp.c","./tools/mktclapp.c","SafeFree","SafeFree( * pMem)",136,138
+3,2,17,1,3,"IsIdent@143-145@./tools/mktclapp.c","./tools/mktclapp.c","IsIdent","IsIdent( int c)",143,145
+83,29,518,1,84,"IfString@155-238@./tools/mktclapp.c","./tools/mktclapp.c","IfString","IfString( char * zExtra)",155,238
+23,5,165,4,23,"PushIf@243-265@./tools/mktclapp.c","./tools/mktclapp.c","PushIf","PushIf( char * zArg , int line , int isNegated , int isDefined)",243,265
+46,21,356,4,48,"GetArg@271-318@./tools/mktclapp.c","./tools/mktclapp.c","GetArg","GetArg( const char * fileName , char * z , int * pI , int * pLine)",271,318
+30,5,176,1,31,"ReadFileIntoMemory@325-355@./tools/mktclapp.c","./tools/mktclapp.c","ReadFileIntoMemory","ReadFileIntoMemory( const char * fileName)",325,355
+14,7,113,1,15,"FuncToProc@374-388@./tools/mktclapp.c","./tools/mktclapp.c","FuncToProc","FuncToProc( char * zFunc)",374,388
+178,63,1304,1,186,"ScanFile@396-581@./tools/mktclapp.c","./tools/mktclapp.c","ScanFile","ScanFile( const char * fileName)",396,581
+16,5,76,2,16,"SetMacro@586-601@./tools/mktclapp.c","./tools/mktclapp.c","SetMacro","SetMacro( char * zMacroName , char * zIf)",586,601
+14,4,111,1,14,"IsTclFile@608-621@./tools/mktclapp.c","./tools/mktclapp.c","IsTclFile","IsTclFile( char * zFile)",608,621
+37,14,187,1,37,"CompressTcl@626-662@./tools/mktclapp.c","./tools/mktclapp.c","CompressTcl","CompressTcl( char * z)",626,662
+47,14,255,2,47,"WriteAsString@668-714@./tools/mktclapp.c","./tools/mktclapp.c","WriteAsString","WriteAsString( char * z , int shroud)",668,714
+26,1,48,1,26,"Usage@749-774@./tools/mktclapp.c","./tools/mktclapp.c","Usage","Usage( char * argv0)",749,774
+48,19,196,1,48,"EscapeChar@781-828@./tools/mktclapp.c","./tools/mktclapp.c","EscapeChar","EscapeChar( FILE * in)",781,828
+89,30,577,3,90,"AddParameters@850-939@./tools/mktclapp.c","./tools/mktclapp.c","AddParameters","AddParameters( int index , int * pArgc , char ** * pArgv)",850,939
+228,64,1513,2,229,"main@941-1169@./tools/mktclapp.c","./tools/mktclapp.c","main","main( int argc , char ** argv)",941,1169
+18,4,126,0,19,"Action_new@334-352@./tools/lemon.c","./tools/lemon.c","Action_new","Action_new()",334,352
+14,7,128,2,14,"actioncmp@355-368@./tools/lemon.c","./tools/lemon.c","actioncmp","actioncmp( ap1 , ap2)",355,368
+6,1,41,1,6,"Action_sort@371-376@./tools/lemon.c","./tools/lemon.c","Action_sort","Action_sort( ap)",371,376
+18,2,102,4,18,"Action_add@378-395@./tools/lemon.c","./tools/lemon.c","Action_add","Action_add( app , type , sp , arg)",378,395
+5,1,27,1,5,"acttab_free@431-435@./tools/lemon.c","./tools/lemon.c","acttab_free","acttab_free( acttab * p)",431,435
+9,2,55,0,9,"acttab_alloc@438-446@./tools/lemon.c","./tools/lemon.c","acttab_alloc","acttab_alloc()",438,446
+25,6,177,3,25,"acttab_action@450-474@./tools/lemon.c","./tools/lemon.c","acttab_action","acttab_action( acttab * p , int lookahead , int action)",450,474
+59,27,596,1,76,"acttab_insert@483-558@./tools/lemon.c","./tools/lemon.c","acttab_insert","acttab_insert( acttab * p)",483,558
+7,1,31,2,7,"myassert@564-570@./tools/lemon.c","./tools/lemon.c","myassert","myassert( file , line)",564,570
+24,9,163,1,24,"FindRulePrecedences@586-609@./tools/lemon.c","./tools/lemon.c","FindRulePrecedences","FindRulePrecedences( xp)",586,609
+52,19,381,1,57,"FindFirstSets@616-672@./tools/lemon.c","./tools/lemon.c","FindFirstSets","FindFirstSets( lemp)",616,672
+39,7,219,1,54,"FindStates@679-732@./tools/lemon.c","./tools/lemon.c","FindStates","FindStates( lemp)",679,732
+32,4,200,1,41,"getstate@738-778@./tools/lemon.c","./tools/lemon.c","getstate","getstate( lemp)",738,778
+14,7,104,2,14,"same_symbol@783-796@./tools/lemon.c","./tools/lemon.c","same_symbol","same_symbol( a , b)",783,796
+36,11,306,2,51,"buildshifts@801-851@./tools/lemon.c","./tools/lemon.c","buildshifts","buildshifts( lemp , stp)",801,851
+23,6,160,1,30,"FindLinks@856-885@./tools/lemon.c","./tools/lemon.c","FindLinks","FindLinks( lemp)",856,885
+30,9,195,1,32,"FindFollowSets@892-923@./tools/lemon.c","./tools/lemon.c","FindFollowSets","FindFollowSets( lemp)",892,923
+52,19,459,1,70,"FindActions@929-998@./tools/lemon.c","./tools/lemon.c","FindActions","FindActions( lemp)",929,998
+51,27,388,3,55,"resolve_conflict@1013-1067@./tools/lemon.c","./tools/lemon.c","resolve_conflict","resolve_conflict( apx , apy , errsym)",1013,1067
+17,4,118,0,17,"newconfig@1081-1097@./tools/lemon.c","./tools/lemon.c","newconfig","newconfig()",1081,1097
+6,1,21,1,6,"deleteconfig@1100-1105@./tools/lemon.c","./tools/lemon.c","deleteconfig","deleteconfig( old)",1100,1105
+8,1,29,0,8,"Configlist_init@1108-1115@./tools/lemon.c","./tools/lemon.c","Configlist_init","Configlist_init()",1108,1115
+8,1,30,0,8,"Configlist_reset@1118-1125@./tools/lemon.c","./tools/lemon.c","Configlist_reset","Configlist_reset()",1118,1125
+24,2,132,2,25,"Configlist_add@1128-1152@./tools/lemon.c","./tools/lemon.c","Configlist_add","Configlist_add( rp , dot)",1128,1152
+27,2,151,2,28,"Configlist_addbasis@1155-1182@./tools/lemon.c","./tools/lemon.c","Configlist_addbasis","Configlist_addbasis( rp , dot)",1155,1182
+43,13,313,1,44,"Configlist_closure@1185-1228@./tools/lemon.c","./tools/lemon.c","Configlist_closure","Configlist_closure( lemp)",1185,1228
+5,1,40,0,5,"Configlist_sort@1231-1235@./tools/lemon.c","./tools/lemon.c","Configlist_sort","Configlist_sort()",1231,1235
+5,1,40,0,5,"Configlist_sortbasis@1238-1242@./tools/lemon.c","./tools/lemon.c","Configlist_sortbasis","Configlist_sortbasis()",1238,1242
+7,1,25,0,7,"Configlist_return@1246-1252@./tools/lemon.c","./tools/lemon.c","Configlist_return","Configlist_return()",1246,1252
+7,1,25,0,7,"Configlist_basis@1256-1262@./tools/lemon.c","./tools/lemon.c","Configlist_basis","Configlist_basis()",1256,1262
+13,3,71,1,13,"Configlist_eat@1265-1277@./tools/lemon.c","./tools/lemon.c","Configlist_eat","Configlist_eat( cfp)",1265,1277
+17,8,131,3,17,"findbreak@1286-1302@./tools/lemon.c","./tools/lemon.c","findbreak","findbreak( msg , min , max)",1286,1302
+31,6,226,3,38,"ErrorMsg@1312-1349@./tools/lemon.c","./tools/lemon.c","ErrorMsg","ErrorMsg( const char * filename , int lineno , const char * format , ...)",1312,1349
+4,1,17,0,4,"memory_error@1358-1361@./tools/lemon.c","./tools/lemon.c","memory_error","memory_error()",1358,1361
+18,5,129,1,18,"handle_D_option@1369-1386@./tools/lemon.c","./tools/lemon.c","handle_D_option","handle_D_option( char * z)",1369,1386
+97,14,777,2,134,"main@1390-1523@./tools/lemon.c","./tools/lemon.c","main","main( argc , argv)",1390,1523
+3,1,12,1,3,"if@1576-1578@./tools/lemon.c","./tools/lemon.c","if","if( a == 0)",1576,1578
+3,1,12,1,3,"if@1578-1580@./tools/lemon.c","./tools/lemon.c","if","if( b == 0)",1578,1580
+4,1,27,0,4,"if@1581-1584@./tools/lemon.c","./tools/lemon.c","if","if((*cmp)(a,b)<0)",1581,1584
+11,2,63,0,11,"while@1589-1599@./tools/lemon.c","./tools/lemon.c","while","while(a&&b)",1589,1599
+10,3,77,0,10,"while@1631-1640@./tools/lemon.c","./tools/lemon.c","while","while(list)",1631,1640
+20,6,162,0,20,"errline@1656-1675@./tools/lemon.c","./tools/lemon.c","errline","errline(n,k,err)",1656,1675
+16,8,95,0,16,"argindex@1681-1696@./tools/lemon.c","./tools/lemon.c","argindex","argindex(n)",1681,1696
+32,10,279,0,32,"handleflags@1703-1734@./tools/lemon.c","./tools/lemon.c","handleflags","handleflags(i,err)",1703,1734
+87,26,526,0,87,"handleswitch@1739-1825@./tools/lemon.c","./tools/lemon.c","handleswitch","handleswitch(i,err)",1739,1825
+26,9,157,0,26,"OptInit@1827-1852@./tools/lemon.c","./tools/lemon.c","OptInit","OptInit(a,o,err)",1827,1852
+12,7,86,0,12,"OptNArgs@1854-1865@./tools/lemon.c","./tools/lemon.c","OptNArgs","OptNArgs()",1854,1865
+7,2,31,0,7,"OptArg@1867-1873@./tools/lemon.c","./tools/lemon.c","OptArg","OptArg(n)",1867,1873
+7,2,34,0,7,"OptErr@1875-1881@./tools/lemon.c","./tools/lemon.c","OptErr","OptErr(n)",1875,1881
+49,20,324,0,49,"OptPrint@1883-1931@./tools/lemon.c","./tools/lemon.c","OptPrint","OptPrint()",1883,1931
+389,97,2886,0,394,"parseonetoken@1982-2375@./tools/lemon.c","./tools/lemon.c","parseonetoken","parseonetoken(psp)",1982,2375
+45,30,446,0,45,"preprocess_input@2382-2426@./tools/lemon.c","./tools/lemon.c","preprocess_input","preprocess_input(char*z)",2382,2426
+138,62,963,0,145,"Parse@2433-2577@./tools/lemon.c","./tools/lemon.c","Parse","Parse(gp)",2433,2577
+18,4,118,0,19,"Plink_new@2586-2604@./tools/lemon.c","./tools/lemon.c","Plink_new","Plink_new()",2586,2604
+10,1,47,0,10,"Plink_add@2607-2616@./tools/lemon.c","./tools/lemon.c","Plink_add","Plink_add(plpp,cfp)",2607,2616
+12,2,51,0,12,"Plink_copy@2619-2630@./tools/lemon.c","./tools/lemon.c","Plink_copy","Plink_copy(to,from)",2619,2630
+11,2,42,0,12,"Plink_delete@2633-2644@./tools/lemon.c","./tools/lemon.c","Plink_delete","Plink_delete(plp)",2633,2644
+17,3,101,0,18,"file_makename@2654-2671@./tools/lemon.c","./tools/lemon.c","file_makename","file_makename(lemp,suffix)",2654,2671
+16,4,97,0,17,"file_open@2676-2692@./tools/lemon.c","./tools/lemon.c","file_open","file_open(lemp,suffix,mode)",2676,2692
+42,11,339,0,45,"Reprint@2696-2740@./tools/lemon.c","./tools/lemon.c","Reprint","Reprint(lemp)",2696,2740
+21,6,156,0,21,"ConfigPrint@2742-2762@./tools/lemon.c","./tools/lemon.c","ConfigPrint","ConfigPrint(fp,cfp)",2742,2762
+17,3,100,0,17,"SetPrint@2767-2783@./tools/lemon.c","./tools/lemon.c","SetPrint","SetPrint(out,set,lemp)",2767,2783
+12,2,70,0,12,"PlinkPrint@2786-2797@./tools/lemon.c","./tools/lemon.c","PlinkPrint","PlinkPrint(out,plp,tag)",2786,2797
+27,9,171,0,27,"PrintAction@2803-2829@./tools/lemon.c","./tools/lemon.c","PrintAction","PrintAction(struct action*ap,FILE*fp,int indent)",2803,2829
+41,10,296,0,44,"ReportOutput@2832-2875@./tools/lemon.c","./tools/lemon.c","ReportOutput","ReportOutput(lemp)",2832,2875
+38,10,266,0,42,"pathsearch@2879-2920@./tools/lemon.c","./tools/lemon.c","pathsearch","pathsearch(argv0,name,modemask)",2879,2920
+14,5,107,0,14,"compute_action@2926-2939@./tools/lemon.c","./tools/lemon.c","compute_action","compute_action(lemp,ap)",2926,2939
+26,11,198,0,26,"tplt_xfer@2951-2976@./tools/lemon.c","./tools/lemon.c","tplt_xfer","tplt_xfer(name,in,out,lineno)",2951,2976
+35,6,203,0,36,"tplt_open@2980-3015@./tools/lemon.c","./tools/lemon.c","tplt_open","tplt_open(lemp)",2980,3015
+13,3,69,0,13,"tplt_linedir@3018-3030@./tools/lemon.c","./tools/lemon.c","tplt_linedir","tplt_linedir(out,lineno,filename)",3018,3030
+23,5,138,0,23,"tplt_print@3033-3055@./tools/lemon.c","./tools/lemon.c","tplt_print","tplt_print(out,lemp,str,strln,lineno)",3033,3055
+39,10,262,0,40,"emit_destructor_code@3061-3100@./tools/lemon.c","./tools/lemon.c","emit_destructor_code","emit_destructor_code(out,sp,lemp,lineno)",3061,3100
+12,3,59,0,12,"has_destructor@3105-3116@./tools/lemon.c","./tools/lemon.c","has_destructor","has_destructor(sp,lemp)",3105,3116
+38,9,238,0,39,"append_str@3130-3168@./tools/lemon.c","./tools/lemon.c","append_str","append_str(char*zText,int n,int p1,int p2)",3130,3168
+66,24,578,0,76,"translate_code@3175-3250@./tools/lemon.c","./tools/lemon.c","translate_code","translate_code(struct lemon*lemp,struct rule*rp)",3175,3250
+20,4,127,0,23,"emit_code@3256-3278@./tools/lemon.c","./tools/lemon.c","emit_code","emit_code(out,rp,lemp,lineno)",3256,3278
+93,30,732,0,104,"print_stack_union@3287-3390@./tools/lemon.c","./tools/lemon.c","print_stack_union","print_stack_union(out,lemp,plineno,mhflag)",3287,3390
+17,8,87,0,17,"minimum_size_type@3396-3412@./tools/lemon.c","./tools/lemon.c","minimum_size_type","minimum_size_type(int lwr,int upr)",3396,3412
+5,1,47,0,5,"axset_compare@3429-3433@./tools/lemon.c","./tools/lemon.c","axset_compare","axset_compare(const void*a,const void*b)",3429,3433
+339,105,3185,0,413,"ReportTable@3436-3848@./tools/lemon.c","./tools/lemon.c","ReportTable","ReportTable(lemp,mhflag)",3436,3848
+30,9,206,0,32,"ReportHeader@3851-3882@./tools/lemon.c","./tools/lemon.c","ReportHeader","ReportHeader(lemp)",3851,3882
+40,17,303,0,48,"CompressTables@3890-3937@./tools/lemon.c","./tools/lemon.c","CompressTables","CompressTables(lemp)",3890,3937
+10,2,78,0,11,"stateResortCompare@3946-3956@./tools/lemon.c","./tools/lemon.c","stateResortCompare","stateResortCompare(const void*a,const void*b)",3946,3956
+30,7,225,0,31,"ResortStates@3963-3993@./tools/lemon.c","./tools/lemon.c","ResortStates","ResortStates(lemp)",3963,3993
+5,1,15,0,5,"SetSize@4004-4008@./tools/lemon.c","./tools/lemon.c","SetSize","SetSize(n)",4004,4008
+11,3,64,0,11,"SetNew@4011-4021@./tools/lemon.c","./tools/lemon.c","SetNew","SetNew()",4011,4021
+5,1,15,0,5,"SetFree@4024-4028@./tools/lemon.c","./tools/lemon.c","SetFree","SetFree(s)",4024,4028
+9,1,36,0,9,"SetAdd@4032-4040@./tools/lemon.c","./tools/lemon.c","SetAdd","SetAdd(s,e)",4032,4040
+15,4,76,0,15,"SetUnion@4043-4057@./tools/lemon.c","./tools/lemon.c","SetUnion","SetUnion(s1,s2)",4043,4057
+7,2,35,0,7,"strhash@4071-4077@./tools/lemon.c","./tools/lemon.c","strhash","strhash(x)",4071,4077
+12,2,65,0,13,"Strsafe@4083-4095@./tools/lemon.c","./tools/lemon.c","Strsafe","Strsafe(y)",4083,4095
+18,5,136,0,18,"Strsafe_init@4122-4139@./tools/lemon.c","./tools/lemon.c","Strsafe_init","Strsafe_init()",4122,4139
+49,10,442,0,54,"Strsafe_insert@4142-4195@./tools/lemon.c","./tools/lemon.c","Strsafe_insert","Strsafe_insert(data)",4142,4195
+14,5,86,0,15,"Strsafe_find@4199-4213@./tools/lemon.c","./tools/lemon.c","Strsafe_find","Strsafe_find(key)",4199,4213
+22,3,135,0,23,"Symbol_new@4218-4240@./tools/lemon.c","./tools/lemon.c","Symbol_new","Symbol_new(x)",4218,4240
+5,1,71,0,5,"Symbolcmpp@4252-4256@./tools/lemon.c","./tools/lemon.c","Symbolcmpp","Symbolcmpp(struct symbol**a,struct symbol**b)",4252,4256
+18,5,136,0,18,"Symbol_init@4284-4301@./tools/lemon.c","./tools/lemon.c","Symbol_init","Symbol_init()",4284,4301
+52,10,463,0,57,"Symbol_insert@4304-4360@./tools/lemon.c","./tools/lemon.c","Symbol_insert","Symbol_insert(data,key)",4304,4360
+14,5,86,0,15,"Symbol_find@4364-4378@./tools/lemon.c","./tools/lemon.c","Symbol_find","Symbol_find(key)",4364,4378
+11,4,53,0,11,"Symbol_Nth@4381-4391@./tools/lemon.c","./tools/lemon.c","Symbol_Nth","Symbol_Nth(n)",4381,4391
+4,2,14,0,4,"Symbol_count@4394-4397@./tools/lemon.c","./tools/lemon.c","Symbol_count","Symbol_count()",4394,4397
+12,4,85,0,12,"Symbol_arrayof@4402-4413@./tools/lemon.c","./tools/lemon.c","Symbol_arrayof","Symbol_arrayof()",4402,4413
+9,2,54,0,9,"Configcmp@4416-4424@./tools/lemon.c","./tools/lemon.c","Configcmp","Configcmp(a,b)",4416,4424
+15,8,107,0,15,"statecmp@4427-4441@./tools/lemon.c","./tools/lemon.c","statecmp","statecmp(a,b)",4427,4441
+10,2,49,0,10,"statehash@4444-4453@./tools/lemon.c","./tools/lemon.c","statehash","statehash(a)",4444,4453
+7,1,34,0,7,"State_new@4456-4462@./tools/lemon.c","./tools/lemon.c","State_new","State_new()",4456,4462
+18,5,136,0,18,"State_init@4490-4507@./tools/lemon.c","./tools/lemon.c","State_init","State_init()",4490,4507
+52,10,464,0,57,"State_insert@4510-4566@./tools/lemon.c","./tools/lemon.c","State_insert","State_insert(data,key)",4510,4566
+14,5,87,0,15,"State_find@4570-4584@./tools/lemon.c","./tools/lemon.c","State_find","State_find(key)",4570,4584
+12,4,85,0,12,"State_arrayof@4589-4600@./tools/lemon.c","./tools/lemon.c","State_arrayof","State_arrayof()",4589,4600
+7,1,37,0,7,"confighash@4603-4609@./tools/lemon.c","./tools/lemon.c","confighash","confighash(a)",4603,4609
+18,5,136,0,18,"Configtable_init@4636-4653@./tools/lemon.c","./tools/lemon.c","Configtable_init","Configtable_init()",4636,4653
+49,10,443,0,54,"Configtable_insert@4656-4709@./tools/lemon.c","./tools/lemon.c","Configtable_insert","Configtable_insert(data)",4656,4709
+14,5,87,0,15,"Configtable_find@4713-4727@./tools/lemon.c","./tools/lemon.c","Configtable_find","Configtable_find(key)",4713,4727
+17,3,148,1,17,"GetImage@34-50@./tools/getpage.c","./tools/getpage.c","GetImage","GetImage( char * zUrl)",34,50
+4,1,22,1,4,"usage@55-58@./tools/getpage.c","./tools/getpage.c","usage","usage( char * argv0)",55,58
+3,1,20,2,3,"WordHandler@63-65@./tools/getpage.c","./tools/getpage.c","WordHandler","WordHandler( const char * zText , * notUsed)",63,65
+8,2,75,3,8,"DefaultMarkup@70-77@./tools/getpage.c","./tools/getpage.c","DefaultMarkup","DefaultMarkup( int argc , const char ** argv , * notUsed)",70,77
+18,4,140,3,19,"ImageMarkup@82-100@./tools/getpage.c","./tools/getpage.c","ImageMarkup","ImageMarkup( int argc , const char ** argv , * notUsed)",82,100
+11,4,91,3,11,"BaseMarkup@105-115@./tools/getpage.c","./tools/getpage.c","BaseMarkup","BaseMarkup( int argc , const char ** argv , * notUsed)",105,115
+45,9,283,2,47,"main@125-171@./tools/getpage.c","./tools/getpage.c","main","main( int argc , char ** argv)",125,171
+6,3,41,2,6,"ParseTrace@183-188@./tools/lempar.c","./tools/lempar.c","ParseTrace","ParseTrace( FILE * TraceFILE , char * zTracePrompt)",183,188
+8,3,47,1,11,"ParseTokenName@211-221@./tools/lempar.c","./tools/lempar.c","ParseTokenName","ParseTokenName( int tokenType)",211,221
+8,2,54,0,8,"ParseAlloc@235-242@./tools/lempar.c","./tools/lempar.c","ParseAlloc","ParseAlloc( *(*mallocProc)(size_t))",235,242
+6,1,23,2,16,"yy_destructor@249-264@./tools/lempar.c","./tools/lempar.c","yy_destructor","yy_destructor( YYCODETYPE yymajor , YYMINORTYPE * yypminor)",249,264
+14,4,88,1,17,"yy_pop_parser_stack@274-290@./tools/lempar.c","./tools/lempar.c","yy_pop_parser_stack","yy_pop_parser_stack( yyParser * pParser)",274,290
+9,3,61,1,9,"ParseFree@304-312@./tools/lempar.c","./tools/lempar.c","ParseFree","ParseFree( * p ,(*freeProc)(void*))",304,312
+28,10,168,2,33,"yy_find_shift_action@322-354@./tools/lempar.c","./tools/lempar.c","yy_find_shift_action","yy_find_shift_action( yyParser * pParser , int iLookAhead)",322,354
+19,7,87,2,21,"yy_find_reduce_action@364-384@./tools/lempar.c","./tools/lempar.c","yy_find_reduce_action","yy_find_reduce_action( int stateno , int iLookAhead)",364,384
+32,7,185,4,38,"yy_shift@389-426@./tools/lempar.c","./tools/lempar.c","yy_shift","yy_shift( yyParser * yypParser , int yyNewState , int yyMajor , YYMINORTYPE * yypMinor)",389,426
+39,8,217,2,67,"yy_reduce@444-510@./tools/lempar.c","./tools/lempar.c","yy_reduce","yy_reduce( yyParser * yypParser , int yyruleno)",444,510
+11,3,42,1,15,"yy_parse_failed@515-529@./tools/lempar.c","./tools/lempar.c","yy_parse_failed","yy_parse_failed( yyParser * yypParser)",515,529
+9,1,20,3,10,"yy_syntax_error@534-543@./tools/lempar.c","./tools/lempar.c","yy_syntax_error","yy_syntax_error( yyParser * yypParser , int yymajor , YYMINORTYPE yyminor)",534,543
+11,3,42,1,15,"yy_accept@548-562@./tools/lempar.c","./tools/lempar.c","yy_accept","yy_accept( yyParser * yypParser)",548,562
+90,23,493,3,132,"Parse@583-714@./tools/lempar.c","./tools/lempar.c","Parse","Parse( * yyp , int yymajor , ParseTOKENTYPE yyminor ParseARG_PDECL)",583,714
+126,37,921,4,129,"HttpTryOnce@19-147@./tools/httpget.c","./tools/httpget.c","HttpTryOnce","HttpTryOnce( char * zUrl , char * zLocalFile , int quiet , char * zLocation)",19,147
+36,9,192,5,37,"HttpFetch@152-188@./tools/httpget.c","./tools/httpget.c","HttpFetch","HttpFetch( char * zUrl , char * zLocalFile , int quiet , int nActual , char * zActual)",152,188
+4,1,25,1,4,"CantHappen@359-362@./tools/makeheaders.c","./tools/makeheaders.c","CantHappen","CantHappen( int iLine)",359,362
+8,2,41,1,8,"SafeMalloc@368-375@./tools/makeheaders.c","./tools/makeheaders.c","SafeMalloc","SafeMalloc( int nByte)",368,375
+5,2,19,1,5,"SafeFree@376-380@./tools/makeheaders.c","./tools/makeheaders.c","SafeFree","SafeFree( * pOld)",376,380
+14,3,67,2,14,"SafeRealloc@381-394@./tools/makeheaders.c","./tools/makeheaders.c","SafeRealloc","SafeRealloc( * pOld , int nByte)",381,394
+10,2,59,2,10,"StrDup@395-404@./tools/makeheaders.c","./tools/makeheaders.c","StrDup","StrDup( const char * zSrc , int nByte)",395,404
+5,1,26,1,5,"StringInit@414-418@./tools/makeheaders.c","./tools/makeheaders.c","StringInit","StringInit( String * pStr)",414,418
+4,1,20,1,4,"StringReset@419-422@./tools/makeheaders.c","./tools/makeheaders.c","StringReset","StringReset( String * pStr)",419,422
+17,4,138,3,17,"StringAppend@423-439@./tools/makeheaders.c","./tools/makeheaders.c","StringAppend","StringAppend( String * pStr , const char * zText , int nByte)",423,439
+11,4,68,2,11,"Hash@446-456@./tools/makeheaders.c","./tools/makeheaders.c","Hash","Hash( const char * z , int n)",446,456
+13,5,91,2,14,"FindDecl@463-476@./tools/makeheaders.c","./tools/makeheaders.c","FindDecl","FindDecl( const char * zName , int len)",463,476
+24,5,138,1,25,"InstallDecl@482-506@./tools/makeheaders.c","./tools/makeheaders.c","InstallDecl","InstallDecl( Decl * pDecl)",482,506
+23,6,134,0,24,"GetIfString@518-541@./tools/makeheaders.c","./tools/makeheaders.c","GetIfString","GetIfString()",518,541
+15,1,97,2,16,"CreateDecl@548-563@./tools/makeheaders.c","./tools/makeheaders.c","CreateDecl","CreateDecl( const char * zName , int nName)",548,563
+25,5,177,3,28,"IdentTableInsert@570-597@./tools/makeheaders.c","./tools/makeheaders.c","IdentTableInsert","IdentTableInsert( IdentTable * pTable , const char * zId , int nId)",570,597
+18,5,102,3,19,"IdentTableTest@603-621@./tools/makeheaders.c","./tools/makeheaders.c","IdentTableTest","IdentTableTest( IdentTable * pTable , const char * zId , int nId)",603,621
+8,2,54,1,9,"IdentTableReset@627-635@./tools/makeheaders.c","./tools/makeheaders.c","IdentTableReset","IdentTableReset( IdentTable * pTable)",627,635
+6,2,45,2,7,"IdentTablePrint@641-647@./tools/makeheaders.c","./tools/makeheaders.c","IdentTablePrint","IdentTablePrint( IdentTable * pTable , FILE * pOut)",641,647
+20,4,110,1,23,"ReadFile@658-680@./tools/makeheaders.c","./tools/makeheaders.c","ReadFile","ReadFile( const char * zFilename)",658,680
+10,2,60,2,10,"WriteFile@686-695@./tools/makeheaders.c","./tools/makeheaders.c","WriteFile","WriteFile( const char * zFilename , const char * zOutput)",686,695
+187,142,1400,2,204,"GetToken@729-932@./tools/makeheaders.c","./tools/makeheaders.c","GetToken","GetToken( InStream * pIn , Token * pToken)",729,932
+53,18,265,2,62,"GetNonspaceToken@944-1005@./tools/makeheaders.c","./tools/makeheaders.c","GetNonspaceToken","GetNonspaceToken( InStream * pIn , Token * pToken)",944,1005
+21,5,105,2,24,"FindIdentifiersInMacro@1012-1035@./tools/makeheaders.c","./tools/makeheaders.c","FindIdentifiersInMacro","FindIdentifiersInMacro( Token * pToken , IdentTable * pTable)",1012,1035
+66,16,323,3,77,"GetBigToken@1048-1124@./tools/makeheaders.c","./tools/makeheaders.c","GetBigToken","GetBigToken( InStream * pIn , Token * pToken , IdentTable * pTable)",1048,1124
+8,2,33,1,8,"FreeTokenList@1131-1138@./tools/makeheaders.c","./tools/makeheaders.c","FreeTokenList","FreeTokenList( Token * pList)",1131,1138
+31,7,202,2,34,"TokenizeFile@1149-1182@./tools/makeheaders.c","./tools/makeheaders.c","TokenizeFile","TokenizeFile( const char * zFile , IdentTable * pTable)",1149,1182
+58,17,384,2,59,"main@1188-1246@./tools/makeheaders.c","./tools/makeheaders.c","main","main( int argc , char ** argv)",1188,1246
+26,9,156,2,29,"PrintTokens@1253-1281@./tools/makeheaders.c","./tools/makeheaders.c","PrintTokens","PrintTokens( Token * pFirst , Token * pLast)",1253,1281
+43,12,269,2,48,"TokensToString@1291-1338@./tools/makeheaders.c","./tools/makeheaders.c","TokensToString","TokensToString( Token * pFirst , Token * pLast)",1291,1338
+109,36,816,3,146,"ProcessTypeDecl@1353-1498@./tools/makeheaders.c","./tools/makeheaders.c","ProcessTypeDecl","ProcessTypeDecl( Token * pList , int flags , int * pReset)",1353,1498
+39,19,297,2,41,"FindDeclName@1521-1561@./tools/makeheaders.c","./tools/makeheaders.c","FindDeclName","FindDeclName( Token * pFirst , Token * pLast)",1521,1561
+58,21,365,3,68,"ProcessProcedureDef@1568-1635@./tools/makeheaders.c","./tools/makeheaders.c","ProcessProcedureDef","ProcessProcedureDef( Token * pFirst , Token * pLast , int flags)",1568,1635
+44,11,286,3,50,"ProcessInlineProc@1642-1691@./tools/makeheaders.c","./tools/makeheaders.c","ProcessInlineProc","ProcessInlineProc( Token * pFirst , int flags , int * pReset)",1642,1691
+12,9,83,2,12,"isVariableDef@1706-1717@./tools/makeheaders.c","./tools/makeheaders.c","isVariableDef","isVariableDef( Token * pFirst , Token * pEnd)",1706,1717
+94,39,654,3,110,"ProcessDecl@1725-1834@./tools/makeheaders.c","./tools/makeheaders.c","ProcessDecl","ProcessDecl( Token * pFirst , Token * pEnd , int flags)",1725,1834
+32,5,159,5,33,"PushIfMacro@1839-1871@./tools/makeheaders.c","./tools/makeheaders.c","PushIfMacro","PushIfMacro( const char * zPrefix , const char * zText , int nText , int nLine , int flags)",1839,1871
+133,63,1225,3,166,"ParsePreprocessor@1890-2055@./tools/makeheaders.c","./tools/makeheaders.c","ParsePreprocessor","ParsePreprocessor( Token * pToken , int flags , int * pPresetFlags)",1890,2055
+149,58,863,2,171,"ParseFile@2067-2237@./tools/makeheaders.c","./tools/makeheaders.c","ParseFile","ParseFile( Token * pList , int initFlags)",2067,2237
+9,4,63,1,10,"ResetDeclFlags@2244-2253@./tools/makeheaders.c","./tools/makeheaders.c","ResetDeclFlags","ResetDeclFlags( char * zFilename)",2244,2253
+24,6,158,2,24,"ChangeIfContext@2267-2290@./tools/makeheaders.c","./tools/makeheaders.c","ChangeIfContext","ChangeIfContext( const char * zIf , GenState * pState)",2267,2290
+16,4,96,2,16,"AddIncludes@2298-2313@./tools/makeheaders.c","./tools/makeheaders.c","AddIncludes","AddIncludes( Include * pInclude , GenState * pState)",2298,2313
+84,36,597,3,125,"DeclareObject@2332-2456@./tools/makeheaders.c","./tools/makeheaders.c","DeclareObject","DeclareObject( Decl * pDecl , GenState * pState , int needFullDecl)",2332,2456
+36,7,195,2,53,"ScanText@2468-2520@./tools/makeheaders.c","./tools/makeheaders.c","ScanText","ScanText( const char * zText , GenState * pState)",2468,2520
+16,5,85,1,17,"CompleteForwardDeclarations@2526-2542@./tools/makeheaders.c","./tools/makeheaders.c","CompleteForwardDeclarations","CompleteForwardDeclarations( GenState * pState)",2526,2542
+58,16,427,3,59,"MakeHeader@2551-2609@./tools/makeheaders.c","./tools/makeheaders.c","MakeHeader","MakeHeader( InFile * pFile , FILE * report , int nolocal_flag)",2551,2609
+25,4,157,1,27,"MakeGlobalHeader@2616-2642@./tools/makeheaders.c","./tools/makeheaders.c","MakeGlobalHeader","MakeGlobalHeader( int forExport)",2616,2642
+5,4,50,1,5,"ClipTrailingNewline@2649-2653@./tools/makeheaders.c","./tools/makeheaders.c","ClipTrailingNewline","ClipTrailingNewline( char * z)",2649,2653
+49,10,318,0,50,"DumpDeclList@2658-2707@./tools/makeheaders.c","./tools/makeheaders.c","DumpDeclList","DumpDeclList()",2658,2707
+57,16,396,0,58,"DocumentationDump@2714-2771@./tools/makeheaders.c","./tools/makeheaders.c","DocumentationDump","DocumentationDump()",2714,2771
+11,8,122,2,11,"PrintModuleRecord@2778-2788@./tools/makeheaders.c","./tools/makeheaders.c","PrintModuleRecord","PrintModuleRecord( const char * zFile , const char * zFilename)",2778,2788
+52,22,435,2,78,"CreateInFile@2795-2872@./tools/makeheaders.c","./tools/makeheaders.c","CreateInFile","CreateInFile( char * zArg , int * pnErr)",2795,2872
+72,21,452,3,73,"AddParameters@2893-2965@./tools/makeheaders.c","./tools/makeheaders.c","AddParameters","AddParameters( int index , int * pArgc , char ** * pArgv)",2893,2965
+8,2,42,1,8,"ModTime@2973-2980@./tools/makeheaders.c","./tools/makeheaders.c","ModTime","ModTime( const char * zFilename)",2973,2980
+20,2,48,2,22,"Usage@2986-3007@./tools/makeheaders.c","./tools/makeheaders.c","Usage","Usage( const char * argv0 , const char * argvN)",2986,3007
+106,39,645,2,112,"main@3022-3133@./tools/makeheaders.c","./tools/makeheaders.c","main","main( int argc , char ** argv)",3022,3133
+13,6,101,3,13,"ComponentLength@42-54@./tools/url.c","./tools/url.c","ComponentLength","ComponentLength( const char * z , const char * zInit , const char * zTerm)",42,54
+12,3,65,2,12,"StrNDup@59-70@./tools/url.c","./tools/url.c","StrNDup","StrNDup( const char * z , int n)",59,70
+34,11,276,1,35,"ParseUrl@75-109@./tools/url.c","./tools/url.c","ParseUrl","ParseUrl( const char * zUri)",75,109
+9,7,86,1,9,"FreeUrl@114-122@./tools/url.c","./tools/url.c","FreeUrl","FreeUrl( Url * p)",114,122
+32,12,276,1,32,"BuildUrl@129-160@./tools/url.c","./tools/url.c","BuildUrl","BuildUrl( Url * p)",129,160
+8,3,53,2,8,"ReplaceStr@165-172@./tools/url.c","./tools/url.c","ReplaceStr","ReplaceStr( char ** pzDest , const char * zSrc)",165,172
+14,5,89,1,14,"Trim@178-191@./tools/url.c","./tools/url.c","Trim","Trim( char * z)",178,191
+71,33,645,2,72,"ResolveUrl@197-268@./tools/url.c","./tools/url.c","ResolveUrl","ResolveUrl( char * zBase , const char ** azSeries)",197,268
+34,10,331,1,36,"getPropertyDef@302-337@./src/htmlprop.c","./src/htmlprop.c","getPropertyDef","getPropertyDef( int eProp)",302,337
+55,23,366,2,58,"HtmlPropertyToString@366-423@./src/htmlprop.c","./src/htmlprop.c","HtmlPropertyToString","HtmlPropertyToString( pProp , pzFree)",366,423
+11,1,66,2,11,"pixelsToPoints@445-455@./src/htmlprop.c","./src/htmlprop.c","pixelsToPoints","pixelsToPoints( p , pixels)",445,455
+11,1,63,3,11,"physicalToPixels@486-496@./src/htmlprop.c","./src/htmlprop.c","physicalToPixels","physicalToPixels( p , rVal , type)",486,496
+17,5,103,2,17,"propertyValuesSetFontStyle@516-532@./src/htmlprop.c","./src/htmlprop.c","propertyValuesSetFontStyle","propertyValuesSetFontStyle( p , pProp)",516,532
+30,3,189,4,39,"contentCounter@538-576@./src/htmlprop.c","./src/htmlprop.c","contentCounter","contentCounter( pTree , pProp , zOut , nOut)",538,576
+49,7,336,4,59,"contentCounters@579-637@./src/htmlprop.c","./src/htmlprop.c","contentCounters","contentCounters( pTree , pProp , zOut , nOut)",579,637
+9,2,33,2,9,"propertyValuesSetContent@640-648@./src/htmlprop.c","./src/htmlprop.c","propertyValuesSetContent","propertyValuesSetContent( p , pProp)",640,648
+39,7,246,1,46,"propertyValuesCalculateContent@651-696@./src/htmlprop.c","./src/htmlprop.c","propertyValuesCalculateContent","propertyValuesCalculateContent( p)",651,696
+14,3,69,3,15,"propertyValuesSetAutoInteger@718-732@./src/htmlprop.c","./src/htmlprop.c","propertyValuesSetAutoInteger","propertyValuesSetAutoInteger( p , pProp , piVal)",718,732
+30,11,146,2,30,"propertyValuesSetFontWeight@753-782@./src/htmlprop.c","./src/htmlprop.c","propertyValuesSetFontWeight","propertyValuesSetFontWeight( p , pProp)",753,782
+20,4,97,2,23,"propertyValuesSetFontFamily@800-822@./src/htmlprop.c","./src/htmlprop.c","propertyValuesSetFontFamily","propertyValuesSetFontFamily( p , pProp)",800,822
+12,2,75,1,12,"propertyValuesObjFontSize@825-836@./src/htmlprop.c","./src/htmlprop.c","propertyValuesObjFontSize","propertyValuesObjFontSize( p)",825,836
+8,2,40,1,8,"propertyValuesObjFontStyle@838-845@./src/htmlprop.c","./src/htmlprop.c","propertyValuesObjFontStyle","propertyValuesObjFontStyle( p)",838,845
+5,1,25,1,5,"propertyValuesObjFontFamily@847-851@./src/htmlprop.c","./src/htmlprop.c","propertyValuesObjFontFamily","propertyValuesObjFontFamily( p)",847,851
+8,2,40,1,8,"propertyValuesObjFontWeight@853-860@./src/htmlprop.c","./src/htmlprop.c","propertyValuesObjFontWeight","propertyValuesObjFontWeight( p)",853,860
+5,1,19,1,5,"propertyValuesObjContent@862-866@./src/htmlprop.c","./src/htmlprop.c","propertyValuesObjContent","propertyValuesObjContent( p)",862,866
+15,3,96,1,15,"propertyValuesObjLineHeight@868-882@./src/htmlprop.c","./src/htmlprop.c","propertyValuesObjLineHeight","propertyValuesObjLineHeight( p)",868,882
+11,2,65,1,11,"propertyValuesObjVerticalAlign@884-894@./src/htmlprop.c","./src/htmlprop.c","propertyValuesObjVerticalAlign","propertyValuesObjVerticalAlign( p)",884,894
+11,2,55,2,11,"normalizeFontSize@896-906@./src/htmlprop.c","./src/htmlprop.c","normalizeFontSize","normalizeFontSize( p , pNode)",896,906
+126,32,781,2,142,"propertyValuesSetFontSize@926-1067@./src/htmlprop.c","./src/htmlprop.c","propertyValuesSetFontSize","propertyValuesSetFontSize( p , pProp)",926,1067
+35,12,227,2,44,"getInheritPointer@1070-1113@./src/htmlprop.c","./src/htmlprop.c","getInheritPointer","getInheritPointer( p , pVar)",1070,1113
+23,5,115,4,25,"propertyValuesSetEnum@1134-1158@./src/htmlprop.c","./src/htmlprop.c","propertyValuesSetEnum","propertyValuesSetEnum( p , pEVar , aOptions , pProp)",1134,1158
+18,4,89,2,18,"decrementColorRef@1161-1178@./src/htmlprop.c","./src/htmlprop.c","decrementColorRef","decrementColorRef( pTree , pColor)",1161,1178
+20,2,91,1,20,"dumpColorTable@1182-1201@./src/htmlprop.c","./src/htmlprop.c","dumpColorTable","dumpColorTable( pTree)",1182,1201
+70,15,480,3,94,"propertyValuesSetColor@1223-1316@./src/htmlprop.c","./src/htmlprop.c","propertyValuesSetColor","propertyValuesSetColor( p , pCVar , pProp)",1223,1316
+55,10,429,4,67,"propertyValuesSetCounterList@1319-1385@./src/htmlprop.c","./src/htmlprop.c","propertyValuesSetCounterList","propertyValuesSetCounterList( p , ppCL , eProp , pProp)",1319,1385
+5,1,15,1,5,"decrementCounterListRef@1388-1392@./src/htmlprop.c","./src/htmlprop.c","decrementCounterListRef","decrementCounterListRef( pCounterList)",1388,1392
+56,19,310,5,71,"propertyValuesSetLength@1438-1508@./src/htmlprop.c","./src/htmlprop.c","propertyValuesSetLength","propertyValuesSetLength( p , pIVal , em_mask , pProp , allowNegative)",1438,1508
+47,8,222,2,50,"propertyValuesSetLineHeight@1524-1573@./src/htmlprop.c","./src/htmlprop.c","propertyValuesSetLineHeight","propertyValuesSetLineHeight( p , pProp)",1524,1573
+34,8,159,3,39,"propertyValuesSetImage@1589-1627@./src/htmlprop.c","./src/htmlprop.c","propertyValuesSetImage","propertyValuesSetImage( p , pImVar , pProp)",1589,1627
+56,12,313,2,68,"propertyValuesSetVerticalAlign@1643-1710@./src/htmlprop.c","./src/htmlprop.c","propertyValuesSetVerticalAlign","propertyValuesSetVerticalAlign( p , pProp)",1643,1710
+66,17,312,5,80,"propertyValuesSetSize@1727-1806@./src/htmlprop.c","./src/htmlprop.c","propertyValuesSetSize","propertyValuesSetSize( p , pIVal , p_mask , pProp , allow_mask)",1727,1806
+33,8,198,4,45,"propertyValuesSetBorderWidth@1834-1878@./src/htmlprop.c","./src/htmlprop.c","propertyValuesSetBorderWidth","propertyValuesSetBorderWidth( p , pIVal , em_mask , pProp)",1834,1878
+69,13,475,3,90,"getPrototypeCreator@1904-1993@./src/htmlprop.c","./src/htmlprop.c","getPrototypeCreator","getPrototypeCreator( pTree , pMask , piCopyBytes)",1904,1993
+41,3,336,4,55,"HtmlComputedValuesInit@2011-2065@./src/htmlprop.c","./src/htmlprop.c","HtmlComputedValuesInit","HtmlComputedValuesInit( pTree , pNode , pParent , p)",2011,2065
+40,4,217,3,61,"propertyValuesTclScript@2079-2139@./src/htmlprop.c","./src/htmlprop.c","propertyValuesTclScript","propertyValuesTclScript( p , eProp , zScript) const",2079,2139
+54,13,375,3,59,"propertyValuesAttr@2166-2224@./src/htmlprop.c","./src/htmlprop.c","propertyValuesAttr","propertyValuesAttr( p , eProp , zArglist) const",2166,2224
+7,1,36,2,7,"HtmlComputedValuesFreeProperty@2226-2232@./src/htmlprop.c","./src/htmlprop.c","HtmlComputedValuesFreeProperty","HtmlComputedValuesFreeProperty( p , pProp)",2226,2232
+78,17,515,3,89,"HtmlComputedValuesSet@2260-2348@./src/htmlprop.c","./src/htmlprop.c","HtmlComputedValuesSet","HtmlComputedValuesSet( p , eProp , pProp)",2260,2348
+82,15,571,1,113,"allocateNewFont@2367-2479@./src/htmlprop.c","./src/htmlprop.c","allocateNewFont","allocateNewFont( clientData)",2367,2479
+22,13,76,1,22,"setDisplay97@2498-2519@./src/htmlprop.c","./src/htmlprop.c","setDisplay97","setDisplay97( p)",2498,2519
+240,48,1821,1,301,"HtmlComputedValuesFinish@2534-2834@./src/htmlprop.c","./src/htmlprop.c","HtmlComputedValuesFinish","HtmlComputedValuesFinish( p)",2534,2834
+34,9,213,2,36,"HtmlFontRelease@2854-2889@./src/htmlprop.c","./src/htmlprop.c","HtmlFontRelease","HtmlFontRelease( pTree , pFont)",2854,2889
+7,1,29,1,7,"HtmlFontReference@2908-2914@./src/htmlprop.c","./src/htmlprop.c","HtmlFontReference","HtmlFontReference( pFont)",2908,2914
+6,1,24,1,6,"HtmlComputedValuesReference@2917-2922@./src/htmlprop.c","./src/htmlprop.c","HtmlComputedValuesReference","HtmlComputedValuesReference( pValues)",2917,2922
+31,5,206,2,40,"HtmlComputedValuesRelease@2925-2964@./src/htmlprop.c","./src/htmlprop.c","HtmlComputedValuesRelease","HtmlComputedValuesRelease( pTree , pValues)",2925,2964
+72,5,541,1,86,"HtmlComputedValuesSetupTables@2995-3080@./src/htmlprop.c","./src/htmlprop.c","HtmlComputedValuesSetupTables","HtmlComputedValuesSetupTables( pTree)",2995,3080
+29,4,162,2,34,"HtmlFontCacheClear@3107-3140@./src/htmlprop.c","./src/htmlprop.c","HtmlFontCacheClear","HtmlFontCacheClear( pTree , isReinit)",3107,3140
+10,2,53,1,10,"HtmlComputedValuesFreePrototype@3143-3152@./src/htmlprop.c","./src/htmlprop.c","HtmlComputedValuesFreePrototype","HtmlComputedValuesFreePrototype( pTree)",3143,3152
+35,2,144,1,48,"HtmlComputedValuesCleanupTables@3179-3226@./src/htmlprop.c","./src/htmlprop.c","HtmlComputedValuesCleanupTables","HtmlComputedValuesCleanupTables( pTree)",3179,3226
+99,21,603,2,116,"getPropertyObj@3229-3344@./src/htmlprop.c","./src/htmlprop.c","getPropertyObj","getPropertyObj( pValues , eProp)",3229,3344
+20,3,116,3,30,"HtmlNodeGetProperty@3362-3391@./src/htmlprop.c","./src/htmlprop.c","HtmlNodeGetProperty","HtmlNodeGetProperty( interp , pProp , pValues)",3362,3391
+22,2,153,2,26,"HtmlNodeProperties@3394-3419@./src/htmlprop.c","./src/htmlprop.c","HtmlNodeProperties","HtmlNodeProperties( interp , pValues)",3394,3419
+69,36,413,2,99,"HtmlComputedValuesCompare@3426-3524@./src/htmlprop.c","./src/htmlprop.c","HtmlComputedValuesCompare","HtmlComputedValuesCompare( pV1 , pV2)",3426,3524
+13,2,81,2,18,"MakeWindowName@27-44@./src/htmlform.c","./src/htmlform.c","MakeWindowName","MakeWindowName( htmlPtr , pElem)",27,44
+3,1,16,3,3,"SizeAndLink@48-50@./src/htmlform.c","./src/htmlform.c","SizeAndLink","SizeAndLink( HtmlWidget * htmlPtr , char * zWin , HtmlElement * pElem)",48,50
+3,1,8,1,3,"HtmlDeleteControls@52-54@./src/htmlform.c","./src/htmlform.c","HtmlDeleteControls","HtmlDeleteControls( HtmlWidget * htmlPtr)",52,54
+10,4,64,1,11,"HtmlUnmapControls@61-71@./src/htmlform.c","./src/htmlform.c","HtmlUnmapControls","HtmlUnmapControls( htmlPtr)",61,71
+32,9,233,1,40,"HtmlMapControls@83-122@./src/htmlform.c","./src/htmlform.c","HtmlMapControls","HtmlMapControls( htmlPtr)",83,122
+45,14,304,1,46,"HtmlDeleteControls@132-177@./src/htmlform.c","./src/htmlform.c","HtmlDeleteControls","HtmlDeleteControls( htmlPtr)",132,177
+20,5,117,2,20,"HtmlInputRequestProc@184-203@./src/htmlform.c","./src/htmlform.c","HtmlInputRequestProc","HtmlInputRequestProc( clientData , tkwin)",184,203
+19,5,100,2,19,"HtmlInputLostSlaveProc@210-228@./src/htmlform.c","./src/htmlform.c","HtmlInputLostSlaveProc","HtmlInputLostSlaveProc( clientData , tkwin)",210,228
+13,4,79,2,16,"HtmlInputEventProc@235-250@./src/htmlform.c","./src/htmlform.c","HtmlInputEventProc","HtmlInputEventProc( clientData , eventPtr)",235,250
+37,4,246,3,37,"SizeAndLink@269-305@./src/htmlform.c","./src/htmlform.c","SizeAndLink","SizeAndLink( htmlPtr , zWin , pElem)",269,305
+11,1,73,4,11,"HtmlSizeWindow@308-318@./src/htmlform.c","./src/htmlform.c","HtmlSizeWindow","HtmlSizeWindow( clientData , interp , argc , argv) const",308,318
+56,11,254,1,57,"InputType@326-382@./src/htmlform.c","./src/htmlform.c","InputType","InputType( p)",326,382
+10,1,61,1,10,"EmptyInput@392-401@./src/htmlform.c","./src/htmlform.c","EmptyInput","EmptyInput( pElem)",392,401
+36,8,176,3,39,"HtmlAppendText@407-445@./src/htmlform.c","./src/htmlform.c","HtmlAppendText","HtmlAppendText( str , pFirst , pEnd)",407,445
+50,15,271,3,50,"AddSelectOptions@461-510@./src/htmlform.c","./src/htmlform.c","AddSelectOptions","AddSelectOptions( str , p , pEnd)",461,510
+21,7,76,5,21,"HtmlFormIdx@514-534@./src/htmlform.c","./src/htmlform.c","HtmlFormIdx","HtmlFormIdx( htmlPtr , p , tag , idx , radio)",514,534
+21,9,119,3,21,"HtmlFormCount@538-558@./src/htmlform.c","./src/htmlform.c","HtmlFormCount","HtmlFormCount( htmlPtr , p , radio)",538,558
+55,20,333,2,55,"HtmlAddFormInfo@562-616@./src/htmlform.c","./src/htmlform.c","HtmlAddFormInfo","HtmlAddFormInfo( htmlPtr , p)",562,616
+23,1,186,3,25,"HtmlAppendStyle@619-643@./src/htmlform.c","./src/htmlform.c","HtmlAppendStyle","HtmlAppendStyle( htmlPtr , cmd , pf)",619,643
+198,39,1261,2,210,"HtmlControlSize@658-867@./src/htmlform.c","./src/htmlform.c","HtmlControlSize","HtmlControlSize( htmlPtr , pElem)",658,867
+28,10,161,2,31,"EncodeText@893-923@./src/htmlform.c","./src/htmlform.c","EncodeText","EncodeText( Tcl_DString * str , char * z)",893,923
+27,5,178,1,30,"floatListPrint@107-136@./src/htmlfloat.c","./src/htmlfloat.c","floatListPrint","floatListPrint( pList)",107,136
+6,2,24,0,8,"HtmlFloatListNew@153-160@./src/htmlfloat.c","./src/htmlfloat.c","HtmlFloatListNew","HtmlFloatListNew()",153,160
+14,5,71,1,14,"HtmlFloatListDelete@179-192@./src/htmlfloat.c","./src/htmlfloat.c","HtmlFloatListDelete","HtmlFloatListDelete( pList)",179,192
+48,17,297,2,65,"insertListEntry@215-279@./src/htmlfloat.c","./src/htmlfloat.c","insertListEntry","insertListEntry( pList , y)",215,279
+45,14,268,5,65,"HtmlFloatListAdd@321-385@./src/htmlfloat.c","./src/htmlfloat.c","HtmlFloatListAdd","HtmlFloatListAdd( pList , side , x , y1 , y2)",321,385
+13,3,72,2,14,"HtmlFloatListClearTop@408-421@./src/htmlfloat.c","./src/htmlfloat.c","HtmlFloatListClearTop","HtmlFloatListClearTop( pList , y)",408,421
+43,15,211,3,51,"HtmlFloatListClear@454-504@./src/htmlfloat.c","./src/htmlfloat.c","HtmlFloatListClear","HtmlFloatListClear( pList , clear , y)",454,504
+10,2,56,3,12,"HtmlFloatListNormalize@523-534@./src/htmlfloat.c","./src/htmlfloat.c","HtmlFloatListNormalize","HtmlFloatListNormalize( pList , x , y)",523,534
+25,7,153,5,30,"floatListMarginsNormal@558-587@./src/htmlfloat.c","./src/htmlfloat.c","floatListMarginsNormal","floatListMarginsNormal( pList , y1 , y2 , pLeft , pRight)",558,587
+18,3,119,5,25,"HtmlFloatListMargins@626-650@./src/htmlfloat.c","./src/htmlfloat.c","HtmlFloatListMargins","HtmlFloatListMargins( pList , y1 , y2 , pLeft , pRight)",626,650
+35,9,193,5,44,"HtmlFloatListPlace@680-723@./src/htmlfloat.c","./src/htmlfloat.c","HtmlFloatListPlace","HtmlFloatListPlace( pList , parentwidth , width , height , y)",680,723
+33,4,261,4,39,"HtmlFloatListLog@742-780@./src/htmlfloat.c","./src/htmlfloat.c","HtmlFloatListLog","HtmlFloatListLog( pTree , zCaption , zNode , pList)",742,780
+15,5,104,3,20,"HtmlFloatListIsConstant@783-802@./src/htmlfloat.c","./src/htmlfloat.c","HtmlFloatListIsConstant","HtmlFloatListIsConstant( pList , y , iHeight)",783,802
+187,40,1272,8,231,"TkPostscriptImage@21-251@./src/htmlPsImg.c","./src/htmlPsImg.c","TkPostscriptImage","TkPostscriptImage( Tcl_Interp * interp , Tk_Window tkwin , Tk_PostscriptInfo psInfo , XImage * ximage , int x , int y , int width , int height)",21,251
+36,4,252,9,57,"Tk_PostscriptImage@254-310@./src/htmlPsImg.c","./src/htmlPsImg.c","Tk_PostscriptImage","Tk_PostscriptImage( Tk_Image image , Tcl_Interp * interp , Tk_Window tkwin , Tk_PostscriptInfo psinfo , int x , int y , int width , int height , int prepass)",254,310
+31,6,178,8,47,"Tk_RedrawImage@331-377@./src/htmlPsImg.c","./src/htmlPsImg.c","Tk_RedrawImage","Tk_RedrawImage( Tk_Image image , int imageX , int imageY , int width , int height , Drawable drawable , int drawableX , int drawableY)",331,377
+8,1,43,3,10,"Tk_SizeOfImage@380-389@./src/htmlPsImg.c","./src/htmlPsImg.c","Tk_SizeOfImage","Tk_SizeOfImage( Tk_Image image , int * widthPtr , int * heightPtr)",380,389
+15,3,77,2,17,"Tk_DeleteImage@392-408@./src/htmlPsImg.c","./src/htmlPsImg.c","Tk_DeleteImage","Tk_DeleteImage( Tcl_Interp * interp , char * name)",392,408
+21,4,142,1,22,"DeleteImage@411-432@./src/htmlPsImg.c","./src/htmlPsImg.c","DeleteImage","DeleteImage( ImageMaster * masterPtr)",411,432
+12,2,72,1,14,"TkDeleteAllImages@435-448@./src/htmlPsImg.c","./src/htmlPsImg.c","TkDeleteAllImages","TkDeleteAllImages( TkMainInfo * mainPtr)",435,448
+17,2,92,3,20,"Tk_GetImageMasterData@451-470@./src/htmlPsImg.c","./src/htmlPsImg.c","Tk_GetImageMasterData","Tk_GetImageMasterData( Tcl_Interp * interp , char * name , Tk_ImageType ** typePtrPtr)",451,470
+9,2,75,4,9,"Tk_SetTSOrigin@493-501@./src/htmlPsImg.c","./src/htmlPsImg.c","Tk_SetTSOrigin","Tk_SetTSOrigin( Tk_Window tkwin , GC gc , int x , int y)",493,501
+22,2,129,3,24,"updateInstData@61-84@./src/htmlutil.c","./src/htmlutil.c","updateInstData","updateInstData( pGlobal , p , iClicks)",61,84
+23,1,153,4,28,"execInst@144-171@./src/htmlutil.c","./src/htmlutil.c","execInst","execInst( clientData , interp , objc , objv)",144,171
+6,1,26,1,6,"freeInstStruct@174-179@./src/htmlutil.c","./src/htmlutil.c","freeInstStruct","freeInstStruct( p)",174,179
+9,2,48,1,9,"freeInstCommand@181-189@./src/htmlutil.c","./src/htmlutil.c","freeInstCommand","freeInstCommand( clientData)",181,189
+32,2,213,4,37,"instCommand@192-228@./src/htmlutil.c","./src/htmlutil.c","instCommand","instCommand( clientData , interp , objc , objv)",192,228
+35,3,225,4,42,"instVectors@231-272@./src/htmlutil.c","./src/htmlutil.c","instVectors","instVectors( clientData , interp , objc , objv)",231,272
+37,4,208,4,42,"instZero@275-316@./src/htmlutil.c","./src/htmlutil.c","instZero","instZero( clientData , interp , objc , objv)",275,316
+27,3,148,4,29,"instrument_objcmd@337-365@./src/htmlutil.c","./src/htmlutil.c","instrument_objcmd","instrument_objcmd( clientData , interp , objc , objv)",337,365
+4,1,9,1,6,"instDelCommand@368-373@./src/htmlutil.c","./src/htmlutil.c","instDelCommand","instDelCommand( clientData)",368,373
+24,1,240,1,27,"HtmlInstrumentInit@376-402@./src/htmlutil.c","./src/htmlutil.c","HtmlInstrumentInit","HtmlInstrumentInit( interp)",376,402
+4,1,10,1,5,"HtmlInstrumentInit@406-410@./src/htmlutil.c","./src/htmlutil.c","HtmlInstrumentInit","HtmlInstrumentInit( interp)",406,410
+8,1,58,2,8,"oprintf@220-227@./src/htmlinline.c","./src/htmlinline.c","oprintf","oprintf( Tcl_Obj * pObj , CONST char * zFormat , ...)",220,227
+38,5,292,3,46,"inlineBoxMetrics@247-292@./src/htmlinline.c","./src/htmlinline.c","inlineBoxMetrics","inlineBoxMetrics( pContext , pNode , pMetrics)",247,292
+28,3,191,3,35,"inlineContextAddInlineCanvas@314-348@./src/htmlinline.c","./src/htmlinline.c","inlineContextAddInlineCanvas","inlineContextAddInlineCanvas( p , eType , pNode)",314,348
+9,1,48,2,10,"inlineContextAddSpacer@351-360@./src/htmlinline.c","./src/htmlinline.c","inlineContextAddSpacer","inlineContextAddSpacer( p , eWhitespace)",351,360
+81,18,460,2,112,"HtmlInlineContextPushBorder@403-514@./src/htmlinline.c","./src/htmlinline.c","HtmlInlineContextPushBorder","HtmlInlineContextPushBorder( pContext , pBorder)",403,514
+35,8,222,2,59,"HtmlInlineContextPopBorder@533-591@./src/htmlinline.c","./src/htmlinline.c","HtmlInlineContextPopBorder","HtmlInlineContextPopBorder( p , pBorder)",533,591
+15,2,92,3,28,"HtmlGetInlineBorder@617-644@./src/htmlinline.c","./src/htmlinline.c","HtmlGetInlineBorder","HtmlGetInlineBorder( pLayout , pContext , pNode)",617,644
+14,4,84,3,14,"inlineContextAddSpace@663-676@./src/htmlinline.c","./src/htmlinline.c","inlineContextAddSpace","inlineContextAddSpace( p , nPixels , eWhitespace)",663,676
+12,2,61,3,16,"inlineContextAddNewLine@692-707@./src/htmlinline.c","./src/htmlinline.c","inlineContextAddNewLine","inlineContextAddNewLine( p , nHeight , isLast)",692,707
+75,26,589,9,97,"inlineContextDrawBorder@735-831@./src/htmlinline.c","./src/htmlinline.c","inlineContextDrawBorder","inlineContextDrawBorder( pLayout , pCanvas , pBorder , x1 , x2 , iVerticalOffset , drb , aRepX , nRepX)",735,831
+100,23,631,5,118,"calculateLineBoxHeight@834-951@./src/htmlinline.c","./src/htmlinline.c","calculateLineBoxHeight","calculateLineBoxHeight( pContext , nBox , hasText , piTop , piBottom)",834,951
+68,25,440,6,103,"calculateLineBoxWidth@954-1056@./src/htmlinline.c","./src/htmlinline.c","calculateLineBoxWidth","calculateLineBoxWidth( p , flags , iReqWidth , piWidth , pnBox , pHasText)",954,1056
+244,58,1660,7,363,"HtmlInlineContextGetLineBox@1110-1472@./src/htmlinline.c","./src/htmlinline.c","HtmlInlineContextGetLineBox","HtmlInlineContextGetLineBox( pLayout , p , flags , pWidth , pCanvas , pVSpace , pAscent)",1110,1472
+5,1,19,1,5,"HtmlInlineContextIsEmpty@1491-1495@./src/htmlinline.c","./src/htmlinline.c","HtmlInlineContextIsEmpty","HtmlInlineContextIsEmpty( pContext)",1491,1495
+22,4,101,1,31,"HtmlInlineContextCleanup@1518-1548@./src/htmlinline.c","./src/htmlinline.c","HtmlInlineContextCleanup","HtmlInlineContextCleanup( pContext)",1518,1548
+36,6,188,4,62,"HtmlInlineContextNew@1577-1638@./src/htmlinline.c","./src/htmlinline.c","HtmlInlineContextNew","HtmlInlineContextNew( pTree , pNode , isSizeOnly , iTextIndent)",1577,1638
+80,12,456,2,99,"HtmlInlineContextAddText@1657-1755@./src/htmlinline.c","./src/htmlinline.c","HtmlInlineContextAddText","HtmlInlineContextAddText( pContext , pNode)",1657,1755
+39,2,248,6,44,"HtmlInlineContextAddBox@1780-1823@./src/htmlinline.c","./src/htmlinline.c","HtmlInlineContextAddBox","HtmlInlineContextAddBox( pContext , pNode , pCanvas , iWidth , iHeight , iOffset)",1780,1823
+5,1,15,1,5,"HtmlInlineContextCreator@1826-1830@./src/htmlinline.c","./src/htmlinline.c","HtmlInlineContextCreator","HtmlInlineContextCreator( pContext)",1826,1830
+28,7,179,3,29,"cssSearchCb@54-82@./src/csssearch.c","./src/csssearch.c","cssSearchCb","cssSearchCb( pTree , pNode , clientData)",54,82
+7,1,34,1,7,"HtmlCssSearchInit@85-91@./src/csssearch.c","./src/csssearch.c","HtmlCssSearchInit","HtmlCssSearchInit( pTree)",85,91
+16,3,83,1,18,"HtmlCssSearchInvalidateCache@94-111@./src/csssearch.c","./src/csssearch.c","HtmlCssSearchInvalidateCache","HtmlCssSearchInvalidateCache( pTree)",94,111
+9,1,41,1,9,"HtmlCssSearchShutdown@114-122@./src/csssearch.c","./src/csssearch.c","HtmlCssSearchShutdown","HtmlCssSearchShutdown( pTree)",114,122
+128,25,776,4,146,"HtmlCssSearch@151-296@./src/csssearch.c","./src/csssearch.c","HtmlCssSearch","HtmlCssSearch( clientData , interp , objc , objv)",151,296
+15,5,88,1,18,"HtmlTestPointDump@67-84@./src/htmltest.c","./src/htmltest.c","HtmlTestPointDump","HtmlTestPointDump( filename)",67,84
+7,1,27,2,9,"HtmlTPUntested@90-98@./src/htmltest.c","./src/htmltest.c","HtmlTPUntested","HtmlTPUntested( zFile , line) const",90,98
+8,1,27,2,10,"HtmlTPCantHappen@104-113@./src/htmltest.c","./src/htmltest.c","HtmlTPCantHappen","HtmlTPCantHappen( zFile , line) const",104,113
+13,1,56,7,15,"BgImageChangeProc@58-72@./src/htmlexts.c","./src/htmlexts.c","BgImageChangeProc","BgImageChangeProc( clientData , x , y , w , h , newWidth , newHeight)",58,72
+23,4,133,4,24,"HtmlImageUpdateCmd@76-99@./src/htmlexts.c","./src/htmlexts.c","HtmlImageUpdateCmd","HtmlImageUpdateCmd( clientData , interp , argc , argv) const",76,99
+23,4,133,4,24,"HtmlImageAddCmd@103-126@./src/htmlexts.c","./src/htmlexts.c","HtmlImageAddCmd","HtmlImageAddCmd( clientData , interp , argc , argv) const",103,126
+31,7,190,4,32,"HtmlImageSetCmd@130-161@./src/htmlexts.c","./src/htmlexts.c","HtmlImageSetCmd","HtmlImageSetCmd( clientData , interp , argc , argv) const",130,161
+30,4,174,4,32,"HtmlOnScreen@165-196@./src/htmlexts.c","./src/htmlexts.c","HtmlOnScreen","HtmlOnScreen( clientData , interp , argc , argv) const",165,196
+17,3,112,4,18,"HtmlAttrOverCmd@199-216@./src/htmlexts.c","./src/htmlexts.c","HtmlAttrOverCmd","HtmlAttrOverCmd( clientData , interp , argc , argv) const",199,216
+16,3,111,4,17,"HtmlOverCmd@219-235@./src/htmlexts.c","./src/htmlexts.c","HtmlOverCmd","HtmlOverCmd( clientData , interp , argc , argv) const",219,235
+18,3,127,4,19,"HtmlImageAtCmd@244-262@./src/htmlexts.c","./src/htmlexts.c","HtmlImageAtCmd","HtmlImageAtCmd( clientData , interp , argc , argv) const",244,262
+39,8,177,4,39,"HtmlSetImageBg@266-304@./src/htmlexts.c","./src/htmlexts.c","HtmlSetImageBg","HtmlSetImageBg( htmlPtr , interp , imgname , p)",266,304
+17,4,124,4,17,"HtmlImageBgCmd@308-324@./src/htmlexts.c","./src/htmlexts.c","HtmlImageBgCmd","HtmlImageBgCmd( clientData , interp , argc , argv)",308,324
+46,9,255,3,50,"HtmlToken2Txt@327-376@./src/htmlexts.c","./src/htmlexts.c","HtmlToken2Txt","HtmlToken2Txt( htmlPtr , interp , p)",327,376
+43,9,236,4,43,"HtmlImagesListCmd@380-422@./src/htmlexts.c","./src/htmlexts.c","HtmlImagesListCmd","HtmlImagesListCmd( clientData , interp , argc , argv)",380,422
+15,4,83,4,21,"HtmlPostscriptCmd@425-445@./src/htmlexts.c","./src/htmlexts.c","HtmlPostscriptCmd","HtmlPostscriptCmd( clientData , interp , argc , argv)",425,445
+31,9,204,4,32,"HtmlCoordsCmd@451-482@./src/htmlexts.c","./src/htmlexts.c","HtmlCoordsCmd","HtmlCoordsCmd( clientData , interp , argc , argv)",451,482
+17,4,106,4,22,"HtmlFetchSelection@485-506@./src/htmlexts.c","./src/htmlexts.c","HtmlFetchSelection","HtmlFetchSelection( clientData , offset , buffer , maxBytes)",485,506
+9,2,50,1,9,"HtmlLostSelection@510-518@./src/htmlexts.c","./src/htmlexts.c","HtmlLostSelection","HtmlLostSelection( ClientData clientData)",510,518
+25,5,203,7,32,"HtmlBGDraw@528-559@./src/htmlexts.c","./src/htmlexts.c","HtmlBGDraw","HtmlBGDraw( htmlPtr , left , top , w , h , pixmap , image)",528,559
+45,15,354,7,51,"HtmlTblBGDraw@562-612@./src/htmlexts.c","./src/htmlexts.c","HtmlTblBGDraw","HtmlTblBGDraw( htmlPtr , l , t , w , h , pixmap , image)",562,612
+23,10,139,3,24,"HtmlGetImageAt@620-643@./src/htmlexts.c","./src/htmlexts.c","HtmlGetImageAt","HtmlGetImageAt( htmlPtr , x , y)",620,643
+46,18,327,4,48,"HtmlGetAttrOver@647-694@./src/htmlexts.c","./src/htmlexts.c","HtmlGetAttrOver","HtmlGetAttrOver( htmlPtr , x , y , attr)",647,694
+27,11,181,4,28,"HtmlGetOver@697-724@./src/htmlexts.c","./src/htmlexts.c","HtmlGetOver","HtmlGetOver( htmlPtr , x , y , justmarkup)",697,724
+21,4,145,2,21,"OldHtmlFormColors@728-748@./src/htmlexts.c","./src/htmlexts.c","OldHtmlFormColors","OldHtmlFormColors( htmlPtr , fid)",728,748
+20,3,107,1,20,"Clr2Name@751-770@./src/htmlexts.c","./src/htmlexts.c","Clr2Name","Clr2Name( str) const",751,770
+36,8,238,3,39,"HtmlFormColors@774-812@./src/htmlexts.c","./src/htmlexts.c","HtmlFormColors","HtmlFormColors( htmlPtr , fid , n)",774,812
+11,2,68,4,11,"HtmlFormInfo@816-826@./src/htmlexts.c","./src/htmlexts.c","HtmlFormInfo","HtmlFormInfo( clientData , interp , argc , argv)",816,826
+11,4,63,2,11,"HtmlGetEndToken@831-841@./src/htmlexts.c","./src/htmlexts.c","HtmlGetEndToken","HtmlGetEndToken( htmlPtr , typ)",831,841
+14,4,80,3,14,"HtmlNameToTypeAndEnd@844-857@./src/htmlexts.c","./src/htmlexts.c","HtmlNameToTypeAndEnd","HtmlNameToTypeAndEnd( htmlPtr , zType , end)",844,857
+27,7,166,3,27,"HtmlDomSubEl@876-902@./src/htmlexts.c","./src/htmlexts.c","HtmlDomSubEl","HtmlDomSubEl( htmlPtr , tok , en)",876,902
+15,4,74,3,15,"HtmlFindEndPOther@905-919@./src/htmlexts.c","./src/htmlexts.c","HtmlFindEndPOther","HtmlFindEndPOther( htmlPtr , sp , op)",905,919
+44,15,230,4,44,"HtmlFindEndNest@923-966@./src/htmlexts.c","./src/htmlexts.c","HtmlFindEndNest","HtmlFindEndNest( htmlPtr , sp , en , lp)",923,966
+55,17,257,6,66,"HtmlFindEndTag@970-1035@./src/htmlexts.c","./src/htmlexts.c","HtmlFindEndTag","HtmlFindEndTag( htmlPtr , p , tok , n , en , tp)",970,1035
+90,33,553,11,94,"HtmlDOMGetIndex@1044-1137@./src/htmlexts.c","./src/htmlexts.c","HtmlDOMGetIndex","HtmlDOMGetIndex( htmlPtr , p , interp , n , en , tok , a , ip , tp , tlim , aflag)",1044,1137
+141,50,930,4,150,"HtmlDomIdLookup@1150-1299@./src/htmlexts.c","./src/htmlexts.c","HtmlDomIdLookup","HtmlDomIdLookup( htmlPtr , cname , dname , pp) const const",1150,1299
+9,1,55,4,9,"HtmlDomCmd@1302-1310@./src/htmlexts.c","./src/htmlexts.c","HtmlDomCmd","HtmlDomCmd( clientData , interp , argc , argv)",1302,1310
+29,8,135,4,29,"HtmlCountTagsBefore@1314-1342@./src/htmlexts.c","./src/htmlexts.c","HtmlCountTagsBefore","HtmlCountTagsBefore( htmlPtr , tag , tp , etag)",1314,1342
+17,5,84,3,17,"HtmlInObject@1345-1361@./src/htmlexts.c","./src/htmlexts.c","HtmlInObject","HtmlInObject( p , tag , endtag)",1345,1361
+31,4,201,8,31,"HtmlDOMFmtSubIndexGen@1365-1395@./src/htmlexts.c","./src/htmlexts.c","HtmlDOMFmtSubIndexGen","HtmlDOMFmtSubIndexGen( htmlPtr , pStart , cmd , tag , str , pretag , tp , nostr)",1365,1395
+11,3,45,2,11,"HtmlFindBefore@1398-1408@./src/htmlexts.c","./src/htmlexts.c","HtmlFindBefore","HtmlFindBefore( p , tag)",1398,1408
+28,6,155,9,31,"HtmlDOMFmtSubIndex@1412-1442@./src/htmlexts.c","./src/htmlexts.c","HtmlDOMFmtSubIndex","HtmlDOMFmtSubIndex( htmlPtr , pStart , cmd , tag , endtag , str , pretag , tp , nostr)",1412,1442
+30,6,200,4,33,"HtmlTextTable@1445-1477@./src/htmlexts.c","./src/htmlexts.c","HtmlTextTable","HtmlTextTable( clientData , interp , argc , argv)",1445,1477
+155,52,1040,4,156,"HtmlIdToDomCmd@1484-1639@./src/htmlexts.c","./src/htmlexts.c","HtmlIdToDomCmd","HtmlIdToDomCmd( clientData , interp , argc , argv)",1484,1639
+27,5,210,4,27,"HtmlBeginEnd@1643-1669@./src/htmlexts.c","./src/htmlexts.c","HtmlBeginEnd","HtmlBeginEnd( htmlPtr , be , argc , argv) const",1643,1669
+40,12,289,4,40,"HtmlTokenAttrSearch@1673-1712@./src/htmlexts.c","./src/htmlexts.c","HtmlTokenAttrSearch","HtmlTokenAttrSearch( clientData , interp , argc , argv)",1673,1712
+55,15,431,4,55,"HtmlBeginEndOpts@1716-1770@./src/htmlexts.c","./src/htmlexts.c","HtmlBeginEndOpts","HtmlBeginEndOpts( htmlPtr , be , argc , argv)",1716,1770
+30,10,237,4,30,"HtmlTokenOnEvents@1774-1803@./src/htmlexts.c","./src/htmlexts.c","HtmlTokenOnEvents","HtmlTokenOnEvents( clientData , interp , argc , argv)",1774,1803
+31,9,201,4,31,"HtmlDomName2Index@1807-1837@./src/htmlexts.c","./src/htmlexts.c","HtmlDomName2Index","HtmlDomName2Index( clientData , interp , argc , argv)",1807,1837
+11,4,60,3,11,"HtmlGetIndexth@1840-1850@./src/htmlexts.c","./src/htmlexts.c","HtmlGetIndexth","HtmlGetIndexth( htmlPtr , typ , cnt)",1840,1850
+24,11,189,2,24,"HtmlRadioCount@1854-1877@./src/htmlexts.c","./src/htmlexts.c","HtmlRadioCount","HtmlRadioCount( htmlPtr , radio)",1854,1877
+29,8,226,4,29,"HtmlDomRadio2Index@1881-1909@./src/htmlexts.c","./src/htmlexts.c","HtmlDomRadio2Index","HtmlDomRadio2Index( clientData , interp , argc , argv)",1881,1909
+34,13,286,4,34,"HtmlTokenUnique@1913-1946@./src/htmlexts.c","./src/htmlexts.c","HtmlTokenUnique","HtmlTokenUnique( clientData , interp , argc , argv)",1913,1946
+37,14,186,3,37,"HtmlDomFormEl@1950-1986@./src/htmlexts.c","./src/htmlexts.c","HtmlDomFormEl","HtmlDomFormEl( htmlPtr , form , el) const",1950,1986
+13,1,85,4,13,"HtmlDomFormElIndex@1990-2002@./src/htmlexts.c","./src/htmlexts.c","HtmlDomFormElIndex","HtmlDomFormElIndex( clientData , interp , argc , argv)",1990,2002
+36,10,187,4,44,"HtmlDomTreeCmd@2006-2049@./src/htmlexts.c","./src/htmlexts.c","HtmlDomTreeCmd","HtmlDomTreeCmd( clientData , interp , argc , argv)",2006,2049
+133,73,646,5,134,"HtmlTclizeList@2070-2203@./src/htmlexts.c","./src/htmlexts.c","HtmlTclizeList","HtmlTclizeList( htmlPtr , interp , p , pEnd , flag)",2070,2203
+33,7,191,5,34,"_HtmlTokenCmdSub@2206-2239@./src/htmlexts.c","./src/htmlexts.c","_HtmlTokenCmdSub","_HtmlTokenCmdSub( htmlPtr , interp , argc , argv , flag) const",2206,2239
+89,24,778,4,98,"HtmlTokenAttr@2246-2343@./src/htmlexts.c","./src/htmlexts.c","HtmlTokenAttr","HtmlTokenAttr( clientData , interp , argc , argv)",2246,2343
+9,1,51,4,9,"HtmlTokenListCmd@2349-2357@./src/htmlexts.c","./src/htmlexts.c","HtmlTokenListCmd","HtmlTokenListCmd( clientData , interp , argc , argv)",2349,2357
+10,1,53,4,10,"HtmlTokenMarkupCmd@2363-2372@./src/htmlexts.c","./src/htmlexts.c","HtmlTokenMarkupCmd","HtmlTokenMarkupCmd( clientData , interp , argc , argv)",2363,2372
+10,1,53,4,10,"HtmlTokenDomCmd@2378-2387@./src/htmlexts.c","./src/htmlexts.c","HtmlTokenDomCmd","HtmlTokenDomCmd( clientData , interp , argc , argv)",2378,2387
+61,13,409,4,62,"HtmlTclizeHtml@2394-2455@./src/htmlexts.c","./src/htmlexts.c","HtmlTclizeHtml","HtmlTclizeHtml( htmlPtr , interp , p , pEnd)",2394,2455
+32,7,191,4,33,"HtmlTextHtmlCmd@2461-2493@./src/htmlexts.c","./src/htmlexts.c","HtmlTextHtmlCmd","HtmlTextHtmlCmd( clientData , interp , argc , argv)",2461,2493
+51,16,281,3,51,"HtmlTclizeAscii@2500-2550@./src/htmlexts.c","./src/htmlexts.c","HtmlTclizeAscii","HtmlTclizeAscii( interp , s , e)",2500,2550
+35,9,226,4,36,"HtmlTextAsciiCmd@2556-2591@./src/htmlexts.c","./src/htmlexts.c","HtmlTextAsciiCmd","HtmlTextAsciiCmd( clientData , interp , argc , argv)",2556,2591
+132,38,782,4,138,"HtmlTextOffsetCmd@2597-2734@./src/htmlexts.c","./src/htmlexts.c","HtmlTextOffsetCmd","HtmlTextOffsetCmd( clientData , interp , argc , argv)",2597,2734
+98,26,540,6,104,"HtmlTclizeFindText@2741-2844@./src/htmlexts.c","./src/htmlexts.c","HtmlTclizeFindText","HtmlTclizeFindText( interp , pat , ip , iEnd , nocase , after)",2741,2844
+66,15,377,5,70,"HtmlTclizeFind@2851-2920@./src/htmlexts.c","./src/htmlexts.c","HtmlTclizeFind","HtmlTclizeFind( interp , tag , p , pEnd , near)",2851,2920
+50,13,361,4,54,"HtmlTextFindCmd@2923-2976@./src/htmlexts.c","./src/htmlexts.c","HtmlTextFindCmd","HtmlTextFindCmd( clientData , interp , argc , argv)",2923,2976
+14,2,91,4,14,"StrInsert@2980-2993@./src/htmlexts.c","./src/htmlexts.c","StrInsert","StrInsert( cp , str , n , clen)",2980,2993
+10,2,41,3,10,"HtmlAddOffset@2996-3005@./src/htmlexts.c","./src/htmlexts.c","HtmlAddOffset","HtmlAddOffset( htmlPtr , p , n)",2996,3005
+16,5,117,4,16,"HtmlAddStrOffset@3008-3023@./src/htmlexts.c","./src/htmlexts.c","HtmlAddStrOffset","HtmlAddStrOffset( htmlPtr , p , str , offs)",3008,3023
+20,3,157,4,20,"HtmlDelStrOffset@3026-3045@./src/htmlexts.c","./src/htmlexts.c","HtmlDelStrOffset","HtmlDelStrOffset( htmlPtr , p , offs , l)",3026,3045
+7,1,26,2,7,"HtmlRefresh@3049-3055@./src/htmlexts.c","./src/htmlexts.c","HtmlRefresh","HtmlRefresh( htmlPtr , idx)",3049,3055
+64,16,257,4,64,"HtmlRefreshCmd@3058-3121@./src/htmlexts.c","./src/htmlexts.c","HtmlRefreshCmd","HtmlRefreshCmd( clientData , interp , argc , argv) const",3058,3121
+11,1,57,4,11,"HtmlGetCmd@3125-3135@./src/htmlexts.c","./src/htmlexts.c","HtmlGetCmd","HtmlGetCmd( clientData , interp , objc , objv)",3125,3135
+62,16,393,4,63,"HtmlTextDeleteCmd@3141-3203@./src/htmlexts.c","./src/htmlexts.c","HtmlTextDeleteCmd","HtmlTextDeleteCmd( clientData , interp , argc , argv)",3141,3203
+38,8,289,4,38,"HtmlTokenInsertCmd@3209-3246@./src/htmlexts.c","./src/htmlexts.c","HtmlTokenInsertCmd","HtmlTokenInsertCmd( clientData , interp , argc , argv)",3209,3246
+34,6,200,4,35,"HtmlTokenDeleteCmd@3252-3286@./src/htmlexts.c","./src/htmlexts.c","HtmlTokenDeleteCmd","HtmlTokenDeleteCmd( clientData , interp , argc , argv)",3252,3286
+27,7,185,4,28,"HtmlTokenGetEnd@3290-3317@./src/htmlexts.c","./src/htmlexts.c","HtmlTokenGetEnd","HtmlTokenGetEnd( clientData , interp , argc , argv)",3290,3317
+34,7,198,4,35,"HtmlTokenGetCmd@3334-3368@./src/htmlexts.c","./src/htmlexts.c","HtmlTokenGetCmd","HtmlTokenGetCmd( clientData , interp , argc , argv)",3334,3368
+54,14,370,4,54,"HtmlTokenFindCmd@3371-3424@./src/htmlexts.c","./src/htmlexts.c","HtmlTokenFindCmd","HtmlTokenFindCmd( clientData , interp , argc , argv)",3371,3424
+25,7,132,3,25,"HtmlRemoveElements@3430-3454@./src/htmlexts.c","./src/htmlexts.c","HtmlRemoveElements","HtmlRemoveElements( p , pElem , pLast)",3430,3454
+62,21,362,6,63,"HtmlAscii2Buf@3458-3520@./src/htmlexts.c","./src/htmlexts.c","HtmlAscii2Buf","HtmlAscii2Buf( interp , ip , ipEnd , buffer , len , offset)",3458,3520
+61,13,413,4,62,"HtmlTclizeHtmlFmt@3524-3585@./src/htmlexts.c","./src/htmlexts.c","HtmlTclizeHtmlFmt","HtmlTclizeHtmlFmt( htmlPtr , interp , p , pEnd)",3524,3585
+11,4,76,2,11,"trailmatch@3589-3599@./src/htmlexts.c","./src/htmlexts.c","trailmatch","trailmatch( line , pat)",3589,3599
+8,1,30,4,8,"HtmlBP@3604-3611@./src/htmlexts.c","./src/htmlexts.c","HtmlBP","HtmlBP( clientData , interp , argc , argv)",3604,3611
+16,5,87,1,24,"Htmlexts_Init@3613-3636@./src/htmlexts.c","./src/htmlexts.c","Htmlexts_Init","Htmlexts_Init( interp)",3613,3636
+4,1,35,1,4,"for@166-169@./src/htmltable.c","./src/htmltable.c","for","for( i = 0 ; i<nChild;i++)",166,169
+15,3,87,0,15,"fixNodeProperties@174-188@./src/htmltable.c","./src/htmltable.c","fixNodeProperties","fixNodeProperties(pData,pNode)",174,188
+54,10,414,0,76,"tableColWidthSingleSpan@221-296@./src/htmltable.c","./src/htmltable.c","tableColWidthSingleSpan","tableColWidthSingleSpan(pNode,col,colspan,row,rowspan,pContext)",221,296
+53,9,317,0,58,"logWidthsToTable@320-377@./src/htmltable.c","./src/htmltable.c","logWidthsToTable","logWidthsToTable(pData,pObj)",320,377
+15,3,94,0,16,"getReqWidth@380-395@./src/htmltable.c","./src/htmltable.c","getReqWidth","getReqWidth(pNode,pReq)",380,395
+40,3,235,0,40,"logMinMaxWidths@398-437@./src/htmltable.c","./src/htmltable.c","logMinMaxWidths","logMinMaxWidths(pLayout,pNode,col,colspan,aMinWidth,aMaxWidth)",398,437
+152,35,1064,0,204,"tableColWidthMultiSpan@467-670@./src/htmltable.c","./src/htmltable.c","tableColWidthMultiSpan","tableColWidthMultiSpan(pNode,col,colspan,row,rowspan,pContext)",467,670
+17,3,83,0,20,"tableCountCells@689-708@./src/htmltable.c","./src/htmltable.c","tableCountCells","tableCountCells(pNode,col,colspan,row,rowspan,pContext)",689,708
+9,1,42,0,9,"tableCountRows@711-719@./src/htmltable.c","./src/htmltable.c","tableCountRows","tableCountRows(pNode,row,pContext)",711,719
+88,14,707,0,120,"tableDrawRow@739-858@./src/htmltable.c","./src/htmltable.c","tableDrawRow","tableDrawRow(pNode,row,pContext)",739,858
+71,8,569,0,98,"tableDrawCells@891-988@./src/htmltable.c","./src/htmltable.c","tableDrawCells","tableDrawCells(pNode,col,colspan,row,rowspan,pContext)",891,988
+59,18,424,0,80,"cellIterate@1024-1103@./src/htmltable.c","./src/htmltable.c","cellIterate","cellIterate(pTree,pNode,p)",1024,1103
+45,11,336,0,58,"rowIterate@1106-1163@./src/htmltable.c","./src/htmltable.c","rowIterate","rowIterate(pTree,pNode,p)",1106,1163
+37,10,271,0,49,"rowGroupIterate@1166-1214@./src/htmltable.c","./src/htmltable.c","rowGroupIterate","rowGroupIterate(pTree,pNode,p)",1166,1214
+11,5,71,0,11,"for@1284-1294@./src/htmltable.c","./src/htmltable.c","for","for(ii=0;ii<HtmlNodeNumChildren(pNode);ii++)",1284,1294
+33,11,228,0,41,"for@1298-1338@./src/htmltable.c","./src/htmltable.c","for","for(ii=0;ii<HtmlNodeNumChildren(pNode);ii++)",1298,1338
+4,1,30,0,4,"while@1342-1345@./src/htmltable.c","./src/htmltable.c","while","while(sRowContext.iRow<=sRowContext.iMaxRow&&xRowCallback)",1342,1345
+15,3,94,0,15,"logWidthStage@1351-1365@./src/htmltable.c","./src/htmltable.c","logWidthStage","logWidthStage(nStage,pStageLog,nWidth,aWidth)",1351,1365
+199,39,1378,0,258,"tableCalculateCellWidths@1369-1626@./src/htmltable.c","./src/htmltable.c","tableCalculateCellWidths","tableCalculateCellWidths(pData,availablewidth,isAuto)",1369,1626
+59,14,381,0,82,"tableCalculateMaxWidth@1629-1710@./src/htmltable.c","./src/htmltable.c","tableCalculateMaxWidth","tableCalculateMaxWidth(pData)",1629,1710
+110,9,806,0,152,"HtmlTableLayout@1750-1901@./src/htmltable.c","./src/htmltable.c","HtmlTableLayout","HtmlTableLayout(pLayout,pBox,pNode)",1750,1901
+30,9,156,3,39,"HtmlTokenByIndex@25-63@./src/htmlindex.c","./src/htmlindex.c","HtmlTokenByIndex","HtmlTokenByIndex( htmlPtr , N , flag)",25,63
+15,4,63,1,17,"HtmlTokenNumber@69-85@./src/htmlindex.c","./src/htmlindex.c","HtmlTokenNumber","HtmlTokenNumber( p)",69,85
+27,5,110,3,27,"maxIndex@91-117@./src/htmlindex.c","./src/htmlindex.c","maxIndex","maxIndex( p , pIndex , islast)",91,117
+83,17,422,5,85,"FindIndexInBlock@132-216@./src/htmlindex.c","./src/htmlindex.c","FindIndexInBlock","FindIndexInBlock( htmlPtr , pBlock , x , ppToken , pIndex)",132,216
+43,10,221,4,44,"HtmlIndexToBlockIndex@228-271@./src/htmlindex.c","./src/htmlindex.c","HtmlIndexToBlockIndex","HtmlIndexToBlockIndex( htmlPtr , sIndex , ppBlock , piIndex)",228,271
+69,28,503,4,69,"HtmlIndexMod@275-343@./src/htmlindex.c","./src/htmlindex.c","HtmlIndexMod","HtmlIndexMod( htmlPtr , pp , ip , cp)",275,343
+220,66,1144,4,227,"DecodeBaseIndex@384-610@./src/htmlindex.c","./src/htmlindex.c","DecodeBaseIndex","DecodeBaseIndex( htmlPtr , Baseind , ppToken , pIndex) const",384,610
+8,1,40,4,8,"HtmlGetIndex@629-636@./src/htmlindex.c","./src/htmlindex.c","HtmlGetIndex","HtmlGetIndex( htmlPtr , zIndex , ppToken , pIndex)",629,636
+10,4,43,3,10,"HtmlFormContent@111-120@./src/htmlparse.c","./src/htmlparse.c","HtmlFormContent","HtmlFormContent( pTree , pNode , tag)",111,120
+10,3,39,3,10,"HtmlPcdataContent@136-145@./src/htmlparse.c","./src/htmlparse.c","HtmlPcdataContent","HtmlPcdataContent( pTree , pNode , tag)",136,145
+9,5,50,3,9,"HtmlDlContent@161-169@./src/htmlparse.c","./src/htmlparse.c","HtmlDlContent","HtmlDlContent( pTree , pNode , tag)",161,169
+9,4,46,3,9,"HtmlUlContent@186-194@./src/htmlparse.c","./src/htmlparse.c","HtmlUlContent","HtmlUlContent( pTree , pNode , tag)",186,194
+8,3,37,3,8,"HtmlHeadContent@197-204@./src/htmlparse.c","./src/htmlparse.c","HtmlHeadContent","HtmlHeadContent( pTree , pNode , tag)",197,204
+19,7,85,3,22,"HtmlInlineContent@224-245@./src/htmlparse.c","./src/htmlparse.c","HtmlInlineContent","HtmlInlineContent( pTree , pNode , tag)",224,245
+11,4,48,3,17,"HtmlAnchorContent@263-279@./src/htmlparse.c","./src/htmlparse.c","HtmlAnchorContent","HtmlAnchorContent( pTree , pNode , tag)",263,279
+12,4,65,3,12,"HtmlFlowContent@311-322@./src/htmlparse.c","./src/htmlparse.c","HtmlFlowContent","HtmlFlowContent( pTree , pNode , tag)",311,322
+7,1,26,3,7,"HtmlColgroupContent@344-350@./src/htmlparse.c","./src/htmlparse.c","HtmlColgroupContent","HtmlColgroupContent( pTree , pNode , tag)",344,350
+8,2,33,3,8,"HtmlTableContent@378-385@./src/htmlparse.c","./src/htmlparse.c","HtmlTableContent","HtmlTableContent( pTree , pNode , tag)",378,385
+8,3,39,3,8,"HtmlTableSectionContent@406-413@./src/htmlparse.c","./src/htmlparse.c","HtmlTableSectionContent","HtmlTableSectionContent( pTree , pNode , tag)",406,413
+10,2,35,3,11,"HtmlTableRowContent@438-448@./src/htmlparse.c","./src/htmlparse.c","HtmlTableRowContent","HtmlTableRowContent( pTree , pNode , tag)",438,448
+8,4,41,3,8,"HtmlTableCellContent@464-471@./src/htmlparse.c","./src/htmlparse.c","HtmlTableCellContent","HtmlTableCellContent( pTree , pNode , tag)",464,471
+9,6,54,3,9,"HtmlLiContent@487-495@./src/htmlparse.c","./src/htmlparse.c","HtmlLiContent","HtmlLiContent( pTree , pNode , tag)",487,495
+25,5,132,1,27,"HtmlHashStats@511-537@./src/htmlparse.c","./src/htmlparse.c","HtmlHashStats","HtmlHashStats( * htmlPtr)",511,537
+11,2,59,2,11,"getScriptHandler@557-567@./src/htmlparse.c","./src/htmlparse.c","getScriptHandler","getScriptHandler( pTree , tag)",557,567
+24,5,163,3,28,"findEndOfScript@594-621@./src/htmlparse.c","./src/htmlparse.c","findEndOfScript","findEndOfScript( eTag , z , pN)",594,621
+29,3,195,5,36,"executeScript@637-672@./src/htmlparse.c","./src/htmlparse.c","executeScript","executeScript( pTree , pCallback , pAttributes , zScript , nScript) const",637,672
+4,1,18,1,5,"if@725-729@./src/htmlparse.c","./src/htmlparse.c","if","if( zText)",725,729
+261,83,1707,1,367,"while@735-1101@./src/htmlparse.c","./src/htmlparse.c","while","while((c=z[n]) != 0)",735,1101
+3,1,19,1,3,"if@1104-1106@./src/htmlparse.c","./src/htmlparse.c","if","if( ! zText && pTree -> eWriteState != HTML_WRITE_INHANDLERRESET)",1104,1106
+3,1,19,1,3,"if@1129-1131@./src/htmlparse.c","./src/htmlparse.c","if","if( pTree -> isParseFinished && pTree -> eWriteState == HTML_WRITE_NONE)",1129,1131
+5,2,36,1,16,"if@1133-1148@./src/htmlparse.c","./src/htmlparse.c","if","if( pTree -> eWriteState != HTML_WRITE_INHANDLERRESET)",1133,1148
+23,3,119,4,28,"HtmlTokenizerAppend@1171-1198@./src/htmlparse.c","./src/htmlparse.c","HtmlTokenizerAppend","HtmlTokenizerAppend( pTree , zText , nText , isFinal) const",1171,1198
+15,4,82,3,15,"HtmlMarkupArg@1217-1231@./src/htmlparse.c","./src/htmlparse.c","HtmlMarkupArg","HtmlMarkupArg( pAttr , zTag , zDefault) const",1217,1231
+11,2,49,1,12,"HtmlWriteWait@1249-1260@./src/htmlparse.c","./src/htmlparse.c","HtmlWriteWait","HtmlWriteWait( pTree)",1249,1260
+23,2,143,2,29,"HtmlWriteText@1278-1306@./src/htmlparse.c","./src/htmlparse.c","HtmlWriteText","HtmlWriteText( pTree , pText)",1278,1306
+25,5,97,1,27,"HtmlWriteContinue@1324-1350@./src/htmlparse.c","./src/htmlparse.c","HtmlWriteContinue","HtmlWriteContinue( pTree)",1324,1350
+37,29,315,1,42,"inputPrintToken@54-95@./src/cssparser.c","./src/cssparser.c","inputPrintToken","inputPrintToken( pInput)",54,95
+22,10,147,1,31,"inputDiscardComment@114-144@./src/cssparser.c","./src/cssparser.c","inputDiscardComment","inputDiscardComment( pInput)",114,144
+9,3,50,3,9,"inputGetToken@161-169@./src/cssparser.c","./src/cssparser.c","inputGetToken","inputGetToken( pInput , pzToken , pnToken) const",161,169
+140,57,1091,1,175,"inputNextToken@186-360@./src/cssparser.c","./src/cssparser.c","inputNextToken","inputNextToken( pInput)",186,360
+10,3,61,1,10,"inputNextTokenIgnoreSpace@377-386@./src/cssparser.c","./src/cssparser.c","inputNextTokenIgnoreSpace","inputNextTokenIgnoreSpace( pInput)",377,386
+30,10,178,3,35,"parseSyntaxError@416-450@./src/cssparser.c","./src/cssparser.c","parseSyntaxError","parseSyntaxError( pInput , pParse , isStopAtSemiColon)",416,450
+31,10,188,2,37,"parseDeclarationError@468-504@./src/cssparser.c","./src/cssparser.c","parseDeclarationError","parseDeclarationError( pInput , pParse)",468,504
+177,56,1060,2,224,"parseSelector@519-742@./src/cssparser.c","./src/cssparser.c","parseSelector","parseSelector( pInput , pParse)",519,742
+58,24,376,2,72,"parseDeclarationBlock@755-826@./src/cssparser.c","./src/cssparser.c","parseDeclarationBlock","parseDeclarationBlock( CssInput * pInput , CssParse * pParse)",755,826
+23,8,134,2,28,"parseMediaList@841-868@./src/cssparser.c","./src/cssparser.c","parseMediaList","parseMediaList( pInput , pIsMatch)",841,868
+59,27,418,2,80,"parseAtRule@881-960@./src/cssparser.c","./src/cssparser.c","parseAtRule","parseAtRule( CssInput * pInput , CssParse * pParse)",881,960
+32,8,196,3,41,"HtmlCssRunParser@983-1023@./src/cssparser.c","./src/cssparser.c","HtmlCssRunParser","HtmlCssRunParser( zInput , nInput , pParse) const",983,1023
+13,1,80,3,14,"HtmlCssRunStyleParser@1040-1053@./src/cssparser.c","./src/cssparser.c","HtmlCssRunStyleParser","HtmlCssRunStyleParser( zInput , nInput , pParse) const",1040,1053
+13,1,72,3,14,"HtmlCssGetToken@1072-1085@./src/cssparser.c","./src/cssparser.c","HtmlCssGetToken","HtmlCssGetToken( z , n , pLen)",1072,1085
+34,6,189,3,39,"HtmlCssGetNextListItem@1108-1146@./src/cssparser.c","./src/cssparser.c","HtmlCssGetNextListItem","HtmlCssGetNextListItem( zList , nList , pN) const",1108,1146
+32,6,201,3,38,"HtmlCssGetNextCommaListItem@1169-1206@./src/cssparser.c","./src/cssparser.c","HtmlCssGetNextCommaListItem","HtmlCssGetNextCommaListItem( zList , nList , pN) const",1169,1206
+8,1,53,2,9,"compareCaseInsensitiveKey@73-81@./src/htmlhash.c","./src/htmlhash.c","compareCaseInsensitiveKey","compareCaseInsensitiveKey( keyPtr , hPtr)",73,81
+13,2,74,2,15,"hashCaseInsensitiveKey@100-114@./src/htmlhash.c","./src/htmlhash.c","hashCaseInsensitiveKey","hashCaseInsensitiveKey( tablePtr , keyPtr)",100,114
+19,4,140,2,22,"allocCaseInsensitiveEntry@132-153@./src/htmlhash.c","./src/htmlhash.c","allocCaseInsensitiveEntry","allocCaseInsensitiveEntry( tablePtr , keyPtr)",132,153
+5,1,15,1,5,"freeCaseInsensitiveEntry@156-160@./src/htmlhash.c","./src/htmlhash.c","freeCaseInsensitiveEntry","freeCaseInsensitiveEntry( hPtr)",156,160
+12,1,27,0,15,"HtmlCaseInsenstiveHashType@183-197@./src/htmlhash.c","./src/htmlhash.c","HtmlCaseInsenstiveHashType","HtmlCaseInsenstiveHashType()",183,197
+16,4,127,2,18,"hashFontKey@216-233@./src/htmlhash.c","./src/htmlhash.c","hashFontKey","hashFontKey( tablePtr , keyPtr)",216,233
+13,5,84,2,14,"compareFontKey@252-265@./src/htmlhash.c","./src/htmlhash.c","compareFontKey","compareFontKey( keyPtr , hPtr)",252,265
+24,1,170,2,27,"allocFontEntry@284-310@./src/htmlhash.c","./src/htmlhash.c","allocFontEntry","allocFontEntry( tablePtr , keyPtr)",284,310
+12,1,27,0,15,"HtmlFontKeyHashType@335-349@./src/htmlhash.c","./src/htmlhash.c","HtmlFontKeyHashType","HtmlFontKeyHashType()",335,349
+13,2,84,2,18,"hashValuesKey@369-386@./src/htmlhash.c","./src/htmlhash.c","hashValuesKey","hashValuesKey( tablePtr , keyPtr)",369,386
+13,1,95,2,18,"compareValuesKey@405-422@./src/htmlhash.c","./src/htmlhash.c","compareValuesKey","compareValuesKey( keyPtr , hPtr)",405,422
+5,1,15,1,5,"freeValuesEntry@425-429@./src/htmlhash.c","./src/htmlhash.c","freeValuesEntry","freeValuesEntry( hPtr)",425,429
+19,1,111,2,22,"allocValuesEntry@448-469@./src/htmlhash.c","./src/htmlhash.c","allocValuesEntry","allocValuesEntry( tablePtr , keyPtr)",448,469
+12,1,27,0,15,"HtmlComputedValuesHashType@493-507@./src/htmlhash.c","./src/htmlhash.c","HtmlComputedValuesHashType","HtmlComputedValuesHashType()",493,507
+18,4,86,2,18,"HtmlHash@75-92@./src/htmltagdb.c","./src/htmltagdb.c","HtmlHash","HtmlHash( htmlPtr , zName) const",75,92
+9,3,37,1,9,"ToLower@98-106@./src/htmltagdb.c","./src/htmltagdb.c","ToLower","ToLower( z)",98,106
+10,3,39,3,10,"textContent@109-118@./src/htmltagdb.c","./src/htmltagdb.c","textContent","textContent( pTree , pNode , tag)",109,118
+19,4,74,1,19,"HtmlMarkup@134-152@./src/htmltagdb.c","./src/htmltagdb.c","HtmlMarkup","HtmlMarkup( markup)",134,152
+12,5,54,1,15,"HtmlMarkupFlags@170-184@./src/htmltagdb.c","./src/htmltagdb.c","HtmlMarkupFlags","HtmlMarkupFlags( markup)",170,184
+12,5,54,1,14,"HtmlMarkupName@200-213@./src/htmltagdb.c","./src/htmltagdb.c","HtmlMarkupName","HtmlMarkupName( markup)",200,213
+18,3,102,2,20,"HtmlHashLookup@234-253@./src/htmltagdb.c","./src/htmltagdb.c","HtmlHashLookup","HtmlHashLookup( htmlPtr , zType) const",234,253
+16,4,94,2,22,"HtmlHashInit@258-279@./src/htmltagdb.c","./src/htmltagdb.c","HtmlHashInit","HtmlHashInit( htmlPtr , start)",258,279
+39,6,292,4,47,"HtmlAttributesNew@283-329@./src/htmltagdb.c","./src/htmltagdb.c","HtmlAttributesNew","HtmlAttributesNew( argc , argv , arglen , doEscape)",283,329
+7,2,36,2,7,"HtmlNameToType@335-341@./src/htmltagdb.c","./src/htmltagdb.c","HtmlNameToType","HtmlNameToType( htmlPtr , zType)",335,341
+12,3,50,2,12,"HtmlTypeToName@347-358@./src/htmltagdb.c","./src/htmltagdb.c","HtmlTypeToName","HtmlTypeToName( htmlPtr , eTag)",347,358
+18,2,80,1,18,"GetCurrentStyle@25-42@./src/htmlsizer.c","./src/htmlsizer.c","GetCurrentStyle","GetCurrentStyle( htmlPtr)",25,42
+12,1,61,3,14,"PushStyleStack@48-61@./src/htmlsizer.c","./src/htmlsizer.c","PushStyleStack","PushStyleStack( htmlPtr , tag , style)",48,61
+41,11,234,2,42,"HtmlPopStyleStack@74-115@./src/htmlsizer.c","./src/htmlsizer.c","HtmlPopStyleStack","HtmlPopStyleStack( htmlPtr , tag)",74,115
+13,3,60,2,13,"ScaleFont@121-133@./src/htmlsizer.c","./src/htmlsizer.c","ScaleFont","ScaleFont( pStyle , delta)",121,133
+16,4,94,3,16,"HtmlMarkupArg@141-156@./src/htmlsizer.c","./src/htmlsizer.c","HtmlMarkupArg","HtmlMarkupArg( p , tag , zDefault) const",141,156
+19,5,95,2,19,"GetAlignment@164-182@./src/htmlsizer.c","./src/htmlsizer.c","GetAlignment","GetAlignment( p , dflt)",164,182
+31,7,98,2,32,"GetOrderedListType@190-221@./src/htmlsizer.c","./src/htmlsizer.c","GetOrderedListType","GetOrderedListType( p , dflt)",190,221
+19,5,92,2,20,"GetUnorderedListType@229-248@./src/htmlsizer.c","./src/htmlsizer.c","GetUnorderedListType","GetUnorderedListType( p , dflt)",229,248
+12,4,56,2,12,"MakeInvisible@254-265@./src/htmlsizer.c","./src/htmlsizer.c","MakeInvisible","MakeInvisible( pFirst , pLast)",254,265
+39,9,205,2,41,"GetLinkColor@277-317@./src/htmlsizer.c","./src/htmlsizer.c","GetLinkColor","GetLinkColor( htmlPtr , zURL)",277,317
+25,8,172,2,25,"GetCoords@320-344@./src/htmlsizer.c","./src/htmlsizer.c","GetCoords","GetCoords( str , nptr)",320,344
+778,235,4369,2,821,"HtmlAddStyle@372-1192@./src/htmlsizer.c","./src/htmlsizer.c","HtmlAddStyle","HtmlAddStyle( htmlPtr , p)",372,1192
+30,7,215,2,32,"HtmlTableBgImage@1195-1226@./src/htmlsizer.c","./src/htmlsizer.c","HtmlTableBgImage","HtmlTableBgImage( htmlPtr , p)",1195,1226
+163,37,1038,1,175,"HtmlSizer@1246-1420@./src/htmlsizer.c","./src/htmlsizer.c","HtmlSizer","HtmlSizer( htmlPtr)",1246,1420
+8,1,41,4,8,"allocCmd@75-82@./src/htmltcl.c","./src/htmltcl.c","allocCmd","allocCmd( clientData , interp , objc , objv)",75,82
+8,1,41,4,8,"heapdebugCmd@84-91@./src/htmltcl.c","./src/htmltcl.c","heapdebugCmd","heapdebugCmd( clientData , interp , objc , objv)",84,91
+26,2,139,4,28,"hashstatsCmd@93-120@./src/htmltcl.c","./src/htmltcl.c","hashstatsCmd","hashstatsCmd( clientData , interp , objc , objv)",93,120
+31,4,180,5,35,"logCommon@162-196@./src/htmltcl.c","./src/htmltcl.c","logCommon","logCommon( HtmlTree * pTree , Tcl_Obj * pLogCmd , CONST char * zSubject , CONST char * zFormat , va_list ap)",162,196
+5,1,47,3,5,"HtmlTimer@199-203@./src/htmltcl.c","./src/htmltcl.c","HtmlTimer","HtmlTimer( HtmlTree * pTree , CONST char * zSubject , CONST char * zFormat , ...)",199,203
+5,1,47,3,5,"HtmlLog@205-209@./src/htmltcl.c","./src/htmltcl.c","HtmlLog","HtmlLog( HtmlTree * pTree , CONST char * zSubject , CONST char * zFormat , ...)",205,209
+10,1,61,1,10,"doLoadDefaultStyle@232-241@./src/htmltcl.c","./src/htmltcl.c","doLoadDefaultStyle","doLoadDefaultStyle( pTree)",232,241
+31,4,173,5,33,"doSingleScrollCallback@259-291@./src/htmltcl.c","./src/htmltcl.c","doSingleScrollCallback","doSingleScrollCallback( interp , pScript , iOffScreen , iTotal , iPage)",259,291
+21,2,132,1,25,"doScrollCallback@313-337@./src/htmltcl.c","./src/htmltcl.c","doScrollCallback","doScrollCallback( pTree)",313,337
+19,8,141,3,28,"checkRestylePointCb@361-388@./src/htmltcl.c","./src/htmltcl.c","checkRestylePointCb","checkRestylePointCb( pTree , pNode , clientData)",361,388
+5,1,21,1,5,"HtmlCheckRestylePoint@390-394@./src/htmltcl.c","./src/htmltcl.c","HtmlCheckRestylePoint","HtmlCheckRestylePoint( pTree)",390,394
+6,1,32,2,6,"INSTRUMENTED@419-424@./src/htmltcl.c","./src/htmltcl.c","INSTRUMENTED","INSTRUMENTED( runDynamicStyleEngine , HTML_INSTRUMENT_DYNAMIC_STYLE_ENGINE)",419,424
+14,2,83,2,17,"INSTRUMENTED@426-442@./src/htmltcl.c","./src/htmltcl.c","INSTRUMENTED","INSTRUMENTED( runStyleEngine , HTML_INSTRUMENT_STYLE_ENGINE)",426,442
+16,5,99,2,20,"INSTRUMENTED@444-463@./src/htmltcl.c","./src/htmltcl.c","INSTRUMENTED","INSTRUMENTED( runLayoutEngine , HTML_INSTRUMENT_LAYOUT_ENGINE)",444,463
+109,31,813,2,148,"INSTRUMENTED@489-636@./src/htmltcl.c","./src/htmltcl.c","INSTRUMENTED","INSTRUMENTED( callbackHandler , HTML_INSTRUMENT_CALLBACK)",489,636
+9,2,40,1,9,"delayCallbackHandler@639-647@./src/htmltcl.c","./src/htmltcl.c","delayCallbackHandler","delayCallbackHandler( clientData)",639,647
+20,5,108,1,21,"HtmlCallbackForce@669-689@./src/htmltcl.c","./src/htmltcl.c","HtmlCallbackForce","HtmlCallbackForce( pTree)",669,689
+34,11,203,2,38,"upgradeRestylePoint@706-743@./src/htmltcl.c","./src/htmltcl.c","upgradeRestylePoint","upgradeRestylePoint( ppRestyle , pNode)",706,743
+7,2,35,1,7,"snapshotLayout@746-752@./src/htmltcl.c","./src/htmltcl.c","snapshotLayout","snapshotLayout( pTree)",746,752
+11,2,68,1,11,"snapshotZero@754-764@./src/htmltcl.c","./src/htmltcl.c","snapshotZero","snapshotZero( pTree)",754,764
+17,4,91,2,23,"HtmlCallbackRestyle@787-809@./src/htmltcl.c","./src/htmltcl.c","HtmlCallbackRestyle","HtmlCallbackRestyle( pTree , pNode)",787,809
+13,4,67,2,13,"HtmlCallbackDynamic@831-843@./src/htmltcl.c","./src/htmltcl.c","HtmlCallbackDynamic","HtmlCallbackDynamic( pTree , pNode)",831,843
+18,4,99,2,19,"HtmlCallbackLayout@864-882@./src/htmltcl.c","./src/htmltcl.c","HtmlCallbackLayout","HtmlCallbackLayout( pTree , pNode)",864,882
+7,1,27,2,7,"setSnapshotId@884-890@./src/htmltcl.c","./src/htmltcl.c","setSnapshotId","setSnapshotId( pTree , pNode)",884,890
+14,3,101,2,14,"HtmlCallbackDamageNode@893-906@./src/htmltcl.c","./src/htmltcl.c","HtmlCallbackDamageNode","HtmlCallbackDamageNode( pTree , pNode)",893,906
+54,13,472,5,72,"HtmlCallbackDamage@926-997@./src/htmltcl.c","./src/htmltcl.c","HtmlCallbackDamage","HtmlCallbackDamage( pTree , x , y , w , h)",926,997
+10,2,52,2,10,"HtmlCallbackScrollY@1000-1009@./src/htmltcl.c","./src/htmltcl.c","HtmlCallbackScrollY","HtmlCallbackScrollY( pTree , y)",1000,1009
+10,2,52,2,10,"HtmlCallbackScrollX@1012-1021@./src/htmltcl.c","./src/htmltcl.c","HtmlCallbackScrollX","HtmlCallbackScrollX( pTree , x)",1012,1021
+14,2,58,1,15,"cleanupHandlerTable@1041-1055@./src/htmltcl.c","./src/htmltcl.c","cleanupHandlerTable","cleanupHandlerTable( pHash)",1041,1055
+27,3,158,1,43,"deleteWidget@1073-1115@./src/htmltcl.c","./src/htmltcl.c","deleteWidget","deleteWidget( clientData)",1073,1115
+9,2,41,1,9,"widgetCmdDel@1140-1148@./src/htmltcl.c","./src/htmltcl.c","widgetCmdDel","widgetCmdDel( clientData)",1140,1148
+31,6,150,2,36,"eventHandler@1164-1199@./src/htmltcl.c","./src/htmltcl.c","eventHandler","eventHandler( clientData , pEvent)",1164,1199
+32,7,191,2,43,"docwinEventHandler@1202-1244@./src/htmltcl.c","./src/htmltcl.c","docwinEventHandler","docwinEventHandler( clientData , pEvent)",1202,1244
+8,1,31,3,8,"relayoutCb@1247-1254@./src/htmltcl.c","./src/htmltcl.c","relayoutCb","relayoutCb( pTree , pNode , clientData)",1247,1254
+15,2,79,3,15,"worldChangedCb@1257-1271@./src/htmltcl.c","./src/htmltcl.c","worldChangedCb","worldChangedCb( pTree , pNode , clientData)",1257,1271
+6,1,27,2,6,"HtmlNodeClearRecursive@1273-1278@./src/htmltcl.c","./src/htmltcl.c","HtmlNodeClearRecursive","HtmlNodeClearRecursive( pTree , pNode)",1273,1278
+113,23,972,4,185,"configureCmd@1303-1487@./src/htmltcl.c","./src/htmltcl.c","configureCmd","configureCmd( clientData , interp , objc , objv)",1303,1487
+26,3,161,4,29,"cgetCmd@1506-1534@./src/htmltcl.c","./src/htmltcl.c","cgetCmd","cgetCmd( clientData , interp , objc , objv)",1506,1534
+29,4,164,4,32,"resetCmd@1554-1585@./src/htmltcl.c","./src/htmltcl.c","resetCmd","resetCmd( clientData , interp , objc , objv)",1554,1585
+30,8,217,4,33,"relayoutCmd@1604-1636@./src/htmltcl.c","./src/htmltcl.c","relayoutCmd","relayoutCmd( clientData , interp , objc , objv)",1604,1636
+70,13,398,4,86,"parseCmd@1657-1742@./src/htmltcl.c","./src/htmltcl.c","parseCmd","parseCmd( clientData , interp , objc , objv)",1657,1742
+17,2,96,4,20,"preloadCmd@1761-1780@./src/htmltcl.c","./src/htmltcl.c","preloadCmd","preloadCmd( clientData , interp , objc , objv)",1761,1780
+14,2,76,4,14,"fragmentCmd@1799-1812@./src/htmltcl.c","./src/htmltcl.c","fragmentCmd","fragmentCmd( clientData , interp , objc , objv)",1799,1812
+84,12,519,4,97,"viewCommon@1827-1923@./src/htmltcl.c","./src/htmltcl.c","viewCommon","viewCommon( pTree , isXview , objc , objv)",1827,1923
+8,1,44,4,8,"xviewCmd@1939-1946@./src/htmltcl.c","./src/htmltcl.c","xviewCmd","xviewCmd( clientData , interp , objc , objv)",1939,1946
+8,1,44,4,8,"yviewCmd@1948-1955@./src/htmltcl.c","./src/htmltcl.c","yviewCmd","yviewCmd( clientData , interp , objc , objv)",1948,1955
+52,7,282,4,60,"writeCmd@1975-2034@./src/htmltcl.c","./src/htmltcl.c","writeCmd","writeCmd( clientData , interp , objc , objv)",1975,2034
+83,14,454,4,92,"handlerCmd@2052-2143@./src/htmltcl.c","./src/htmltcl.c","handlerCmd","handlerCmd( clientData , interp , objc , objv)",2052,2143
+36,5,300,4,58,"styleCmd@2164-2221@./src/htmltcl.c","./src/htmltcl.c","styleCmd","styleCmd( clientData , interp , objc , objv)",2164,2221
+8,1,43,4,8,"tagAddCmd@2224-2231@./src/htmltcl.c","./src/htmltcl.c","tagAddCmd","tagAddCmd( clientData , interp , objc , objv)",2224,2231
+8,1,43,4,8,"tagRemoveCmd@2233-2240@./src/htmltcl.c","./src/htmltcl.c","tagRemoveCmd","tagRemoveCmd( clientData , interp , objc , objv)",2233,2240
+8,1,41,4,8,"tagCfgCmd@2242-2249@./src/htmltcl.c","./src/htmltcl.c","tagCfgCmd","tagCfgCmd( clientData , interp , objc , objv)",2242,2249
+8,1,41,4,8,"tagDeleteCmd@2252-2259@./src/htmltcl.c","./src/htmltcl.c","tagDeleteCmd","tagDeleteCmd( clientData , interp , objc , objv)",2252,2259
+21,3,120,6,23,"callSubCmd@2262-2284@./src/htmltcl.c","./src/htmltcl.c","callSubCmd","callSubCmd( aSub , iIdx , clientData , interp , objc , objv)",2262,2284
+15,1,82,4,15,"tagCmd@2287-2301@./src/htmltcl.c","./src/htmltcl.c","tagCmd","tagCmd( clientData , interp , objc , objv)",2287,2301
+8,1,41,4,8,"textTextCmd@2304-2311@./src/htmltcl.c","./src/htmltcl.c","textTextCmd","textTextCmd( clientData , interp , objc , objv)",2304,2311
+8,1,41,4,8,"textIndexCmd@2313-2320@./src/htmltcl.c","./src/htmltcl.c","textIndexCmd","textIndexCmd( clientData , interp , objc , objv)",2313,2320
+8,1,41,4,8,"textBboxCmd@2322-2329@./src/htmltcl.c","./src/htmltcl.c","textBboxCmd","textBboxCmd( clientData , interp , objc , objv)",2322,2329
+8,1,41,4,8,"textOffsetCmd@2331-2338@./src/htmltcl.c","./src/htmltcl.c","textOffsetCmd","textOffsetCmd( clientData , interp , objc , objv)",2331,2338
+15,1,82,4,15,"textCmd@2340-2354@./src/htmltcl.c","./src/htmltcl.c","textCmd","textCmd( clientData , interp , objc , objv)",2340,2354
+9,1,41,4,9,"forceCmd@2358-2366@./src/htmltcl.c","./src/htmltcl.c","forceCmd","forceCmd( clientData , interp , objc , objv)",2358,2366
+28,6,156,4,32,"delayCmd@2369-2400@./src/htmltcl.c","./src/htmltcl.c","delayCmd","delayCmd( clientData , interp , objc , objv)",2369,2400
+8,1,41,4,8,"imageCmd@2424-2431@./src/htmltcl.c","./src/htmltcl.c","imageCmd","imageCmd( clientData , interp , objc , objv)",2424,2431
+9,1,50,4,9,"nodeCmd@2433-2441@./src/htmltcl.c","./src/htmltcl.c","nodeCmd","nodeCmd( clientData , interp , objc , objv)",2433,2441
+8,1,41,4,8,"primitivesCmd@2443-2450@./src/htmltcl.c","./src/htmltcl.c","primitivesCmd","primitivesCmd( clientData , interp , objc , objv)",2443,2450
+8,1,41,4,8,"imagesCmd@2452-2459@./src/htmltcl.c","./src/htmltcl.c","imagesCmd","imagesCmd( clientData , interp , objc , objv)",2452,2459
+8,1,41,4,8,"searchCmd@2461-2468@./src/htmltcl.c","./src/htmltcl.c","searchCmd","searchCmd( clientData , interp , objc , objv)",2461,2468
+8,1,41,4,8,"styleconfigCmd@2470-2477@./src/htmltcl.c","./src/htmltcl.c","styleconfigCmd","styleconfigCmd( clientData , interp , objc , objv)",2470,2477
+8,1,41,4,8,"stylereportCmd@2479-2486@./src/htmltcl.c","./src/htmltcl.c","stylereportCmd","stylereportCmd( clientData , interp , objc , objv)",2479,2486
+31,8,231,4,37,"bboxCmd@2503-2539@./src/htmltcl.c","./src/htmltcl.c","bboxCmd","bboxCmd( clientData , interp , objc , objv)",2503,2539
+36,1,208,4,46,"widgetCmd@2556-2601@./src/htmltcl.c","./src/htmltcl.c","widgetCmd","widgetCmd( clientData , interp , objc , objv)",2556,2601
+74,7,477,4,99,"newWidget@2623-2721@./src/htmltcl.c","./src/htmltcl.c","newWidget","newWidget( clientData , interp , objc , objv)",2623,2721
+16,5,97,4,18,"htmlstyleCmd@2740-2757@./src/htmltcl.c","./src/htmltcl.c","htmlstyleCmd","htmlstyleCmd( clientData , interp , objc , objv)",2740,2757
+13,2,63,4,13,"htmlVersionCmd@2776-2788@./src/htmltcl.c","./src/htmltcl.c","htmlVersionCmd","htmlVersionCmd( clientData , interp , objc , objv)",2776,2788
+8,1,41,4,8,"htmlDecodeCmd@2792-2799@./src/htmltcl.c","./src/htmltcl.c","htmlDecodeCmd","htmlDecodeCmd( clientData , interp , objc , objv)",2792,2799
+8,1,41,4,8,"htmlEncodeCmd@2801-2808@./src/htmltcl.c","./src/htmltcl.c","htmlEncodeCmd","htmlEncodeCmd( clientData , interp , objc , objv)",2801,2808
+8,1,41,4,8,"htmlEscapeCmd@2811-2818@./src/htmltcl.c","./src/htmltcl.c","htmlEscapeCmd","htmlEscapeCmd( clientData , interp , objc , objv)",2811,2818
+8,1,41,4,8,"htmlUriCmd@2820-2827@./src/htmltcl.c","./src/htmltcl.c","htmlUriCmd","htmlUriCmd( clientData , interp , objc , objv)",2820,2827
+19,3,115,4,22,"htmlByteOffsetCmd@2846-2867@./src/htmltcl.c","./src/htmltcl.c","htmlByteOffsetCmd","htmlByteOffsetCmd( clientData , interp , objc , objv)",2846,2867
+19,3,111,4,22,"htmlCharOffsetCmd@2869-2890@./src/htmltcl.c","./src/htmltcl.c","htmlCharOffsetCmd","htmlCharOffsetCmd( clientData , interp , objc , objv)",2869,2890
+31,5,255,1,46,"Tkhtml_Init@2925-2970@./src/htmltcl.c","./src/htmltcl.c","Tkhtml_Init","Tkhtml_Init( interp)",2925,2970
+5,1,16,1,5,"Tkhtml_SafeInit@2992-2996@./src/htmltcl.c","./src/htmltcl.c","Tkhtml_SafeInit","Tkhtml_SafeInit( interp)",2992,2996
+19,6,107,3,19,"ComponentLength@55-73@./src/htmlurl.c","./src/htmlurl.c","ComponentLength","ComponentLength( z , zInit , zTerm) const const const",55,73
+15,3,69,2,15,"StrNDup@79-93@./src/htmlurl.c","./src/htmlurl.c","StrNDup","StrNDup( z , n) const",79,93
+40,11,278,1,41,"ParseUri@99-139@./src/htmlurl.c","./src/htmlurl.c","ParseUri","ParseUri( zUri) const",99,139
+17,7,88,1,17,"FreeUri@145-161@./src/htmlurl.c","./src/htmlurl.c","FreeUri","FreeUri( p)",145,161
+43,12,288,1,43,"BuildUri@169-211@./src/htmlurl.c","./src/htmlurl.c","BuildUri","BuildUri( p)",169,211
+13,3,57,2,13,"ReplaceStr@217-229@./src/htmlurl.c","./src/htmlurl.c","ReplaceStr","ReplaceStr( pzDest , zSrc) const",217,229
+18,5,91,1,18,"Trim@236-253@./src/htmlurl.c","./src/htmlurl.c","Trim","Trim( z)",236,253
+129,48,943,2,143,"HtmlCallResolver@265-407@./src/htmlurl.c","./src/htmlurl.c","HtmlCallResolver","HtmlCallResolver( htmlPtr , azSeries)",265,407
+23,6,133,2,24,"HtmlResolveUri@415-438@./src/htmlurl.c","./src/htmlurl.c","HtmlResolveUri","HtmlResolveUri( htmlPtr , zUri)",415,438
+43,12,275,1,46,"CHECK_CANVAS@383-428@./src/htmldraw.c","./src/htmldraw.c","CHECK_CANVAS","CHECK_CANVAS( pCanvas)",383,428
+82,16,471,5,89,"sorterInsert@465-553@./src/htmldraw.c","./src/htmldraw.c","sorterInsert","sorterInsert( pSorter , pItem , x , y , pOverflow)",465,553
+8,2,82,1,8,"for@561-568@./src/htmldraw.c","./src/htmldraw.c","for","for( ii = 0 ; ii<pSorter->nLevel;ii++)",561,568
+9,2,49,0,9,"sorterReset@571-579@./src/htmldraw.c","./src/htmldraw.c","sorterReset","sorterReset(pSorter)",571,579
+4,1,11,0,4,"allocateCanvasItem@584-587@./src/htmldraw.c","./src/htmldraw.c","allocateCanvasItem","allocateCanvasItem()",584,587
+22,5,115,0,22,"freeCanvasItem@589-610@./src/htmldraw.c","./src/htmldraw.c","freeCanvasItem","freeCanvasItem(pTree,p)",589,610
+11,3,58,0,11,"byteToCharOffset@615-625@./src/htmldraw.c","./src/htmldraw.c","byteToCharOffset","byteToCharOffset(z,iByte) const",615,625
+11,3,58,0,11,"charToByteOffset@627-637@./src/htmldraw.c","./src/htmldraw.c","charToByteOffset","charToByteOffset(z,iChar) const",627,637
+8,2,29,0,8,"HtmlDrawCanvasItemRelease@641-648@./src/htmldraw.c","./src/htmldraw.c","HtmlDrawCanvasItemRelease","HtmlDrawCanvasItemRelease(pTree,pItem)",641,648
+7,2,21,0,7,"HtmlDrawCanvasItemReference@651-657@./src/htmldraw.c","./src/htmldraw.c","HtmlDrawCanvasItemReference","HtmlDrawCanvasItemReference(pItem)",651,657
+50,15,295,0,63,"windowsRepair@660-722@./src/htmldraw.c","./src/htmldraw.c","windowsRepair","windowsRepair(pTree,pCanvas)",660,722
+58,21,333,0,62,"HtmlDrawCleanup@739-800@./src/htmldraw.c","./src/htmldraw.c","HtmlDrawCleanup","HtmlDrawCleanup(pTree,pCanvas)",739,800
+14,2,70,0,15,"linkItem@817-831@./src/htmldraw.c","./src/htmldraw.c","linkItem","linkItem(pCanvas,pItem)",817,831
+7,1,29,0,7,"fontFromNode@834-840@./src/htmldraw.c","./src/htmldraw.c","fontFromNode","fontFromNode(pNode)",834,840
+7,1,29,0,7,"colorFromNode@843-849@./src/htmldraw.c","./src/htmldraw.c","colorFromNode","colorFromNode(pNode)",843,849
+13,3,63,0,13,"countPrimitives@868-880@./src/htmldraw.c","./src/htmldraw.c","countPrimitives","countPrimitives(pCanvas)",868,880
+19,5,116,0,22,"movePrimitives@884-905@./src/htmldraw.c","./src/htmldraw.c","movePrimitives","movePrimitives(pCanvas,x,y)",884,905
+26,2,190,0,34,"HtmlDrawOrigin@907-940@./src/htmldraw.c","./src/htmldraw.c","HtmlDrawOrigin","HtmlDrawOrigin(pCanvas)",907,940
+37,6,226,0,42,"HtmlDrawOverflow@942-983@./src/htmldraw.c","./src/htmldraw.c","HtmlDrawOverflow","HtmlDrawOverflow(pCanvas,pNode,w,h)",942,983
+25,7,227,0,31,"HtmlDrawCopyCanvas@985-1015@./src/htmldraw.c","./src/htmldraw.c","HtmlDrawCopyCanvas","HtmlDrawCopyCanvas(pTo,pFrom)",985,1015
+28,4,193,0,30,"HtmlDrawCanvas@1034-1063@./src/htmldraw.c","./src/htmldraw.c","HtmlDrawCanvas","HtmlDrawCanvas(pCanvas,pCanvas2,x,y,pNode)",1034,1063
+23,6,102,0,23,"itemToNode@1067-1089@./src/htmldraw.c","./src/htmldraw.c","itemToNode","itemToNode(pItem)",1067,1089
+61,10,457,0,67,"itemToBox@1094-1160@./src/htmldraw.c","./src/htmldraw.c","itemToBox","itemToBox(pItem,origin_x,origin_y,pX,pY,pW,pH)",1094,1160
+51,7,392,0,56,"HtmlDrawBox@1189-1244@./src/htmldraw.c","./src/htmldraw.c","HtmlDrawBox","HtmlDrawBox(pCanvas,x,y,w,h,pNode,flags,size_only,pCandidate)",1189,1244
+27,2,198,0,28,"HtmlDrawLine@1247-1274@./src/htmldraw.c","./src/htmldraw.c","HtmlDrawLine","HtmlDrawLine(pCanvas,x,w,y_over,y_through,y_under,pNode,size_only)",1247,1274
+39,3,314,0,43,"HtmlDrawText@1291-1333@./src/htmldraw.c","./src/htmldraw.c","HtmlDrawText","HtmlDrawText(pCanvas,zText,nText,x,y,w,size_only,pNode,iIndex) const",1291,1333
+9,3,61,0,9,"HtmlDrawTextExtend@1336-1344@./src/htmldraw.c","./src/htmldraw.c","HtmlDrawTextExtend","HtmlDrawTextExtend(pCanvas,nChar,nPixel)",1336,1344
+6,3,38,0,6,"HtmlDrawTextLength@1347-1352@./src/htmldraw.c","./src/htmldraw.c","HtmlDrawTextLength","HtmlDrawTextLength(pCanvas)",1347,1352
+34,2,203,0,35,"HtmlDrawImage@1355-1389@./src/htmldraw.c","./src/htmldraw.c","HtmlDrawImage","HtmlDrawImage(pCanvas,pImage,x,y,w,h,pNode,size_only)",1355,1389
+27,2,202,0,28,"HtmlDrawWindow@1405-1432@./src/htmldraw.c","./src/htmldraw.c","HtmlDrawWindow","HtmlDrawWindow(pCanvas,pNode,x,y,w,h,size_only)",1405,1432
+112,16,1022,0,114,"HtmlLayoutPrimitives@1447-1560@./src/htmldraw.c","./src/htmldraw.c","HtmlLayoutPrimitives","HtmlLayoutPrimitives(clientData,interp,objc,objv)",1447,1560
+77,23,633,0,95,"setClippingDrawable@1589-1683@./src/htmldraw.c","./src/htmldraw.c","setClippingDrawable","setClippingDrawable(pQuery,pItem,pDrawable,pX,pY)",1589,1683
+22,5,184,0,30,"setClippingRegion@1686-1715@./src/htmldraw.c","./src/htmldraw.c","setClippingRegion","setClippingRegion(pQuery,pDisplay,gc)",1686,1715
+6,2,24,0,8,"clearClippingRegion@1718-1725@./src/htmldraw.c","./src/htmldraw.c","clearClippingRegion","clearClippingRegion(pDisplay,gc)",1718,1725
+33,2,275,0,44,"fill_quad@1728-1771@./src/htmldraw.c","./src/htmldraw.c","fill_quad","fill_quad(pQuery,win,d,xcolor,x1,y1,x2,y2,x3,y3,x4,y4)",1728,1771
+18,3,114,0,20,"fill_rectangle@1774-1793@./src/htmldraw.c","./src/htmldraw.c","fill_rectangle","fill_rectangle(win,d,xcolor,x,y,w,h)",1774,1793
+94,21,632,0,107,"tileimage@1809-1915@./src/htmldraw.c","./src/htmldraw.c","tileimage","tileimage(pQuery,drawable,d_w,d_h,pImage,bg_x,bg_y,bg_w,bg_h,iPosX,iPosY)",1809,1915
+47,14,372,0,52,"drawScrollbars@1918-1969@./src/htmldraw.c","./src/htmldraw.c","drawScrollbars","drawScrollbars(pTree,pItem,origin_x,origin_y)",1918,1969
+186,45,1382,0,246,"drawBox@1988-2233@./src/htmldraw.c","./src/htmldraw.c","drawBox","drawBox(pQuery,pItem,pBox,drawable,x,y,w,h,xview,yview,flags)",1988,2233
+22,2,111,0,24,"drawImage@2252-2275@./src/htmldraw.c","./src/htmldraw.c","drawImage","drawImage(pQuery,pI2,drawable,x,y,w,h)",2252,2275
+32,4,181,0,33,"drawLine@2294-2326@./src/htmldraw.c","./src/htmldraw.c","drawLine","drawLine(pQuery,pItem,drawable,x,y,w,h)",2294,2326
+79,9,617,0,113,"drawText@2347-2459@./src/htmldraw.c","./src/htmldraw.c","drawText","drawText(pQuery,pItem,drawable,x,y)",2347,2459
+99,27,671,0,115,"for@2506-2620@./src/htmldraw.c","./src/htmldraw.c","for","for(pItem=pCanvas->pFirst;pItem;pItem=(pSkip?pSkip:pItem->pNext))",2506,2620
+40,19,281,0,47,"sorterCb@2632-2678@./src/htmldraw.c","./src/htmldraw.c","sorterCb","sorterCb(pItem,x,y,pOverflow,clientData)",2632,2678
+10,1,45,0,10,"snapshotReleaseItemsCb@2698-2707@./src/htmldraw.c","./src/htmldraw.c","snapshotReleaseItemsCb","snapshotReleaseItemsCb(pItem,x,y,pOverflow,clientData)",2698,2707
+12,1,81,0,14,"HtmlDrawSnapshot@2710-2723@./src/htmldraw.c","./src/htmldraw.c","HtmlDrawSnapshot","HtmlDrawSnapshot(pTree,isDrawable)",2710,2723
+21,4,109,0,21,"nextItem@2725-2745@./src/htmldraw.c","./src/htmldraw.c","nextItem","nextItem(pSorter,piLevel,piItem)",2725,2745
+27,4,216,0,28,"damageSlot@2747-2774@./src/htmldraw.c","./src/htmldraw.c","damageSlot","damageSlot(pTree,pSlot,pX1,pY1,pX2,pY2,isOld)",2747,2774
+39,19,328,0,39,"itemsAreEqual@2776-2814@./src/htmldraw.c","./src/htmldraw.c","itemsAreEqual","itemsAreEqual(p1,p2)",2776,2814
+5,1,20,0,5,"HtmlDrawSnapshotZero@2817-2821@./src/htmldraw.c","./src/htmldraw.c","HtmlDrawSnapshotZero","HtmlDrawSnapshotZero(pTree)",2817,2821
+81,15,658,0,96,"HtmlDrawSnapshotDamage@2824-2919@./src/htmldraw.c","./src/htmldraw.c","HtmlDrawSnapshotDamage","HtmlDrawSnapshotDamage(pTree,pSnapshot,ppCurrent)",2824,2919
+13,3,62,0,13,"HtmlDrawSnapshotFree@2922-2934@./src/htmldraw.c","./src/htmldraw.c","HtmlDrawSnapshotFree","HtmlDrawSnapshotFree(pTree,pSnapshot)",2922,2934
+19,1,140,0,20,"clipRectangle@2937-2956@./src/htmldraw.c","./src/htmldraw.c","clipRectangle","clipRectangle(pX,pY,pW,pH,x2,y2,w2,h2)",2937,2956
+61,14,402,0,71,"pixmapQuerySwitchOverflow@2959-3029@./src/htmldraw.c","./src/htmldraw.c","pixmapQuerySwitchOverflow","pixmapQuerySwitchOverflow(pQuery,pOverflow)",2959,3029
+105,25,776,0,133,"pixmapQueryCb@3032-3164@./src/htmldraw.c","./src/htmldraw.c","pixmapQueryCb","pixmapQueryCb(pItem,origin_x,origin_y,pOverflow,clientData)",3032,3164
+101,13,770,0,115,"getPixmap@3186-3300@./src/htmldraw.c","./src/htmldraw.c","getPixmap","getPixmap(pTree,xcanvas,ycanvas,w,h,getwin)",3186,3300
+35,4,243,0,44,"HtmlLayoutImage@3322-3365@./src/htmldraw.c","./src/htmldraw.c","HtmlLayoutImage","HtmlLayoutImage(clientData,interp,objc,objv)",3322,3365
+5,2,29,0,5,"HtmlDrawIsEmpty@3383-3387@./src/htmldraw.c","./src/htmldraw.c","HtmlDrawIsEmpty","HtmlDrawIsEmpty(pCanvas)",3383,3387
+17,6,71,0,17,"findFlowNode@3390-3406@./src/htmldraw.c","./src/htmldraw.c","findFlowNode","findFlowNode(pNode)",3390,3406
+42,16,271,0,58,"layoutNodeIndexCb@3434-3491@./src/htmldraw.c","./src/htmldraw.c","layoutNodeIndexCb","layoutNodeIndexCb(pItem,origin_x,origin_y,pOverflow,clientData)",3434,3491
+39,5,282,0,47,"layoutNodeIndexCmd@3512-3558@./src/htmldraw.c","./src/htmldraw.c","layoutNodeIndexCmd","layoutNodeIndexCmd(pTree,x,y)",3512,3558
+15,7,81,0,15,"returnDescNode@3580-3594@./src/htmldraw.c","./src/htmldraw.c","returnDescNode","returnDescNode(pNode1,pNode2)",3580,3594
+51,19,360,0,63,"layoutNodeCb@3609-3671@./src/htmldraw.c","./src/htmldraw.c","layoutNodeCb","layoutNodeCb(pItem,origin_x,origin_y,pOverflow,clientData)",3609,3671
+14,3,111,0,17,"layoutNodeCompare@3674-3690@./src/htmldraw.c","./src/htmldraw.c","layoutNodeCompare","layoutNodeCompare(pVoidLeft,pVoidRight) const const",3674,3690
+24,4,197,0,27,"layoutNodeCmd@3711-3737@./src/htmldraw.c","./src/htmldraw.c","layoutNodeCmd","layoutNodeCmd(pTree,x,y)",3711,3737
+33,8,196,0,46,"HtmlLayoutNode@3764-3809@./src/htmldraw.c","./src/htmldraw.c","HtmlLayoutNode","HtmlLayoutNode(clientData,interp,objc,objv)",3764,3809
+28,5,215,0,28,"bboxCb@3817-3844@./src/htmldraw.c","./src/htmldraw.c","bboxCb","bboxCb(pItem,origin_x,origin_y,pOverflow,clientData)",3817,3844
+46,8,304,0,52,"HtmlWidgetBboxCmd@3847-3898@./src/htmldraw.c","./src/htmldraw.c","HtmlWidgetBboxCmd","HtmlWidgetBboxCmd(clientData,interp,objc,objv)",3847,3898
+59,15,429,0,66,"paintNodesSearchCb@3933-3998@./src/htmldraw.c","./src/htmldraw.c","paintNodesSearchCb","paintNodesSearchCb(pItem,origin_x,origin_y,pOverflow,clientData)",3933,3998
+39,4,268,0,45,"HtmlWidgetDamageText@4025-4069@./src/htmldraw.c","./src/htmldraw.c","HtmlWidgetDamageText","HtmlWidgetDamageText(pTree,pNodeStart,iIndexStart,pNodeFin,iIndexFin)",4025,4069
+35,2,213,0,40,"HtmlWidgetBboxText@4072-4111@./src/htmldraw.c","./src/htmldraw.c","HtmlWidgetBboxText","HtmlWidgetBboxText(pTree,pNodeStart,iIndexStart,pNodeFin,iIndexFin,piT,piL,piB,piR)",4072,4111
+26,7,150,0,34,"scrollToNodeCb@4138-4171@./src/htmldraw.c","./src/htmldraw.c","scrollToNodeCb","scrollToNodeCb(pItem,origin_x,origin_y,pOverflow,clientData)",4138,4171
+14,1,81,0,16,"HtmlWidgetNodeTop@4198-4213@./src/htmldraw.c","./src/htmldraw.c","HtmlWidgetNodeTop","HtmlWidgetNodeTop(pTree,pNode)",4198,4213
+25,4,178,0,29,"layoutBboxCb@4225-4253@./src/htmldraw.c","./src/htmldraw.c","layoutBboxCb","layoutBboxCb(pItem,origin_x,origin_y,pOverflow,clientData)",4225,4253
+18,4,111,0,19,"overflowBoxCb@4266-4284@./src/htmldraw.c","./src/htmldraw.c","overflowBoxCb","overflowBoxCb(pItem,origin_x,origin_y,pOverflow,clientData)",4266,4284
+18,1,106,0,18,"HtmlWidgetOverflowBox@4287-4304@./src/htmldraw.c","./src/htmldraw.c","HtmlWidgetOverflowBox","HtmlWidgetOverflowBox(pTree,pNode,pX,pY,pW,pH)",4287,4304
+53,10,414,0,58,"HtmlWidgetNodeBox@4307-4364@./src/htmldraw.c","./src/htmldraw.c","HtmlWidgetNodeBox","HtmlWidgetNodeBox(pTree,pNode,pX,pY,pW,pH)",4307,4364
+27,3,190,0,31,"widgetRepair@4367-4397@./src/htmldraw.c","./src/htmldraw.c","widgetRepair","widgetRepair(pTree,x,y,w,h,g)",4367,4397
+16,3,92,0,20,"HtmlWidgetRepair@4412-4431@./src/htmldraw.c","./src/htmldraw.c","HtmlWidgetRepair","HtmlWidgetRepair(pTree,x,y,w,h,windowsrepair)",4412,4431
+31,7,182,0,47,"HtmlWidgetSetViewport@4446-4492@./src/htmldraw.c","./src/htmldraw.c","HtmlWidgetSetViewport","HtmlWidgetSetViewport(pTree,scroll_x,scroll_y,force_redraw)",4446,4492
+17,2,97,0,17,"HtmlDrawAddMarker@4495-4511@./src/htmldraw.c","./src/htmldraw.c","HtmlDrawAddMarker","HtmlDrawAddMarker(pCanvas,x,y,fixed)",4495,4511
+16,1,85,0,16,"HtmlDrawAddLinebox@4514-4529@./src/htmldraw.c","./src/htmldraw.c","HtmlDrawAddLinebox","HtmlDrawAddLinebox(pCanvas,x,y)",4514,4529
+25,5,145,0,25,"HtmlDrawFindLinebox@4532-4556@./src/htmldraw.c","./src/htmldraw.c","HtmlDrawFindLinebox","HtmlDrawFindLinebox(pCanvas,pX,pY)",4532,4556
+37,8,228,0,37,"HtmlDrawGetMarker@4559-4595@./src/htmldraw.c","./src/htmldraw.c","HtmlDrawGetMarker","HtmlDrawGetMarker(pCanvas,pMarker,pX,pY)",4559,4595
+24,9,136,4,27,"explicitCloseCount@93-119@./src/htmltree.c","./src/htmltree.c","explicitCloseCount","explicitCloseCount( pCurrent , eTag , zTag , pNClose) const",93,119
+30,9,151,4,34,"implicitCloseCount@122-155@./src/htmltree.c","./src/htmltree.c","implicitCloseCount","implicitCloseCount( pTree , pCurrent , eTag , pNClose)",122,155
+7,1,36,1,7,"geomRequestProcCb@158-164@./src/htmltree.c","./src/htmltree.c","geomRequestProcCb","geomRequestProcCb( clientData)",158,164
+12,2,65,2,12,"geomRequestProc@167-178@./src/htmltree.c","./src/htmltree.c","geomRequestProc","geomRequestProc( clientData , widget)",167,178
+33,12,220,2,43,"clearReplacement@181-223@./src/htmltree.c","./src/htmltree.c","clearReplacement","clearReplacement( pTree , pElem)",181,223
+18,2,93,2,18,"HtmlNodeClearStyle@226-243@./src/htmltree.c","./src/htmltree.c","HtmlNodeClearStyle","HtmlNodeClearStyle( pTree , pElem)",226,243
+13,2,67,2,13,"HtmlNodeDeleteCommand@246-258@./src/htmltree.c","./src/htmltree.c","HtmlNodeDeleteCommand","HtmlNodeDeleteCommand( pTree , pNode)",246,258
+33,5,192,2,53,"freeNode@279-331@./src/htmltree.c","./src/htmltree.c","freeNode","freeNode( pTree , pNode)",279,331
+11,2,65,2,11,"HtmlNodeClearGenerated@334-344@./src/htmltree.c","./src/htmltree.c","HtmlNodeClearGenerated","HtmlNodeClearGenerated( pTree , pElem)",334,344
+31,6,144,1,36,"nodeGetPreText@347-382@./src/htmltree.c","./src/htmltree.c","nodeGetPreText","nodeGetPreText( pTextNode)",347,382
+21,5,113,2,22,"nodeRemoveChild@403-424@./src/htmltree.c","./src/htmltree.c","nodeRemoveChild","nodeRemoveChild( pElem , pChild)",403,424
+16,4,91,1,19,"HtmlElementNormalize@442-460@./src/htmltree.c","./src/htmltree.c","HtmlElementNormalize","HtmlElementNormalize( pElem)",442,460
+49,17,287,2,64,"nodeHandlerCallbacks@483-546@./src/htmltree.c","./src/htmltree.c","nodeHandlerCallbacks","nodeHandlerCallbacks( pTree , pNode)",483,546
+9,2,50,1,9,"HtmlFinishNodeHandlers@567-575@./src/htmltree.c","./src/htmltree.c","HtmlFinishNodeHandlers","HtmlFinishNodeHandlers( pTree)",567,575
+8,4,38,1,8,"HtmlNodeIsOrphan@577-584@./src/htmltree.c","./src/htmltree.c","HtmlNodeIsOrphan","HtmlNodeIsOrphan( pNode)",577,584
+14,2,71,2,15,"nodeOrphanize@605-619@./src/htmltree.c","./src/htmltree.c","nodeOrphanize","nodeOrphanize( pTree , pNode)",605,619
+11,1,62,2,11,"nodeDeorphanize@621-631@./src/htmltree.c","./src/htmltree.c","nodeDeorphanize","nodeDeorphanize( pTree , pNode)",621,631
+10,3,55,2,10,"HtmlNodeIndexOfChild@634-643@./src/htmltree.c","./src/htmltree.c","HtmlNodeIndexOfChild","HtmlNodeIndexOfChild( pParent , pChild)",634,643
+44,8,297,5,61,"nodeInsertChild@646-706@./src/htmltree.c","./src/htmltree.c","nodeInsertChild","nodeInsertChild( pTree , pElem , pBefore , pAfter , pChild)",646,706
+28,2,174,4,33,"HtmlNodeAddChild@731-763@./src/htmltree.c","./src/htmltree.c","HtmlNodeAddChild","HtmlNodeAddChild( pElem , eTag , zTag , pAttributes) const",731,763
+23,1,142,2,28,"HtmlNodeAddTextChild@766-793@./src/htmltree.c","./src/htmltree.c","HtmlNodeAddTextChild","HtmlNodeAddTextChild( pNode , pTextNode)",766,793
+40,10,290,3,51,"setNodeAttribute@813-863@./src/htmltree.c","./src/htmltree.c","setNodeAttribute","setNodeAttribute( pNode , zAttrName , zAttrVal) const const",813,863
+10,3,66,2,10,"mergeAttributes@866-875@./src/htmltree.c","./src/htmltree.c","mergeAttributes","mergeAttributes( pNode , pAttr)",866,875
+23,2,165,4,26,"doAttributeHandler@878-903@./src/htmltree.c","./src/htmltree.c","doAttributeHandler","doAttributeHandler( pTree , pNode , zAttr , zValue) const const",878,903
+31,5,185,4,36,"doParseHandler@906-941@./src/htmltree.c","./src/htmltree.c","doParseHandler","doParseHandler( pTree , eType , pNode , iOffset)",906,941
+17,3,130,1,38,"HtmlInitTree@964-1001@./src/htmltree.c","./src/htmltree.c","HtmlInitTree","HtmlInitTree( pTree)",964,1001
+8,3,40,1,11,"HtmlInitTreeNodeCmd@1004-1014@./src/htmltree.c","./src/htmltree.c","HtmlInitTreeNodeCmd","HtmlInitTreeNodeCmd( pTree)",1004,1014
+18,3,75,2,21,"findFosterParent@1018-1038@./src/htmltree.c","./src/htmltree.c","findFosterParent","findFosterParent( pTree , ppTable)",1018,1038
+13,3,74,1,15,"treeCloseFosterTree@1041-1055@./src/htmltree.c","./src/htmltree.c","treeCloseFosterTree","treeCloseFosterTree( pTree)",1041,1055
+15,2,81,2,16,"treeAddFosterText@1058-1073@./src/htmltree.c","./src/htmltree.c","treeAddFosterText","treeAddFosterText( pTree , pTextNode)",1058,1073
+48,9,311,4,55,"treeAddFosterElement@1076-1130@./src/htmltree.c","./src/htmltree.c","treeAddFosterElement","treeAddFosterElement( pTree , eTag , zTag , pAttr) const",1076,1130
+22,4,127,3,25,"treeAddFosterClosingTag@1133-1157@./src/htmltree.c","./src/htmltree.c","treeAddFosterClosingTag","treeAddFosterClosingTag( pTree , eTag , zTag) const",1133,1157
+55,25,365,3,71,"treeAddTableComponent@1160-1230@./src/htmltree.c","./src/htmltree.c","treeAddTableComponent","treeAddTableComponent( pTree , eTag , pAttr)",1160,1230
+115,31,681,5,155,"HtmlTreeAddElement@1250-1404@./src/htmltree.c","./src/htmltree.c","HtmlTreeAddElement","HtmlTreeAddElement( pTree , eType , zType , pAttr , iOffset) const",1250,1404
+33,7,223,3,37,"HtmlTreeAddText@1422-1458@./src/htmltree.c","./src/htmltree.c","HtmlTreeAddText","HtmlTreeAddText( pTree , pTextNode , iOffset)",1422,1458
+22,5,176,4,25,"HtmlTreeAddClosingTag@1480-1504@./src/htmltree.c","./src/htmltree.c","HtmlTreeAddClosingTag","HtmlTreeAddClosingTag( pTree , eTag , zTag , iOffset) const",1480,1504
+19,6,109,1,20,"if@1527-1546@./src/htmltree.c","./src/htmltree.c","if","if( pNode)",1527,1546
+6,2,33,1,6,"HtmlNodeNumChildren@1599-1604@./src/htmltree.c","./src/htmltree.c","HtmlNodeNumChildren","HtmlNodeNumChildren( pNode)",1599,1604
+8,4,52,2,8,"HtmlNodeChild@1621-1628@./src/htmltree.c","./src/htmltree.c","HtmlNodeChild","HtmlNodeChild( pNode , n)",1621,1628
+8,2,34,1,8,"HtmlNodeBefore@1645-1652@./src/htmltree.c","./src/htmltree.c","HtmlNodeBefore","HtmlNodeBefore( pNode)",1645,1652
+11,3,46,1,11,"HtmlNodeComputedValues@1656-1666@./src/htmltree.c","./src/htmltree.c","HtmlNodeComputedValues","HtmlNodeComputedValues( pNode)",1656,1666
+8,2,34,1,8,"HtmlNodeAfter@1683-1690@./src/htmltree.c","./src/htmltree.c","HtmlNodeAfter","HtmlNodeAfter( pNode)",1683,1690
+6,1,20,1,6,"HtmlNodeTagType@1708-1713@./src/htmltree.c","./src/htmltree.c","HtmlNodeTagType","HtmlNodeTagType( pNode)",1708,1713
+7,3,37,1,7,"HtmlNodeTagName@1731-1737@./src/htmltree.c","./src/htmltree.c","HtmlNodeTagName","HtmlNodeTagName( pNode)",1731,1737
+15,4,92,1,15,"HtmlNodeRightSibling@1754-1768@./src/htmltree.c","./src/htmltree.c","HtmlNodeRightSibling","HtmlNodeRightSibling( pNode)",1754,1768
+15,4,86,1,15,"HtmlNodeLeftSibling@1785-1799@./src/htmltree.c","./src/htmltree.c","HtmlNodeLeftSibling","HtmlNodeLeftSibling( pNode)",1785,1799
+10,2,47,2,10,"HtmlNodeAttr@1817-1826@./src/htmltree.c","./src/htmltree.c","HtmlNodeAttr","HtmlNodeAttr( pNode , zAttr)",1817,1826
+13,3,60,3,14,"markWindowAsClipped@1829-1842@./src/htmltree.c","./src/htmltree.c","markWindowAsClipped","markWindowAsClipped( pTree , pNode , clientData)",1829,1842
+62,10,383,4,76,"nodeViewCmd@1867-1942@./src/htmltree.c","./src/htmltree.c","nodeViewCmd","nodeViewCmd( pNode , isVertical , objv , objc)",1867,1942
+34,6,202,3,39,"nodeRemoveCmd@1960-1998@./src/htmltree.c","./src/htmltree.c","nodeRemoveCmd","nodeRemoveCmd( pNode , objc , objv)",1960,1998
+28,6,157,3,33,"nodeDestroyCmd@2016-2048@./src/htmltree.c","./src/htmltree.c","nodeDestroyCmd","nodeDestroyCmd( pNode , objc , objv)",2016,2048
+57,15,386,3,67,"nodeInsertCmd@2066-2132@./src/htmltree.c","./src/htmltree.c","nodeInsertCmd","nodeInsertCmd( pNode , objc , objv)",2066,2132
+11,2,70,2,11,"nodeGetStyle@2135-2145@./src/htmltree.c","./src/htmltree.c","nodeGetStyle","nodeGetStyle( pTree , p)",2135,2145
+110,16,611,4,139,"nodeTextCommand@2168-2306@./src/htmltree.c","./src/htmltree.c","nodeTextCommand","nodeTextCommand( interp , pNode , objc , objv)",2168,2306
+400,90,2401,4,548,"nodeCommand@2342-2889@./src/htmltree.c","./src/htmltree.c","nodeCommand","nodeCommand( clientData , interp , objc , objv)",2342,2889
+23,3,130,2,27,"HtmlNodeCommand@2910-2936@./src/htmltree.c","./src/htmltree.c","HtmlNodeCommand","HtmlNodeCommand( pTree , pNode)",2910,2936
+29,5,213,2,31,"HtmlNodeScrollbarDoCallback@2954-2984@./src/htmltree.c","./src/htmltree.c","HtmlNodeScrollbarDoCallback","HtmlNodeScrollbarDoCallback( pTree , pNode)",2954,2984
+41,3,272,1,62,"HtmlTreeClear@3003-3064@./src/htmltree.c","./src/htmltree.c","HtmlTreeClear","HtmlTreeClear( pTree)",3003,3064
+14,3,80,2,15,"HtmlNodeGetPointer@3085-3099@./src/htmltree.c","./src/htmltree.c","HtmlNodeGetPointer","HtmlNodeGetPointer( pTree , zCmd)",3085,3099
+14,3,86,1,16,"fragmentOrphan@3106-3121@./src/htmltree.c","./src/htmltree.c","fragmentOrphan","fragmentOrphan( pTree)",3106,3121
+14,2,82,3,20,"fragmentAddText@3124-3143@./src/htmltree.c","./src/htmltree.c","fragmentAddText","fragmentAddText( pTree , pTextNode , iOffset)",3124,3143
+55,14,321,5,63,"fragmentAddElement@3146-3208@./src/htmltree.c","./src/htmltree.c","fragmentAddElement","fragmentAddElement( pTree , eType , zType , pAttributes , iOffset) const",3146,3208
+19,3,115,4,19,"fragmentAddClosingTag@3211-3229@./src/htmltree.c","./src/htmltree.c","fragmentAddClosingTag","fragmentAddClosingTag( pTree , eType , zType , iOffset) const",3211,3229
+22,2,130,2,26,"HtmlParseFragment@3232-3257@./src/htmltree.c","./src/htmltree.c","HtmlParseFragment","HtmlParseFragment( pTree , zHtml) const",3232,3257
+8,1,33,3,8,"sequenceCb@3275-3282@./src/htmltree.c","./src/htmltree.c","sequenceCb","sequenceCb( pTree , pNode , clientData)",3275,3282
+9,2,42,1,9,"HtmlSequenceNodes@3297-3305@./src/htmltree.c","./src/htmltree.c","HtmlSequenceNodes","HtmlSequenceNodes( pTree)",3297,3305
+31,10,229,4,46,"nodeGetBoxProperties@239-284@./src/htmllayout.c","./src/htmllayout.c","nodeGetBoxProperties","nodeGetBoxProperties( pLayout , pNode , iContaining , pBoxProperties)",239,284
+35,12,267,4,48,"nodeGetMargins@302-349@./src/htmllayout.c","./src/htmllayout.c","nodeGetMargins","nodeGetMargins( pLayout , pNode , iContaining , pMargins)",302,349
+9,2,41,1,9,"normalFlowMarginQuery@370-378@./src/htmllayout.c","./src/htmllayout.c","normalFlowMarginQuery","normalFlowMarginQuery( pNormal)",370,378
+29,5,180,4,31,"normalFlowMarginCollapse@380-410@./src/htmllayout.c","./src/htmllayout.c","normalFlowMarginCollapse","normalFlowMarginCollapse( pLayout , pNode , pNormal , pY)",380,410
+27,6,163,4,27,"normalFlowMarginAdd@412-438@./src/htmllayout.c","./src/htmllayout.c","normalFlowMarginAdd","normalFlowMarginAdd( pLayout , pNode , pNormal , y)",412,438
+7,1,30,2,7,"normalFlowCbAdd@441-447@./src/htmllayout.c","./src/htmllayout.c","normalFlowCbAdd","normalFlowCbAdd( pNormal , pCallback)",441,447
+16,6,97,2,16,"normalFlowCbDelete@449-464@./src/htmllayout.c","./src/htmllayout.c","normalFlowCbDelete","normalFlowCbDelete( pNormal , pCallback)",449,464
+12,6,64,1,12,"nodeIsReplaced@485-496@./src/htmllayout.c","./src/htmllayout.c","nodeIsReplaced","nodeIsReplaced( pNode)",485,496
+21,5,123,3,25,"considerMinMaxHeight@499-523@./src/htmllayout.c","./src/htmllayout.c","considerMinMaxHeight","considerMinMaxHeight( pNode , iContaining , piHeight)",499,523
+13,2,66,3,15,"getHeight@549-563@./src/htmllayout.c","./src/htmllayout.c","getHeight","getHeight( pNode , iHeight , iContainingHeight)",549,563
+9,2,28,2,9,"getWidth@566-574@./src/htmllayout.c","./src/htmllayout.c","getWidth","getWidth( iWidthCalculated , iWidthContent)",566,574
+9,2,37,3,9,"getWidthProperty@577-585@./src/htmllayout.c","./src/htmllayout.c","getWidthProperty","getWidthProperty( pLayout , pComputed , iContaining)",577,585
+21,4,121,3,25,"considerMinMaxWidth@601-625@./src/htmllayout.c","./src/htmllayout.c","considerMinMaxWidth","considerMinMaxWidth( pNode , iContaining , piWidth)",601,625
+28,10,140,4,51,"doHorizontalBlockAlign@659-709@./src/htmllayout.c","./src/htmllayout.c","doHorizontalBlockAlign","doHorizontalBlockAlign( pLayout , pNode , pMargin , iSpareWidth)",659,709
+67,7,419,6,70,"createScrollbars@732-801@./src/htmllayout.c","./src/htmllayout.c","createScrollbars","createScrollbars( pTree , pNode , iWidth , iHeight , iHorizontal , iVertical)",732,801
+122,26,871,6,160,"normalFlowLayoutOverflow@825-984@./src/htmllayout.c","./src/htmllayout.c","normalFlowLayoutOverflow","normalFlowLayoutOverflow( pLayout , pBox , pNode , pY , pContext , pNormal)",825,984
+119,14,855,6,190,"normalFlowLayoutFloat@1009-1198@./src/htmllayout.c","./src/htmllayout.c","normalFlowLayoutFloat","normalFlowLayoutFloat( pLayout , pBox , pNode , pY , pDoNotUse , pNormal)",1009,1198
+52,9,318,3,53,"getRomanIndex@1218-1270@./src/htmllayout.c","./src/htmllayout.c","getRomanIndex","getRomanIndex( zBuf , iList , isUpper)",1218,1270
+45,22,254,4,53,"HtmlLayoutMarkerBox@1273-1325@./src/htmllayout.c","./src/htmllayout.c","HtmlLayoutMarkerBox","HtmlLayoutMarkerBox( eStyle , iList , isList , zBuf)",1273,1325
+69,11,416,4,83,"markerBoxLayout@1346-1428@./src/htmllayout.c","./src/htmllayout.c","markerBoxLayout","markerBoxLayout( pLayout , pBox , pNode , pVerticalOffset)",1346,1428
+49,10,356,6,70,"inlineLayoutDrawLines@1454-1523@./src/htmllayout.c","./src/htmllayout.c","inlineLayoutDrawLines","inlineLayoutDrawLines( pLayout , pBox , pContext , forceflag , pY , pNormal)",1454,1523
+26,4,183,3,47,"HtmlLayoutNodeContent@1561-1607@./src/htmllayout.c","./src/htmllayout.c","HtmlLayoutNodeContent","HtmlLayoutNodeContent( pLayout , pBox , pNode)",1561,1607
+81,23,614,3,108,"drawReplacementContent@1639-1746@./src/htmllayout.c","./src/htmllayout.c","drawReplacementContent","drawReplacementContent( pLayout , pBox , pNode)",1639,1746
+16,1,108,3,18,"drawReplacement@1777-1794@./src/htmllayout.c","./src/htmllayout.c","drawReplacement","drawReplacement( pLayout , pBox , pNode)",1777,1794
+199,54,1356,5,264,"drawAbsolute@1798-2061@./src/htmllayout.c","./src/htmllayout.c","drawAbsolute","drawAbsolute( pLayout , pBox , pStaticCanvas , x , y)",1798,2061
+119,11,779,4,139,"wrapContent@2113-2251@./src/htmllayout.c","./src/htmllayout.c","wrapContent","wrapContent( pLayout , pBox , pContent , pNode)",2113,2251
+23,2,144,9,23,"HtmlLayoutDrawBox@2254-2276@./src/htmllayout.c","./src/htmllayout.c","HtmlLayoutDrawBox","HtmlLayoutDrawBox( pTree , pCanvas , x , y , w , h , pNode , flags , size_only)",2254,2276
+82,4,630,6,128,"normalFlowLayoutTable@2292-2419@./src/htmllayout.c","./src/htmllayout.c","normalFlowLayoutTable","normalFlowLayoutTable( pLayout , pBox , pNode , pY , pContext , pNormal)",2292,2419
+56,8,393,6,65,"normalFlowLayoutTableComponent@2439-2503@./src/htmllayout.c","./src/htmllayout.c","normalFlowLayoutTableComponent","normalFlowLayoutTableComponent( pLayout , pBox , pNode , pY , pContext , pNormal)",2439,2503
+37,4,302,6,54,"normalFlowLayoutReplaced@2519-2572@./src/htmllayout.c","./src/htmllayout.c","normalFlowLayoutReplaced","normalFlowLayoutReplaced( pLayout , pBox , pNode , pY , pContext , pNormal)",2519,2572
+8,1,41,3,8,"setValueCallback@2575-2582@./src/htmllayout.c","./src/htmllayout.c","setValueCallback","setValueCallback( pNormal , pCallback , y)",2575,2582
+99,9,797,6,165,"normalFlowLayoutBlock@2598-2762@./src/htmllayout.c","./src/htmllayout.c","normalFlowLayoutBlock","normalFlowLayoutBlock( pLayout , pBox , pNode , pY , pContext , pNormal)",2598,2762
+21,2,128,4,22,"normalFlowClearFloat@2781-2802@./src/htmllayout.c","./src/htmllayout.c","normalFlowClearFloat","normalFlowClearFloat( pBox , pNode , pNormal , y)",2781,2802
+11,1,50,6,11,"normalFlowLayoutText@2818-2828@./src/htmllayout.c","./src/htmllayout.c","normalFlowLayoutText","normalFlowLayoutText( pLayout , pBox , pNode , pY , pContext , pNormal)",2818,2828
+30,2,219,6,43,"normalFlowLayoutInlineReplaced@2844-2886@./src/htmllayout.c","./src/htmllayout.c","normalFlowLayoutInlineReplaced","normalFlowLayoutInlineReplaced( pLayout , pBox , pNode , pY , pContext , pNormal)",2844,2886
+21,2,151,6,28,"layoutChildren@2902-2929@./src/htmllayout.c","./src/htmllayout.c","layoutChildren","layoutChildren( pLayout , pBox , pNode , pY , pContext , pNormal)",2902,2929
+15,1,87,6,15,"normalFlowLayoutInline@2945-2959@./src/htmllayout.c","./src/htmllayout.c","normalFlowLayoutInline","normalFlowLayoutInline( pLayout , pBox , pNode , pY , pContext , pNormal)",2945,2959
+48,4,321,6,58,"normalFlowLayoutInlineBlock@2975-3032@./src/htmllayout.c","./src/htmllayout.c","normalFlowLayoutInlineBlock","normalFlowLayoutInlineBlock( pLayout , pBox , pNode , pY , pContext , pNormal)",2975,3032
+21,2,147,6,40,"normalFlowLayoutAbsolute@3035-3074@./src/htmllayout.c","./src/htmllayout.c","normalFlowLayoutAbsolute","normalFlowLayoutAbsolute( pLayout , pBox , pNode , pY , pContext , pNormal)",3035,3074
+18,2,120,6,18,"normalFlowLayoutFixed@3077-3094@./src/htmllayout.c","./src/htmllayout.c","normalFlowLayoutFixed","normalFlowLayoutFixed( pLayout , pBox , pNode , pY , pContext , pNormal)",3077,3094
+13,1,55,2,13,"appendVerticalMarginsToObj@3114-3126@./src/htmllayout.c","./src/htmllayout.c","appendVerticalMarginsToObj","appendVerticalMarginsToObj( pObj , pNormal)",3114,3126
+136,25,936,6,191,"normalFlowLayoutNode@3144-3334@./src/htmllayout.c","./src/htmllayout.c","normalFlowLayoutNode","normalFlowLayoutNode( pLayout , pBox , pNode , pY , pContext , pNormal)",3144,3334
+51,18,390,6,66,"normalFlowLayoutFromCache@3386-3451@./src/htmllayout.c","./src/htmllayout.c","normalFlowLayoutFromCache","normalFlowLayoutFromCache( pLayout , pBox , pElem , pNormal , iLeft , iRight)",3386,3451
+142,27,1021,4,200,"normalFlowLayout@3481-3680@./src/htmllayout.c","./src/htmllayout.c","normalFlowLayout","normalFlowLayout( pLayout , pBox , pNode , pNormal)",3481,3680
+67,12,415,4,100,"blockMinMaxWidth@3702-3801@./src/htmllayout.c","./src/htmllayout.c","blockMinMaxWidth","blockMinMaxWidth( pLayout , pNode , pMin , pMax)",3702,3801
+71,10,476,3,84,"doConfigureCmd@3825-3908@./src/htmllayout.c","./src/htmllayout.c","doConfigureCmd","doConfigureCmd( pTree , pElem , iContaining)",3825,3908
+93,14,735,1,156,"HtmlLayout@3927-4082@./src/htmllayout.c","./src/htmllayout.c","HtmlLayout","HtmlLayout( pTree)",3927,4082
+15,3,108,2,15,"HtmlLayoutInvalidateCache@4105-4119@./src/htmllayout.c","./src/htmllayout.c","HtmlLayoutInvalidateCache","HtmlLayoutInvalidateCache( pTree , pNode)",4105,4119
+4,1,8,0,4,"HtmlConfigSpec@182-185@./src/htmlwidget.c","./src/htmlwidget.c","HtmlConfigSpec","HtmlConfigSpec()",182,185
+86,12,444,7,86,"TclConfigureWidgetObj@188-273@./src/htmlwidget.c","./src/htmlwidget.c","TclConfigureWidgetObj","TclConfigureWidgetObj( interp , htmlPtr , configSpecs , objc , objv , dp , flags)",188,273
+85,13,447,7,85,"TclConfigureWidget@276-360@./src/htmlwidget.c","./src/htmlwidget.c","TclConfigureWidget","TclConfigureWidget( interp , htmlPtr , configSpecs , argc , argv , dp , flags)",276,360
+3,1,7,1,3,"HtmlCmdDeletedProc@364-366@./src/htmlwidget.c","./src/htmlwidget.c","HtmlCmdDeletedProc","HtmlCmdDeletedProc( ClientData clientData)",364,366
+3,1,11,2,3,"HtmlEventProc@368-370@./src/htmlwidget.c","./src/htmlwidget.c","HtmlEventProc","HtmlEventProc( ClientData clientData , XEvent * eventPtr)",368,370
+3,1,11,2,3,"HtmlRedrawText@372-374@./src/htmlwidget.c","./src/htmlwidget.c","HtmlRedrawText","HtmlRedrawText( HtmlWidget * htmlPtr , int y)",372,374
+3,1,12,2,3,"HtmlRedrawBlock@376-378@./src/htmlwidget.c","./src/htmlwidget.c","HtmlRedrawBlock","HtmlRedrawBlock( HtmlWidget * htmlPtr , HtmlBlock * p)",376,378
+4,1,18,3,4,"HtmlGetColorByName@380-383@./src/htmlwidget.c","./src/htmlwidget.c","HtmlGetColorByName","HtmlGetColorByName( HtmlWidget * htmlPtr , char * zColor , int def)",380,383
+3,1,8,1,3,"HtmlScheduleRedraw@386-388@./src/htmlwidget.c","./src/htmlwidget.c","HtmlScheduleRedraw","HtmlScheduleRedraw( HtmlWidget * htmlPtr)",386,388
+13,3,62,1,13,"HtmlUsableWidth@401-413@./src/htmlwidget.c","./src/htmlwidget.c","HtmlUsableWidth","HtmlUsableWidth( htmlPtr)",401,413
+13,3,62,1,13,"HtmlUsableHeight@425-437@./src/htmlwidget.c","./src/htmlwidget.c","HtmlUsableHeight","HtmlUsableHeight( htmlPtr)",425,437
+29,6,149,2,31,"HtmlComputeVerticalPosition@446-476@./src/htmlwidget.c","./src/htmlwidget.c","HtmlComputeVerticalPosition","HtmlComputeVerticalPosition( htmlPtr , buf)",446,476
+29,6,149,2,31,"HtmlComputeHorizontalPosition@482-512@./src/htmlwidget.c","./src/htmlwidget.c","HtmlComputeHorizontalPosition","HtmlComputeHorizontalPosition( htmlPtr , buf)",482,512
+14,3,75,1,14,"ClearGcCache@520-533@./src/htmlwidget.c","./src/htmlwidget.c","ClearGcCache","ClearGcCache( htmlPtr)",520,533
+10,3,51,1,10,"HtmlCmdDeletedProc@549-558@./src/htmlwidget.c","./src/htmlwidget.c","HtmlCmdDeletedProc","HtmlCmdDeletedProc( clientData)",549,558
+9,1,54,1,9,"ResetLayoutContext@565-573@./src/htmlwidget.c","./src/htmlwidget.c","ResetLayoutContext","ResetLayoutContext( htmlPtr)",565,573
+267,69,1706,1,380,"HtmlRedrawCallback@594-973@./src/htmlwidget.c","./src/htmlwidget.c","HtmlRedrawCallback","HtmlRedrawCallback( clientData)",594,973
+33,9,143,5,34,"HtmlRedrawArea@985-1018@./src/htmlwidget.c","./src/htmlwidget.c","HtmlRedrawArea","HtmlRedrawArea( htmlPtr , left , top , right , bottom)",985,1018
+14,2,64,2,14,"HtmlRedrawBlock@1023-1036@./src/htmlwidget.c","./src/htmlwidget.c","HtmlRedrawBlock","HtmlRedrawBlock( htmlPtr , p)",1023,1036
+6,1,25,1,6,"HtmlRedrawEverything@1042-1047@./src/htmlwidget.c","./src/htmlwidget.c","HtmlRedrawEverything","HtmlRedrawEverything( htmlPtr)",1042,1047
+9,2,39,1,9,"HtmlRedrawPush@1054-1062@./src/htmlwidget.c","./src/htmlwidget.c","HtmlRedrawPush","HtmlRedrawPush( HtmlWidget * htmlPtr)",1054,1062
+15,2,62,2,16,"HtmlRedrawText@1070-1085@./src/htmlwidget.c","./src/htmlwidget.c","HtmlRedrawText","HtmlRedrawText( htmlPtr , y)",1070,1085
+10,1,85,1,12,"HtmlRecomputeGeometry@1092-1103@./src/htmlwidget.c","./src/htmlwidget.c","HtmlRecomputeGeometry","HtmlRecomputeGeometry( htmlPtr)",1092,1103
+37,7,237,1,37,"HtmlClearTk@1106-1142@./src/htmlwidget.c","./src/htmlwidget.c","HtmlClearTk","HtmlClearTk( htmlPtr)",1106,1142
+13,3,84,1,14,"DestroyHtmlWidgetTk@1145-1158@./src/htmlwidget.c","./src/htmlwidget.c","DestroyHtmlWidgetTk","DestroyHtmlWidgetTk( htmlPtr)",1145,1158
+25,6,138,1,25,"HtmlFlashCursor@1164-1188@./src/htmlwidget.c","./src/htmlwidget.c","HtmlFlashCursor","HtmlFlashCursor( clientData)",1164,1188
+70,26,474,3,84,"HtmlGetGC@1197-1280@./src/htmlwidget.c","./src/htmlwidget.c","HtmlGetGC","HtmlGetGC( htmlPtr , color , font)",1197,1280
+12,3,62,1,13,"HtmlGetAnyGC@1287-1299@./src/htmlwidget.c","./src/htmlwidget.c","HtmlGetAnyGC","HtmlGetAnyGC( htmlPtr)",1287,1299
+86,23,484,2,96,"HtmlEventProc@1306-1401@./src/htmlwidget.c","./src/htmlwidget.c","HtmlEventProc","HtmlEventProc( clientData , eventPtr)",1306,1401
+150,32,784,2,186,"HtmlGetFont@1415-1600@./src/htmlwidget.c","./src/htmlwidget.c","HtmlGetFont","HtmlGetFont( htmlPtr , iFont)",1415,1600
+10,1,78,2,11,"colorDistance@1606-1616@./src/htmlwidget.c","./src/htmlwidget.c","colorDistance","colorDistance( pA , pB)",1606,1616
+37,10,193,3,44,"HtmlGetColorByName@1624-1667@./src/htmlwidget.c","./src/htmlwidget.c","HtmlGetColorByName","HtmlGetColorByName( htmlPtr , zColor , def)",1624,1667
+9,1,62,1,10,"isDarkColor@1681-1690@./src/htmlwidget.c","./src/htmlwidget.c","isDarkColor","isDarkColor( p)",1681,1690
+28,3,231,2,28,"HtmlGetDarkShadowColor@1697-1724@./src/htmlwidget.c","./src/htmlwidget.c","HtmlGetDarkShadowColor","HtmlGetDarkShadowColor( htmlPtr , iBgColor)",1697,1724
+5,1,19,1,5,"isLightColor@1731-1735@./src/htmlwidget.c","./src/htmlwidget.c","isLightColor","isLightColor( p)",1731,1735
+28,3,225,2,28,"HtmlGetLightShadowColor@1742-1769@./src/htmlwidget.c","./src/htmlwidget.c","HtmlGetLightShadowColor","HtmlGetLightShadowColor( htmlPtr , iBgColor)",1742,1769
+23,7,156,2,23,"CheckDupColor@1775-1797@./src/htmlwidget.c","./src/htmlwidget.c","CheckDupColor","CheckDupColor( htmlPtr , slot)",1775,1797
+46,12,343,2,67,"GetColorByValue@1804-1870@./src/htmlwidget.c","./src/htmlwidget.c","GetColorByValue","GetColorByValue( htmlPtr , pRef)",1804,1870
+11,5,89,5,11,"HtmlInArea@1874-1884@./src/htmlwidget.c","./src/htmlwidget.c","HtmlInArea","HtmlInArea( p , left , top , x , y)",1874,1884
+48,20,305,4,49,"HtmlGetHref@1892-1940@./src/htmlwidget.c","./src/htmlwidget.c","HtmlGetHref","HtmlGetHref( htmlPtr , x , y , target)",1892,1940
+35,7,208,6,37,"HtmlElementCoords@1944-1980@./src/htmlwidget.c","./src/htmlwidget.c","HtmlElementCoords","HtmlElementCoords( interp , htmlPtr , p , i , pct , coords)",1944,1980
+17,2,121,5,18,"HtmlGetCoords@1984-2001@./src/htmlwidget.c","./src/htmlwidget.c","HtmlGetCoords","HtmlGetCoords( interp , htmlPtr , p , i , pct)",1984,2001
+46,8,294,2,53,"HtmlVerticalScroll@2008-2060@./src/htmlwidget.c","./src/htmlwidget.c","HtmlVerticalScroll","HtmlVerticalScroll( htmlPtr , yOffset)",2008,2060
+12,2,51,2,12,"HtmlHorizontalScroll@2067-2078@./src/htmlwidget.c","./src/htmlwidget.c","HtmlHorizontalScroll","HtmlHorizontalScroll( htmlPtr , xOffset)",2067,2078
+10,4,53,1,10,"HtmlScheduleRedraw@2085-2094@./src/htmlwidget.c","./src/htmlwidget.c","HtmlScheduleRedraw","HtmlScheduleRedraw( htmlPtr)",2085,2094
+88,21,574,6,103,"ConfigureHtmlWidgetObj@2103-2205@./src/htmlwidget.c","./src/htmlwidget.c","ConfigureHtmlWidgetObj","ConfigureHtmlWidgetObj( interp , htmlPtr , objc , objv , flags , realign)",2103,2205
+80,8,502,4,99,"HtmlNewWidget@2208-2306@./src/htmlwidget.c","./src/htmlwidget.c","HtmlNewWidget","HtmlNewWidget( clientData , interp , objc , objv)",2208,2306
+19,3,126,4,27,"HtmlObjCommand@2314-2340@./src/htmlwidget.c","./src/htmlwidget.c","HtmlObjCommand","HtmlObjCommand( clientData , interp , objc , objv)",2314,2340
+8,2,44,2,16,"HtmlXErrorHandler@2369-2384@./src/htmlwidget.c","./src/htmlwidget.c","HtmlXErrorHandler","HtmlXErrorHandler( dsp , ev)",2369,2384
+5,1,16,1,5,"Tkhtml_SafeInit@2387-2391@./src/htmlwidget.c","./src/htmlwidget.c","Tkhtml_SafeInit","Tkhtml_SafeInit( interp)",2387,2391
+18,5,114,1,25,"Tkhtml_Init@2394-2418@./src/htmlwidget.c","./src/htmlwidget.c","Tkhtml_Init","Tkhtml_Init( interp)",2394,2418
+69,33,208,1,69,"constantToString@105-173@./src/css.c","./src/css.c","constantToString","constantToString( int c)",105,173
+59,21,711,1,80,"dequote@197-276@./src/css.c","./src/css.c","dequote","dequote( z)",197,276
+10,3,70,1,10,"tokenToString@295-304@./src/css.c","./src/css.c","tokenToString","tokenToString( CssToken * pToken)",295,304
+22,6,131,3,26,"tokenToReal@328-353@./src/css.c","./src/css.c","tokenToReal","tokenToReal( pToken , pLen , pVal)",328,353
+22,12,87,2,24,"propertyIsLength@379-402@./src/css.c","./src/css.c","propertyIsLength","propertyIsLength( pParse , pProp)",379,402
+52,15,454,3,58,"rgbToColor@430-487@./src/css.c","./src/css.c","rgbToColor","rgbToColor( zOut , zRgb , nRgb)",430,487
+20,1,127,3,24,"doUrlCmd@501-524@./src/css.c","./src/css.c","doUrlCmd","doUrlCmd( pParse , zArg , nArg)",501,524
+129,32,951,2,164,"tokenToProperty@540-703@./src/css.c","./src/css.c","tokenToProperty","tokenToProperty( pParse , pToken)",540,703
+10,2,57,3,10,"textToProperty@719-728@./src/css.c","./src/css.c","textToProperty","textToProperty( pParse , z , n)",719,728
+12,2,55,2,12,"HtmlCssStringToProperty@748-759@./src/css.c","./src/css.c","HtmlCssStringToProperty","HtmlCssStringToProperty( z , n)",748,759
+13,6,55,1,13,"HtmlCssPropertyGetString@775-787@./src/css.c","./src/css.c","HtmlCssPropertyGetString","HtmlCssPropertyGetString( pProp)",775,787
+5,1,17,0,5,"propertySetNew@805-809@./src/css.c","./src/css.c","propertySetNew","propertySetNew()",805,809
+13,4,74,2,15,"propertySetGet@828-842@./src/css.c","./src/css.c","propertySetGet","propertySetGet( p , i)",828,842
+16,3,120,3,32,"propertySetAdd@859-890@./src/css.c","./src/css.c","propertySetAdd","propertySetAdd( p , i , v)",859,890
+10,4,66,1,10,"propertyFree@894-903@./src/css.c","./src/css.c","propertyFree","propertyFree( CssProperty * p)",894,903
+9,3,59,1,9,"propertySetFree@920-928@./src/css.c","./src/css.c","propertySetFree","propertySetFree( CssPropertySet * p)",920,928
+15,3,110,1,16,"propertyDup@943-958@./src/css.c","./src/css.c","propertyDup","propertyDup( pProp)",943,958
+119,30,546,4,128,"propertySetAddShortcutBorder@982-1109@./src/css.c","./src/css.c","propertySetAddShortcutBorder","propertySetAddShortcutBorder( pParse , p , prop , v)",982,1109
+24,7,78,1,28,"propertyTransformBgPosition@1136-1163@./src/css.c","./src/css.c","propertyTransformBgPosition","propertyTransformBgPosition( pProp)",1136,1163
+129,55,681,3,146,"shortcutBackground@1181-1326@./src/css.c","./src/css.c","shortcutBackground","shortcutBackground( pParse , p , v)",1181,1326
+67,29,317,3,76,"shortcutListStyle@1343-1418@./src/css.c","./src/css.c","shortcutListStyle","shortcutListStyle( pParse , p , v)",1343,1418
+39,3,286,4,45,"propertySetAddList@1421-1465@./src/css.c","./src/css.c","propertySetAddList","propertySetAddList( pParse , eProp , p , v)",1421,1465
+26,4,137,3,29,"getNextFontFamily@1483-1511@./src/css.c","./src/css.c","getNextFontFamily","getNextFontFamily( zList , nList , pzNext)",1483,1511
+25,5,150,3,28,"textToFontFamilyProperty@1525-1552@./src/css.c","./src/css.c","textToFontFamilyProperty","textToFontFamilyProperty( pParse , zText , nText) const",1525,1552
+8,1,48,3,8,"propertySetAddFontFamily@1570-1577@./src/css.c","./src/css.c","propertySetAddFontFamily","propertySetAddFontFamily( pParse , p , v)",1570,1577
+111,45,679,3,128,"propertySetAddShortcutFont@1612-1739@./src/css.c","./src/css.c","propertySetAddShortcutFont","propertySetAddShortcutFont( pParse , p , v)",1612,1739
+30,5,153,3,35,"tokenToPropertyList@1754-1788@./src/css.c","./src/css.c","tokenToPropertyList","tokenToPropertyList( pToken , apProp , nMax)",1754,1788
+69,25,395,3,78,"shortcutBackgroundPosition@1804-1881@./src/css.c","./src/css.c","shortcutBackgroundPosition","shortcutBackgroundPosition( pParse , p , v)",1804,1881
+74,13,522,3,78,"propertySetAddShortcutBorderColor@1896-1973@./src/css.c","./src/css.c","propertySetAddShortcutBorderColor","propertySetAddShortcutBorderColor( p , prop , v)",1896,1973
+9,2,43,1,9,"selectorFree@1990-1998@./src/css.c","./src/css.c","selectorFree","selectorFree( pSelector)",1990,1998
+28,11,197,2,38,"comparePriority@2023-2060@./src/css.c","./src/css.c","comparePriority","comparePriority( pLeft , pRight)",2023,2060
+37,6,154,4,41,"newCssPriority@2087-2127@./src/css.c","./src/css.c","newCssPriority","newCssPriority( pStyle , origin , pIdTail , important)",2087,2127
+61,10,388,10,85,"cssParse@2156-2240@./src/css.c","./src/css.c","cssParse","cssParse( pTree , n , z , isStyle , origin , pStyleId , pImportCmd , pUrlCmd , pErrorVar , ppStyle)",2156,2240
+8,1,52,4,8,"HtmlCssSelectorParse@2243-2250@./src/css.c","./src/css.c","HtmlCssSelectorParse","HtmlCssSelectorParse( pTree , n , z , ppStyle) const",2243,2250
+46,5,244,6,59,"HtmlStyleParse@2268-2326@./src/css.c","./src/css.c","HtmlStyleParse","HtmlStyleParse( pTree , pStyleText , pId , pImportCmd , pUrlCmd , pErrorVar)",2268,2326
+20,4,118,4,21,"HtmlCssInlineParse@2344-2364@./src/css.c","./src/css.c","HtmlCssInlineParse","HtmlCssInlineParse( HtmlTree * pTree , int n , const char * z , CssPropertySet ** ppPropertySet)",2344,2364
+13,4,51,1,13,"ruleFree@2382-2394@./src/css.c","./src/css.c","ruleFree","ruleFree( pRule)",2382,2394
+11,2,45,1,11,"freeRulesList@2397-2407@./src/css.c","./src/css.c","freeRulesList","freeRulesList( ppList)",2397,2407
+15,2,65,1,16,"freeRulesHash@2410-2425@./src/css.c","./src/css.c","freeRulesHash","freeRulesHash( pHash)",2410,2425
+21,3,109,1,26,"HtmlCssStyleSheetFree@2443-2468@./src/css.c","./src/css.c","HtmlCssStyleSheetFree","HtmlCssStyleSheetFree( pStyle)",2443,2468
+3,1,13,1,3,"HtmlCssStyleSheetSyntaxErrs@2474-2476@./src/css.c","./src/css.c","HtmlCssStyleSheetSyntaxErrs","HtmlCssStyleSheetSyntaxErrs( CssStyleSheet * pStyle)",2474,2476
+73,31,390,4,89,"HtmlCssDeclaration@2493-2581@./src/css.c","./src/css.c","HtmlCssDeclaration","HtmlCssDeclaration( pParse , pProp , pExpr , isImportant)",2493,2581
+33,16,209,4,48,"HtmlCssSelector@2602-2649@./src/css.c","./src/css.c","HtmlCssSelector","HtmlCssSelector( pParse , stype , pAttr , pValue)",2602,2649
+22,9,157,2,35,"ruleCompare@2674-2708@./src/css.c","./src/css.c","ruleCompare","ruleCompare( CssRule * pLeft , CssRule * pRight)",2674,2708
+16,5,95,2,26,"insertRule@2711-2736@./src/css.c","./src/css.c","insertRule","insertRule( ppList , pRule)",2711,2736
+108,41,531,4,144,"cssSelectorPropertySetPair@2763-2906@./src/css.c","./src/css.c","cssSelectorPropertySetPair","cssSelectorPropertySetPair( pParse , pSelector , pPropertySet , freeWhat)",2763,2906
+60,19,349,2,73,"HtmlCssRule@2925-2997@./src/css.c","./src/css.c","HtmlCssRule","HtmlCssRule( pParse , success)",2925,2997
+36,14,197,3,51,"attrTest@3014-3064@./src/css.c","./src/css.c","attrTest","attrTest( eType , zString , zAttr) const const",3014,3064
+131,60,738,3,160,"HtmlCssSelectorTest@3086-3245@./src/css.c","./src/css.c","HtmlCssSelectorTest","HtmlCssSelectorTest( pSelector , pNode , dynamic_true)",3086,3245
+5,1,15,1,5,"HtmlCssInlineFree@3259-3263@./src/css.c","./src/css.c","HtmlCssInlineFree","HtmlCssInlineFree( pPropertySet)",3259,3263
+16,5,105,3,20,"propertySetToPropertyValues@3277-3296@./src/css.c","./src/css.c","propertySetToPropertyValues","propertySetToPropertyValues( p , aPropDone , pSet)",3277,3296
+7,1,33,3,7,"ruleToPropertyValues@3312-3318@./src/css.c","./src/css.c","ruleToPropertyValues","ruleToPropertyValues( p , aPropDone , pRule)",3312,3318
+26,6,180,3,30,"overrideToPropertyValues@3334-3363@./src/css.c","./src/css.c","overrideToPropertyValues","overrideToPropertyValues( p , aPropDone , pOverride)",3334,3363
+36,7,206,6,45,"applyRule@3382-3426@./src/css.c","./src/css.c","applyRule","applyRule( pTree , pNode , pRule , aPropDone , pzIfMatch , pCreator)",3382,3426
+18,6,105,2,21,"nextRule@3439-3459@./src/css.c","./src/css.c","nextRule","nextRule( apRule , n)",3439,3459
+87,15,548,2,148,"HtmlCssStyleSheetApply@3483-3630@./src/css.c","./src/css.c","HtmlCssStyleSheetApply","HtmlCssStyleSheetApply( pTree , pNode)",3483,3630
+7,1,38,2,7,"generateContentText@3650-3656@./src/css.c","./src/css.c","generateContentText","generateContentText( pTree , zContent) const",3650,3656
+34,6,235,4,43,"generatedContent@3671-3713@./src/css.c","./src/css.c","generatedContent","generatedContent( pTree , pNode , pCssRule , ppNode)",3671,3713
+13,2,80,3,13,"HtmlCssStyleGenerateContent@3728-3740@./src/css.c","./src/css.c","HtmlCssStyleGenerateContent","HtmlCssStyleGenerateContent( pTree , pElem , isBefore)",3728,3740
+24,7,131,4,24,"HtmlCssPropertiesGet@3756-3779@./src/css.c","./src/css.c","HtmlCssPropertiesGet","HtmlCssPropertiesGet( pProperties , prop , pSheetnum , pSpec)",3756,3779
+12,2,82,1,15,"HtmlCssSelectorComma@3794-3808@./src/css.c","./src/css.c","HtmlCssSelectorComma","HtmlCssSelectorComma( pParse)",3794,3808
+31,8,172,2,36,"HtmlCssImport@3826-3861@./src/css.c","./src/css.c","HtmlCssImport","HtmlCssImport( pParse , pToken)",3826,3861
+58,28,379,2,69,"HtmlCssSelectorToString@3875-3943@./src/css.c","./src/css.c","HtmlCssSelectorToString","HtmlCssSelectorToString( pSelector , pObj)",3875,3943
+33,5,198,3,38,"rulelistReport@3957-3994@./src/css.c","./src/css.c","rulelistReport","rulelistReport( pRule , pObj , pN)",3957,3994
+125,4,695,4,146,"HtmlCssStyleReport@4008-4153@./src/css.c","./src/css.c","HtmlCssStyleReport","HtmlCssStyleReport( clientData , interp , objc , objv)",4008,4153
+6,1,44,2,7,"ruleQsortCompare@4167-4173@./src/css.c","./src/css.c","ruleQsortCompare","ruleQsortCompare( const * pLeft , const * pRight)",4167,4173
+83,16,582,4,94,"HtmlCssStyleConfigDump@4197-4290@./src/css.c","./src/css.c","HtmlCssStyleConfigDump","HtmlCssStyleConfigDump( clientData , interp , objc , objv)",4197,4290
+45,7,267,3,49,"HtmlCssInlineQuery@4314-4362@./src/css.c","./src/css.c","HtmlCssInlineQuery","HtmlCssInlineQuery( interp , pPropertySet , pArg)",4314,4362
+39,13,255,2,44,"HtmlDelScrollbars@46-89@./src/htmlstyle.c","./src/htmlstyle.c","HtmlDelScrollbars","HtmlDelScrollbars( pTree , pNode)",46,89
+21,7,121,2,22,"HtmlDelStackingInfo@92-113@./src/htmlstyle.c","./src/htmlstyle.c","HtmlDelStackingInfo","HtmlDelStackingInfo( pTree , pElem)",92,113
+18,6,77,1,27,"stackType@120-146@./src/htmlstyle.c","./src/htmlstyle.c","stackType","stackType( p)",120,146
+23,3,139,2,29,"addStackingInfo@149-177@./src/htmlstyle.c","./src/htmlstyle.c","addStackingInfo","addStackingInfo( pTree , pElem)",149,177
+18,6,106,3,18,"scoreStack@209-226@./src/htmlstyle.c","./src/htmlstyle.c","scoreStack","scoreStack( pParentStack , pStack , eStack)",209,226
+11,4,60,2,11,"setStackingContext@232-242@./src/htmlstyle.c","./src/htmlstyle.c","setStackingContext","setStackingContext( p , ppOut)",232,242
+78,21,550,2,98,"stackCompare@246-343@./src/htmlstyle.c","./src/htmlstyle.c","stackCompare","stackCompare( pVoidLeft , pVoidRight) const const",246,343
+17,5,120,3,19,"checkStackSort@378-396@./src/htmlstyle.c","./src/htmlstyle.c","checkStackSort","checkStackSort( pTree , aStack , nStack)",378,396
+41,10,333,1,48,"HtmlRestackNodes@417-464@./src/htmlstyle.c","./src/htmlstyle.c","HtmlRestackNodes","HtmlRestackNodes( pTree)",417,464
+26,4,159,3,58,"styleNode@480-537@./src/htmlstyle.c","./src/htmlstyle.c","styleNode","styleNode( pTree , pNode , clientData)",480,537
+88,30,629,3,116,"styleApply@570-685@./src/htmlstyle.c","./src/htmlstyle.c","styleApply","styleApply( pTree , pNode , p)",570,685
+23,2,157,3,25,"addCounterEntry@687-711@./src/htmlstyle.c","./src/htmlstyle.c","addCounterEntry","addCounterEntry( p , zName , iValue) const",687,711
+43,12,301,2,56,"HtmlStyleHandleCounters@714-769@./src/htmlstyle.c","./src/htmlstyle.c","HtmlStyleHandleCounters","HtmlStyleHandleCounters( pTree , pComputed)",714,769
+21,5,130,4,25,"HtmlStyleCounters@771-795@./src/htmlstyle.c","./src/htmlstyle.c","HtmlStyleCounters","HtmlStyleCounters( pTree , zName , aValue , nValue) const",771,795
+13,3,86,2,15,"HtmlStyleCounter@797-811@./src/htmlstyle.c","./src/htmlstyle.c","HtmlStyleCounter","HtmlStyleCounter( pTree , zName) const",797,811
+18,2,126,2,20,"HtmlStyleApply@827-846@./src/htmlstyle.c","./src/htmlstyle.c","HtmlStyleApply","HtmlStyleApply( pTree , pNode)",827,846
+14,2,74,4,14,"HtmlStyleSyntaxErrs@862-875@./src/htmlstyle.c","./src/htmlstyle.c","HtmlStyleSyntaxErrs","HtmlStyleSyntaxErrs( clientData , interp , objc , objv)",862,875
+5,1,32,2,5,"Html_PostscriptY@97-101@./src/htmlPs.c","./src/htmlPs.c","Html_PostscriptY","Html_PostscriptY( double y , TkPostscriptInfo * psinfo)",97,101
+363,84,2477,4,486,"HtmlPostscript@517-1002@./src/htmlPs.c","./src/htmlPs.c","HtmlPostscript","HtmlPostscript( HtmlWidget * htmlPtr , Tcl_Interp * interp , int argc , char ** argv)",517,1002
+46,12,197,3,49,"GetPostscriptPoints@1028-1076@./src/htmlPs.c","./src/htmlPs.c","GetPostscriptPoints","GetPostscriptPoints( Tcl_Interp * interp , char * string , double * doublePtr)",1028,1076
+50,8,346,3,66,"Html_PostscriptFont@1079-1144@./src/htmlPs.c","./src/htmlPs.c","Html_PostscriptFont","Html_PostscriptFont( Tcl_Interp * interp , TkPostscriptInfo * psInfo , Tk_Font tkfont)",1079,1144
+57,8,386,8,72,"Html_PostscriptBitmap@1147-1218@./src/htmlPs.c","./src/htmlPs.c","Html_PostscriptBitmap","Html_PostscriptBitmap( Tcl_Interp * interp , Tk_Window tkwin , TkPostscriptInfo * psInfo , Pixmap bitmap , int startX , int startY , int width , int height)",1147,1218
+30,4,202,3,55,"Html_PostscriptColor@1221-1275@./src/htmlPs.c","./src/htmlPs.c","Html_PostscriptColor","Html_PostscriptColor( Tcl_Interp * interp , TkPostscriptInfo * psInfo , XColor * colorPtr)",1221,1275
+24,3,176,4,39,"Html_PostscriptStipple@1278-1316@./src/htmlPs.c","./src/htmlPs.c","Html_PostscriptStipple","Html_PostscriptStipple( Tcl_Interp * interp , Tk_Window tkwin , TkPostscriptInfo * psInfo , Pixmap bitmap)",1278,1316
+45,8,325,5,86,"TextToPostscript@1319-1404@./src/htmlPs.c","./src/htmlPs.c","TextToPostscript","TextToPostscript( Tcl_Interp * interp , HtmlWidget * htmlPtr , HtmlBlock * pB , int prepass , TkPostscriptInfo * psInfo)",1319,1404
+37,12,250,2,59,"HtmlPsOutText@1407-1465@./src/htmlPs.c","./src/htmlPs.c","HtmlPsOutText","HtmlPsOutText( Tcl_Interp * interp , HtmlBlock * pBlock)",1407,1465
+30,9,166,5,33,"HtmlPostscriptProc@1468-1500@./src/htmlPs.c","./src/htmlPs.c","HtmlPostscriptProc","HtmlPostscriptProc( Tcl_Interp * interp , HtmlWidget * htmlPtr , HtmlBlock * pB , int prepass , TkPostscriptInfo * psInfo)",1468,1500
+18,2,167,5,18,"TkImageGetColor@1503-1520@./src/htmlPs.c","./src/htmlPs.c","TkImageGetColor","TkImageGetColor( TkColormapData * cdata , unsigned long pixel , double * red , double * green , double * blue)",1503,1520
+187,40,1273,8,231,"HtmlTkPostscriptImage@1523-1753@./src/htmlPs.c","./src/htmlPs.c","HtmlTkPostscriptImage","HtmlTkPostscriptImage( Tcl_Interp * interp , Tk_Window tkwin , TkPostscriptInfo * psInfo , XImage * ximage , int x , int y , int width , int height)",1523,1753
+49,8,366,9,74,"HtmlTk_PostscriptImage@1756-1829@./src/htmlPs.c","./src/htmlPs.c","HtmlTk_PostscriptImage","HtmlTk_PostscriptImage( Tk_Image image , Tcl_Interp * interp , Tk_Window tkwin , TkPostscriptInfo * psinfo , int x , int y , int width , int height , int prepass)",1756,1829
+6,1,25,1,6,"Tkhtmlpr_Init@1838-1843@./src/htmlPs.c","./src/htmlPs.c","Tkhtmlpr_Init","Tkhtmlpr_Init( Tcl_Interp * interp)",1838,1843
+10,1,51,1,10,"HtmlImageServerInit@159-168@./src/htmlimage.c","./src/htmlimage.c","HtmlImageServerInit","HtmlImageServerInit( pTree)",159,168
+10,1,53,1,12,"HtmlImageServerShutdown@187-198@./src/htmlimage.c","./src/htmlimage.c","HtmlImageServerShutdown","HtmlImageServerShutdown( pTree)",187,198
+12,1,61,8,12,"photoputblock@221-232@./src/htmlimage.c","./src/htmlimage.c","photoputblock","photoputblock( interp , handle , blockPtr , x , y , width , height , compRule)",221,232
+23,3,137,1,24,"freeTile@235-258@./src/htmlimage.c","./src/htmlimage.c","freeTile","freeTile( pImage)",235,258
+23,5,136,3,23,"imageChangedCb@265-287@./src/htmlimage.c","./src/htmlimage.c","imageChangedCb","imageChangedCb( pTree , pNode , clientData)",265,287
+6,1,24,1,6,"asyncPixmapify@289-294@./src/htmlimage.c","./src/htmlimage.c","asyncPixmapify","asyncPixmapify( clientData)",289,294
+27,4,182,1,28,"getImageCompressed@297-324@./src/htmlimage.c","./src/htmlimage.c","getImageCompressed","getImageCompressed( pImage)",297,324
+8,2,31,1,8,"freeImageCompressed@327-334@./src/htmlimage.c","./src/htmlimage.c","freeImageCompressed","freeImageCompressed( pImage)",327,334
+34,8,227,7,46,"imageChanged@352-397@./src/htmlimage.c","./src/htmlimage.c","imageChanged","imageChanged( clientData , x , y , width , height , imgWidth , imgHeight)",352,397
+76,15,460,2,93,"HtmlImageServerGet@424-516@./src/htmlimage.c","./src/htmlimage.c","HtmlImageServerGet","HtmlImageServerGet( p , zUrl) const",424,516
+10,2,42,1,10,"HtmlImageUnscaledName@535-544@./src/htmlimage.c","./src/htmlimage.c","HtmlImageUnscaledName","HtmlImageUnscaledName( pImage)",535,544
+8,3,44,3,8,"HtmlImageSize@547-554@./src/htmlimage.c","./src/htmlimage.c","HtmlImageSize","HtmlImageSize( pImage , pWidth , pHeight)",547,554
+58,21,389,4,70,"HtmlImageScale@594-663@./src/htmlimage.c","./src/htmlimage.c","HtmlImageScale","HtmlImageScale( pImage , pWidth , pHeight , doScale)",594,663
+111,12,879,1,140,"HtmlImageImage@666-805@./src/htmlimage.c","./src/htmlimage.c","HtmlImageImage","HtmlImageImage( pImage)",666,805
+18,3,106,3,23,"tilesize@824-846@./src/htmlimage.c","./src/htmlimage.c","tilesize","tilesize( pImage , pW , pH)",824,846
+42,6,270,3,48,"HtmlImageTilePixmap@849-896@./src/htmlimage.c","./src/htmlimage.c","HtmlImageTilePixmap","HtmlImageTilePixmap( pImage , pW , pH)",849,896
+42,10,286,1,49,"HtmlImagePixmap@912-960@./src/htmlimage.c","./src/htmlimage.c","HtmlImagePixmap","HtmlImagePixmap( pImage)",912,960
+59,12,340,1,67,"HtmlImageFree@963-1029@./src/htmlimage.c","./src/htmlimage.c","HtmlImageFree","HtmlImageFree( pImage)",963,1029
+7,2,21,1,7,"HtmlImageRef@1032-1038@./src/htmlimage.c","./src/htmlimage.c","HtmlImageRef","HtmlImageRef( pImage)",1032,1038
+5,1,15,1,5,"HtmlImageUrl@1041-1045@./src/htmlimage.c","./src/htmlimage.c","HtmlImageUrl","HtmlImageUrl( pImage)",1041,1045
+7,3,31,1,7,"HtmlImageCheck@1047-1053@./src/htmlimage.c","./src/htmlimage.c","HtmlImageCheck","HtmlImageCheck( pImage)",1047,1053
+45,16,319,1,52,"HtmlImageAlphaChannel@1071-1122@./src/htmlimage.c","./src/htmlimage.c","HtmlImageAlphaChannel","HtmlImageAlphaChannel( pImage)",1071,1122
+73,7,514,3,92,"HtmlImageTile@1137-1228@./src/htmlimage.c","./src/htmlimage.c","HtmlImageTile","HtmlImageTile( pImage , pW , pH)",1137,1228
+5,1,18,1,5,"HtmlImageServerSuspendGC@1249-1253@./src/htmlimage.c","./src/htmlimage.c","HtmlImageServerSuspendGC","HtmlImageServerSuspendGC( pTree)",1249,1253
+27,7,158,1,29,"HtmlImageServerDoGC@1255-1283@./src/htmlimage.c","./src/htmlimage.c","HtmlImageServerDoGC","HtmlImageServerDoGC( pTree)",1255,1283
+12,2,58,1,14,"HtmlImageServerCount@1302-1315@./src/htmlimage.c","./src/htmlimage.c","HtmlImageServerCount","HtmlImageServerCount( pTree)",1302,1315
+51,6,425,4,60,"HtmlXImageToImage@1341-1400@./src/htmlimage.c","./src/htmlimage.c","HtmlXImageToImage","HtmlXImageToImage( pTree , pXImage , w , h)",1341,1400
+8,1,29,4,8,"HtmlXImageToImage@1402-1409@./src/htmlimage.c","./src/htmlimage.c","HtmlXImageToImage","HtmlXImageToImage( pTree , pXImage , w , h)",1402,1409
+43,9,312,4,47,"HtmlImageServerReport@1434-1480@./src/htmlimage.c","./src/htmlimage.c","HtmlImageServerReport","HtmlImageServerReport( clientData , interp , objc , objv)",1434,1480
+10,2,65,2,33,"main@70-102@./src/main.c","./src/main.c","main","main( argc , argv)",70,102
+24,6,131,1,36,"Tcl_AppInit@125-160@./src/main.c","./src/main.c","Tcl_AppInit","Tcl_AppInit( interp)",125,160
+36,4,247,2,43,"ResAlloc@178-220@./src/restrack.c","./src/restrack.c","ResAlloc","ResAlloc( v1 , v2)",178,220
+25,4,180,2,34,"ResFree@240-273@./src/restrack.c","./src/restrack.c","ResFree","ResFree( v1 , v2)",240,273
+24,6,171,0,26,"ResDump@292-317@./src/restrack.c","./src/restrack.c","ResDump","ResDump()",292,317
+8,2,38,0,8,"initMallocHash@369-376@./src/restrack.c","./src/restrack.c","initMallocHash","initMallocHash()",369,376
+24,2,141,3,27,"insertMallocHash@395-421@./src/restrack.c","./src/restrack.c","insertMallocHash","insertMallocHash( zTopic , p , nBytes) const",395,421
+22,5,148,2,26,"freeMallocHash@441-466@./src/restrack.c","./src/restrack.c","freeMallocHash","freeMallocHash( p , nBytes)",441,466
+25,2,172,4,27,"HtmlHeapDebug@499-525@./src/restrack.c","./src/restrack.c","HtmlHeapDebug","HtmlHeapDebug( clientData , interp , objc , objv)",499,525
+18,2,111,4,20,"Rt_AllocCommand@555-574@./src/restrack.c","./src/restrack.c","Rt_AllocCommand","Rt_AllocCommand( clientData , interp , objc , objv)",555,574
+15,2,115,2,17,"Rt_Alloc@592-608@./src/restrack.c","./src/restrack.c","Rt_Alloc","Rt_Alloc( zTopic , n) const",592,608
+14,2,109,1,14,"Rt_Free@626-639@./src/restrack.c","./src/restrack.c","Rt_Free","Rt_Free( p)",626,639
+13,2,80,3,13,"Rt_Realloc@657-669@./src/restrack.c","./src/restrack.c","Rt_Realloc","Rt_Realloc( zTopic , p , n) const",657,669
+8,1,41,4,8,"HtmlResolveCmd@28-35@./src/htmlcmd.c","./src/htmlcmd.c","HtmlResolveCmd","HtmlResolveCmd( clientData , interp , argc , argv) const",28,35
+17,2,115,4,18,"HtmlCgetObjCmd@43-60@./src/htmlcmd.c","./src/htmlcmd.c","HtmlCgetObjCmd","HtmlCgetObjCmd( clientData , interp , objc , objv)",43,60
+13,1,65,4,13,"HtmlClearCmd@69-81@./src/htmlcmd.c","./src/htmlcmd.c","HtmlClearCmd","HtmlClearCmd( clientData , interp , argc , argv) const",69,81
+30,6,200,4,33,"HtmlConfigCmd@89-121@./src/htmlcmd.c","./src/htmlcmd.c","HtmlConfigCmd","HtmlConfigCmd( clientData , interp , objc , objv)",89,121
+16,5,92,3,16,"HtmlAttrElem@125-140@./src/htmlcmd.c","./src/htmlcmd.c","HtmlAttrElem","HtmlAttrElem( htmlPtr , name , value) const",125,140
+25,5,129,4,25,"HtmlNamesCmd@148-172@./src/htmlcmd.c","./src/htmlcmd.c","HtmlNamesCmd","HtmlNamesCmd( clientData , interp , argc , argv) const",148,172
+27,4,148,1,27,"HtmlAdvanceLayout@175-201@./src/htmlcmd.c","./src/htmlcmd.c","HtmlAdvanceLayout","HtmlAdvanceLayout( htmlPtr)",175,201
+72,16,488,4,92,"HtmlParseCmd@224-315@./src/htmlcmd.c","./src/htmlcmd.c","HtmlParseCmd","HtmlParseCmd( clientData , interp , objc , objv)",224,315
+9,1,39,4,9,"HtmlLayoutCmd@318-326@./src/htmlcmd.c","./src/htmlcmd.c","HtmlLayoutCmd","HtmlLayoutCmd( clientData , interp , argc , argv) const",318,326
+36,8,218,4,37,"HtmlHrefCmd@337-373@./src/htmlcmd.c","./src/htmlcmd.c","HtmlHrefCmd","HtmlHrefCmd( clientData , interp , objc , objv)",337,373
+45,8,208,4,45,"HtmlXviewCmd@381-425@./src/htmlcmd.c","./src/htmlcmd.c","HtmlXviewCmd","HtmlXviewCmd( clientData , interp , argc , argv) const",381,425
+57,12,282,4,57,"HtmlYviewCmd@436-492@./src/htmlcmd.c","./src/htmlcmd.c","HtmlYviewCmd","HtmlYviewCmd( clientData , interp , argc , argv) const",436,492
+52,9,244,1,53,"UpdateSelection@501-553@./src/htmlcmd.c","./src/htmlcmd.c","UpdateSelection","UpdateSelection( htmlPtr)",501,553
+60,13,301,2,61,"HtmlUpdateSelection@565-625@./src/htmlcmd.c","./src/htmlcmd.c","HtmlUpdateSelection","HtmlUpdateSelection( htmlPtr , forceUpdate)",565,625
+10,2,53,1,10,"HtmlLostSelection@628-637@./src/htmlcmd.c","./src/htmlcmd.c","HtmlLostSelection","HtmlLostSelection( clientData)",628,637
+45,13,295,4,47,"HtmlSelectionSetCmd@643-689@./src/htmlcmd.c","./src/htmlcmd.c","HtmlSelectionSetCmd","HtmlSelectionSetCmd( clientData , interp , argc , argv) const",643,689
+14,1,73,4,14,"HtmlSelectionClearCmd@695-708@./src/htmlcmd.c","./src/htmlcmd.c","HtmlSelectionClearCmd","HtmlSelectionClearCmd( clientData , interp , argc , argv) const",695,708
+15,3,70,1,17,"HtmlUpdateInsert@719-735@./src/htmlcmd.c","./src/htmlcmd.c","HtmlUpdateInsert","HtmlUpdateInsert( htmlPtr)",719,735
+28,6,184,4,28,"HtmlTokenHandlerCmd@741-768@./src/htmlcmd.c","./src/htmlcmd.c","HtmlTokenHandlerCmd","HtmlTokenHandlerCmd( clientData , interp , argc , argv) const",741,768
+23,5,134,4,24,"HtmlIndexCmd@774-797@./src/htmlcmd.c","./src/htmlcmd.c","HtmlIndexCmd","HtmlIndexCmd( clientData , interp , argc , argv) const",774,797
+31,5,177,4,31,"HtmlInsertCmd@803-833@./src/htmlcmd.c","./src/htmlcmd.c","HtmlInsertCmd","HtmlInsertCmd( clientData , interp , argc , argv) const",803,833
+22,5,155,4,23,"HtmlDebugDumpCmd@839-861@./src/htmlcmd.c","./src/htmlcmd.c","HtmlDebugDumpCmd","HtmlDebugDumpCmd( clientData , interp , argc , argv) const",839,861
+10,1,48,4,10,"HtmlDebugTestPtCmd@867-876@./src/htmlcmd.c","./src/htmlcmd.c","HtmlDebugTestPtCmd","HtmlDebugTestPtCmd( clientData , interp , argc , argv) const",867,876
+90,24,583,5,111,"SwprocRt@35-145@./src/swproc.c","./src/swproc.c","SwprocRt","SwprocRt( interp , objc , objv , aConf , apObj)",35,145
+11,3,50,2,11,"SwprocCleanup@161-171@./src/swproc.c","./src/swproc.c","SwprocCleanup","SwprocCleanup( apObj , nObj)",161,171
+82,14,592,4,90,"swproc_rtCmd@187-276@./src/swproc.c","./src/swproc.c","swproc_rtCmd","swproc_rtCmd( clientData , interp , objc , objv)",187,276
+16,1,40,1,16,"SwprocInit@326-341@./src/swproc.c","./src/swproc.c","SwprocInit","SwprocInit( interp)",326,341
+22,17,212,1,28,"readUriEncodedByte@55-82@./src/htmldecode.c","./src/htmldecode.c","readUriEncodedByte","readUriEncodedByte( unsigned char ** pzIn)",55,82
+25,2,745,1,30,"read6bits@84-113@./src/htmldecode.c","./src/htmldecode.c","read6bits","read6bits( unsigned char ** pzIn)",84,113
+50,14,372,4,57,"HtmlDecode@134-190@./src/htmldecode.c","./src/htmldecode.c","HtmlDecode","HtmlDecode( clientData , interp , objc , objv)",134,190
+45,5,524,4,52,"HtmlEncode@210-261@./src/htmldecode.c","./src/htmldecode.c","HtmlEncode","HtmlEncode( clientData , interp , objc , objv)",210,261
+51,10,614,3,56,"allocEscapedComponent@264-319@./src/htmldecode.c","./src/htmldecode.c","allocEscapedComponent","allocEscapedComponent( zInput , nInput , isQuery) const",264,319
+23,3,138,4,28,"HtmlEscapeUriComponent@337-364@./src/htmldecode.c","./src/htmldecode.c","HtmlEscapeUriComponent","HtmlEscapeUriComponent( clientData , interp , objc , objv)",337,364
+69,17,483,1,85,"objToUri@387-471@./src/htmldecode.c","./src/htmldecode.c","objToUri","objToUri( pObj)",387,471
+31,5,192,2,32,"combinePath@474-505@./src/htmldecode.c","./src/htmldecode.c","combinePath","combinePath( zOne , zTwo) const const",474,505
+29,17,210,1,37,"cleanPath@508-544@./src/htmldecode.c","./src/htmldecode.c","cleanPath","cleanPath( zPath)",508,544
+30,15,204,5,30,"makeUri@547-576@./src/htmldecode.c","./src/htmldecode.c","makeUri","makeUri( zScheme , zAuthority , zPath , zQuery , zFragment)",547,576
+44,8,261,2,51,"uriResolve@579-629@./src/htmldecode.c","./src/htmldecode.c","uriResolve","uriResolve( pBase , pObjRel)",579,629
+107,15,660,4,117,"uriObjCmd@655-771@./src/htmldecode.c","./src/htmldecode.c","uriObjCmd","uriObjCmd( clientData , interp , objc , objv)",655,771
+5,1,14,1,5,"uriObjDel@774-778@./src/htmldecode.c","./src/htmldecode.c","uriObjDel","uriObjDel( clientData)",774,778
+19,2,116,4,22,"HtmlCreateUri@797-818@./src/htmldecode.c","./src/htmldecode.c","HtmlCreateUri","HtmlCreateUri( clientData , interp , objc , objv)",797,818
+7,1,35,1,7,"CHECK_INTEGER_PLAUSIBILITY@175-181@./src/htmllayout.h","./src/htmllayout.h","CHECK_INTEGER_PLAUSIBILITY","CHECK_INTEGER_PLAUSIBILITY( x)",175,181
+16,3,67,1,18,"EscHash@381-398@./src/htmltext.c","./src/htmltext.c","EscHash","EscHash( zName) const",381,398
+25,5,141,0,26,"EscHashStats@407-432@./src/htmltext.c","./src/htmltext.c","EscHashStats","EscHashStats()",407,432
+15,4,103,0,23,"EscInit@438-460@./src/htmltext.c","./src/htmltext.c","EscInit","EscInit()",438,460
+18,4,94,2,24,"translateNumericEscape@570-593@./src/htmltext.c","./src/htmltext.c","translateNumericEscape","translateNumericEscape( z , pI)",570,593
+84,23,511,1,116,"HtmlTranslateEscapes@606-721@./src/htmltext.c","./src/htmltext.c","HtmlTranslateEscapes","HtmlTranslateEscapes( z)",606,721
+37,5,307,3,41,"getWidgetTag@724-764@./src/htmltext.c","./src/htmltext.c","getWidgetTag","getWidgetTag( pTree , zTag , pIsNew) const",724,764
+55,15,355,4,63,"orderIndexPair@767-829@./src/htmltext.c","./src/htmltext.c","orderIndexPair","orderIndexPair( ppA , piA , ppB , piB)",767,829
+24,5,121,2,29,"removeTagFromNode@845-873@./src/htmltext.c","./src/htmltext.c","removeTagFromNode","removeTagFromNode( pTextNode , pTag)",845,873
+17,3,87,3,17,"findTagInNode@876-892@./src/htmltext.c","./src/htmltext.c","findTagInNode","findTagInNode( pTextNode , pTag , ppPtr)",876,892
+29,10,175,3,30,"getOverlap@918-947@./src/htmltext.c","./src/htmltext.c","getOverlap","getOverlap( pTagged , iFrom , iTo)",918,947
+109,30,640,3,125,"tagAddRemoveCallback@951-1075@./src/htmltext.c","./src/htmltext.c","tagAddRemoveCallback","tagAddRemoveCallback( pTree , pNode , clientData)",951,1075
+54,11,381,5,63,"HtmlTagAddRemoveCmd@1078-1140@./src/htmltext.c","./src/htmltext.c","HtmlTagAddRemoveCmd","HtmlTagAddRemoveCmd( clientData , interp , objc , objv , isAdd)",1078,1140
+24,3,159,4,29,"HtmlTagConfigureCmd@1143-1171@./src/htmltext.c","./src/htmltext.c","HtmlTagConfigureCmd","HtmlTagConfigureCmd( clientData , interp , objc , objv)",1143,1171
+12,2,62,3,12,"tagDeleteCallback@1180-1191@./src/htmltext.c","./src/htmltext.c","tagDeleteCallback","tagDeleteCallback( pTree , pNode , clientData)",1180,1191
+28,4,175,4,33,"HtmlTagDeleteCmd@1194-1226@./src/htmltext.c","./src/htmltext.c","HtmlTagDeleteCmd","HtmlTagDeleteCmd( clientData , interp , objc , objv)",1194,1226
+11,2,47,1,11,"HtmlTagCleanupNode@1229-1239@./src/htmltext.c","./src/htmltext.c","HtmlTagCleanupNode","HtmlTagCleanupNode( pTextNode)",1229,1239
+13,2,88,1,13,"HtmlTagCleanupTree@1242-1254@./src/htmltext.c","./src/htmltext.c","HtmlTagCleanupTree","HtmlTagCleanupTree( pTree)",1242,1254
+14,1,78,4,14,"addTextMapping@1286-1299@./src/htmltext.c","./src/htmltext.c","addTextMapping","addTextMapping( pText , pTextNode , iNodeIndex , iStrIndex)",1286,1299
+54,11,330,3,60,"initHtmlText_TextNode@1302-1361@./src/htmltext.c","./src/htmltext.c","initHtmlText_TextNode","initHtmlText_TextNode( pTree , pTextNode , pInit)",1302,1361
+29,8,161,3,37,"initHtmlText_Elem@1364-1400@./src/htmltext.c","./src/htmltext.c","initHtmlText_Elem","initHtmlText_Elem( pTree , pElem , pInit)",1364,1400
+15,2,113,1,15,"initHtmlText@1420-1434@./src/htmltext.c","./src/htmltext.c","initHtmlText","initHtmlText( pTree)",1420,1434
+16,3,79,1,17,"HtmlTextInvalidate@1437-1453@./src/htmltext.c","./src/htmltext.c","HtmlTextInvalidate","HtmlTextInvalidate( pTree)",1437,1453
+15,2,80,4,15,"HtmlTextTextCmd@1456-1470@./src/htmltext.c","./src/htmltext.c","HtmlTextTextCmd","HtmlTextTextCmd( clientData , interp , objc , objv)",1456,1470
+43,10,304,4,49,"HtmlTextIndexCmd@1493-1541@./src/htmltext.c","./src/htmltext.c","HtmlTextIndexCmd","HtmlTextIndexCmd( clientData , interp , objc , objv)",1493,1541
+41,9,264,4,50,"HtmlTextOffsetCmd@1564-1613@./src/htmltext.c","./src/htmltext.c","HtmlTextOffsetCmd","HtmlTextOffsetCmd( clientData , interp , objc , objv)",1564,1613
+40,8,277,4,44,"HtmlTextBboxCmd@1631-1674@./src/htmltext.c","./src/htmltext.c","HtmlTextBboxCmd","HtmlTextBboxCmd( clientData , interp , objc , objv)",1631,1674
+34,5,285,3,36,"utf8Read@1781-1816@./src/htmltext.c","./src/htmltext.c","utf8Read","utf8Read( const unsigned char * z , const unsigned char * zTerm , const unsigned char ** pzNext)",1781,1816
+14,6,108,2,16,"tokenLength@1837-1852@./src/htmltext.c","./src/htmltext.c","tokenLength","tokenLength( zToken , zEnd) const const",1837,1852
+90,25,592,5,130,"populateTextNode@1876-2005@./src/htmltext.c","./src/htmltext.c","populateTextNode","populateTextNode( n , z , pText , pnToken , pnText)",1876,2005
+57,15,395,5,86,"HtmlTextSet@2008-2093@./src/htmltext.c","./src/htmltext.c","HtmlTextSet","HtmlTextSet( pText , n , z , isTrimEnd , isTrimStart) const",2008,2093
+11,1,53,4,14,"HtmlTextNew@2096-2109@./src/htmltext.c","./src/htmltext.c","HtmlTextNew","HtmlTextNew( n , z , isTrimEnd , isTrimStart) const",2096,2109
+6,1,19,2,7,"HtmlTextCombine@2124-2130@./src/htmltext.c","./src/htmltext.c","HtmlTextCombine","HtmlTextCombine( p1 , p2)",2124,2130
+5,1,15,1,5,"HtmlTextFree@2149-2153@./src/htmltext.c","./src/htmltext.c","HtmlTextFree","HtmlTextFree( p)",2149,2153
+8,1,34,2,8,"HtmlTextIterFirst@2156-2163@./src/htmltext.c","./src/htmltext.c","HtmlTextIterFirst","HtmlTextIterFirst( pTextNode , pTextIter)",2156,2163
+6,2,39,1,6,"HtmlTextIterIsValid@2166-2171@./src/htmltext.c","./src/htmltext.c","HtmlTextIterIsValid","HtmlTextIterIsValid( pTextIter)",2166,2171
+22,7,158,1,26,"HtmlTextIterNext@2174-2199@./src/htmltext.c","./src/htmltext.c","HtmlTextIterNext","HtmlTextIterNext( pTextIter)",2174,2199
+8,1,40,1,8,"HtmlTextIterIsLast@2202-2209@./src/htmltext.c","./src/htmltext.c","HtmlTextIterIsLast","HtmlTextIterIsLast( pTextIter)",2202,2209
+7,2,47,1,7,"HtmlTextIterType@2212-2218@./src/htmltext.c","./src/htmltext.c","HtmlTextIterType","HtmlTextIterType( pTextIter)",2212,2218
+10,2,83,1,10,"HtmlTextIterLength@2221-2230@./src/htmltext.c","./src/htmltext.c","HtmlTextIterLength","HtmlTextIterLength( pTextIter)",2221,2230
+5,1,30,1,5,"HtmlTextIterData@2233-2237@./src/htmltext.c","./src/htmltext.c","HtmlTextIterData","HtmlTextIterData( pTextIter)",2233,2237
+16,4,96,3,17,"HtmlCssAddDynamic@26-42@./src/cssdynamic.c","./src/cssdynamic.c","HtmlCssAddDynamic","HtmlCssAddDynamic( pElem , pSelector , isSet)",26,42
+11,2,47,1,11,"HtmlCssFreeDynamics@45-55@./src/cssdynamic.c","./src/cssdynamic.c","HtmlCssFreeDynamics","HtmlCssFreeDynamics( pElem)",45,55
+18,5,107,3,18,"checkDynamicCb@59-76@./src/cssdynamic.c","./src/cssdynamic.c","checkDynamicCb","checkDynamicCb( pTree , pNode , clientData)",59,76
+18,5,127,1,18,"HtmlCssCheckDynamic@79-96@./src/cssdynamic.c","./src/cssdynamic.c","HtmlCssCheckDynamic","HtmlCssCheckDynamic( pTree)",79,96
+17,3,102,2,17,"HtmlCssTclNodeDynamics@99-115@./src/cssdynamic.c","./src/cssdynamic.c","HtmlCssTclNodeDynamics","HtmlCssTclNodeDynamics( interp , pNode)",99,115
+7,1,26,1,7,"Et_AppInit@18-24@./src/htmlwish.c","./src/htmlwish.c","Et_AppInit","Et_AppInit( interp)",18,24
+36,5,262,6,40,"function_construct@36-75@./hv/hv3function.c","./hv/hv3function.c","function_construct","function_construct( interp , self , thisobj , argc , argv , res)",36,75
+20,1,134,2,24,"interpFunctionInit@92-115@./hv/hv3function.c","./hv/hv3function.c","interpFunctionInit","interpFunctionInit( pInterp , pObj)",92,115
+17,3,106,3,17,"createBridgeObject@62-78@./hv/hv3bridge.c","./hv/hv3bridge.c","createBridgeObject","createBridgeObject( pInterp , pForiegnInterp , pForiegnObj)",62,78
+15,2,93,4,16,"bridgeCopyValue@94-109@./hv/hv3bridge.c","./hv/hv3bridge.c","bridgeCopyValue","bridgeCopyValue( pInterp , pValue , pForiegnInterp , pForiegnValue)",94,109
+26,6,165,3,30,"bridgeHandleException@123-152@./hv/hv3bridge.c","./hv/hv3bridge.c","bridgeHandleException","bridgeHandleException( pInterp , pForiegnInterp , pForiegnTry)",123,152
+21,2,140,4,21,"Bridge_Get@156-176@./hv/hv3bridge.c","./hv/hv3bridge.c","Bridge_Get","Bridge_Get( pInterp , pObj , pProp , pRes)",156,176
+22,2,149,5,23,"Bridge_Put@179-201@./hv/hv3bridge.c","./hv/hv3bridge.c","Bridge_Put","Bridge_Put( pInterp , pObj , pProp , pValue , flags)",179,201
+9,1,60,3,9,"Bridge_CanPut@204-212@./hv/hv3bridge.c","./hv/hv3bridge.c","Bridge_CanPut","Bridge_CanPut( pInterp , pObj , pProp)",204,212
+9,1,60,3,9,"Bridge_HasProperty@215-223@./hv/hv3bridge.c","./hv/hv3bridge.c","Bridge_HasProperty","Bridge_HasProperty( pInterp , pObj , pProp)",215,223
+19,2,117,3,19,"Bridge_Delete@226-244@./hv/hv3bridge.c","./hv/hv3bridge.c","Bridge_Delete","Bridge_Delete( pInterp , pObj , pProp)",226,244
+11,1,76,4,11,"Bridge_DefaultValue@247-257@./hv/hv3bridge.c","./hv/hv3bridge.c","Bridge_DefaultValue","Bridge_DefaultValue( pInterp , pObj , pHint , pRes)",247,257
+12,1,82,2,14,"Bridge_Enumerator@260-273@./hv/hv3bridge.c","./hv/hv3bridge.c","Bridge_Enumerator","Bridge_Enumerator( pInterp , pObj)",260,273
+43,5,325,7,47,"bridgeCallOrConstruct@276-322@./hv/hv3bridge.c","./hv/hv3bridge.c","bridgeCallOrConstruct","bridgeCallOrConstruct( pInterp , pObj , pThis , argc , argv , pRes , isConstruct)",276,322
+10,1,62,6,10,"Bridge_Construct@325-334@./hv/hv3bridge.c","./hv/hv3bridge.c","Bridge_Construct","Bridge_Construct( pInterp , pObj , pThis , argc , argv , pRes)",325,334
+10,1,62,6,10,"Bridge_Call@337-346@./hv/hv3bridge.c","./hv/hv3bridge.c","Bridge_Call","Bridge_Call( pInterp , pObj , pThis , argc , argv , pRes)",337,346
+10,1,68,3,10,"Bridge_HasInstance@349-358@./hv/hv3bridge.c","./hv/hv3bridge.c","Bridge_HasInstance","Bridge_HasInstance( pInterp , pObj , pInstance)",349,358
+7,1,40,2,7,"Bridge_GetSecDomain@361-367@./hv/hv3bridge.c","./hv/hv3bridge.c","Bridge_GetSecDomain","Bridge_GetSecDomain( pInterp , pObj)",361,367
+8,1,48,3,8,"BridgeEnum_Next@370-377@./hv/hv3bridge.c","./hv/hv3bridge.c","BridgeEnum_Next","BridgeEnum_Next( pSeeInterp , pEnum , pFlags)",370,377
+17,1,40,0,17,"getBridgeVtbl@380-396@./hv/hv3bridge.c","./hv/hv3bridge.c","getBridgeVtbl","getBridgeVtbl()",380,396
+7,1,20,0,7,"getBridgeEnumVtbl@399-405@./hv/hv3bridge.c","./hv/hv3bridge.c","getBridgeEnumVtbl","getBridgeEnumVtbl()",399,405
+15,3,63,3,18,"valueToBoolean@67-84@./hv/hv3events.c","./hv/hv3events.c","valueToBoolean","valueToBoolean( interp , pValue , eDef)",67,84
+10,1,56,4,10,"setBooleanFlag@100-109@./hv/hv3events.c","./hv/hv3events.c","setBooleanFlag","setBooleanFlag( interp , pObj , zName , v) const",100,109
+9,1,52,3,9,"getBooleanFlag@125-133@./hv/hv3events.c","./hv/hv3events.c","getBooleanFlag","getBooleanFlag( interp , pObj , zName) const",125,133
+9,2,45,2,9,"getEventList@149-157@./hv/hv3events.c","./hv/hv3events.c","getEventList","getEventList( interp , pObj)",149,157
+21,3,131,6,24,"objectCall@160-183@./hv/hv3events.c","./hv/hv3events.c","objectCall","objectCall( pInterp , pObj , pThis , argc , argv , pRes)",160,183
+59,15,456,5,75,"runEvent@199-273@./hv/hv3events.c","./hv/hv3events.c","runEvent","runEvent( interp , pTarget , pEvent , zType , isCapture)",199,273
+8,1,51,6,8,"preventDefaultFunc@289-296@./hv/hv3events.c","./hv/hv3events.c","preventDefaultFunc","preventDefaultFunc( interp , self , thisobj , argc , argv , res)",289,296
+8,1,51,6,8,"stopPropagationFunc@312-319@./hv/hv3events.c","./hv/hv3events.c","stopPropagationFunc","stopPropagationFunc( interp , self , thisobj , argc , argv , res)",312,319
+20,11,141,2,23,"getParentNode@322-344@./hv/hv3events.c","./hv/hv3events.c","getParentNode","getParentNode( interp , p)",322,344
+80,14,630,6,109,"dispatchEventFunc@377-485@./hv/hv3events.c","./hv/hv3events.c","dispatchEventFunc","dispatchEventFunc( interp , self , thisobj , argc , argv , res)",377,485
+38,3,273,4,43,"eventDispatchCmd@503-545@./hv/hv3events.c","./hv/hv3events.c","eventDispatchCmd","eventDispatchCmd( clientData , pTcl , objc , objv)",503,545
+53,13,381,6,80,"addEventListenerFunc@569-648@./hv/hv3events.c","./hv/hv3events.c","addEventListenerFunc","addEventListenerFunc( interp , self , thisobj , argc , argv , res)",569,648
+41,11,314,6,54,"removeEventListenerFunc@671-724@./hv/hv3events.c","./hv/hv3events.c","removeEventListenerFunc","removeEventListenerFunc( interp , self , thisobj , argc , argv , res)",671,724
+92,10,662,2,116,"eventTargetInit@768-883@./hv/hv3events.c","./hv/hv3events.c","eventTargetInit","eventTargetInit( pTclSeeInterp , p)",768,883
+10,1,59,2,11,"listenerToString@899-909@./hv/hv3events.c","./hv/hv3events.c","listenerToString","listenerToString( pSeeInterp , pListener)",899,909
+53,8,439,4,64,"eventDumpCmd@938-1001@./hv/hv3events.c","./hv/hv3events.c","eventDumpCmd","eventDumpCmd( clientData , pTcl , objc , objv)",938,1001
+10,2,49,1,10,"delTimeout@39-48@./hv/hv3timeout.c","./hv/hv3timeout.c","delTimeout","delTimeout( p)",39,48
+13,2,85,1,13,"timeoutCb@53-65@./hv/hv3timeout.c","./hv/hv3timeout.c","timeoutCb","timeoutCb( clientData)",53,65
+58,6,411,1,73,"timeoutCb@68-140@./hv/hv3timeout.c","./hv/hv3timeout.c","timeoutCb","timeoutCb( clientData)",68,140
+60,8,434,6,77,"newTimeout@142-218@./hv/hv3timeout.c","./hv/hv3timeout.c","newTimeout","newTimeout( pSeeInterp , pThis , isInterval , argc , argv , res)",142,218
+35,5,204,6,42,"cancelTimeout@220-261@./hv/hv3timeout.c","./hv/hv3timeout.c","cancelTimeout","cancelTimeout( pSeeInterp , pThis , isInterval , argc , argv , res)",220,261
+8,1,59,6,8,"setTimeoutFunc@264-271@./hv/hv3timeout.c","./hv/hv3timeout.c","setTimeoutFunc","setTimeoutFunc( interp , self , thisobj , argc , argv , res)",264,271
+8,1,59,6,8,"setIntervalFunc@274-281@./hv/hv3timeout.c","./hv/hv3timeout.c","setIntervalFunc","setIntervalFunc( interp , self , thisobj , argc , argv , res)",274,281
+8,1,59,6,8,"clearTimeoutFunc@284-291@./hv/hv3timeout.c","./hv/hv3timeout.c","clearTimeoutFunc","clearTimeoutFunc( interp , self , thisobj , argc , argv , res)",284,291
+8,1,59,6,8,"clearIntervalFunc@294-301@./hv/hv3timeout.c","./hv/hv3timeout.c","clearIntervalFunc","clearIntervalFunc( interp , self , thisobj , argc , argv , res)",294,301
+11,1,100,2,12,"interpTimeoutInit@304-315@./hv/hv3timeout.c","./hv/hv3timeout.c","interpTimeoutInit","interpTimeoutInit( pSeeInterp , pWindow)",304,315
+13,2,76,2,13,"interpTimeoutCleanup@318-330@./hv/hv3timeout.c","./hv/hv3timeout.c","interpTimeoutCleanup","interpTimeoutCleanup( pSeeInterp , pWindow)",318,330
+4,1,22,1,4,"Et_AppInit@4-7@./hv/hvinit.c","./hv/hvinit.c","Et_AppInit","Et_AppInit( Tcl_Interp * interp)",4,7
+4,1,22,1,4,"Et_AppInit@4-7@./hv/ssinit.c","./hv/ssinit.c","Et_AppInit","Et_AppInit( Tcl_Interp * interp)",4,7
+26,4,160,3,29,"allocWordArray@364-392@./hv/hv3see.c","./hv/hv3see.c","allocWordArray","allocWordArray( p , pSeeTclObject , nExtra)",364,392
+9,3,42,1,9,"getSeeTclObject@411-419@./hv/hv3see.c","./hv/hv3see.c","getSeeTclObject","getSeeTclObject( pSeeObject)",411,419
+10,2,60,1,10,"hashCommand@438-447@./hv/hv3see.c","./hv/hv3see.c","hashCommand","hashCommand( zCommand)",438,447
+12,1,67,2,16,"createObjectRef@465-480@./hv/hv3see.c","./hv/hv3see.c","createObjectRef","createObjectRef( pTclSeeInterp , pObject)",465,480
+9,2,43,2,9,"removeTransientRefs@495-503@./hv/hv3see.c","./hv/hv3see.c","removeTransientRefs","removeTransientRefs( pTclSeeInterp , n)",495,503
+18,4,83,2,21,"lookupObjectRef@525-545@./hv/hv3see.c","./hv/hv3see.c","lookupObjectRef","lookupObjectRef( pTclSeeInterp , iKey)",525,545
+11,2,46,1,11,"stringToObj@562-572@./hv/hv3see.c","./hv/hv3see.c","stringToObj","stringToObj( pString)",562,572
+61,17,394,2,75,"primitiveValueToTcl@597-671@./hv/hv3see.c","./hv/hv3see.c","primitiveValueToTcl","primitiveValueToTcl( pTclSeeInterp , pValue)",597,671
+24,3,143,3,25,"argValueToTcl@701-725@./hv/hv3see.c","./hv/hv3see.c","argValueToTcl","argValueToTcl( pTclSeeInterp , pValue , piObject)",701,725
+12,3,69,3,14,"evalObjv@728-741@./hv/hv3see.c","./hv/hv3see.c","evalObjv","evalObjv( pTcl , nWord , apWord)",728,741
+51,10,353,6,62,"callSeeTclMethod@765-826@./hv/hv3see.c","./hv/hv3see.c","callSeeTclMethod","callSeeTclMethod( pTcl , pLog , p , zMethod , pProperty , pVal) const",765,826
+20,2,152,3,27,"initSeeTclObject@829-855@./hv/hv3see.c","./hv/hv3see.c","initSeeTclObject","initSeeTclObject( pTclSeeInterp , p , pTclCommand)",829,855
+8,1,42,2,8,"newSeeTclObject@874-881@./hv/hv3see.c","./hv/hv3see.c","newSeeTclObject","newSeeTclObject( pTclSeeInterp , pTclCommand)",874,881
+19,3,112,2,22,"finalizeObject@908-929@./hv/hv3see.c","./hv/hv3see.c","finalizeObject","finalizeObject( pPtr , pContext)",908,929
+9,1,56,2,9,"createTransient@944-952@./hv/hv3see.c","./hv/hv3see.c","createTransient","createTransient( pTclSeeInterp , pTclCommand)",944,952
+22,4,169,2,25,"createNative@968-992@./hv/hv3see.c","./hv/hv3see.c","createNative","createNative( pTclSeeInterp , pTclList)",968,992
+17,2,100,2,19,"createBridge@995-1013@./hv/hv3see.c","./hv/hv3see.c","createBridge","createBridge( pTclSeeInterp , pCommand)",995,1013
+37,8,224,3,56,"findOrCreateObject@1030-1085@./hv/hv3see.c","./hv/hv3see.c","findOrCreateObject","findOrCreateObject( pTclSeeInterp , pTclCommand , isGlobal)",1030,1085
+18,2,116,2,19,"createNode@1088-1106@./hv/hv3see.c","./hv/hv3see.c","createNode","createNode( pTclSeeInterp , pTclCommand)",1088,1106
+24,4,132,2,25,"makeObjectTransient@1121-1145@./hv/hv3see.c","./hv/hv3see.c","makeObjectTransient","makeObjectTransient( pTclSeeInterp , pCommand)",1121,1145
+31,6,176,2,42,"makeObjectPersistent@1159-1200@./hv/hv3see.c","./hv/hv3see.c","makeObjectPersistent","makeObjectPersistent( pTclSeeInterp , pCommand)",1159,1200
+141,24,782,4,160,"objToValue@1203-1362@./hv/hv3see.c","./hv/hv3see.c","objToValue","objToValue( pInterp , pObj , pValue , pIsCacheable)",1203,1362
+69,10,498,2,91,"handleJavascriptError@1389-1479@./hv/hv3see.c","./hv/hv3see.c","handleJavascriptError","handleJavascriptError( pTclSeeInterp , pTry)",1389,1479
+18,3,91,1,26,"delInterpCmd@1496-1521@./hv/hv3see.c","./hv/hv3see.c","delInterpCmd","delInterpCmd( clientData)",1496,1521
+27,5,150,4,27,"processArgs@1531-1557@./hv/hv3see.c","./hv/hv3see.c","processArgs","processArgs( pTcl , aOpt , nArg , apArg)",1531,1557
+56,7,362,3,68,"interpEval@1584-1651@./hv/hv3see.c","./hv/hv3see.c","interpEval","interpEval( pTclSeeInterp , nArg , apArg)",1584,1651
+16,2,85,3,16,"interpGlobalSet@1654-1669@./hv/hv3see.c","./hv/hv3see.c","interpGlobalSet","interpGlobalSet( pTclSeeInterp , pProp , pValue)",1654,1669
+43,5,291,3,52,"interpDebug@1692-1743@./hv/hv3see.c","./hv/hv3see.c","interpDebug","interpDebug( pTclSeeInterp , objc , objv)",1692,1743
+132,23,769,4,205,"interpCmd@1759-1963@./hv/hv3see.c","./hv/hv3see.c","interpCmd","interpCmd( clientData , pTclInterp , objc , objv)",1759,1963
+38,8,254,4,44,"seeTraceHook@1966-2009@./hv/hv3see.c","./hv/hv3see.c","seeTraceHook","seeTraceHook( pSeeInterp , pThrowLoc , pContext , event)",1966,2009
+34,4,228,4,49,"tclSeeInterp@2029-2077@./hv/hv3see.c","./hv/hv3see.c","tclSeeInterp","tclSeeInterp( clientData , interp , objc , objv)",2029,2077
+24,3,148,2,28,"throwTclError@2079-2106@./hv/hv3see.c","./hv/hv3see.c","throwTclError","throwTclError( p , rc)",2079,2106
+34,4,305,7,39,"tclCallOrConstruct@2131-2169@./hv/hv3see.c","./hv/hv3see.c","tclCallOrConstruct","tclCallOrConstruct( zMethod , pInterp , pObj , pThis , argc , argv , pRes) const",2131,2169
+33,5,237,4,47,"SeeTcl_Get@2172-2218@./hv/hv3see.c","./hv/hv3see.c","SeeTcl_Get","SeeTcl_Get( pInterp , pObj , pProp , pRes)",2172,2218
+30,4,214,5,39,"SeeTcl_Put@2221-2259@./hv/hv3see.c","./hv/hv3see.c","SeeTcl_Put","SeeTcl_Put( pInterp , pObj , pProp , pValue , flags)",2221,2259
+17,1,114,3,19,"SeeTcl_CanPut@2262-2280@./hv/hv3see.c","./hv/hv3see.c","SeeTcl_CanPut","SeeTcl_CanPut( pInterp , pObj , pProp)",2262,2280
+24,5,186,3,29,"SeeTcl_HasProperty@2283-2311@./hv/hv3see.c","./hv/hv3see.c","SeeTcl_HasProperty","SeeTcl_HasProperty( pInterp , pObj , pProp)",2283,2311
+13,1,83,3,15,"SeeTcl_Delete@2313-2327@./hv/hv3see.c","./hv/hv3see.c","SeeTcl_Delete","SeeTcl_Delete( pInterp , pObj , pProp)",2313,2327
+21,2,136,4,22,"SeeTcl_DefaultValue@2330-2351@./hv/hv3see.c","./hv/hv3see.c","SeeTcl_DefaultValue","SeeTcl_DefaultValue( pInterp , pObj , pHint , pRes)",2330,2351
+6,1,26,2,6,"SeeTcl_Enumerator@2355-2360@./hv/hv3see.c","./hv/hv3see.c","SeeTcl_Enumerator","SeeTcl_Enumerator( pInterp , pObj)",2355,2360
+10,1,61,6,10,"SeeTcl_Construct@2362-2371@./hv/hv3see.c","./hv/hv3see.c","SeeTcl_Construct","SeeTcl_Construct( pInterp , pObj , pThis , argc , argv , pRes)",2362,2371
+10,1,61,6,10,"SeeTcl_Call@2373-2382@./hv/hv3see.c","./hv/hv3see.c","SeeTcl_Call","SeeTcl_Call( pInterp , pObj , pThis , argc , argv , pRes)",2373,2382
+8,1,33,3,8,"SeeTcl_HasInstance@2384-2391@./hv/hv3see.c","./hv/hv3see.c","SeeTcl_HasInstance","SeeTcl_HasInstance( pInterp , pObj , pInstance)",2384,2391
+7,1,26,2,7,"SeeTcl_GetSecDomain@2393-2399@./hv/hv3see.c","./hv/hv3see.c","SeeTcl_GetSecDomain","SeeTcl_GetSecDomain( pInterp , pObj)",2393,2399
+3,1,9,0,3,"getVtbl@2415-2417@./hv/hv3see.c","./hv/hv3see.c","getVtbl","getVtbl()",2415,2417
+12,3,78,3,12,"SeeTclEnum_Next@2437-2448@./hv/hv3see.c","./hv/hv3see.c","SeeTclEnum_Next","SeeTclEnum_Next( pSeeInterp , pEnum , pFlags)",2437,2448
+35,2,257,2,45,"tclEnumerator@2457-2501@./hv/hv3see.c","./hv/hv3see.c","tclEnumerator","tclEnumerator( pInterp , pObj)",2457,2501
+29,2,192,4,35,"tclSeeAlloc@2504-2538@./hv/hv3see.c","./hv/hv3see.c","tclSeeAlloc","tclSeeAlloc( clientData , interp , objc , objv)",2504,2538
+9,1,36,4,11,"tclSeeCollect@2541-2551@./hv/hv3see.c","./hv/hv3see.c","tclSeeCollect","tclSeeCollect( clientData , interp , objc , objv)",2541,2551
+8,1,32,4,8,"classCall@2554-2561@./hv/hv3see.c","./hv/hv3see.c","classCall","classCall( clientData , interp , objc , objv)",2554,2561
+7,1,36,1,7,"classDelete@2563-2569@./hv/hv3see.c","./hv/hv3see.c","classDelete","classDelete( clientData)",2563,2569
+35,5,236,4,41,"tclSeeClass@2589-2629@./hv/hv3see.c","./hv/hv3see.c","tclSeeClass","tclSeeClass( clientData , interp , objc , objv)",2589,2629
+15,3,109,1,22,"Tclsee_Init@2632-2653@./hv/hv3see.c","./hv/hv3see.c","Tclsee_Init","Tclsee_Init( interp)",2632,2653
+4,1,10,1,4,"backupEmptyLine@68-71@./hv/hv3format.c","./hv/hv3format.c","backupEmptyLine","backupEmptyLine( pBlob)",68,71
+15,3,89,3,15,"writeOut@74-88@./hv/hv3format.c","./hv/hv3format.c","writeOut","writeOut( pBlob , z , n) const",74,88
+11,2,64,1,11,"writeLine@91-101@./hv/hv3format.c","./hv/hv3format.c","writeLine","writeLine( pBlob)",91,101
+32,5,201,1,34,"prevWasKeyword@104-137@./hv/hv3format.c","./hv/hv3format.c","prevWasKeyword","prevWasKeyword( pBlob)",104,137
+5,2,21,1,5,"formatLinefeed@140-144@./hv/hv3format.c","./hv/hv3format.c","formatLinefeed","formatLinefeed( pBlob)",140,144
+14,4,82,1,14,"formatSpace@147-160@./hv/hv3format.c","./hv/hv3format.c","formatSpace","formatSpace( pBlob)",147,160
+13,3,55,1,13,"formatColon@163-175@./hv/hv3format.c","./hv/hv3format.c","formatColon","formatColon( pBlob)",163,175
+14,3,65,1,14,"formatSemicolon@178-191@./hv/hv3format.c","./hv/hv3format.c","formatSemicolon","formatSemicolon( pBlob)",178,191
+12,5,74,1,12,"formatBracketOpen@194-205@./hv/hv3format.c","./hv/hv3format.c","formatBracketOpen","formatBracketOpen( pBlob)",194,205
+5,1,20,1,5,"formatBracketClose@207-211@./hv/hv3format.c","./hv/hv3format.c","formatBracketClose","formatBracketClose( pBlob)",207,211
+5,1,20,1,5,"formatSquareOpen@214-218@./hv/hv3format.c","./hv/hv3format.c","formatSquareOpen","formatSquareOpen( pBlob)",214,218
+5,1,20,1,5,"formatSquareClose@220-224@./hv/hv3format.c","./hv/hv3format.c","formatSquareClose","formatSquareClose( pBlob)",220,224
+13,3,62,1,13,"formatBlockOpen@227-239@./hv/hv3format.c","./hv/hv3format.c","formatBlockOpen","formatBlockOpen( pBlob)",227,239
+15,5,74,1,18,"formatBlockClose@241-258@./hv/hv3format.c","./hv/hv3format.c","formatBlockClose","formatBlockClose( pBlob)",241,258
+15,8,115,1,17,"formatQuotedstring@261-277@./hv/hv3format.c","./hv/hv3format.c","formatQuotedstring","formatQuotedstring( pBlob)",261,277
+43,24,386,1,50,"formatSlash@280-329@./hv/hv3format.c","./hv/hv3format.c","formatSlash","formatSlash( pBlob)",280,329
+5,1,20,1,5,"formatDot@332-336@./hv/hv3format.c","./hv/hv3format.c","formatDot","formatDot( pBlob)",332,336
+5,1,20,1,5,"formatComma@339-343@./hv/hv3format.c","./hv/hv3format.c","formatComma","formatComma( pBlob)",339,343
+10,2,49,1,10,"formatAlphanumeric@346-355@./hv/hv3format.c","./hv/hv3format.c","formatAlphanumeric","formatAlphanumeric( pBlob)",346,355
+29,11,206,1,36,"formatSymbol@358-393@./hv/hv3format.c","./hv/hv3format.c","formatSymbol","formatSymbol( pBlob)",358,393
+13,5,95,1,13,"formatLessthan@396-408@./hv/hv3format.c","./hv/hv3format.c","formatLessthan","formatLessthan( pBlob)",396,408
+60,35,477,4,74,"tclSeeFormat@429-502@./hv/hv3format.c","./hv/hv3format.c","tclSeeFormat","tclSeeFormat( clientData , interp , objc , objv)",429,502

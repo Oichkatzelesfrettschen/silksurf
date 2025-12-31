@@ -1,0 +1,226 @@
+================================================================================
+NETSURF vs NEOSURF - QUICK REFERENCE GUIDE
+================================================================================
+
+DIRECTORY STRUCTURE
+═══════════════════════════════════════════════════════════════════════════════
+
+NetSurf (Main):                    NeoSurf (Fork):
+  1815 files, 55 MB                 1296 files, 28 MB
+  
+  /content           (248 files)    /src (refactored)
+  /desktop           (65 files)     ├─ /content
+  /docs              (33 files)     ├─ /desktop
+  /frontends (8+)   (1155 files)    ├─ /docs
+  /include           (27 files)     └─ /resources
+  /resources         (65 files)
+  /test             (109 files)    /contrib (694 files)
+  /tools             (19 files)    ├─ libcss, libdom, libhubbub, etc.
+  /utils             (81 files)    └─ Bundled dependencies
+                                   
+                                   /frontends (148 files)
+                                   ├─ gtk/  (cleaner)
+                                   └─ visurf/ (NEW - Wayland + Vi keys)
+                                   
+                                   /include (79 files)
+
+BUILD SYSTEMS
+═══════════════════════════════════════════════════════════════════════════════
+NetSurf:                           NeoSurf:
+  ✓ GNU Make                         ✓ CMake (primary)
+  ✓ 13 Makefiles                     ✓ Meson (alternative)
+  ✓ Makefile.defaults (per platform) ✓ 7 CMakeLists.txt
+  ✓ Cross-compiler support          ✓ Bundled deps in CMake
+  ✓ Platform-specific configs        ✓ Declarative syntax
+  ✗ Hard to understand               ✗ Less portable
+
+FILE TYPES DISTRIBUTION
+═══════════════════════════════════════════════════════════════════════════════
+Type        NetSurf    NeoSurf    Delta
+──────────────────────────────────────
+.c            403        505      +102 (+25%)
+.h            463        521      +58  (+13%)
+.bnd           67         68      +1
+.png          126         41      -85  (-67%)
+.html          77          3      -74  (-96%)
+.cpp           39          0      -39  (-100%)
+.ui            26         13      -13  (-50%)
+.info          30          0      -30  (-100%)
+
+PLATFORMS
+═══════════════════════════════════════════════════════════════════════════════
+NetSurf Supports (8+):            NeoSurf Supports (2):
+  • Amiga          (180 files)     • GTK          (90 files)
+  • Atari GEM      (140 files)     • ViSurf       (58 files) NEW
+  • BeOS           (80 files)
+  • Framebuffer    (70 files)
+  • GTK            (120 files)
+  • Qt             (70 files)
+  • RISC OS        (190 files)
+  • Windows        (120 files)
+  • Monkey (test)  (30 files)
+
+KEY METRICS
+═══════════════════════════════════════════════════════════════════════════════
+Metric                    NetSurf      NeoSurf      Change
+────────────────────────────────────────────────────
+Total files              1815         1296         -519 (-28%)
+Codebase size           55 MB        28 MB        -27 MB (-49%)
+Platform support        8+           2            -75%
+C/H files               866          1026         +18%
+Platform-specific       ~1700        0            -100%
+Average file size       31 KB        21.6 KB      -30%
+
+REMOVED IN NEOSURF
+═══════════════════════════════════════════════════════════════════════════════
+Platform Support:
+  • Amiga (180 files) - custom resource system, themes
+  • Atari (140 files) - GEM graphics, custom UI
+  • BeOS (80 files) - C++ implementation
+  • RISC OS (190 files) - proprietary UI, heavy
+  • Windows (120 files) - Win32 API
+  • Qt (70 files) - C++ wrapper
+  • Framebuffer (70 files) - embedded Linux
+  • Monkey (30 files) - test harness
+
+Build Infrastructure:
+  • 11 platform-specific Makefile.defaults
+  • Cross-compiler support scripts
+  • RISC OS template system
+
+Resources & Assets:
+  • 126 PNG images (icons, themes)
+  • 18 BMP images
+  • 77 HTML documentation pages
+  • Localization files (6 languages)
+  • RISC OS sprite files
+
+Added in NEOSURF
+═══════════════════════════════════════════════════════════════════════════════
+Build System:
+  • CMakeLists.txt hierarchy (7 files)
+  • meson.build (3 files)
+
+New Frontend:
+  • ViSurf (58 files)
+    - Wayland native
+    - Vi keybindings
+    - Pool buffers
+    - Keyboard-driven
+
+Bundled Libraries (contrib/, 694 files):
+  • libcss - CSS parser/evaluator
+  • libdom - DOM implementation
+  • libhubbub - HTML5 parser
+  • libnsbmp - BMP decoder
+  • libnsgif - GIF decoder
+  • libnsutils - Utilities
+  • libparserutils - Parser infrastructure
+  • libsvgtiny - SVG renderer
+  • nsgenbind - WebIDL binding generator
+
+ARCHITECTURAL PHILOSOPHY
+═══════════════════════════════════════════════════════════════════════════════
+NetSurf:                           NeoSurf:
+  "Universal Compatibility"        "Lean & Focused"
+  
+  • Multi-platform support         • Linux/BSD first
+  • Legacy system support          • Modern tooling only
+  • Portable C89 focus             • Self-contained build
+  • External dependencies          • Bundled dependencies
+  • Comprehensive docs             • Focused features
+  • Complex build system           • Simple CMake build
+
+COMMON FILES (95 total, 5.2% overlap)
+═══════════════════════════════════════════════════════════════════════════════
+Location              Count        Files
+───────────────────────────────────────────
+include/neosurf/      22           Public API headers
+src/content/          28           Core engine
+src/desktop/          25           Desktop abstraction
+Build docs            20           Documentation
+
+Why low overlap?
+  • Path reorganization (netsurf/ → neosurf/, → src/)
+  • Platform-specific code dropped
+  • File reorganization
+  • Some refactoring/renaming
+
+CORE ENGINE EQUIVALENCE
+═══════════════════════════════════════════════════════════════════════════════
+Functionally Identical:
+  ✓ HTML/CSS parsing (libhubbub, libcss)
+  ✓ DOM implementation (libdom)
+  ✓ JavaScript engine (Duktape)
+  ✓ Image rendering (libnsgif, libnsbmp, libsvgtiny)
+  ✓ Network fetching (curl-based)
+  ✓ Cookie management
+  ✓ Plotters abstraction
+
+Modified in NeoSurf:
+  ~ Simplified bitmap abstraction
+  ~ Removed print infrastructure
+  ~ Removed font_haru.c
+  ~ Cleaner GTK frontend
+
+NEW IN NEOSURF: ViSurf Frontend
+═════════════════════════════════════════════════════════════════════════════════
+• Wayland-native (no X11)
+• Vi keybindings
+• xdg-shell protocol
+• xdg-decoration protocol
+• Keyboard-driven interface
+• Pool buffer graphics
+• Undo/command system
+• 58 files total
+• Minimalist philosophy
+
+SIZE BREAKDOWN
+═══════════════════════════════════════════════════════════════════════════════
+NetSurf (55 MB):                   NeoSurf (28 MB):
+  frontends/   11 MB  (20%)         contrib/     5.9 MB (21%)
+  content/    6.5 MB  (12%)         src/         8.4 MB (30%)
+  resources/  1.5 MB  (3%)          frontends/   1.6 MB (6%)
+  test/       724 KB  (1%)          include/     576 KB (2%)
+  desktop/    984 KB  (2%)          Other        11.5 MB (41%)
+  utils/      832 KB  (2%)
+  other/     35.5 MB (64%)
+
+TOP MISSING FILES (NetSurf only)
+═══════════════════════════════════════════════════════════════════════════════
+• riscos/ - 190 files (complete RISC OS port)
+• amiga/ - 180 files (complete Amiga port)
+• atari/ - 140 files (Atari GEM port)
+• windows/ - 120 files (Win32 implementation)
+• qt/ - 70 files (Qt4/Qt5 binding)
+• resources/icons/ - 40+ icon files
+• resources/en/,fr/,de/ - localization
+• test/js/ - 100+ JavaScript test files
+• docs/ - 20+ markdown documentation files
+
+RECOMMENDATIONS FOR HYBRID PROJECT
+═══════════════════════════════════════════════════════════════════════════════
+Best of Both Worlds:
+
+From NeoSurf:
+  ✓ Modern CMake build system
+  ✓ Bundled dependencies (reproducible builds)
+  ✓ Cleaner code organization
+  ✓ ViSurf frontend (innovative)
+
+From NetSurf:
+  ✓ Comprehensive documentation
+  ✓ Mature codebase
+  ✓ Legacy platform support (optional)
+  ✓ Extended test suite
+
+Suggested Hybrid Structure:
+  silksurf/
+  ├── CMakeLists.txt     (NeoSurf style)
+  ├── src/               (NetSurf core logic)
+  ├── frontends/         (GTK + ViSurf + new?)
+  ├── contrib/           (Bundled libs)
+  ├── docs/              (Comprehensive)
+  └── resources/         (Assets, localization)
+
+================================================================================

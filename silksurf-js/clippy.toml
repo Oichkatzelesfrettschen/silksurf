@@ -1,0 +1,148 @@
+# SilkSurfJS Clippy Configuration
+# Comprehensive linting for code quality and performance
+# Last updated: 2025-12-30
+#
+# Run with: cargo clippy --all-targets --all-features -- -D warnings
+# Or use alias: cargo check-all
+
+# =============================================================================
+# General Settings
+# =============================================================================
+
+# Minimum supported Rust version for MSRV lints
+msrv = "1.83.0"
+
+# Cognitive complexity threshold (default: 25)
+cognitive-complexity-threshold = 30
+
+# Maximum lines in a function (default: 100)
+too-many-lines-threshold = 150
+
+# Maximum number of arguments to a function (default: 7)
+too-many-arguments-threshold = 8
+
+# Maximum number of struct fields (default: 8)
+max-struct-bools = 4
+
+# =============================================================================
+# Naming Conventions
+# =============================================================================
+
+# Names to avoid (extend default list)
+disallowed-names = [
+    "..",  # Keep defaults (foo, bar, baz, etc.)
+    "tmp",
+    "temp",
+    "data",
+    "stuff",
+    "thing",
+    "xxx",
+    "yyy",
+    "zzz",
+]
+
+# Enforce snake_case for modules
+# Allowed module names that don't follow convention
+allowed-idents-below-min-chars = ["i", "j", "k", "n", "x", "y", "z", "id", "gc", "vm", "pc", "op", "lr", "fp", "sp", "ip"]
+
+# =============================================================================
+# Documentation Requirements
+# =============================================================================
+
+# Require docs for public items
+# missing-docs-in-crate-items = true
+
+# =============================================================================
+# Type Size Limits
+# =============================================================================
+
+# Threshold for large types passed by value (default: 256)
+trivial-copy-size-limit = 16
+
+# Threshold for pass-by-value (default: 256)
+pass-by-value-size-limit = 64
+
+# Size limit for stack arrays (default: 512000)
+array-size-threshold = 65536
+
+# =============================================================================
+# Arithmetic Settings
+# =============================================================================
+
+# Allow integer arithmetic (we need it for bytecode)
+arithmetic-side-effects-allowed = [
+    "u8",
+    "u16",
+    "u32",
+    "u64",
+    "usize",
+    "i8",
+    "i16",
+    "i32",
+    "i64",
+    "isize",
+]
+
+# =============================================================================
+# Allow List for Specific Patterns
+# =============================================================================
+
+# Methods that are OK to call on unwrap
+allowed-dotfiles-for-globwalk = []
+
+# Wildcards patterns allowed in dependencies
+allowed-wildcard-imports = ["super::*", "crate::*"]
+
+# =============================================================================
+# Disallowed Items
+# =============================================================================
+
+# Disallowed methods (use safer alternatives)
+disallowed-methods = [
+    # Use expect() instead of unwrap() in most cases
+    # { path = "std::option::Option::unwrap", reason = "Use expect() with a message or proper error handling" },
+    # { path = "std::result::Result::unwrap", reason = "Use expect() with a message or ? operator" },
+
+    # Avoid print!/println! in library code
+    { path = "std::print", reason = "Use tracing or log macros instead" },
+    { path = "std::println", reason = "Use tracing or log macros instead" },
+    { path = "std::eprint", reason = "Use tracing or log macros instead" },
+    { path = "std::eprintln", reason = "Use tracing or log macros instead" },
+
+    # Avoid dbg! in production
+    { path = "std::dbg", reason = "Remove debug statements before commit" },
+]
+
+# Disallowed types
+disallowed-types = [
+    # Prefer parking_lot for synchronization
+    # { path = "std::sync::Mutex", reason = "Use parking_lot::Mutex for better performance" },
+    # { path = "std::sync::RwLock", reason = "Use parking_lot::RwLock for better performance" },
+]
+
+# =============================================================================
+# Performance Settings
+# =============================================================================
+
+# Threshold for vec initialization (default: 8)
+vec-box-size-threshold = 4096
+
+# Single char patterns in string methods
+single-char-binding-names-threshold = 5
+
+# =============================================================================
+# Unsafe Code Settings
+# =============================================================================
+
+# Allow unsafe blocks in unsafe functions
+allow-unsafe-block-in-doc-comment = false
+
+# =============================================================================
+# Future Compatibility
+# =============================================================================
+
+# Avoid features that may break
+avoid-breaking-exported-api = true
+
+# Enforce edition 2024 patterns
+enforce-iter-loop-reborrow = true

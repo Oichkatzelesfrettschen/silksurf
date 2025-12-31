@@ -1,0 +1,36 @@
+# Build outputs
+/build/
+/**/target/
+
+# Fuzzing outputs
+/fuzz_out/
+/fuzz_out_css/
+
+# Static analysis and logs
+/infer-out/
+/logs/
+
+# Crash dumps
+core.*
+
+# Cleanroom reference checkouts (not tracked)
+/silksurf-extras/
+/silksurf-js/test262/
+
+# Local tooling settings
+/.claude/settings.local.json
+
+# Binaries and objects
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Databases and profiling artifacts
+*.db
+*.db-shm
+*.db-wal
+*.profraw
+*.data

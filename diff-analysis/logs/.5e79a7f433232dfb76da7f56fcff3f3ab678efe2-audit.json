@@ -1,0 +1,15 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 14
+    },
+    "auditLog": "/home/eirikr/Github/silksurf/diff-analysis/logs/.5e79a7f433232dfb76da7f56fcff3f3ab678efe2-audit.json",
+    "files": [
+        {
+            "date": 1767123457515,
+            "name": "/home/eirikr/Github/silksurf/diff-analysis/logs/mcp-puppeteer-2025-12-30.log",
+            "hash": "41e60fd9e0df5daa70aa4c73340cb56d94b2e6eb87f60b34b92a47cec0ced4a0"
+        }
+    ],
+    "hashType": "sha256"
+}
