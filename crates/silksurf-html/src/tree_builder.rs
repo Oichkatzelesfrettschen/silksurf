@@ -37,6 +37,10 @@ impl TreeBuilder {
         &mut self.dom
     }
 
+    pub fn into_dom(self) -> Dom {
+        self.dom
+    }
+
     pub fn process_tokens<I>(&mut self, tokens: I) -> Result<(), TreeBuildError>
     where
         I: IntoIterator<Item = Token>,
