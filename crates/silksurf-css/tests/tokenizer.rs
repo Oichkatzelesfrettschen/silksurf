@@ -98,3 +98,30 @@ fn tokenizes_cdo_cdc() {
 
     assert_eq!(tokens, expected);
 }
+
+#[test]
+fn tokenizes_url() {
+    let mut tokenizer = CssTokenizer::new();
+    let mut tokens = tokenizer
+        .feed(".hero { background: url(\"img.png\"); }")
+        .unwrap();
+    tokens.extend(tokenizer.finish().unwrap());
+
+    let expected = vec![
+        CssToken::Delim('.'),
+        CssToken::Ident("hero".into()),
+        CssToken::Whitespace,
+        CssToken::CurlyOpen,
+        CssToken::Whitespace,
+        CssToken::Ident("background".into()),
+        CssToken::Colon,
+        CssToken::Whitespace,
+        CssToken::Url("img.png".into()),
+        CssToken::Semicolon,
+        CssToken::Whitespace,
+        CssToken::CurlyClose,
+        CssToken::Eof,
+    ];
+
+    assert_eq!(tokens, expected);
+}
