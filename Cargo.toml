@@ -1,0 +1,20 @@
+[workspace]
+members = [
+  "silksurf-js",
+  "crates/silksurf-app",
+  "crates/silksurf-engine",
+  "crates/silksurf-html",
+  "crates/silksurf-css",
+  "crates/silksurf-dom",
+  "crates/silksurf-layout",
+  "crates/silksurf-render",
+  "crates/silksurf-gui",
+  "crates/silksurf-net",
+  "crates/silksurf-tls",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.83.0"

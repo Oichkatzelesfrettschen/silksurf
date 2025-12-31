@@ -1,0 +1,22 @@
+=== NetSurf build files ===
+netsurf-main/test/Makefile
+netsurf-main/content/Makefile
+netsurf-main/desktop/Makefile
+netsurf-main/tools/Makefile
+netsurf-main/Makefile.config.example
+netsurf-main/Makefile.macros
+netsurf-main/Makefile
+netsurf-main/Makefile.defaults
+netsurf-main/frontends/Makefile.hts
+netsurf-main/frontends/Makefile
+netsurf-main/Makefile.tools
+netsurf-main/utils/Makefile
+
+=== NeoSurf build files ===
+neosurf-fork/contrib/meson.build
+neosurf-fork/contrib/CMakeLists.txt
+neosurf-fork/meson.build
+neosurf-fork/src/meson.build
+neosurf-fork/src/CMakeLists.txt
+neosurf-fork/frontends/CMakeLists.txt
+neosurf-fork/CMakeLists.txt

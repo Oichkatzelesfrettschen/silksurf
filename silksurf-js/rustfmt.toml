@@ -1,0 +1,164 @@
+# SilkSurfJS Rustfmt Configuration
+# Consistent code formatting across the project
+# Last updated: 2025-12-30
+#
+# Run with: cargo fmt
+# Check with: cargo fmt -- --check
+
+# =============================================================================
+# Edition and Stability
+# =============================================================================
+
+# Target Rust edition
+edition = "2021"
+
+# Use stable features only (set to true for nightly-only options)
+unstable_features = false
+
+# =============================================================================
+# Indentation and Width
+# =============================================================================
+
+# Use spaces, not tabs
+hard_tabs = false
+
+# 4-space indentation
+tab_spaces = 4
+
+# Maximum line width
+max_width = 100
+
+# Width for comments
+comment_width = 80
+
+# Wrap long strings
+wrap_comments = false
+
+# =============================================================================
+# Imports
+# =============================================================================
+
+# Group imports: std, external, crate
+imports_granularity = "Module"
+
+# Sort imports alphabetically
+reorder_imports = true
+
+# Group imports by kind
+group_imports = "StdExternalCrate"
+
+# Reorder modules
+reorder_modules = true
+
+# =============================================================================
+# Functions and Methods
+# =============================================================================
+
+# Function arguments formatting
+fn_args_layout = "Tall"
+
+# Minimum function call arguments to be formatted across multiple lines
+fn_call_width = 80
+
+# Function parameters width
+fn_params_layout = "Tall"
+
+# =============================================================================
+# Control Flow
+# =============================================================================
+
+# Brace style for control structures
+brace_style = "SameLineWhere"
+
+# Control brace style for single-arm match
+match_arm_blocks = true
+
+# Match arm leading pipes
+match_arm_leading_pipes = "Never"
+
+# Force multiline for blocks
+force_multiline_blocks = false
+
+# =============================================================================
+# Struct and Enum
+# =============================================================================
+
+# Struct field alignment
+struct_field_align_threshold = 0
+
+# Struct literal single-line threshold
+struct_lit_single_line = true
+
+# Use field init shorthand
+use_field_init_shorthand = true
+
+# =============================================================================
+# Expressions
+# =============================================================================
+
+# Chain width before breaking
+chain_width = 60
+
+# Single-line if-else
+single_line_if_else_max_width = 50
+
+# Single-line let-else
+single_line_let_else_max_width = 50
+
+# =============================================================================
+# Type Declarations
+# =============================================================================
+
+# Use try shorthand (?)
+use_try_shorthand = true
+
+# =============================================================================
+# Macros
+# =============================================================================
+
+# Format macro metavariables
+format_macro_matchers = false
+
+# Format macro bodies
+format_macro_bodies = true
+
+# =============================================================================
+# Doc Comments
+# =============================================================================
+
+# Normalize doc comments
+normalize_doc_attributes = false
+
+# Format doc comments
+format_code_in_doc_comments = true
+
+# Doc comment code block width
+doc_comment_code_block_width = 80
+
+# =============================================================================
+# Miscellaneous
+# =============================================================================
+
+# Newline at end of file
+newline_style = "Unix"
+
+# Remove nested parens where possible
+remove_nested_parens = true
+
+# Combine attribute derives
+merge_derives = true
+
+# Use shorthand for closures
+short_array_element_width_threshold = 10
+
+# Skip children (if needed for generated code)
+skip_children = false
+
+# =============================================================================
+# Generated and Special Files
+# =============================================================================
+
+# Files to ignore
+# ignore = [
+#     "src/generated/",
+# ]

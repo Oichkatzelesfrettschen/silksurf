@@ -1,0 +1,8 @@
+[package]
+name = "silksurf-net"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+silksurf-tls = { path = "../silksurf-tls" }

@@ -1,0 +1,176 @@
+# SilkSurfJS cargo-deny Configuration
+# Dependency linting for security, licenses, and quality
+# Last updated: 2025-12-30
+#
+# Install: cargo install --locked cargo-deny
+# Run: cargo deny check
+# Or use alias: cargo deny
+
+# =============================================================================
+# Graph Configuration
+# =============================================================================
+
+[graph]
+# Target platforms to check
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+    "wasm32-unknown-unknown",
+]
+
+# Include all features when checking
+all-features = true
+
+# Exclude dev dependencies from checks
+exclude-dev = false
+
+# =============================================================================
+# Advisories - Security Vulnerability Checks
+# =============================================================================
+
+[advisories]
+# Version of the advisory database
+db-path = "~/.cargo/advisory-db"
+
+# URL to the advisory database
+db-urls = ["https://github.com/rustsec/advisory-db"]
+
+# How to handle unmaintained crates
+unmaintained = "warn"
+
+# How to handle yanked crates
+yanked = "deny"
+
+# How to handle crates with security notices
+notice = "warn"
+
+# Ignore specific advisories (add RUSTSEC-YYYY-NNNN when needed)
+ignore = []
+
+# =============================================================================
+# Licenses - Open Source License Compliance
+# =============================================================================
+
+[licenses]
+# Confidence threshold for license detection
+confidence-threshold = 0.93
+
+# Allow these licenses (permissive open-source)
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "0BSD",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "CC0-1.0",
+    "BSL-1.0",
+    "MPL-2.0",
+]
+
+# Deny these licenses (copyleft or problematic)
+# deny = [
+#     "GPL-2.0",
+#     "GPL-3.0",
+#     "AGPL-3.0",
+# ]
+
+# Allow copyleft licenses only for dev/build dependencies
+copyleft = "warn"
+
+# Allow unlicensed crates (not recommended for production)
+unlicensed = "deny"
+
+# Allow crates with no license expression
+allow-osi-fsf-free = "either"
+
+# Default license behavior
+default = "deny"
+
+# Private crates (don't need license)
+private = { ignore = true }
+
+# Exceptions for specific crates
+[[licenses.clarify]]
+name = "ring"
+expression = "ISC AND MIT AND OpenSSL"
+license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
+
+[[licenses.clarify]]
+name = "webpki"
+expression = "ISC"
+license-files = [{ path = "LICENSE", hash = 0x001c7e6c }]
+
+# =============================================================================
+# Bans - Crate Restrictions
+# =============================================================================
+
+[bans]
+# Lint level for multiple versions of same crate
+multiple-versions = "warn"
+
+# Lint level for wildcard dependencies (e.g., "*")
+wildcards = "deny"
+
+# Allow workspace dependencies to be inherited
+workspace-default-features = "allow"
+external-default-features = "allow"
+
+# Highlight conflicting dependencies
+highlight = "all"
+
+# Denied crates (use alternatives)
+deny = [
+    # Security concerns - prefer rustls
+    { crate = "openssl", use-instead = "rustls" },
+    { crate = "openssl-sys", use-instead = "rustls" },
+
+    # Prefer pure Rust implementations
+    { crate = "git2", use-instead = "gix" },
+    { crate = "libgit2-sys", use-instead = "gix" },
+
+    # Unmaintained or problematic
+    { crate = "atty", use-instead = "std::io::IsTerminal" },
+    { crate = "ansi_term", use-instead = "owo-colors or yansi" },
+]
+
+# Skip specific versions (when multiple versions are unavoidable)
+skip = [
+    # { crate = "syn@1", reason = "Some proc-macros still use syn 1.x" },
+]
+
+# Skip tree (skip a crate and all its transitive dependencies)
+skip-tree = []
+
+# =============================================================================
+# Sources - Where Crates Can Come From
+# =============================================================================
+
+[sources]
+# Lint level for unknown registries
+unknown-registry = "deny"
+
+# Lint level for unknown git sources
+unknown-git = "deny"
+
+# Allowed registries
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+
+# Allow git sources from these organizations
+allow-git = [
+    # "https://github.com/silksurf/*",
+]
+
+# =============================================================================
+# Output Configuration
+# =============================================================================
+
+[output]
+# Output format
+feature-depth = 1

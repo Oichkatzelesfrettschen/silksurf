@@ -1,0 +1,16 @@
+[package]
+name = "silksurf-engine"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+silksurf-html = { path = "../silksurf-html" }
+silksurf-css = { path = "../silksurf-css" }
+silksurf-dom = { path = "../silksurf-dom" }
+silksurf-layout = { path = "../silksurf-layout" }
+silksurf-render = { path = "../silksurf-render" }
+silksurf-gui = { path = "../silksurf-gui" }
+silksurf-net = { path = "../silksurf-net" }
+silksurf-tls = { path = "../silksurf-tls" }
+silksurf-js = { path = "../../silksurf-js" }

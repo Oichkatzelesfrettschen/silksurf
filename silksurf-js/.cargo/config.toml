@@ -1,0 +1,191 @@
+# SilkSurfJS Cargo Configuration
+# Compiler ricing for maximal checks, performance, and safety
+# Last updated: 2025-12-30
+
+# =============================================================================
+# Build Configuration
+# =============================================================================
+
+[build]
+# Use all available cores for parallel compilation
+jobs = 8
+
+# Target for native builds (override with --target if cross-compiling)
+# target = "x86_64-unknown-linux-gnu"
+
+# =============================================================================
+# RUSTFLAGS - Compiler Flags
+# =============================================================================
+
+[target.'cfg(all())']
+rustflags = [
+    # -------------------------------------------------------------------------
+    # Warnings as Errors (enable in CI, relax for development)
+    # -------------------------------------------------------------------------
+    # "-D", "warnings",
+
+    # -------------------------------------------------------------------------
+    # Optimization Hints
+    # -------------------------------------------------------------------------
+    # Enable native CPU optimizations (AVX2, etc.)
+    "-C", "target-cpu=native",
+
+    # -------------------------------------------------------------------------
+    # Debugging and Profiling
+    # -------------------------------------------------------------------------
+    # Force frame pointers for profiling (perf, flamegraph)
+    "-C", "force-frame-pointers=yes",
+
+    # -------------------------------------------------------------------------
+    # Overflow Checks (enabled in debug, configurable in release)
+    # -------------------------------------------------------------------------
+    # "-C", "overflow-checks=on",
+
+    # -------------------------------------------------------------------------
+    # Additional Lints
+    # -------------------------------------------------------------------------
+    # Enforce documentation (enable when codebase is documented)
+    # "-W", "missing_docs",
+
+    # Unsafe code requires explicit opt-in (enable after codebase update)
+    # "-W", "unsafe_op_in_unsafe_fn",
+
+    # Enforce explicit lifetimes where ambiguous
+    # "-W", "elided_lifetimes_in_paths",
+
+    # Warn on trivial casts
+    # "-W", "trivial_casts",
+    # "-W", "trivial_numeric_casts",
+
+    # Warn on unused qualifications
+    # "-W", "unused_qualifications",
+
+    # Future compatibility lints
+    "-W", "future_incompatible",
+
+    # Rust 2024 compatibility (enable when updating edition)
+    # "-W", "rust_2024_compatibility",
+]
+
+# =============================================================================
+# Nightly-Only Flags (uncomment when using nightly)
+# =============================================================================
+
+# [target.'cfg(all())']
+# rustflags = [
+#     # Parallel frontend (50% faster compilation)
+#     "-Z", "threads=8",
+#
+#     # Sanitizers (choose one at a time)
+#     # "-Z", "sanitizer=address",
+#     # "-Z", "sanitizer=memory",
+#     # "-Z", "sanitizer=thread",
+#
+#     # Macro statistics for optimization
+#     # "-Z", "macro-stats",
+#
+#     # Build std from source for maximum optimization
+#     # "-Z", "build-std=std,core,alloc",
+#
+#     # Cranelift backend for faster dev builds
+#     # "-Z", "codegen-backend=cranelift",
+# ]
+
+# =============================================================================
+# Profile-Specific Overrides
+# =============================================================================
+
+[profile.dev]
+# Faster incremental builds
+incremental = true
+# Some optimizations in debug mode for usable performance
+opt-level = 1
+
+[profile.dev.package."*"]
+# Optimize dependencies even in dev mode
+opt-level = 2
+
+[profile.test]
+# Enable debug assertions in tests
+debug-assertions = true
+overflow-checks = true
+
+# =============================================================================
+# Environment Variables
+# =============================================================================
+
+[env]
+# Backtrace on panic
+RUST_BACKTRACE = "1"
+
+# Colored cargo output
+CARGO_TERM_COLOR = "always"
+
+# Miri flags for UB detection (used when running cargo miri)
+MIRIFLAGS = "-Zmiri-disable-isolation -Zmiri-symbolic-alignment-check"
+
+# =============================================================================
+# Registries
+# =============================================================================
+
+[registries.crates-io]
+protocol = "sparse"
+
+# =============================================================================
+# Aliases for Common Commands
+# =============================================================================
+
+[alias]
+# Run all checks
+check-all = "clippy --all-targets --all-features -- -D warnings"
+
+# Run miri on tests
+miri-test = "miri test"
+
+# Build with all features
+build-full = "build --all-features"
+
+# Test with all features
+test-full = "test --all-features"
+
+# Release build with maximum optimization
+build-release = "build --release --all-features"
+
+# Generate documentation
+doc-all = "doc --all-features --no-deps"
+
+# Run benchmarks
+bench-all = "bench --all-features"
+
+# Audit dependencies for security
+audit = "audit"
+
+# Deny check
+deny = "deny check"
+
+# Format check
+fmt-check = "fmt -- --check"
+
+# =============================================================================
+# Linker Configuration (Platform-Specific)
+# =============================================================================
+
+[target.x86_64-unknown-linux-gnu]
+# Use mold linker for faster linking (if installed)
+# linker = "clang"
+# rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+
+[target.x86_64-apple-darwin]
+# macOS specific settings
+# rustflags = ["-C", "link-arg=-Wl,-dead_strip"]
+
+[target.x86_64-pc-windows-msvc]
+# Windows specific settings
+
+# =============================================================================
+# Feature Resolver
+# =============================================================================
+
+[resolver]
+# Use resolver v2 for workspace
+# incompatible-rust-versions = "fallback"
