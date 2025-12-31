@@ -19,7 +19,7 @@ fn builds_dom_tree() {
 
     let html = doc_children[0];
     match dom.node(html).unwrap().kind() {
-        NodeKind::Element { name } => assert_eq!(name, "html"),
+        NodeKind::Element { name, .. } => assert_eq!(name, "html"),
         _ => panic!("expected html element"),
     }
 
@@ -34,4 +34,22 @@ fn builds_dom_tree() {
         NodeKind::Text { text } => assert_eq!(text, "hi"),
         _ => panic!("expected text node"),
     }
+}
+
+#[test]
+fn builds_attributes() {
+    let mut tokenizer = Tokenizer::new();
+    let mut tokens = tokenizer.feed("<div class='hero'></div>").unwrap();
+    tokens.extend(tokenizer.finish().unwrap());
+
+    let mut builder = TreeBuilder::new();
+    builder.process_tokens(tokens).unwrap();
+
+    let dom = builder.dom();
+    let doc = builder.document_id();
+    let div = dom.children(doc).unwrap()[0];
+    let attrs = dom.attributes(div).unwrap();
+    assert_eq!(attrs.len(), 1);
+    assert_eq!(attrs[0].name, "class");
+    assert_eq!(attrs[0].value, "hero");
 }

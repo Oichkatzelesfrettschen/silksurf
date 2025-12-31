@@ -11,7 +11,7 @@ fn parse_html_builds_dom() {
     assert_eq!(children.len(), 1);
 
     match dom.node(children[0]).unwrap().kind() {
-        NodeKind::Element { name } => assert_eq!(name, "html"),
+        NodeKind::Element { name, .. } => assert_eq!(name, "html"),
         _ => panic!("expected html element"),
     }
 }

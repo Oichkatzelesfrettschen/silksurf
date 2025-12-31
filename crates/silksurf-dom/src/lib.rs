@@ -4,9 +4,27 @@
 pub struct NodeId(usize);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Attribute {
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Namespace {
+    Html,
+    Svg,
+    MathMl,
+    Other(String),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum NodeKind {
     Document,
-    Element { name: String },
+    Element {
+        name: String,
+        namespace: Namespace,
+        attributes: Vec<Attribute>,
+    },
     Text { text: String },
 }
 
@@ -26,6 +44,7 @@ pub struct Dom {
 pub enum DomError {
     UnknownNode(NodeId),
     AlreadyHasParent(NodeId),
+    NotElement(NodeId),
 }
 
 impl Dom {
@@ -38,7 +57,15 @@ impl Dom {
     }
 
     pub fn create_element(&mut self, name: impl Into<String>) -> NodeId {
-        self.push_node(NodeKind::Element { name: name.into() })
+        self.create_element_ns(name, Namespace::Html)
+    }
+
+    pub fn create_element_ns(&mut self, name: impl Into<String>, namespace: Namespace) -> NodeId {
+        self.push_node(NodeKind::Element {
+            name: name.into(),
+            namespace,
+            attributes: Vec::new(),
+        })
     }
 
     pub fn create_text(&mut self, text: impl Into<String>) -> NodeId {
@@ -56,6 +83,33 @@ impl Dom {
         self.nodes[child_index].parent = Some(parent);
         self.nodes[parent_index].children.push(child);
         Ok(())
+    }
+
+    pub fn set_attribute(
+        &mut self,
+        id: NodeId,
+        name: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Result<(), DomError> {
+        let index = self.node_index(id)?;
+        match &mut self.nodes[index].kind {
+            NodeKind::Element { attributes, .. } => {
+                attributes.push(Attribute {
+                    name: name.into(),
+                    value: value.into(),
+                });
+                Ok(())
+            }
+            _ => Err(DomError::NotElement(id)),
+        }
+    }
+
+    pub fn attributes(&self, id: NodeId) -> Result<&[Attribute], DomError> {
+        let index = self.node_index(id)?;
+        match &self.nodes[index].kind {
+            NodeKind::Element { attributes, .. } => Ok(attributes.as_slice()),
+            _ => Err(DomError::NotElement(id)),
+        }
     }
 
     pub fn node(&self, id: NodeId) -> Result<&Node, DomError> {
