@@ -41,10 +41,58 @@ fn tokenizes_hash_and_comment() {
         CssToken::Ident("padding".into()),
         CssToken::Colon,
         CssToken::Whitespace,
-        CssToken::Number("10".into()),
-        CssToken::Ident("px".into()),
+        CssToken::Dimension {
+            value: "10".into(),
+            unit: "px".into(),
+        },
         CssToken::Whitespace,
         CssToken::CurlyClose,
+        CssToken::Eof,
+    ];
+
+    assert_eq!(tokens, expected);
+}
+
+#[test]
+fn tokenizes_at_keyword_and_function() {
+    let mut tokenizer = CssTokenizer::new();
+    let mut tokens = tokenizer
+        .feed("@media screen { color: rgb(10%); }")
+        .unwrap();
+    tokens.extend(tokenizer.finish().unwrap());
+
+    let expected = vec![
+        CssToken::AtKeyword("media".into()),
+        CssToken::Whitespace,
+        CssToken::Ident("screen".into()),
+        CssToken::Whitespace,
+        CssToken::CurlyOpen,
+        CssToken::Whitespace,
+        CssToken::Ident("color".into()),
+        CssToken::Colon,
+        CssToken::Whitespace,
+        CssToken::Function("rgb".into()),
+        CssToken::Percentage("10".into()),
+        CssToken::ParenClose,
+        CssToken::Semicolon,
+        CssToken::Whitespace,
+        CssToken::CurlyClose,
+        CssToken::Eof,
+    ];
+
+    assert_eq!(tokens, expected);
+}
+
+#[test]
+fn tokenizes_cdo_cdc() {
+    let mut tokenizer = CssTokenizer::new();
+    let mut tokens = tokenizer.feed("<!-- -->").unwrap();
+    tokens.extend(tokenizer.finish().unwrap());
+
+    let expected = vec![
+        CssToken::Cdo,
+        CssToken::Whitespace,
+        CssToken::Cdc,
         CssToken::Eof,
     ];
 
