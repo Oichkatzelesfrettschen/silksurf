@@ -155,38 +155,7 @@ impl Tokenizer {
         }
 
         if self.starts_with_case_insensitive(start + 2, "doctype") {
-            let mut cursor = start + 2 + "doctype".len();
-            cursor = self.skip_whitespace(cursor);
-            if cursor >= bytes.len() {
-                return Ok(false);
-            }
-            let name_start = cursor;
-            while cursor < bytes.len() && !is_whitespace(bytes[cursor]) && bytes[cursor] != b'>' {
-                cursor += 1;
-            }
-            if cursor >= bytes.len() {
-                return Ok(false);
-            }
-            let name = if cursor > name_start {
-                Some(self.buffer[name_start..cursor].to_string())
-            } else {
-                None
-            };
-            while cursor < bytes.len() && bytes[cursor] != b'>' {
-                cursor += 1;
-            }
-            if cursor >= bytes.len() {
-                return Ok(false);
-            }
-            cursor += 1;
-            tokens.push(Token::Doctype {
-                name,
-                public_id: None,
-                system_id: None,
-                force_quirks: false,
-            });
-            self.cursor = cursor;
-            return Ok(true);
+            return self.parse_doctype(tokens, start);
         }
 
         Err(self.error(
@@ -194,6 +163,102 @@ impl Tokenizer {
             start + 1,
             "unsupported markup declaration",
         ))
+    }
+
+    fn parse_doctype(&mut self, tokens: &mut Vec<Token>, start: usize) -> Result<bool, TokenizeError> {
+        let bytes = self.buffer.as_bytes();
+        let mut cursor = start + 2 + "doctype".len();
+        cursor = self.skip_whitespace(cursor);
+        if cursor >= bytes.len() {
+            return Ok(false);
+        }
+
+        let name_start = cursor;
+        while cursor < bytes.len() && !is_whitespace(bytes[cursor]) && bytes[cursor] != b'>' {
+            cursor += 1;
+        }
+        if cursor >= bytes.len() {
+            return Ok(false);
+        }
+
+        let name = if cursor > name_start {
+            Some(self.buffer[name_start..cursor].to_string())
+        } else {
+            None
+        };
+
+        let mut public_id = None;
+        let mut system_id = None;
+        let mut force_quirks = name.is_none();
+
+        cursor = self.skip_whitespace(cursor);
+        if cursor >= bytes.len() {
+            return Ok(false);
+        }
+
+        if bytes[cursor] != b'>' {
+            if self.starts_with_case_insensitive(cursor, "public") {
+                cursor += "public".len();
+                cursor = self.skip_whitespace(cursor);
+                match self.parse_quoted_string(cursor) {
+                    QuotedParse::Parsed(value, next) => {
+                        public_id = Some(value);
+                        cursor = self.skip_whitespace(next);
+                    }
+                    QuotedParse::Incomplete => return Ok(false),
+                    QuotedParse::MissingQuote => {
+                        force_quirks = true;
+                        cursor = self.skip_to_gt(cursor);
+                    }
+                }
+
+                if cursor < bytes.len() && bytes[cursor] != b'>' {
+                    match self.parse_quoted_string(cursor) {
+                        QuotedParse::Parsed(value, next) => {
+                            system_id = Some(value);
+                            cursor = next;
+                        }
+                        QuotedParse::Incomplete => return Ok(false),
+                        QuotedParse::MissingQuote => {
+                            force_quirks = true;
+                            cursor = self.skip_to_gt(cursor);
+                        }
+                    }
+                }
+            } else if self.starts_with_case_insensitive(cursor, "system") {
+                cursor += "system".len();
+                cursor = self.skip_whitespace(cursor);
+                match self.parse_quoted_string(cursor) {
+                    QuotedParse::Parsed(value, next) => {
+                        system_id = Some(value);
+                        cursor = next;
+                    }
+                    QuotedParse::Incomplete => return Ok(false),
+                    QuotedParse::MissingQuote => {
+                        force_quirks = true;
+                        cursor = self.skip_to_gt(cursor);
+                    }
+                }
+            } else {
+                force_quirks = true;
+                cursor = self.skip_to_gt(cursor);
+            }
+        }
+
+        cursor = self.skip_to_gt(cursor);
+        if cursor >= bytes.len() {
+            return Ok(false);
+        }
+        cursor += 1;
+
+        tokens.push(Token::Doctype {
+            name,
+            public_id,
+            system_id,
+            force_quirks,
+        });
+        self.cursor = cursor;
+        Ok(true)
     }
 
     fn parse_end_tag(&mut self, tokens: &mut Vec<Token>, start: usize) -> Result<bool, TokenizeError> {
@@ -358,6 +423,14 @@ impl Tokenizer {
         cursor
     }
 
+    fn skip_to_gt(&self, mut cursor: usize) -> usize {
+        let bytes = self.buffer.as_bytes();
+        while cursor < bytes.len() && bytes[cursor] != b'>' {
+            cursor += 1;
+        }
+        cursor
+    }
+
     fn find_subsequence(&self, start: usize, needle: &[u8]) -> Option<usize> {
         let bytes = self.buffer.as_bytes();
         bytes[start..]
@@ -379,6 +452,26 @@ impl Tokenizer {
             .bytes()
             .zip(needle.bytes())
             .all(|(a, b)| a.eq_ignore_ascii_case(&b))
+    }
+
+    fn parse_quoted_string(&self, cursor: usize) -> QuotedParse {
+        let bytes = self.buffer.as_bytes();
+        if cursor >= bytes.len() {
+            return QuotedParse::Incomplete;
+        }
+        let quote = bytes[cursor];
+        if quote != b'"' && quote != b'\'' {
+            return QuotedParse::MissingQuote;
+        }
+        let mut end = cursor + 1;
+        while end < bytes.len() && bytes[end] != quote {
+            end += 1;
+        }
+        if end >= bytes.len() {
+            return QuotedParse::Incomplete;
+        }
+        let value = self.buffer[cursor + 1..end].to_string();
+        QuotedParse::Parsed(value, end + 1)
     }
 
     fn error(&self, state: State, offset: usize, message: &str) -> TokenizeError {
@@ -411,4 +504,10 @@ fn normalize_tag_name(name: &str) -> String {
 enum AttributeParse {
     Parsed(Attribute, usize),
     Incomplete,
+}
+
+enum QuotedParse {
+    Parsed(String, usize),
+    Incomplete,
+    MissingQuote,
 }
