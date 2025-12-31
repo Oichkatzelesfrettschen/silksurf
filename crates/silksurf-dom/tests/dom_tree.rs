@@ -57,3 +57,22 @@ fn sets_attributes_and_namespace() {
         _ => panic!("expected element node"),
     }
 }
+
+#[test]
+fn traversal_helpers_work() {
+    let mut dom = Dom::new();
+    let doc = dom.create_document();
+    let html = dom.create_element("html");
+    let head = dom.create_element("head");
+    let body = dom.create_element("body");
+
+    dom.append_child(doc, html).unwrap();
+    dom.append_child(html, head).unwrap();
+    dom.append_child(html, body).unwrap();
+
+    assert_eq!(dom.first_child(doc).unwrap(), Some(html));
+    assert_eq!(dom.first_child(html).unwrap(), Some(head));
+    assert_eq!(dom.next_sibling(head).unwrap(), Some(body));
+    assert_eq!(dom.next_sibling(body).unwrap(), None);
+    assert_eq!(dom.element_name(body).unwrap(), Some("body"));
+}
