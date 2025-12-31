@@ -37,5 +37,6 @@
 - PRs should include: summary of changes, tests run (with commands), and screenshots for GUI/rendering changes. Link related issues when available.
 
 ## Documentation & Cleanroom Policy
-- Keep research in `diff-analysis/`, specs in `silksurf-specification/`, and implementation in `src/`.
+- Keep research in `diff-analysis/`, specs in `silksurf-specification/`, and implementation in `crates/` + `silksurf-js/`.
 - Update specs/docs before large code changes and explain the why/what/how (see `CLAUDE.md`).
+- Treat `silksurf-extras/` and `silksurf-js/test262/` as local, untracked reference checkouts.
