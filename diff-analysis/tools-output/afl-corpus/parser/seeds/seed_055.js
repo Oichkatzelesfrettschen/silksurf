@@ -1,23 +1,3 @@
-// Copyright 2015 Cubane Canada, Inc.  All rights reserved.
-// See LICENSE for details.
-
-/*---
-info: |
- GeneratorMethod early SyntaxError when lexical declaration
- inside generator shadows parameter name
-features: [generators]
-es6id: 14.4.1
-author: Sam Mikes
-description: GeneratorMethod error with lexical shadowing
-negative:
-  phase: parse
-  type: SyntaxError
----*/
-
-$DONOTEVALUATE();
-
-var obj = {
-    *foo(a) {
-        let a = 3;
-    }
-};
+version https://git-lfs.github.com/spec/v1
+oid sha256:e6ff7e626d6e83652b7346cc08a8b075bda6fa87b81ee77deccd543f2030cebd
+size 442

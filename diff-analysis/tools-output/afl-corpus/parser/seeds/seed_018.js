@@ -1,23 +1,3 @@
-// Copyright 2017 Caitlin Potter. All rights reserved.
-// This code is governed by the BSD license found in the LICENSE file.
-
-/*---
-author: Caitlin Potter <caitp@igalia.com>
-esid: pending
-description: >
-  Implementations must defer resolving an async function's Promise until after
-  all finally blocks have been evaluated.
-flags: [async]
----*/
-
-var f = async function() {
-  try {
-    return "early-return";
-  } finally {
-    throw "override";
-  }
-};
-
-f().then($DONE, function(value) {
-  assert.sameValue(value, "override", "Exception thrown in finally block");
-}).then($DONE, $DONE);
+version https://git-lfs.github.com/spec/v1
+oid sha256:51c3a695cb84dfb5cdbcc8c430e30218a107489704f127dff4d4841fa8e9fdab
+size 586

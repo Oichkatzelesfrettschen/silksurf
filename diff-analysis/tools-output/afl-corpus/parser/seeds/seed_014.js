@@ -1,13 +1,3 @@
-// Copyright (c) 2017 the V8 project authors. All rights reserved.
-// This code is governed by the BSD license found in the LICENSE file.
-
-/*---
-esid: sec-strict-mode-of-ecmascript
-description: >
-    It is a SyntaxError if a CatchParameter occurs within strict mode code and BoundNames of CatchParameter contains either eval or arguments (13.15.1).
-flags: [onlyStrict]
----*/
-
-assert.throws(SyntaxError, function() {
-  eval("try {} catch (arguments) { }");
-});
+version https://git-lfs.github.com/spec/v1
+oid sha256:d7881acae209ab8163a5a501ea2bbef9ea851c7212e6a6ffd0ba8876f587b15d
+size 460

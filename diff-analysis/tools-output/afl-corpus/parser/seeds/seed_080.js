@@ -1,20 +1,3 @@
-// This file was procedurally generated from the following sources:
-// - src/assignment-target-type/lefthandsideexpression-logical-or-assignment-assignmentexpression-0.case
-// - src/assignment-target-type/invalid/direct.template
-/*---
-description: Static Semantics AssignmentTargetType, Return invalid. (Direct assignment)
-flags: [generated]
-negative:
-  phase: parse
-  type: SyntaxError
-info: |
-    Direct assignment
-
-    LeftHandSideExpression ||= AssignmentExpression
-    Static Semantics AssignmentTargetType, Return invalid.
-
----*/
-
-$DONOTEVALUATE();
-
-(x ||= y) = 1;
+version https://git-lfs.github.com/spec/v1
+oid sha256:7c8234ef0911810a3a77243ff0fc19bde6acd2584c39f49026eb8955f727c659
+size 571

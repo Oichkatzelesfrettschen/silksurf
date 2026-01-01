@@ -1,33 +1,3 @@
-// This file was procedurally generated from the following sources:
-// - src/class-elements/private-call-exp-cannot-escape-token.case
-// - src/class-elements/syntax/invalid/cls-decl-elements-invalid-syntax.template
-/*---
-description: The pound signal in the private reference cannot be escaped (class declaration)
-esid: prod-ClassElement
-features: [class-fields-private, class]
-flags: [generated]
-negative:
-  phase: parse
-  type: SyntaxError
-info: |
-    PrivateName ::
-      # IdentifierName
-
-    MemberExpression :
-      MemberExpression . PrivateName
-
-    CallExpression :
-      CallExpression . PrivateName
-
-    U+0023 is the escape sequence for #
-
----*/
-
-
-$DONOTEVALUATE();
-
-class C {
-  method() {
-    foo().\u0023field;
-  }
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:01af08d2513caba374a913080985a2223fd480e0f4ae8bb7a4a45cfa4590b423
+size 731

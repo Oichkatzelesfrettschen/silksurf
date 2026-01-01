@@ -1,16 +1,3 @@
-// Copyright (c) 2020 Ecma International.  All rights reserved.
-// This code is governed by the BSD license found in the LICENSE file.
-
-/*---
-esid: sec-assignment-operators-runtime-semantics-evaluation
-description: >
-    ReferenceError is not thrown if the AssignmentExpression of a Logical
-    Assignment operator(||=) evaluates to an unresolvable reference and the
-    AssignmentExpression is not evaluated.
-features: [logical-assignment-operators]
-
----*/
-
-var value = 2;
-
-assert.sameValue(value ||= unresolved, 2, "value");
+version https://git-lfs.github.com/spec/v1
+oid sha256:5e04af66fb6ecd70bdce8f8ce61d8a742879095b586033aad635ee7cafae756b
+size 527

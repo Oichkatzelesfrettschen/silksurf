@@ -1,20 +1,3 @@
-// This file was procedurally generated from the following sources:
-// - src/assignment-target-type/lefthandsideexpression-assignment-assignmentexpression-2.case
-// - src/assignment-target-type/invalid/direct.template
-/*---
-description: If LeftHandSideExpression is neither an ObjectLiteral nor an ArrayLiteral, the following Early Error rule is applied, It is a Syntax Error if AssignmentTargetType of LeftHandSideExpression is not simple. (Direct assignment)
-flags: [generated]
-negative:
-  phase: parse
-  type: SyntaxError
-info: |
-    Direct assignment
-
-    LeftHandSideExpression = AssignmentExpression
-    If LeftHandSideExpression is neither an ObjectLiteral nor an ArrayLiteral, the following Early Error rule is applied, It is a Syntax Error if AssignmentTargetType of LeftHandSideExpression is not simple.
-
----*/
-
-$DONOTEVALUATE();
-
-(x = true) = 1;
+version https://git-lfs.github.com/spec/v1
+oid sha256:3214f8354db3c18af70c42a53c5305431159e69627b0fea9dbd00bd24e818041
+size 857

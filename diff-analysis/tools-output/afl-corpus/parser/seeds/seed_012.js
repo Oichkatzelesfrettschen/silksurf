@@ -1,23 +1,3 @@
-// This file was procedurally generated from the following sources:
-// - src/assignment-target-type/lefthandsideexpression-coalesce-assignment-assignmentexpression-1.case
-// - src/assignment-target-type/invalid/parenthesized.template
-/*---
-description: Static Semantics AssignmentTargetType, Return invalid. (ParenthesizedExpression)
-esid: sec-grouping-operator-static-semantics-assignmenttargettype
-flags: [generated]
-negative:
-  phase: parse
-  type: SyntaxError
-info: |
-    ParenthesizedExpression: (Expression)
-
-    Return AssignmentTargetType of Expression.
-
-    LeftHandSideExpression ??= AssignmentExpression
-    Static Semantics AssignmentTargetType, Return invalid.
-
----*/
-
-$DONOTEVALUATE();
-
-((x ??= 1)) = 1;
+version https://git-lfs.github.com/spec/v1
+oid sha256:fa30d68ce4e2625e3dfb5657cdbc41067e57f8aa5e9d1e5b45837139871a2125
+size 718

@@ -1,25 +1,3 @@
-// Copyright (C) 2021 André Bargull. All rights reserved.
-// This code is governed by the BSD license found in the LICENSE file.
-
-/*---
-esid: sec-ecmascript-function-objects-construct-argumentslist-newtarget
-description: >
-  TypeError from `return 0` is not catchable with `super` called in catch block
-  from an arrow function.
----*/
-
-class C extends class {} {
-  constructor() {
-    var f = () => super();
-
-    try {
-      return 0;
-    } catch(e) {
-      f();
-    }
-  }
-}
-
-assert.throws(TypeError, function() {
-  new C();
-});
+version https://git-lfs.github.com/spec/v1
+oid sha256:0f1543121bd23eb7bed20fdd019304fa4b6a6b273fe96af680724b3455e62242
+size 530
