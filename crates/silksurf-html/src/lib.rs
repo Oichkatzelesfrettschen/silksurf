@@ -1,10 +1,11 @@
 //! HTML5 tokenizer and parser (cleanroom).
 
-use memchr::memchr;
+use memchr::{memchr, memchr2, memchr3};
 
 mod tree_builder;
 
 pub use tree_builder::TreeBuilder;
+pub use tree_builder::TreeBuildError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
@@ -59,6 +60,7 @@ pub struct TokenizeError {
 pub struct Tokenizer {
     buffer: String,
     cursor: usize,
+    raw_text_tag: Option<String>,
 }
 
 impl Tokenizer {
@@ -66,6 +68,7 @@ impl Tokenizer {
         Self {
             buffer: String::new(),
             cursor: 0,
+            raw_text_tag: None,
         }
     }
 
@@ -80,6 +83,13 @@ impl Tokenizer {
                 break;
             }
 
+            if self.raw_text_tag.is_some() {
+                if !self.parse_raw_text(&mut tokens)? {
+                    break;
+                }
+                continue;
+            }
+
             let remainder = &self.buffer[self.cursor..];
             match memchr(b'<', remainder.as_bytes()) {
                 Some(0) => {
@@ -88,12 +98,12 @@ impl Tokenizer {
                     }
                 }
                 Some(pos) => {
-                    let text = remainder[..pos].to_string();
+                    let text = decode_character_references(&remainder[..pos]);
                     tokens.push(Token::Character { data: text });
                     self.cursor += pos;
                 }
                 None => {
-                    let text = remainder.to_string();
+                    let text = decode_character_references(remainder);
                     tokens.push(Token::Character { data: text });
                     self.cursor = self.buffer.len();
                     break;
@@ -272,13 +282,22 @@ impl Tokenizer {
             return Ok(false);
         }
         let name_start = cursor;
-        while cursor < bytes.len() && is_tag_name_char(bytes[cursor]) {
-            cursor += 1;
+        let name_end = self.scan_tag_name_end(name_start);
+        if name_end == name_start {
+            return Err(self.error(State::EndTagOpen, name_start, "missing end tag name"));
         }
-        if cursor == name_start {
-            return Err(self.error(State::EndTagOpen, cursor, "missing end tag name"));
+        if let Some(offset) = bytes[name_start..name_end]
+            .iter()
+            .position(|&b| !is_tag_name_char(b))
+        {
+            return Err(self.error(
+                State::EndTagOpen,
+                name_start + offset,
+                "invalid end tag name",
+            ));
         }
-        let name = self.buffer[name_start..cursor].to_string();
+        cursor = name_end;
+        let name = self.buffer[name_start..name_end].to_string();
         cursor = self.skip_whitespace(cursor);
         if cursor >= bytes.len() {
             return Ok(false);
@@ -306,13 +325,22 @@ impl Tokenizer {
         }
 
         let name_start = cursor;
-        while cursor < bytes.len() && is_tag_name_char(bytes[cursor]) {
-            cursor += 1;
+        let name_end = self.scan_tag_name_end(name_start);
+        if name_end == name_start {
+            return Err(self.error(State::TagName, name_start, "missing tag name"));
         }
-        if cursor == name_start {
-            return Err(self.error(State::TagName, cursor, "missing tag name"));
+        if let Some(offset) = bytes[name_start..name_end]
+            .iter()
+            .position(|&b| !is_tag_name_char(b))
+        {
+            return Err(self.error(
+                State::TagName,
+                name_start + offset,
+                "invalid tag name",
+            ));
         }
-        let name = normalize_tag_name(&self.buffer[name_start..cursor]);
+        cursor = name_end;
+        let name = normalize_tag_name(&self.buffer[name_start..name_end]);
         let mut attributes = Vec::new();
         let mut self_closing = false;
 
@@ -347,26 +375,75 @@ impl Tokenizer {
             }
         }
 
+        let tag_name = name.clone();
         tokens.push(Token::StartTag {
             name,
             attributes,
             self_closing,
         });
         self.cursor = cursor;
+        if !self_closing && (tag_name == "script" || tag_name == "style") {
+            self.raw_text_tag = Some(tag_name);
+        }
         Ok(true)
+    }
+
+    fn parse_raw_text(&mut self, tokens: &mut Vec<Token>) -> Result<bool, TokenizeError> {
+        let tag = match self.raw_text_tag.clone() {
+            Some(tag) => tag,
+            None => return Ok(true),
+        };
+        let bytes = self.buffer.as_bytes();
+        let mut cursor = self.cursor;
+        while cursor < bytes.len() {
+            let next = match memchr(b'<', &bytes[cursor..]) {
+                Some(pos) => cursor + pos,
+                None => break,
+            };
+            cursor = next;
+            if cursor + 1 < bytes.len() && bytes[cursor + 1] == b'/' {
+                let name_start = cursor + 2;
+                if self.starts_with_case_insensitive(name_start, &tag) {
+                    let end = name_start + tag.len();
+                    if end < bytes.len() && bytes[end] == b'>' {
+                        let data = self.buffer[self.cursor..cursor].to_string();
+                        if !data.is_empty() {
+                            tokens.push(Token::Character { data });
+                        }
+                        tokens.push(Token::EndTag {
+                            name: normalize_tag_name(&tag),
+                        });
+                        self.cursor = end + 1;
+                        self.raw_text_tag = None;
+                        return Ok(true);
+                    }
+                }
+            }
+            cursor += 1;
+        }
+        Ok(false)
     }
 
     fn parse_attribute(&self, start: usize) -> Result<AttributeParse, TokenizeError> {
         let bytes = self.buffer.as_bytes();
         let mut cursor = start;
         let name_start = cursor;
-        while cursor < bytes.len() && is_attr_name_char(bytes[cursor]) {
-            cursor += 1;
+        let name_end = self.scan_attr_name_end(name_start);
+        if name_end == name_start {
+            return Err(self.error(State::AttributeName, name_start, "invalid attribute name"));
         }
-        if cursor == name_start {
-            return Err(self.error(State::AttributeName, cursor, "invalid attribute name"));
+        if let Some(offset) = bytes[name_start..name_end]
+            .iter()
+            .position(|&b| !is_attr_name_char(b))
+        {
+            return Err(self.error(
+                State::AttributeName,
+                name_start + offset,
+                "invalid attribute name",
+            ));
         }
-        let name = self.buffer[name_start..cursor].to_string();
+        cursor = name_end;
+        let name = self.buffer[name_start..name_end].to_string();
         cursor = self.skip_whitespace(cursor);
         if cursor >= bytes.len() {
             return Ok(AttributeParse::Incomplete);
@@ -388,25 +465,24 @@ impl Tokenizer {
                 let quote = bytes[cursor];
                 cursor += 1;
                 let value_start = cursor;
-                while cursor < bytes.len() && bytes[cursor] != quote {
-                    cursor += 1;
-                }
-                if cursor >= bytes.len() {
-                    return Ok(AttributeParse::Incomplete);
-                }
-                value = self.buffer[value_start..cursor].to_string();
-                cursor += 1;
+                let rest = &bytes[cursor..];
+                let rel = match memchr(quote, rest) {
+                    Some(pos) => pos,
+                    None => return Ok(AttributeParse::Incomplete),
+                };
+                let value_end = cursor + rel;
+                value = decode_character_references(&self.buffer[value_start..value_end]);
+                cursor = value_end + 1;
             }
             _ => {
                 let value_start = cursor;
-                while cursor < bytes.len()
-                    && !is_whitespace(bytes[cursor])
-                    && bytes[cursor] != b'>'
-                    && bytes[cursor] != b'/'
-                {
+                let rest = &bytes[cursor..];
+                let rel = memchr2(b'>', b'/', rest).unwrap_or(rest.len());
+                let end = cursor + rel;
+                while cursor < end && !is_whitespace(bytes[cursor]) {
                     cursor += 1;
                 }
-                value = self.buffer[value_start..cursor].to_string();
+                value = decode_character_references(&self.buffer[value_start..cursor]);
             }
         }
 
@@ -427,12 +503,47 @@ impl Tokenizer {
         cursor
     }
 
-    fn skip_to_gt(&self, mut cursor: usize) -> usize {
+    fn skip_to_gt(&self, cursor: usize) -> usize {
         let bytes = self.buffer.as_bytes();
-        while cursor < bytes.len() && bytes[cursor] != b'>' {
-            cursor += 1;
+        match memchr(b'>', &bytes[cursor..]) {
+            Some(pos) => cursor + pos,
+            None => bytes.len(),
         }
-        cursor
+    }
+
+    fn scan_tag_name_end(&self, start: usize) -> usize {
+        let bytes = self.buffer.as_bytes();
+        let rest = &bytes[start..];
+        let mut end = start + rest.len();
+        if let Some(pos) = memchr3(b' ', b'>', b'/', rest) {
+            end = start + pos;
+        }
+        if let Some(pos) = memchr2(b'\n', b'\t', &bytes[start..end]) {
+            end = start + pos;
+        }
+        if let Some(pos) = memchr2(b'\r', b'\x0c', &bytes[start..end]) {
+            end = start + pos;
+        }
+        end
+    }
+
+    fn scan_attr_name_end(&self, start: usize) -> usize {
+        let bytes = self.buffer.as_bytes();
+        let rest = &bytes[start..];
+        let mut end = start + rest.len();
+        if let Some(pos) = memchr3(b' ', b'=', b'>', rest) {
+            end = end.min(start + pos);
+        }
+        if let Some(pos) = memchr2(b'/', b'\n', rest) {
+            end = end.min(start + pos);
+        }
+        if let Some(pos) = memchr2(b'\t', b'\r', rest) {
+            end = end.min(start + pos);
+        }
+        if let Some(pos) = memchr(b'\x0c', rest) {
+            end = end.min(start + pos);
+        }
+        end
     }
 
     fn find_subsequence(&self, start: usize, needle: &[u8]) -> Option<usize> {
@@ -467,13 +578,12 @@ impl Tokenizer {
         if quote != b'"' && quote != b'\'' {
             return QuotedParse::MissingQuote;
         }
-        let mut end = cursor + 1;
-        while end < bytes.len() && bytes[end] != quote {
-            end += 1;
-        }
-        if end >= bytes.len() {
-            return QuotedParse::Incomplete;
-        }
+        let rest = &bytes[cursor + 1..];
+        let rel = match memchr(quote, rest) {
+            Some(pos) => pos,
+            None => return QuotedParse::Incomplete,
+        };
+        let end = cursor + 1 + rel;
         let value = self.buffer[cursor + 1..end].to_string();
         QuotedParse::Parsed(value, end + 1)
     }
@@ -503,6 +613,72 @@ fn normalize_tag_name(name: &str) -> String {
     name.bytes()
         .map(|b| b.to_ascii_lowercase() as char)
         .collect()
+}
+
+fn decode_character_references(input: &str) -> String {
+    let bytes = input.as_bytes();
+    if memchr(b'&', bytes).is_none() {
+        return input.to_string();
+    }
+    let mut output = String::with_capacity(input.len());
+    let mut cursor = 0usize;
+    while let Some(pos) = memchr(b'&', &bytes[cursor..]) {
+        let amp = cursor + pos;
+        output.push_str(&input[cursor..amp]);
+        cursor = amp + 1;
+        if let Some((decoded, consumed)) = parse_character_reference_at(&input[cursor..]) {
+            output.push_str(&decoded);
+            cursor += consumed;
+        } else {
+            output.push('&');
+        }
+    }
+    output.push_str(&input[cursor..]);
+    output
+}
+
+fn parse_character_reference_at(input: &str) -> Option<(String, usize)> {
+    if let Some(rest) = input.strip_prefix("#x").or_else(|| input.strip_prefix("#X")) {
+        return parse_numeric_reference(rest, 16, 2);
+    }
+    if let Some(rest) = input.strip_prefix('#') {
+        return parse_numeric_reference(rest, 10, 1);
+    }
+    for (name, value) in [
+        ("amp", "&"),
+        ("lt", "<"),
+        ("gt", ">"),
+        ("quot", "\""),
+        ("apos", "'"),
+    ] {
+        if input.starts_with(name) {
+            let tail = &input[name.len()..];
+            if tail.starts_with(';') {
+                return Some((value.to_string(), name.len() + 1));
+            }
+        }
+    }
+    None
+}
+
+fn parse_numeric_reference(input: &str, radix: u32, prefix_len: usize) -> Option<(String, usize)> {
+    let mut end = None;
+    for (idx, ch) in input.char_indices() {
+        if ch == ';' {
+            end = Some(idx);
+            break;
+        }
+        if !ch.is_digit(radix) {
+            return None;
+        }
+    }
+    let end = end?;
+    if end == 0 {
+        return None;
+    }
+    let value = u32::from_str_radix(&input[..end], radix).ok()?;
+    let ch = std::char::from_u32(value).unwrap_or('\u{FFFD}');
+    Some((ch.to_string(), prefix_len + end + 1))
 }
 
 enum AttributeParse {

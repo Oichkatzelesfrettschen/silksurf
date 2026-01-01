@@ -1,42 +1,38 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `Cargo.toml`: Rust workspace root.
-- `crates/`: Rust implementation crates for engine subsystems.
-- `silksurf-js/`: Rust JS engine crate.
-- `silksurf-specification/`: cleanroom specs and migration plans.
+- `crates/`: Rust subsystem crates (`silksurf-html`, `silksurf-css`, `silksurf-dom`, `silksurf-layout`, `silksurf-render`, `silksurf-engine`, `silksurf-net`, `silksurf-tls`, plus app/gui).
+- `silksurf-js/`: Rust JS engine crate and harnesses.
 - `src/`, `include/`, `tests/`, `CMakeLists.txt`, `Makefile`: legacy C sources (migration-only).
-- `docs/`, `diff-analysis/`, `silksurf-extras/`: research, analysis, and vendor/reference material.
+- `docs/`: canonical architecture, performance, tooling, cleanroom, and testing docs (see `docs/README.md`).
+- `silksurf-specification/`, `diff-analysis/`: cleanroom specs and design research.
+- `silksurf-extras/`, `silksurf-js/test262/`: local reference checkouts (untracked).
+- `fuzz/`, `perf/`, `logs/`: fuzzing and performance artifacts.
 
 ## Build, Test, and Development Commands
 - `cargo build`: build the Rust workspace.
-- `cargo test`: run Rust tests across crates.
-- `cargo run -p silksurf-app`: run the Rust binary.
-- `cargo test -p silksurf-js`: run JS engine tests.
-- `cargo bench -p silksurf-js`: run JS engine benchmarks (if enabled).
+- `cargo run -p silksurf-app`: run the end-to-end pipeline driver.
+- `cargo test`: run all Rust unit/integration tests.
+- `cargo test -p silksurf-js`: run JS engine tests and harnesses.
+- `cargo run -p silksurf-engine --bin bench_pipeline`: run pipeline benchmark binary.
+- `cargo run -p silksurf-css --bin bench_css`: run CSS benchmark binary.
+- `cd fuzz && cargo fuzz run html_tokenizer`: run fuzzing (requires `cargo-fuzz`).
 - `cmake -B build && cmake --build build`: legacy C build (migration-only).
-- `ctest --test-dir build`: legacy C tests.
-- `make build` / `make clean`: legacy Makefile wrapper.
-- `make gui`, `make fuzz-build`, `make fuzz-run`: legacy GUI and AFL++ workflows.
 
 ## Coding Style & Naming Conventions
-- C11, 4-space indentation, braces on the same line.
-- Functions/types use `silk_*` and `silk_*_t`; macros/constants use `SILK_*`.
-- Header guards use `SILKSURF_*_H`; keep includes sorted with local headers from `include/silksurf/`.
-- Rust code uses `rustfmt` (`cargo fmt`) and `clippy` (`cargo clippy`) with warnings treated as errors where practical.
+- Rust: run `cargo fmt` and `cargo clippy`; use idiomatic `snake_case` for functions/vars and `CamelCase` for types; keep crate APIs cohesive.
+- C (legacy): C11, 4-space indentation, `silk_*` functions/typedefs, `SILK_*` macros, and `SILKSURF_*_H` header guards.
 
 ## Testing Guidelines
-- Prefer Rust tests in each crate (`cargo test`); add integration tests under each crate's `tests/` folder.
-- Keep tests deterministic; prefer small HTML/CSS fixtures checked into the crate test dirs.
-- Run `cargo test` (and optionally `cargo nextest run`) before PRs.
-- Legacy C tests live in `tests/` and run via `ctest --test-dir build`.
+- Prefer tests alongside each crate (`crates/*/tests/` and module `#[cfg(test)]`).
+- Keep fixtures minimal and deterministic; store small HTML/CSS snippets in crate test dirs.
+- Run targeted tests during development (`cargo test -p silksurf-html`, `cargo test -p silksurf-css`) plus `cargo test` before PRs.
 
 ## Commit & Pull Request Guidelines
-- Git history is not available in this workspace; no repo-specific commit convention found.
-- Use a concise, imperative subject (e.g., `css: fix cascade order`) and add a brief body if needed.
-- PRs should include: summary of changes, tests run (with commands), and screenshots for GUI/rendering changes. Link related issues when available.
+- Recent commits use short, imperative summaries (e.g., `Handle CSS url tokens`); add a body when behavior changes.
+- PRs should include: summary of changes, tests run (with commands), and screenshots for rendering changes.
+- Document dependency changes and cleanroom rationale in `docs/`.
 
-## Documentation & Cleanroom Policy
-- Keep research in `diff-analysis/`, specs in `silksurf-specification/`, and implementation in `crates/` + `silksurf-js/`.
-- Update specs/docs before large code changes and explain the why/what/how (see `CLAUDE.md`).
-- Treat `silksurf-extras/` and `silksurf-js/test262/` as local, untracked reference checkouts.
+## Cleanroom & Reference Policy
+- Treat `silksurf-extras/` and `silksurf-js/test262/` as reference-only; do not copy code.
+- Base implementations on specs and documented reasoning in `silksurf-specification/` and `docs/`.

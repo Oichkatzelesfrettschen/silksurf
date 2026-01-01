@@ -19,6 +19,7 @@ use std::ptr;
 use std::cell::RefCell;
 
 use crate::lexer::Lexer;
+use crate::parser::ast_arena::AstArena;
 use crate::parser::Parser;
 use crate::bytecode::Compiler;
 use crate::vm::Vm;
@@ -140,7 +141,8 @@ pub extern "C" fn silksurf_compile(
     }
 
     // Parse
-    let parser = Parser::new(source_str);
+    let ast_arena = AstArena::new();
+    let parser = Parser::new(source_str, &ast_arena);
     let (ast, errors) = parser.parse();
     if !errors.is_empty() {
         set_error(&format!("Parse error: {:?}", errors[0]));

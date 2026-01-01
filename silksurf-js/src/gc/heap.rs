@@ -56,7 +56,9 @@
 //! ```
 
 use std::alloc::{alloc, dealloc, Layout};
+use std::collections::HashMap;
 use std::ptr::NonNull;
+use bitvec::vec::BitVec;
 use static_assertions::const_assert_eq;
 
 // ============================================================================
@@ -413,6 +415,10 @@ pub struct Heap {
     large_objects: Vec<NonNull<GcHeader>>,
     /// All allocated blocks (for sweep traversal)
     all_blocks: Vec<NonNull<GcHeader>>,
+    /// Mark bitmap for current GC cycle (parallel to all_blocks)
+    mark_bits: BitVec,
+    /// Pointer-to-index map for mark bitmap
+    mark_index: HashMap<*mut GcHeader, usize>,
     /// Gray worklist for marking
     gray_worklist: Vec<GcRef>,
     /// Statistics
@@ -438,6 +444,8 @@ impl Heap {
             ],
             large_objects: Vec::new(),
             all_blocks: Vec::new(),
+            mark_bits: BitVec::new(),
+            mark_index: HashMap::new(),
             gray_worklist: Vec::with_capacity(256),
             stats: GcStats::default(),
             gc_threshold: 1024 * 1024, // 1 MB initial threshold
@@ -479,6 +487,7 @@ impl Heap {
             let block = NonNull::new(ptr.cast::<GcHeader>())?;
 
             self.all_blocks.push(block);
+            self.mark_bits.push(false);
             self.stats.bytes_allocated += alloc_size;
             self.stats.peak_bytes = self.stats.peak_bytes.max(self.stats.bytes_allocated);
 
@@ -504,6 +513,17 @@ impl Heap {
     /// Mark an object as reachable (add to gray worklist)
     #[inline]
     pub fn mark(&mut self, obj: GcRef) {
+        if let Some(&idx) = self.mark_index.get(&obj.as_ptr()) {
+            debug_assert!(idx < self.mark_bits.len());
+            if !self.mark_bits[idx] {
+                self.mark_bits.set(idx, true);
+                let header = unsafe { &mut *obj.as_ptr() };
+                header.set_color(Color::Gray);
+                self.gray_worklist.push(obj);
+            }
+            return;
+        }
+
         let header = unsafe { &mut *obj.as_ptr() };
         if header.color() == Color::White {
             header.set_color(Color::Gray);
@@ -561,7 +581,9 @@ impl Heap {
         let mut bytes_freed = 0usize;
         let mut objects_freed = 0u64;
 
-        for block in self.all_blocks.drain(..) {
+        let use_bitmap = !self.mark_index.is_empty() && self.mark_bits.len() == self.all_blocks.len();
+
+        for (idx, block) in self.all_blocks.drain(..).enumerate() {
             let header = unsafe { &mut *block.as_ptr() };
 
             if header.is_free() {
@@ -570,34 +592,37 @@ impl Heap {
                 continue;
             }
 
-            match header.color() {
-                Color::White => {
-                    // Garbage - notify before freeing
-                    if let Some(gc_ref) = unsafe { GcRef::from_raw(block.as_ptr()) } {
-                        on_collect(gc_ref);
-                    }
+            let is_marked = if use_bitmap {
+                self.mark_bits.get(idx).map_or(false, |bit| *bit)
+            } else {
+                matches!(header.color(), Color::Black | Color::Gray)
+            };
 
-                    // Add to free list
-                    let size = header.size();
-                    bytes_freed += size;
-                    objects_freed += 1;
+            if !is_marked {
+                // Garbage - notify before freeing
+                if let Some(gc_ref) = unsafe { GcRef::from_raw(block.as_ptr()) } {
+                    on_collect(gc_ref);
+                }
 
-                    if size < LARGE_OBJECT_THRESHOLD {
-                        if let Some(idx) = Self::size_class_index(size) {
-                            unsafe { self.free_lists[idx].push(block) };
-                            retained.push(block);
-                        }
-                    } else {
-                        // Free large object back to system
-                        let layout = Layout::from_size_align(size, ALIGNMENT).unwrap();
-                        unsafe { dealloc(block.as_ptr().cast::<u8>(), layout) };
+                // Add to free list
+                let size = header.size();
+                bytes_freed += size;
+                objects_freed += 1;
+
+                if size < LARGE_OBJECT_THRESHOLD {
+                    if let Some(idx) = Self::size_class_index(size) {
+                        unsafe { self.free_lists[idx].push(block) };
+                        retained.push(block);
                     }
+                } else {
+                    // Free large object back to system
+                    let layout = Layout::from_size_align(size, ALIGNMENT).unwrap();
+                    unsafe { dealloc(block.as_ptr().cast::<u8>(), layout) };
                 }
-                Color::Black | Color::Gray => {
-                    // Alive - reset to white for next cycle
-                    header.set_color(Color::White);
-                    retained.push(block);
-                }
+            } else {
+                // Alive - reset to white for next cycle
+                header.set_color(Color::White);
+                retained.push(block);
             }
         }
 
@@ -634,6 +659,15 @@ impl Heap {
         use std::time::Instant;
         let start = Instant::now();
 
+        // Prepare mark bitmap + index map for this cycle
+        self.mark_bits.resize(self.all_blocks.len(), false);
+        self.mark_bits.fill(false);
+        self.mark_index.clear();
+        self.mark_index.reserve(self.all_blocks.len());
+        for (idx, block) in self.all_blocks.iter().enumerate() {
+            self.mark_index.insert(block.as_ptr(), idx);
+        }
+
         // Mark phase: enumerate roots
         let heap_ptr = std::ptr::from_mut(self);
         root_enumerator(&mut |root| {
@@ -646,6 +680,10 @@ impl Heap {
 
         // Sweep phase with callback
         self.sweep_with_callback(on_collect);
+
+        // Clear bitmap state
+        self.mark_index.clear();
+        self.mark_bits.clear();
 
         // Update stats
         self.stats.gc_cycles += 1;

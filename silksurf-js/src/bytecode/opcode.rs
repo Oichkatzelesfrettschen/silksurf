@@ -261,6 +261,67 @@ pub enum Opcode {
 assert_eq_size!(Opcode, u8);
 const_assert_eq!(std::mem::size_of::<Opcode>(), 1);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OpcodeMeta {
+    pub name: &'static str,
+    pub operand_count: u8,
+    pub is_branch: bool,
+    pub is_terminator: bool,
+}
+
+const fn meta(
+    name: &'static str,
+    operand_count: u8,
+    is_branch: bool,
+    is_terminator: bool,
+) -> OpcodeMeta {
+    OpcodeMeta {
+        name,
+        operand_count,
+        is_branch,
+        is_terminator,
+    }
+}
+
+const INVALID_META: OpcodeMeta = meta("Invalid", 0, false, false);
+
+pub static OPCODE_META: [OpcodeMeta; 256] = {
+    let mut table = [INVALID_META; 256];
+    macro_rules! set_ops {
+        ($count:expr, $branch:expr, $term:expr, $( $op:ident ),+ $(,)?) => {
+            $(table[Opcode::$op as usize] = meta(stringify!($op), $count, $branch, $term);)+
+        };
+    }
+
+    set_ops!(0, false, false, Nop, Debugger, LeaveTry);
+    set_ops!(0, false, true, Halt, RetUndefined, Rethrow);
+    set_ops!(1, false, true, Ret, Throw);
+    set_ops!(1, false, false, LoadTrue, LoadFalse, LoadNull, LoadUndefined, LoadZero, LoadOne, LoadMinusOne, PushScope, PopScope);
+
+    set_ops!(2, true, true, Jmp);
+    set_ops!(2, false, false,
+        Mov, Neg, Inc, Dec, Not, BitNot, Typeof, LoadConst, LoadSmi,
+        NewObject, NewArray, GetLocal, SetLocal, GetGlobal, SetGlobal,
+        GetIterator, GetAsyncIterator, IterNext, IterDone, IterValue, IterClose,
+        Yield, YieldStar, Await, EnterTry, EnterCatch, EnterFinally, GetException,
+        NewFunction, NewArrow, NewGenerator, NewAsync, NewClass, NewRegExp,
+        CheckTdz, CreateBinding, Wide
+    );
+
+    set_ops!(3, true, false, JmpTrue, JmpFalse, JmpNullish, JmpNotNullish);
+    set_ops!(3, false, true, TailCall);
+    set_ops!(3, false, false,
+        Add, Sub, Mul, Div, Mod, Pow,
+        Eq, StrictEq, Ne, StrictNe, Lt, Le, Gt, Ge,
+        BitAnd, BitOr, BitXor, Shl, Shr, Ushr,
+        GetProp, SetProp, GetElem, SetElem, DeleteProp, DeleteElem,
+        In, Instanceof, Call, CallMethod, GetCapture, SetCapture,
+        DefineProperty, DefineGetter, DefineSetter, SpreadArray, SpreadCall
+    );
+
+    table
+};
+
 impl Opcode {
     /// Decode opcode from byte using zerocopy's safe validation
     ///
@@ -294,56 +355,28 @@ impl Opcode {
         }
     }
 
+    /// Get opcode metadata
+    #[inline]
+    pub fn meta(self) -> &'static OpcodeMeta {
+        &OPCODE_META[self as usize]
+    }
+
     /// Get the number of operands this opcode uses
     #[inline]
-    pub const fn operand_count(self) -> u8 {
-        use Opcode::*;
-        match self {
-            // No operands
-            Nop | Debugger | Halt | RetUndefined | LeaveTry | Rethrow => 0,
-
-            // 1 operand (dst or src)
-            LoadTrue | LoadFalse | LoadNull | LoadUndefined | LoadZero | LoadOne
-            | LoadMinusOne | Ret | Throw | PushScope | PopScope => 1,
-
-            // 2 operands (dst + src or dst + immediate)
-            Mov | Neg | Inc | Dec | Not | BitNot | Typeof | LoadConst | LoadSmi
-            | Jmp | NewObject | NewArray | GetLocal | SetLocal | GetGlobal
-            | SetGlobal | GetIterator | GetAsyncIterator | IterNext | IterDone
-            | IterValue | IterClose | Yield | YieldStar | Await | EnterTry
-            | EnterCatch | EnterFinally | GetException | NewFunction | NewArrow
-            | NewGenerator | NewAsync | NewClass | NewRegExp | CheckTdz
-            | CreateBinding | Wide => 2,
-
-            // 3 operands (dst + src1 + src2)
-            Add | Sub | Mul | Div | Mod | Pow | Eq | StrictEq | Ne | StrictNe
-            | Lt | Le | Gt | Ge | BitAnd | BitOr | BitXor | Shl | Shr | Ushr
-            | JmpTrue | JmpFalse | JmpNullish | JmpNotNullish | GetProp | SetProp
-            | GetElem | SetElem | DeleteProp | DeleteElem | In | Instanceof
-            | Call | CallMethod | TailCall | GetCapture | SetCapture
-            | DefineProperty | DefineGetter | DefineSetter | SpreadArray
-            | SpreadCall => 3,
-        }
+    pub fn operand_count(self) -> u8 {
+        self.meta().operand_count
     }
 
     /// Check if this opcode can branch
     #[inline]
-    pub const fn is_branch(self) -> bool {
-        use Opcode::*;
-        matches!(
-            self,
-            Jmp | JmpTrue | JmpFalse | JmpNullish | JmpNotNullish
-        )
+    pub fn is_branch(self) -> bool {
+        self.meta().is_branch
     }
 
     /// Check if this opcode terminates a basic block
     #[inline]
-    pub const fn is_terminator(self) -> bool {
-        use Opcode::*;
-        matches!(
-            self,
-            Ret | RetUndefined | Throw | Halt | Jmp | TailCall | Rethrow
-        )
+    pub fn is_terminator(self) -> bool {
+        self.meta().is_terminator
     }
 }
 

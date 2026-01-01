@@ -10,7 +10,7 @@
 # =============================================================================
 
 # Target Rust edition
-edition = "2021"
+edition = "2024"
 
 # Use stable features only (set to true for nightly-only options)
 unstable_features = false

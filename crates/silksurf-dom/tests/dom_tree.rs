@@ -1,4 +1,4 @@
-use silksurf_dom::{Dom, DomError, NodeKind};
+use silksurf_dom::{AttributeName, Dom, DomError, NodeKind, TagName};
 
 #[test]
 fn append_child_sets_relationships() {
@@ -15,7 +15,7 @@ fn append_child_sets_relationships() {
     assert_eq!(dom.parent(text).unwrap(), Some(html));
 
     match dom.node(html).unwrap().kind() {
-        NodeKind::Element { name, .. } => assert_eq!(name, "html"),
+        NodeKind::Element { name, .. } => assert_eq!(name, &TagName::Html),
         _ => panic!("expected element node"),
     }
 
@@ -46,8 +46,8 @@ fn sets_attributes_and_namespace() {
 
     let attrs = dom.attributes(node).unwrap();
     assert_eq!(attrs.len(), 1);
-    assert_eq!(attrs[0].name, "class");
-    assert_eq!(attrs[0].value, "hero");
+    assert_eq!(attrs[0].name, AttributeName::Class);
+    assert_eq!(attrs[0].value.as_str(), "hero");
 
     let svg = dom.create_element_ns("svg", silksurf_dom::Namespace::Svg);
     match dom.node(svg).unwrap().kind() {
@@ -75,4 +75,44 @@ fn traversal_helpers_work() {
     assert_eq!(dom.next_sibling(head).unwrap(), Some(body));
     assert_eq!(dom.next_sibling(body).unwrap(), None);
     assert_eq!(dom.element_name(body).unwrap(), Some("body"));
+}
+
+#[test]
+fn tracks_dirty_nodes_on_mutations() {
+    let mut dom = Dom::new();
+    let doc = dom.create_document();
+    let html = dom.create_element("html");
+    dom.append_child(doc, html).unwrap();
+    let dirty = dom.take_dirty_nodes();
+    assert!(dirty.contains(&doc));
+    assert!(dirty.contains(&html));
+
+    dom.set_attribute(html, "class", "hero").unwrap();
+    let dirty = dom.take_dirty_nodes();
+    assert!(dirty.contains(&html));
+
+    let text = dom.append_text(html, "hi").unwrap();
+    let dirty = dom.take_dirty_nodes();
+    assert!(dirty.contains(&html));
+    assert!(dirty.contains(&text));
+}
+
+#[test]
+fn batches_dirty_nodes_until_flush() {
+    let mut dom = Dom::new();
+    let doc = dom.create_document();
+    let html = dom.create_element("html");
+
+    dom.begin_mutation_batch();
+    dom.append_child(doc, html).unwrap();
+    dom.set_attribute(html, "class", "hero").unwrap();
+
+    let dirty = dom.take_dirty_nodes();
+    assert!(dirty.is_empty());
+
+    dom.end_mutation_batch();
+    let dirty = dom.take_dirty_nodes();
+    assert!(dirty.contains(&doc));
+    assert!(dirty.contains(&html));
+    assert_eq!(dirty.iter().filter(|&&id| id == html).count(), 1);
 }

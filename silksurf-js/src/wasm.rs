@@ -19,6 +19,7 @@
 use wasm_bindgen::prelude::*;
 
 use crate::lexer::Lexer;
+use crate::parser::ast_arena::AstArena;
 use crate::parser::Parser;
 use crate::bytecode::Compiler;
 use crate::vm::Vm;
@@ -35,7 +36,7 @@ impl Engine {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
         // Set up panic hook for better error messages in browser
-        #[cfg(feature = "console_error_panic_hook")]
+        #[cfg(feature = "wasm")]
         console_error_panic_hook::set_once();
 
         Self { vm: Vm::new() }
@@ -53,7 +54,8 @@ impl Engine {
         }
 
         // Parse
-        let parser = Parser::new(source);
+        let ast_arena = AstArena::new();
+        let parser = Parser::new(source, &ast_arena);
         let (ast, errors) = parser.parse();
         if !errors.is_empty() {
             return Err(JsValue::from_str(&format!("Parse error: {:?}", errors[0])));
@@ -86,7 +88,8 @@ impl Engine {
         }
 
         // Parse
-        let parser = Parser::new(source);
+        let ast_arena = AstArena::new();
+        let parser = Parser::new(source, &ast_arena);
         let (_, errors) = parser.parse();
         errors.is_empty()
     }
@@ -107,7 +110,7 @@ impl Default for Engine {
 /// Initialize the WASM module (called automatically by wasm-bindgen)
 #[wasm_bindgen(start)]
 pub fn init() {
-    #[cfg(feature = "console_error_panic_hook")]
+    #[cfg(feature = "wasm")]
     console_error_panic_hook::set_once();
 }
 

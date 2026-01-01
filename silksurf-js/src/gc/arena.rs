@@ -62,6 +62,20 @@ impl Arena {
         self.bump.alloc_slice_copy(slice)
     }
 
+    /// Allocate a slice from an exact-size iterator.
+    #[inline]
+    pub fn alloc_slice_fill_iter<T, I>(&self, iter: I) -> &[T]
+    where
+        I: IntoIterator<Item = T>,
+        I::IntoIter: ExactSizeIterator,
+    {
+        let iter = iter.into_iter();
+        let len = iter.len();
+        let size = std::mem::size_of::<T>() * len;
+        self.bytes_allocated.set(self.bytes_allocated.get() + size);
+        self.bump.alloc_slice_fill_iter(iter)
+    }
+
     /// Allocate a string in the arena (interned copy)
     #[inline]
     pub fn alloc_str(&self, s: &str) -> &str {

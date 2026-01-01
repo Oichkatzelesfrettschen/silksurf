@@ -5,13 +5,18 @@
 # Fuzzing outputs
 /fuzz_out/
 /fuzz_out_css/
+/fuzz/corpus/
+/fuzz/artifacts/
 
 # Static analysis and logs
 /infer-out/
 /logs/
+/perf/results/
 
-# Crash dumps
-core.*
+# Crash dumps (root-only)
+/core
+/core.*
+/logs/cores/
 
 # Cleanroom reference checkouts (not tracked)
 /silksurf-extras/

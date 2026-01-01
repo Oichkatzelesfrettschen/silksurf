@@ -10,7 +10,7 @@
 # =============================================================================
 
 # Minimum supported Rust version for MSRV lints
-msrv = "1.83.0"
+msrv = "1.94.0"
 
 # Cognitive complexity threshold (default: 25)
 cognitive-complexity-threshold = 30

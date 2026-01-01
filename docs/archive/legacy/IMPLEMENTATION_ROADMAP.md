@@ -1,4 +1,8 @@
 # SilkSurf Implementation Roadmap
+
+> Legacy roadmap (C baseline). The Rust cleanroom implementation supersedes
+> this plan. Current Rust milestones are tracked in `docs/ENGINE_PERF_ROADMAP.md`,
+> `docs/JS_ENGINE_PERF_ROADMAP.md`, and `docs/ENGINE_HOTPATHS.md`.
 ## Self-Contained HTML5/CSS/DOM Engine
 ### Date: 2025-12-30
 ### Scope: Maximum Standards Compliance with Comprehensive Testing

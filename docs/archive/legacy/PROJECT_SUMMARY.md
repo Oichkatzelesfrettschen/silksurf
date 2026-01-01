@@ -1,5 +1,10 @@
 # SilkSurf Browser Project - Comprehensive Summary
 
+> Legacy summary (C baseline). The Rust cleanroom implementation now lives
+> under `crates/` and supersedes this plan. For current status, see
+> `docs/ARCHITECTURE.md`, `docs/ENGINE_PERF_ROADMAP.md`, and
+> `docs/JS_ENGINE_PERF_ROADMAP.md`.
+
 **Project Status:** Phase 3 Complete, Phase 4 Architecture Designed
 **Current Binary Size:** 43 KB (with Phase 3 rendering pipeline)
 **Date:** 2025-12-30

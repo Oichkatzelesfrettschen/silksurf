@@ -18,6 +18,10 @@
 #![allow(clippy::similar_names)]
 #![allow(dead_code)] // GC module is prepared for future phases
 
+#[cfg(all(feature = "fast-alloc", not(target_arch = "wasm32")))]
+#[global_allocator]
+static GLOBAL_ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 pub mod gc;
 pub mod lexer;
 pub mod parser;
@@ -25,6 +29,8 @@ pub mod bytecode;
 pub mod vm;
 pub mod ffi;
 pub mod verification;
+#[cfg(feature = "tracing-full")]
+pub mod tracing_support;
 
 #[cfg(all(target_arch = "wasm32", feature = "wasm"))]
 pub mod wasm;

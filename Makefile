@@ -3,9 +3,16 @@
 # ------------------------------------------------------------------------- 
 
 BUILD_DIR = build
+CORE_DUMP_DIR = logs/cores
 RICING_FLAGS = -march=x86-64-v3 -O3 -flto -fomit-frame-pointer -fno-strict-aliasing -ftree-vectorize -D_SILK_NO_THREADS
 GUI_LIBS = $(shell pkg-config --cflags --libs xcb xcb-damage xcb-composite libcss libdom libhubbub libparserutils)
 CMAKE_FLAGS = -DCMAKE_EXPORT_COMPILE_COMMANDS=1 -DCMAKE_C_FLAGS="$(RICING_FLAGS)"
+BIN ?= bench_pipeline
+CRATE ?= silksurf-engine
+EXTRA_RUSTFLAGS ?= -D warnings
+PERF_OPTS ?= -e cycles:u -j any,u
+PERF2BOLT_OPTS ?=
+BOLT_OPTS ?= -reorder-blocks=ext-tsp -reorder-functions=cdsort -split-functions -icf -use-gnu-stack
 
 all: build
 
@@ -17,7 +24,38 @@ build: $(BUILD_DIR)/Makefile
 	$(MAKE) -C $(BUILD_DIR)
 
 clean:
-	rm -rf $(BUILD_DIR)
+	rm -rf $(BUILD_DIR) $(CORE_DUMP_DIR)
+	rm -f core core.*
+	mkdir -p $(CORE_DUMP_DIR)
+
+.PHONY: core-dumps
+
+core-dumps:
+	mkdir -p $(CORE_DUMP_DIR)
+	@mv -f core core.* $(CORE_DUMP_DIR)/ 2>/dev/null || true
+
+.PHONY: riced-build pgo-train bolt-opt
+
+riced-build:
+	EXTRA_RUSTFLAGS="$(EXTRA_RUSTFLAGS)" ./scripts/riced_build.sh -p $(CRATE) --bin $(BIN)
+
+pgo-train:
+	CRATE="$(CRATE)" EXTRA_RUSTFLAGS="$(EXTRA_RUSTFLAGS)" ./scripts/pgo_build.sh $(BIN)
+
+bolt-opt:
+	CRATE="$(CRATE)" EXTRA_RUSTFLAGS="$(EXTRA_RUSTFLAGS)" PERF_OPTS="$(PERF_OPTS)" PERF2BOLT_OPTS="$(PERF2BOLT_OPTS)" BOLT_OPTS="$(BOLT_OPTS)" ./scripts/bolt_build.sh $(BIN)
+
+.PHONY: perf-guardrails
+
+perf-guardrails:
+	RUSTFLAGS="$(EXTRA_RUSTFLAGS)" python3 scripts/perf_guardrails.py
+
+.PHONY: perf-baselines perf-all
+
+perf-baselines:
+	./perf/run_baselines.sh
+
+perf-all: perf-guardrails perf-baselines
 
 # ------------------------------------------------------------------------- 
 # GUI & Rendering 
@@ -131,4 +169,4 @@ css-fuzz-run:
 	@echo "Starting CSS AFL++ in SMART MODE with Dictionary..."
 	AFL_NO_UI=1 afl-fuzz -i fuzz_in_css -o fuzz_out_css -x fuzz_in/css.dict -- ./build/silksurf_css_fuzz
 
-.PHONY: all build clean
+.PHONY: all build clean core-dumps riced-build pgo-train bolt-opt
