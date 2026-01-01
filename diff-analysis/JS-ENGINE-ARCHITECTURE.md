@@ -1115,7 +1115,7 @@ cd silksurf-js
 [package]
 name = "silksurf-js"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 boa_engine = { version = "0.21", default-features = false }

@@ -1,5 +1,24 @@
 //! CSS syntax, cascade, and computed values (cleanroom).
 
+mod parser;
+mod selector;
+mod matching;
+mod style;
+
+pub use parser::{
+    parse_stylesheet, parse_stylesheet_with_interner, AtRule, AtRuleBlock, CssParser, Declaration,
+    Rule, StyleRule, Stylesheet,
+};
+pub use selector::{
+    parse_selector_list, parse_selector_list_with_interner, AttributeOperator, AttributeSelector,
+    Combinator, CompoundSelector, Selector, SelectorIdent, SelectorList, SelectorModifier,
+    SelectorStep, TypeSelector,
+};
+pub use matching::{matches_selector, matches_selector_list, selector_specificity, Specificity};
+pub use style::{
+    compute_style_for_node, compute_styles, Color, ComputedStyle, Display, Edges, Length, StyleCache,
+};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CssToken {
     AtKeyword(String),
@@ -24,6 +43,9 @@ pub enum CssToken {
     Cdo,
     Cdc,
     Url(String),
+    BadString,
+    BadUrl,
+    UnicodeRange { start: u32, end: u32 },
     Eof,
 }
 
@@ -57,7 +79,7 @@ impl CssTokenizer {
             let current = bytes[self.cursor];
 
             if is_whitespace(current) {
-                let start = self.cursor;
+                let _start = self.cursor;
                 self.cursor += 1;
                 while self.cursor < bytes.len() && is_whitespace(bytes[self.cursor]) {
                     self.cursor += 1;
@@ -70,7 +92,9 @@ impl CssTokenizer {
                 let comment_start = self.cursor + 2;
                 if let Some(end) = find_subsequence(bytes, comment_start, b"*/") {
                     self.cursor = end + 2;
-                    tokens.push(CssToken::Whitespace);
+                    if !matches!(tokens.last(), Some(CssToken::Whitespace)) {
+                        tokens.push(CssToken::Whitespace);
+                    }
                     continue;
                 }
                 break;
@@ -92,44 +116,116 @@ impl CssTokenizer {
                 }
             }
 
-            match current {
-                b'"' | b'\'' => {
-                    let quote = current;
-                    let string_start = self.cursor + 1;
-                    let mut cursor = string_start;
-                    while cursor < bytes.len() && bytes[cursor] != quote {
-                        cursor += 1;
+            if matches!(current, b'"' | b'\'') {
+                match self.parse_string(current, self.cursor + 1) {
+                    StringParse::Parsed(value, next) => {
+                        self.cursor = next;
+                        tokens.push(CssToken::String(value));
                     }
-                    if cursor >= bytes.len() {
-                        break;
+                    StringParse::Bad(next) => {
+                        self.cursor = next;
+                        tokens.push(CssToken::BadString);
                     }
-                    let value = self.buffer[string_start..cursor].to_string();
-                    self.cursor = cursor + 1;
-                    tokens.push(CssToken::String(value));
+                    StringParse::Incomplete => break,
                 }
-                b'#' => {
-                    let mut cursor = self.cursor + 1;
-                    while cursor < bytes.len() && is_ident_char(bytes[cursor]) {
-                        cursor += 1;
-                    }
-                    if cursor == self.cursor + 1 {
-                        self.cursor += 1;
-                        tokens.push(CssToken::Delim('#'));
-                    } else {
-                        let name = self.buffer[self.cursor + 1..cursor].to_string();
-                        self.cursor = cursor;
+                continue;
+            }
+
+            if current == b'#' {
+                match self.parse_name(self.cursor + 1) {
+                    NameParse::Parsed(name, next) => {
+                        self.cursor = next;
                         tokens.push(CssToken::Hash(name));
                     }
+                    NameParse::Incomplete => break,
+                    NameParse::None => {
+                        self.cursor += 1;
+                        tokens.push(CssToken::Delim('#'));
+                    }
                 }
-                b'@' => {
-                    if let Some((name, next)) = self.parse_ident(self.cursor + 1) {
+                continue;
+            }
+
+            if current == b'@' {
+                match self.parse_ident(self.cursor + 1) {
+                    IdentParse::Parsed(name, next) => {
                         self.cursor = next;
                         tokens.push(CssToken::AtKeyword(name));
-                    } else {
+                    }
+                    IdentParse::Incomplete => break,
+                    IdentParse::None => {
                         self.cursor += 1;
                         tokens.push(CssToken::Delim('@'));
                     }
                 }
+                continue;
+            }
+
+            if let Some((start, end, next)) = self.parse_unicode_range(self.cursor) {
+                self.cursor = next;
+                tokens.push(CssToken::UnicodeRange { start, end });
+                continue;
+            }
+
+            if self.starts_number(self.cursor) {
+                if let Some((number, mut cursor)) = self.parse_number(self.cursor) {
+                    if cursor < bytes.len() && bytes[cursor] == b'%' {
+                        cursor += 1;
+                        self.cursor = cursor;
+                        tokens.push(CssToken::Percentage(number));
+                        continue;
+                    }
+                    match self.parse_ident(cursor) {
+                        IdentParse::Parsed(unit, next) => {
+                            self.cursor = next;
+                            tokens.push(CssToken::Dimension { value: number, unit });
+                            continue;
+                        }
+                        IdentParse::Incomplete => break,
+                        IdentParse::None => {}
+                    }
+                    self.cursor = cursor;
+                    tokens.push(CssToken::Number(number));
+                } else {
+                    let delim = self.buffer[self.cursor..].chars().next().unwrap();
+                    self.cursor += delim.len_utf8();
+                    tokens.push(CssToken::Delim(delim));
+                }
+                continue;
+            }
+
+            if self.starts_ident(self.cursor) {
+                match self.parse_ident(self.cursor) {
+                    IdentParse::Parsed(ident, cursor) => {
+                        if cursor < bytes.len() && bytes[cursor] == b'(' {
+                            if ident.eq_ignore_ascii_case("url") {
+                                match self.parse_url(cursor + 1) {
+                                    UrlParse::Parsed(value, next) => {
+                                        self.cursor = next;
+                                        tokens.push(CssToken::Url(value));
+                                    }
+                                    UrlParse::Bad(next) => {
+                                        self.cursor = next;
+                                        tokens.push(CssToken::BadUrl);
+                                    }
+                                    UrlParse::Incomplete => break,
+                                }
+                            } else {
+                                self.cursor = cursor + 1;
+                                tokens.push(CssToken::Function(ident));
+                            }
+                        } else {
+                            self.cursor = cursor;
+                            tokens.push(CssToken::Ident(ident));
+                        }
+                    }
+                    IdentParse::Incomplete => break,
+                    IdentParse::None => {}
+                }
+                continue;
+            }
+
+            match current {
                 b':' => {
                     self.cursor += 1;
                     tokens.push(CssToken::Colon);
@@ -166,52 +262,6 @@ impl CssTokenizer {
                     self.cursor += 1;
                     tokens.push(CssToken::BracketClose);
                 }
-                b'0'..=b'9' | b'.' | b'+' | b'-' => {
-                    if let Some((number, mut cursor)) = self.parse_number(self.cursor) {
-                        if cursor < bytes.len() && bytes[cursor] == b'%' {
-                            cursor += 1;
-                            self.cursor = cursor;
-                            tokens.push(CssToken::Percentage(number));
-                            continue;
-                        }
-                        if let Some((unit, next)) = self.parse_ident(cursor) {
-                            self.cursor = next;
-                            tokens.push(CssToken::Dimension { value: number, unit });
-                            continue;
-                        }
-                        self.cursor = cursor;
-                        tokens.push(CssToken::Number(number));
-                    } else {
-                        let delim = self.buffer[self.cursor..].chars().next().unwrap();
-                        self.cursor += delim.len_utf8();
-                        tokens.push(CssToken::Delim(delim));
-                    }
-                }
-                _ if is_ident_start(current) => {
-                    let start = self.cursor;
-                    let mut cursor = self.cursor + 1;
-                    while cursor < bytes.len() && is_ident_char(bytes[cursor]) {
-                        cursor += 1;
-                    }
-                    let ident = self.buffer[start..cursor].to_string();
-                    if cursor < bytes.len() && bytes[cursor] == b'(' {
-                        if ident.eq_ignore_ascii_case("url") {
-                            match self.parse_url(cursor + 1) {
-                                UrlParse::Parsed(value, next) => {
-                                    self.cursor = next;
-                                    tokens.push(CssToken::Url(value));
-                                }
-                                UrlParse::Incomplete => break,
-                            }
-                        } else {
-                            self.cursor = cursor + 1;
-                            tokens.push(CssToken::Function(ident));
-                        }
-                    } else {
-                        self.cursor = cursor;
-                        tokens.push(CssToken::Ident(ident));
-                    }
-                }
                 _ => {
                     let delim = self.buffer[self.cursor..].chars().next().unwrap();
                     self.cursor += delim.len_utf8();
@@ -234,16 +284,136 @@ impl CssTokenizer {
         Ok(tokens)
     }
 
-    fn parse_ident(&self, start: usize) -> Option<(String, usize)> {
+    fn parse_string(&self, quote: u8, start: usize) -> StringParse {
         let bytes = self.buffer.as_bytes();
-        if start >= bytes.len() || !is_ident_start(bytes[start]) {
-            return None;
-        }
-        let mut cursor = start + 1;
-        while cursor < bytes.len() && is_ident_char(bytes[cursor]) {
+        let mut cursor = start;
+        let mut value = String::new();
+        while cursor < bytes.len() {
+            let byte = bytes[cursor];
+            if byte == quote {
+                return StringParse::Parsed(value, cursor + 1);
+            }
+            if is_newline(byte) {
+                return StringParse::Bad(cursor);
+            }
+            if byte == b'\\' {
+                match self.consume_escape(cursor + 1) {
+                    EscapeParse::Char(ch, next) => {
+                        value.push(ch);
+                        cursor = next;
+                    }
+                    EscapeParse::Ignored(next) => {
+                        cursor = next;
+                    }
+                    EscapeParse::Incomplete => return StringParse::Incomplete,
+                }
+                continue;
+            }
+            value.push(byte as char);
             cursor += 1;
         }
-        Some((self.buffer[start..cursor].to_string(), cursor))
+        StringParse::Incomplete
+    }
+
+    fn parse_name(&self, start: usize) -> NameParse {
+        let bytes = self.buffer.as_bytes();
+        if start >= bytes.len() {
+            return NameParse::None;
+        }
+        let mut cursor = start;
+        let mut value = String::new();
+        while cursor < bytes.len() {
+            let byte = bytes[cursor];
+            if is_name_char(byte) {
+                value.push(byte as char);
+                cursor += 1;
+                continue;
+            }
+            if byte == b'\\' {
+                if !self.is_valid_escape(cursor) {
+                    break;
+                }
+                match self.consume_escape(cursor + 1) {
+                    EscapeParse::Char(ch, next) => {
+                        value.push(ch);
+                        cursor = next;
+                    }
+                    EscapeParse::Ignored(next) => {
+                        cursor = next;
+                    }
+                    EscapeParse::Incomplete => return NameParse::Incomplete,
+                }
+                continue;
+            }
+            break;
+        }
+        if value.is_empty() {
+            NameParse::None
+        } else {
+            NameParse::Parsed(value, cursor)
+        }
+    }
+
+    fn parse_ident(&self, start: usize) -> IdentParse {
+        if !self.starts_ident(start) {
+            return IdentParse::None;
+        }
+        match self.parse_name(start) {
+            NameParse::Parsed(name, next) => IdentParse::Parsed(name, next),
+            NameParse::Incomplete => IdentParse::Incomplete,
+            NameParse::None => IdentParse::None,
+        }
+    }
+
+    fn starts_ident(&self, start: usize) -> bool {
+        let bytes = self.buffer.as_bytes();
+        if start >= bytes.len() {
+            return false;
+        }
+        let first = bytes[start];
+        if is_name_start(first) {
+            return true;
+        }
+        if first == b'-' {
+            if start + 1 >= bytes.len() {
+                return false;
+            }
+            let second = bytes[start + 1];
+            return second == b'-'
+                || is_name_start(second)
+                || (second == b'\\' && self.is_valid_escape(start + 1));
+        }
+        if first == b'\\' {
+            return self.is_valid_escape(start);
+        }
+        false
+    }
+
+    fn starts_number(&self, start: usize) -> bool {
+        let bytes = self.buffer.as_bytes();
+        if start >= bytes.len() {
+            return false;
+        }
+        let first = bytes[start];
+        if first.is_ascii_digit() {
+            return true;
+        }
+        if first == b'.' {
+            return start + 1 < bytes.len() && bytes[start + 1].is_ascii_digit();
+        }
+        if matches!(first, b'+' | b'-') {
+            if start + 1 >= bytes.len() {
+                return false;
+            }
+            let second = bytes[start + 1];
+            if second.is_ascii_digit() {
+                return true;
+            }
+            if second == b'.' {
+                return start + 2 < bytes.len() && bytes[start + 2].is_ascii_digit();
+            }
+        }
+        false
     }
 
     fn parse_number(&self, start: usize) -> Option<(String, usize)> {
@@ -276,6 +446,62 @@ impl CssTokenizer {
         Some((self.buffer[start..cursor].to_string(), cursor))
     }
 
+    fn parse_unicode_range(&self, start: usize) -> Option<(u32, u32, usize)> {
+        let bytes = self.buffer.as_bytes();
+        if start + 1 >= bytes.len() {
+            return None;
+        }
+        let first = bytes[start];
+        if !matches!(first, b'U' | b'u') || bytes[start + 1] != b'+' {
+            return None;
+        }
+        let mut cursor = start + 2;
+        let mut hex_digits = String::new();
+        let mut wildcard_count = 0usize;
+        while cursor < bytes.len() && hex_digits.len() + wildcard_count < 6 {
+            let byte = bytes[cursor];
+            if is_hex_digit(byte) && wildcard_count == 0 {
+                hex_digits.push(byte as char);
+                cursor += 1;
+                continue;
+            }
+            if byte == b'?' {
+                wildcard_count += 1;
+                cursor += 1;
+                continue;
+            }
+            break;
+        }
+        if hex_digits.is_empty() && wildcard_count == 0 {
+            return None;
+        }
+        if wildcard_count > 0 {
+            let mut start_value = hex_digits.clone();
+            start_value.push_str(&"0".repeat(wildcard_count));
+            let mut end_value = hex_digits;
+            end_value.push_str(&"F".repeat(wildcard_count));
+            let start_num = u32::from_str_radix(&start_value, 16).ok()?;
+            let end_num = u32::from_str_radix(&end_value, 16).ok()?;
+            return Some((start_num, end_num, cursor));
+        }
+        if cursor < bytes.len() && bytes[cursor] == b'-' {
+            cursor += 1;
+            let mut end_digits = String::new();
+            while cursor < bytes.len() && end_digits.len() < 6 && is_hex_digit(bytes[cursor]) {
+                end_digits.push(bytes[cursor] as char);
+                cursor += 1;
+            }
+            if end_digits.is_empty() {
+                return None;
+            }
+            let start_num = u32::from_str_radix(&hex_digits, 16).ok()?;
+            let end_num = u32::from_str_radix(&end_digits, 16).ok()?;
+            return Some((start_num, end_num, cursor));
+        }
+        let start_num = u32::from_str_radix(&hex_digits, 16).ok()?;
+        Some((start_num, start_num, cursor))
+    }
+
     fn parse_url(&self, start: usize) -> UrlParse {
         let bytes = self.buffer.as_bytes();
         let mut cursor = start;
@@ -285,47 +511,132 @@ impl CssTokenizer {
         if cursor >= bytes.len() {
             return UrlParse::Incomplete;
         }
-        let value;
         match bytes[cursor] {
             b'"' | b'\'' => {
                 let quote = bytes[cursor];
-                cursor += 1;
-                let value_start = cursor;
-                while cursor < bytes.len() && bytes[cursor] != quote {
-                    cursor += 1;
-                }
-                if cursor >= bytes.len() {
-                    return UrlParse::Incomplete;
-                }
-                value = self.buffer[value_start..cursor].to_string();
-                cursor += 1;
-            }
-            _ => {
-                let value_start = cursor;
-                while cursor < bytes.len()
-                    && bytes[cursor] != b')'
-                    && !is_whitespace(bytes[cursor])
-                {
-                    cursor += 1;
-                }
-                if cursor == value_start {
-                    value = String::new();
-                } else {
-                    value = self.buffer[value_start..cursor].to_string();
+                match self.parse_string(quote, cursor + 1) {
+                    StringParse::Parsed(value, next) => {
+                        cursor = next;
+                        while cursor < bytes.len() && is_whitespace(bytes[cursor]) {
+                            cursor += 1;
+                        }
+                        if cursor < bytes.len() && bytes[cursor] == b')' {
+                            return UrlParse::Parsed(value, cursor + 1);
+                        }
+                        return UrlParse::Bad(self.consume_bad_url(cursor));
+                    }
+                    StringParse::Bad(_) => {
+                        return UrlParse::Bad(self.consume_bad_url(cursor + 1));
+                    }
+                    StringParse::Incomplete => return UrlParse::Incomplete,
                 }
             }
+            b')' => return UrlParse::Parsed(String::new(), cursor + 1),
+            _ => {}
         }
 
-        while cursor < bytes.len() && is_whitespace(bytes[cursor]) {
+        let mut value = String::new();
+        while cursor < bytes.len() {
+            let byte = bytes[cursor];
+            if byte == b')' {
+                return UrlParse::Parsed(value, cursor + 1);
+            }
+            if is_whitespace(byte) {
+                while cursor < bytes.len() && is_whitespace(bytes[cursor]) {
+                    cursor += 1;
+                }
+                if cursor < bytes.len() && bytes[cursor] == b')' {
+                    return UrlParse::Parsed(value, cursor + 1);
+                }
+                return UrlParse::Bad(self.consume_bad_url(cursor));
+            }
+            if matches!(byte, b'"' | b'\'' | b'(') || is_non_printable(byte) || is_newline(byte) {
+                return UrlParse::Bad(self.consume_bad_url(cursor));
+            }
+            if byte == b'\\' {
+                if !self.is_valid_escape(cursor) {
+                    return UrlParse::Bad(self.consume_bad_url(cursor + 1));
+                }
+                match self.consume_escape(cursor + 1) {
+                    EscapeParse::Char(ch, next) => {
+                        value.push(ch);
+                        cursor = next;
+                    }
+                    EscapeParse::Ignored(_) => {
+                        return UrlParse::Bad(self.consume_bad_url(cursor + 1));
+                    }
+                    EscapeParse::Incomplete => return UrlParse::Incomplete,
+                }
+                continue;
+            }
+            value.push(byte as char);
             cursor += 1;
         }
-        if cursor >= bytes.len() {
-            return UrlParse::Incomplete;
+        UrlParse::Incomplete
+    }
+
+    fn consume_bad_url(&self, start: usize) -> usize {
+        let bytes = self.buffer.as_bytes();
+        let mut cursor = start;
+        while cursor < bytes.len() {
+            let byte = bytes[cursor];
+            if byte == b')' {
+                return cursor + 1;
+            }
+            if byte == b'\\' && self.is_valid_escape(cursor) {
+                match self.consume_escape(cursor + 1) {
+                    EscapeParse::Char(_, next) | EscapeParse::Ignored(next) => {
+                        cursor = next;
+                    }
+                    EscapeParse::Incomplete => return cursor,
+                }
+                continue;
+            }
+            cursor += 1;
         }
-        if bytes[cursor] != b')' {
-            return UrlParse::Incomplete;
+        cursor
+    }
+
+    fn consume_escape(&self, start: usize) -> EscapeParse {
+        let bytes = self.buffer.as_bytes();
+        if start >= bytes.len() {
+            return EscapeParse::Incomplete;
         }
-        UrlParse::Parsed(value, cursor + 1)
+        let byte = bytes[start];
+        if is_newline(byte) {
+            let mut next = start + 1;
+            if byte == b'\r' && next < bytes.len() && bytes[next] == b'\n' {
+                next += 1;
+            }
+            return EscapeParse::Ignored(next);
+        }
+        if is_hex_digit(byte) {
+            let mut cursor = start;
+            let mut value: u32 = 0;
+            let mut count = 0usize;
+            while cursor < bytes.len() && count < 6 && is_hex_digit(bytes[cursor]) {
+                value = value * 16 + hex_value(bytes[cursor]) as u32;
+                cursor += 1;
+                count += 1;
+            }
+            if cursor < bytes.len() && is_whitespace(bytes[cursor]) {
+                cursor += 1;
+                if cursor < bytes.len() && bytes[cursor - 1] == b'\r' && bytes[cursor] == b'\n' {
+                    cursor += 1;
+                }
+            }
+            let ch = char::from_u32(value).unwrap_or('\u{FFFD}');
+            return EscapeParse::Char(ch, cursor);
+        }
+        EscapeParse::Char(byte as char, start + 1)
+    }
+
+    fn is_valid_escape(&self, start: usize) -> bool {
+        let bytes = self.buffer.as_bytes();
+        if start + 1 >= bytes.len() || bytes[start] != b'\\' {
+            return false;
+        }
+        !is_newline(bytes[start + 1])
     }
 }
 
@@ -333,12 +644,33 @@ fn is_whitespace(byte: u8) -> bool {
     matches!(byte, b' ' | b'\n' | b'\t' | b'\r' | b'\x0c')
 }
 
-fn is_ident_start(byte: u8) -> bool {
-    matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'-')
+fn is_newline(byte: u8) -> bool {
+    matches!(byte, b'\n' | b'\r' | b'\x0c')
 }
 
-fn is_ident_char(byte: u8) -> bool {
-    is_ident_start(byte) || matches!(byte, b'0'..=b'9')
+fn is_name_start(byte: u8) -> bool {
+    matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'_')
+}
+
+fn is_name_char(byte: u8) -> bool {
+    is_name_start(byte) || matches!(byte, b'0'..=b'9' | b'-')
+}
+
+fn is_hex_digit(byte: u8) -> bool {
+    byte.is_ascii_hexdigit()
+}
+
+fn hex_value(byte: u8) -> u8 {
+    match byte {
+        b'0'..=b'9' => byte - b'0',
+        b'a'..=b'f' => 10 + (byte - b'a'),
+        b'A'..=b'F' => 10 + (byte - b'A'),
+        _ => 0,
+    }
+}
+
+fn is_non_printable(byte: u8) -> bool {
+    matches!(byte, 0x00..=0x08 | 0x0b | 0x0e..=0x1f | 0x7f)
 }
 
 fn find_subsequence(haystack: &[u8], start: usize, needle: &[u8]) -> Option<usize> {
@@ -350,5 +682,30 @@ fn find_subsequence(haystack: &[u8], start: usize, needle: &[u8]) -> Option<usiz
 
 enum UrlParse {
     Parsed(String, usize),
+    Bad(usize),
+    Incomplete,
+}
+
+enum StringParse {
+    Parsed(String, usize),
+    Bad(usize),
+    Incomplete,
+}
+
+enum NameParse {
+    Parsed(String, usize),
+    Incomplete,
+    None,
+}
+
+enum IdentParse {
+    Parsed(String, usize),
+    Incomplete,
+    None,
+}
+
+enum EscapeParse {
+    Char(char, usize),
+    Ignored(usize),
     Incomplete,
 }

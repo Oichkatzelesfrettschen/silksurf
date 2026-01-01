@@ -1,4 +1,4 @@
-use silksurf_js::parser::Parser;
+use silksurf_js::parser::{AstArena, Parser};
 use std::time::Instant;
 
 fn main() {
@@ -30,10 +30,15 @@ if (true) {
     let bytes = large_source.len();
     println!("Source size: {} bytes ({:.2} KB)", bytes, bytes as f64 / 1024.0);
 
+    let arena = AstArena::new();
+
     // Warm up
     for _ in 0..10 {
-        let parser = Parser::new(&large_source);
-        let _ = parser.parse();
+        {
+            let parser = Parser::new(&large_source, &arena);
+            let _ = parser.parse();
+        }
+        arena.reset();
     }
 
     // Profile run
@@ -41,10 +46,13 @@ if (true) {
     let start = Instant::now();
 
     for _ in 0..iterations {
-        let parser = Parser::new(&large_source);
-        let (program, errors) = parser.parse();
-        std::hint::black_box(&program);
-        std::hint::black_box(&errors);
+        {
+            let parser = Parser::new(&large_source, &arena);
+            let (program, errors) = parser.parse();
+            std::hint::black_box(&program);
+            std::hint::black_box(&errors);
+        }
+        arena.reset();
     }
 
     let elapsed = start.elapsed();

@@ -5,5 +5,8 @@ mod span;
 
 pub use arena::SilkArena;
 pub use error::{SilkError, SilkResult};
-pub use interner::SilkInterner;
+pub use interner::{should_intern_identifier, Atom, SilkInterner};
 pub use span::Span;
+
+pub type SmallString = smol_str::SmolStr;
+pub type ArenaVec<'a, T> = bumpalo::collections::Vec<'a, T>;

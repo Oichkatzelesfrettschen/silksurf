@@ -125,3 +125,65 @@ fn tokenizes_url() {
 
     assert_eq!(tokens, expected);
 }
+
+#[test]
+fn tokenizes_escape_and_unicode_range() {
+    let mut tokenizer = CssTokenizer::new();
+    let mut tokens = tokenizer
+        .feed("#\\31 0 { unicode-range: U+4??; }")
+        .unwrap();
+    tokens.extend(tokenizer.finish().unwrap());
+
+    let expected = vec![
+        CssToken::Hash("10".into()),
+        CssToken::Whitespace,
+        CssToken::CurlyOpen,
+        CssToken::Whitespace,
+        CssToken::Ident("unicode-range".into()),
+        CssToken::Colon,
+        CssToken::Whitespace,
+        CssToken::UnicodeRange {
+            start: 0x400,
+            end: 0x4ff,
+        },
+        CssToken::Semicolon,
+        CssToken::Whitespace,
+        CssToken::CurlyClose,
+        CssToken::Eof,
+    ];
+
+    assert_eq!(tokens, expected);
+}
+
+#[test]
+fn tokenizes_bad_string_and_url() {
+    let mut tokenizer = CssTokenizer::new();
+    let mut tokens = tokenizer
+        .feed("p { content: \"bad\n; background: url(bad(\" ); }")
+        .unwrap();
+    tokens.extend(tokenizer.finish().unwrap());
+
+    let expected = vec![
+        CssToken::Ident("p".into()),
+        CssToken::Whitespace,
+        CssToken::CurlyOpen,
+        CssToken::Whitespace,
+        CssToken::Ident("content".into()),
+        CssToken::Colon,
+        CssToken::Whitespace,
+        CssToken::BadString,
+        CssToken::Whitespace,
+        CssToken::Semicolon,
+        CssToken::Whitespace,
+        CssToken::Ident("background".into()),
+        CssToken::Colon,
+        CssToken::Whitespace,
+        CssToken::BadUrl,
+        CssToken::Semicolon,
+        CssToken::Whitespace,
+        CssToken::CurlyClose,
+        CssToken::Eof,
+    ];
+
+    assert_eq!(tokens, expected);
+}

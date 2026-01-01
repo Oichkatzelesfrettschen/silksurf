@@ -208,6 +208,7 @@ impl Vm {
     }
 
     /// Execute a chunk by index
+    #[cfg_attr(feature = "tracing-full", tracing::instrument(level = "trace", skip(self)))]
     pub fn execute(&mut self, chunk_idx: usize) -> VmResult<Value> {
         if chunk_idx >= self.chunks.len() {
             return Err(VmError::OutOfBounds);
@@ -224,7 +225,9 @@ impl Vm {
         // Main execution loop
         loop {
             let frame = self.call_stack.last_mut().ok_or(VmError::OutOfBounds)?;
-            let chunk = &self.chunks[frame.chunk_idx];
+            debug_assert!(frame.chunk_idx < self.chunks.len());
+            // SAFETY: call frames only store valid chunk indices.
+            let chunk = unsafe { self.chunks.get_unchecked(frame.chunk_idx) };
 
             if frame.pc >= chunk.len() {
                 // End of chunk - implicit return undefined
@@ -235,16 +238,20 @@ impl Vm {
                 continue;
             }
 
-            let instr = chunk.instructions[frame.pc];
+            // SAFETY: bounds checked above for frame.pc.
+            let instr = unsafe { *chunk.instructions.get_unchecked(frame.pc) };
             frame.pc += 1;
 
             // Dispatch via function pointer table
-            let handler = DISPATCH_TABLE[instr.opcode() as usize];
+            let opcode = instr.opcode() as usize;
+            debug_assert!(opcode < DISPATCH_TABLE.len());
+            let handler = unsafe { *DISPATCH_TABLE.get_unchecked(opcode) };
             match handler(self, instr) {
                 Ok(()) => continue,
                 Err(VmError::Halted) => {
                     // Normal halt - return accumulator
-                    return Ok(self.registers[0].clone());
+                    // SAFETY: register 0 is always valid.
+                    return Ok(unsafe { self.registers.get_unchecked(0) }.clone());
                 }
                 Err(e) => return Err(e),
             }
@@ -252,15 +259,23 @@ impl Vm {
     }
 
     /// Get register value
-    #[inline]
+    #[inline(always)]
     fn get_reg(&self, idx: u8) -> &Value {
-        &self.registers[idx as usize]
+        let idx = idx as usize;
+        debug_assert!(idx < self.registers.len());
+        // SAFETY: register indices are validated by the compiler/VM invariants.
+        unsafe { self.registers.get_unchecked(idx) }
     }
 
     /// Set register value
-    #[inline]
+    #[inline(always)]
     fn set_reg(&mut self, idx: u8, value: Value) {
-        self.registers[idx as usize] = value;
+        let idx = idx as usize;
+        debug_assert!(idx < self.registers.len());
+        // SAFETY: register indices are validated by the compiler/VM invariants.
+        unsafe {
+            *self.registers.get_unchecked_mut(idx) = value;
+        }
     }
 
     /// Get current chunk

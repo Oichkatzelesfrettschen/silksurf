@@ -117,29 +117,11 @@ impl<T> AstVecBuilder<T> {
     /// This function does not panic - it handles empty vectors gracefully.
     /// Internal unwrap is guarded by length check.
     #[allow(clippy::missing_panics_doc)] // False positive: unwrap is after empty check
-    pub fn freeze(self, arena: &Arena) -> AstVec<'_, T> {
-        // Allocate each item individually in the arena
-        // For better performance, arena could have alloc_slice_from_iter
-        let len = self.items.len();
-        if len == 0 {
+    pub fn freeze(self, arena: &AstArena) -> AstVec<'_, T> {
+        if self.items.is_empty() {
             return &[];
         }
-
-        // Allocate backing storage
-        // SAFETY: We know items is non-empty, so first() returns Some
-        let first = arena.alloc(unsafe { std::ptr::read(self.items.first().unwrap()) });
-
-        // For single element, just return slice of 1
-        if len == 1 {
-            std::mem::forget(self.items);
-            return std::slice::from_ref(first);
-        }
-
-        // For multiple elements, we need contiguous allocation
-        // This is a simplified approach - real impl would use bump.alloc_slice_fill_iter
-        // For now, fall back to arena-allocating a Vec and leaking it
-        let boxed = arena.alloc(self.items);
-        boxed.as_slice()
+        arena.alloc_slice_from_iter(self.items.into_iter())
     }
 }
 
@@ -194,6 +176,17 @@ impl AstArena {
     pub fn alloc_str(&self, s: &str) -> &str {
         let arena = self.inner.borrow();
         let ptr = std::ptr::from_ref(arena.alloc_str(s));
+        unsafe { &*ptr }
+    }
+
+    /// Allocate a slice from an exact-size iterator.
+    pub fn alloc_slice_from_iter<T, I>(&self, iter: I) -> &[T]
+    where
+        I: IntoIterator<Item = T>,
+        I::IntoIter: ExactSizeIterator,
+    {
+        let arena = self.inner.borrow();
+        let ptr = std::ptr::from_ref(arena.alloc_slice_fill_iter(iter));
         unsafe { &*ptr }
     }
 
@@ -281,7 +274,7 @@ mod tests {
 
     #[test]
     fn test_ast_vec_builder() {
-        let gc_arena = Arena::new();
+        let arena = AstArena::new();
         let mut builder = AstVecBuilder::new();
 
         builder.push(1u32);
@@ -290,7 +283,7 @@ mod tests {
 
         assert_eq!(builder.len(), 3);
 
-        let slice = builder.freeze(&gc_arena);
+        let slice = builder.freeze(&arena);
         assert_eq!(slice.len(), 3);
         assert_eq!(slice[0], 1);
         assert_eq!(slice[1], 2);
@@ -299,20 +292,20 @@ mod tests {
 
     #[test]
     fn test_empty_vec_builder() {
-        let gc_arena = Arena::new();
+        let arena = AstArena::new();
         let builder: AstVecBuilder<u32> = AstVecBuilder::new();
 
-        let slice = builder.freeze(&gc_arena);
+        let slice = builder.freeze(&arena);
         assert!(slice.is_empty());
     }
 
     #[test]
     fn test_single_element_vec() {
-        let gc_arena = Arena::new();
+        let arena = AstArena::new();
         let mut builder = AstVecBuilder::new();
         builder.push(42u64);
 
-        let slice = builder.freeze(&gc_arena);
+        let slice = builder.freeze(&arena);
         assert_eq!(slice.len(), 1);
         assert_eq!(slice[0], 42);
     }

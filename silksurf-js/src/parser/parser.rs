@@ -10,11 +10,12 @@
 
 use crate::lexer::{Interner, Lexer, Span, Token, TokenKind};
 use crate::parser::ast::*;
+use crate::parser::ast_arena::{AstArena, AstVec, AstVecBuilder};
 use crate::parser::error::{is_sync_point, ParseError, ParseResult, SyncPoint};
 use crate::parser::precedence::*;
 
 /// The JavaScript parser
-pub struct Parser<'src> {
+pub struct Parser<'src, 'arena> {
     /// Source code
     source: &'src str,
     /// Lexer producing tokens (owns the interner)
@@ -27,11 +28,13 @@ pub struct Parser<'src> {
     errors: Vec<ParseError>,
     /// Are we in panic mode?
     panic_mode: bool,
+    /// Arena for AST allocation
+    arena: &'arena AstArena,
 }
 
-impl<'src> Parser<'src> {
+impl<'src, 'arena> Parser<'src, 'arena> {
     /// Create a new parser
-    pub fn new(source: &'src str) -> Self {
+    pub fn new(source: &'src str, arena: &'arena AstArena) -> Self {
         let mut lexer = Lexer::new(source);
         let first_token = lexer.next_token();
 
@@ -48,14 +51,15 @@ impl<'src> Parser<'src> {
             previous: dummy,
             errors: Vec::new(),
             panic_mode: false,
+            arena,
         }
     }
 
     /// Parse the source into a Program AST
-    pub fn parse(mut self) -> (Program<'src>, Vec<ParseError>) {
+    pub fn parse(mut self) -> (Program<'src, 'arena>, Vec<ParseError>) {
         // Pre-allocate: estimate ~1 statement per 80 bytes of source
         let estimated_stmts = (self.source.len() / 80).max(8);
-        let mut body = Vec::with_capacity(estimated_stmts);
+        let mut body = AstVecBuilder::with_capacity(estimated_stmts);
         let start = self.current.span.start;
 
         while !self.is_at_end() {
@@ -70,7 +74,7 @@ impl<'src> Parser<'src> {
 
         let end = self.previous.span.end;
         let program = Program {
-            body,
+            body: body.freeze(self.arena),
             source_type: SourceType::Script, // TODO: detect module
             span: Span::new(start, end),
         };
@@ -195,7 +199,7 @@ impl<'src> Parser<'src> {
     // ========================================================================
 
     /// Parse a statement
-    fn parse_statement(&mut self) -> ParseResult<Statement<'src>> {
+    fn parse_statement(&mut self) -> ParseResult<Statement<'src, 'arena>> {
         match &self.current.kind {
             TokenKind::Var | TokenKind::Let | TokenKind::Const => self.parse_variable_declaration(),
             TokenKind::Function => self.parse_function_declaration(),
@@ -225,7 +229,7 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse variable declaration: var/let/const x = y;
-    fn parse_variable_declaration(&mut self) -> ParseResult<Statement<'src>> {
+    fn parse_variable_declaration(&mut self) -> ParseResult<Statement<'src, 'arena>> {
         let start = self.current.span.start;
         let kind = match &self.current.kind {
             TokenKind::Var => VariableKind::Var,
@@ -236,7 +240,7 @@ impl<'src> Parser<'src> {
         self.advance();
 
         // Most declarations have 1-3 declarators
-        let mut declarations = Vec::with_capacity(2);
+        let mut declarations = AstVecBuilder::with_capacity(2);
         loop {
             let decl = self.parse_variable_declarator()?;
             declarations.push(decl);
@@ -252,18 +256,18 @@ impl<'src> Parser<'src> {
 
         Ok(Statement::VariableDeclaration(VariableDeclaration {
             kind,
-            declarations,
+            declarations: declarations.freeze(self.arena),
             span: Span::new(start, end),
         }))
     }
 
     /// Parse a single variable declarator
-    fn parse_variable_declarator(&mut self) -> ParseResult<VariableDeclarator<'src>> {
+    fn parse_variable_declarator(&mut self) -> ParseResult<VariableDeclarator<'src, 'arena>> {
         let start = self.current.span.start;
         let id = self.parse_binding_pattern()?;
 
         let init = if self.match_token(&TokenKind::Assign) {
-            Some(Box::new(self.parse_assignment_expression()?))
+            Some(self.arena.alloc(self.parse_assignment_expression()?))
         } else {
             None
         };
@@ -277,7 +281,7 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse binding pattern (identifier or destructuring)
-    fn parse_binding_pattern(&mut self) -> ParseResult<Pattern<'src>> {
+    fn parse_binding_pattern(&mut self) -> ParseResult<Pattern<'src, 'arena>> {
         match &self.current.kind {
             TokenKind::Identifier(_) => {
                 let ident = self.parse_identifier()?;
@@ -294,11 +298,11 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse array pattern: [a, b, ...rest]
-    fn parse_array_pattern(&mut self) -> ParseResult<Pattern<'src>> {
+    fn parse_array_pattern(&mut self) -> ParseResult<Pattern<'src, 'arena>> {
         let start = self.current.span.start;
         self.expect(&TokenKind::LeftBracket, "[")?;
 
-        let mut elements = Vec::new();
+        let mut elements = AstVecBuilder::new();
         while !self.check(&TokenKind::RightBracket) && !self.is_at_end() {
             if self.check(&TokenKind::Comma) {
                 // Elision (hole)
@@ -307,7 +311,7 @@ impl<'src> Parser<'src> {
                 self.advance();
                 let arg = self.parse_binding_pattern()?;
                 elements.push(Some(Pattern::Rest(RestElement {
-                    argument: Box::new(arg),
+                    argument: self.arena.alloc(arg),
                     span: Span::new(start, self.previous.span.end),
                 })));
             } else {
@@ -316,8 +320,8 @@ impl<'src> Parser<'src> {
                 let element = if self.match_token(&TokenKind::Assign) {
                     let right = self.parse_assignment_expression()?;
                     Pattern::Assignment(AssignmentPattern {
-                        left: Box::new(element.clone()),
-                        right: Box::new(right),
+                        left: self.arena.alloc(element.clone()),
+                        right: self.arena.alloc(right),
                         span: Span::new(element.span().start, self.previous.span.end),
                     })
                 } else {
@@ -335,23 +339,23 @@ impl<'src> Parser<'src> {
         let end = self.previous.span.end;
 
         Ok(Pattern::Array(ArrayPattern {
-            elements,
+            elements: elements.freeze(self.arena),
             span: Span::new(start, end),
         }))
     }
 
     /// Parse object pattern: { a, b: c, ...rest }
-    fn parse_object_pattern(&mut self) -> ParseResult<Pattern<'src>> {
+    fn parse_object_pattern(&mut self) -> ParseResult<Pattern<'src, 'arena>> {
         let start = self.current.span.start;
         self.expect(&TokenKind::LeftBrace, "{")?;
 
-        let mut properties = Vec::new();
+        let mut properties = AstVecBuilder::new();
         while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
             if self.check(&TokenKind::Ellipsis) {
                 self.advance();
                 let arg = self.parse_binding_pattern()?;
                 properties.push(ObjectPatternProperty::Rest(RestElement {
-                    argument: Box::new(arg),
+                    argument: self.arena.alloc(arg),
                     span: Span::new(start, self.previous.span.end),
                 }));
             } else {
@@ -368,13 +372,13 @@ impl<'src> Parser<'src> {
         let end = self.previous.span.end;
 
         Ok(Pattern::Object(ObjectPattern {
-            properties,
+            properties: properties.freeze(self.arena),
             span: Span::new(start, end),
         }))
     }
 
     /// Parse object pattern property
-    fn parse_object_pattern_property(&mut self) -> ParseResult<ObjectPatternProperty<'src>> {
+    fn parse_object_pattern_property(&mut self) -> ParseResult<ObjectPatternProperty<'src, 'arena>> {
         let start = self.current.span.start;
         let computed = self.check(&TokenKind::LeftBracket);
 
@@ -401,8 +405,8 @@ impl<'src> Parser<'src> {
         let value = if self.match_token(&TokenKind::Assign) {
             let right = self.parse_assignment_expression()?;
             Pattern::Assignment(AssignmentPattern {
-                left: Box::new(value.clone()),
-                right: Box::new(right),
+                left: self.arena.alloc(value.clone()),
+                right: self.arena.alloc(right),
                 span: Span::new(value.span().start, self.previous.span.end),
             })
         } else {
@@ -420,7 +424,7 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse function declaration
-    fn parse_function_declaration(&mut self) -> ParseResult<Statement<'src>> {
+    fn parse_function_declaration(&mut self) -> ParseResult<Statement<'src, 'arena>> {
         let start = self.current.span.start;
         let is_async = self.previous.kind == TokenKind::Async;
         self.expect(&TokenKind::Function, "function")?;
@@ -453,16 +457,18 @@ impl<'src> Parser<'src> {
 
     /// Parse function parameters
     #[inline]
-    fn parse_function_params(&mut self) -> ParseResult<Vec<Pattern<'src>>> {
+    fn parse_function_params(
+        &mut self,
+    ) -> ParseResult<AstVec<'arena, Pattern<'src, 'arena>>> {
         // Typical function has 0-4 parameters
-        let mut params = Vec::with_capacity(3);
+        let mut params = AstVecBuilder::with_capacity(3);
 
         while !self.check(&TokenKind::RightParen) && !self.is_at_end() {
             if self.check(&TokenKind::Ellipsis) {
                 self.advance();
                 let arg = self.parse_binding_pattern()?;
                 params.push(Pattern::Rest(RestElement {
-                    argument: Box::new(arg),
+                    argument: self.arena.alloc(arg),
                     span: self.previous.span,
                 }));
                 break; // Rest must be last
@@ -473,8 +479,8 @@ impl<'src> Parser<'src> {
             let param = if self.match_token(&TokenKind::Assign) {
                 let right = self.parse_assignment_expression()?;
                 Pattern::Assignment(AssignmentPattern {
-                    left: Box::new(param.clone()),
-                    right: Box::new(right),
+                    left: self.arena.alloc(param.clone()),
+                    right: self.arena.alloc(right),
                     span: Span::new(param.span().start, self.previous.span.end),
                 })
             } else {
@@ -488,11 +494,11 @@ impl<'src> Parser<'src> {
             }
         }
 
-        Ok(params)
+        Ok(params.freeze(self.arena))
     }
 
     /// Parse class declaration
-    fn parse_class_declaration(&mut self) -> ParseResult<Statement<'src>> {
+    fn parse_class_declaration(&mut self) -> ParseResult<Statement<'src, 'arena>> {
         let start = self.current.span.start;
         self.expect(&TokenKind::Class, "class")?;
 
@@ -503,7 +509,7 @@ impl<'src> Parser<'src> {
         };
 
         let super_class = if self.match_token(&TokenKind::Extends) {
-            Some(Box::new(self.parse_left_hand_side_expression()?))
+            Some(self.arena.alloc(self.parse_left_hand_side_expression()?))
         } else {
             None
         };
@@ -521,12 +527,12 @@ impl<'src> Parser<'src> {
 
     /// Parse class body
     #[inline]
-    fn parse_class_body(&mut self) -> ParseResult<ClassBody<'src>> {
+    fn parse_class_body(&mut self) -> ParseResult<ClassBody<'src, 'arena>> {
         let start = self.current.span.start;
         self.expect(&TokenKind::LeftBrace, "{")?;
 
         // Typical class has 2-5 methods
-        let mut body = Vec::with_capacity(4);
+        let mut body = AstVecBuilder::with_capacity(4);
         while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
             // Skip semicolons in class body
             if self.match_token(&TokenKind::Semicolon) {
@@ -541,13 +547,13 @@ impl<'src> Parser<'src> {
         let end = self.previous.span.end;
 
         Ok(ClassBody {
-            body,
+            body: body.freeze(self.arena),
             span: Span::new(start, end),
         })
     }
 
     /// Parse class element (method or property)
-    fn parse_class_element(&mut self) -> ParseResult<ClassElement<'src>> {
+    fn parse_class_element(&mut self) -> ParseResult<ClassElement<'src, 'arena>> {
         let start = self.current.span.start;
         let is_static = self.match_token(&TokenKind::Static);
 
@@ -597,7 +603,7 @@ impl<'src> Parser<'src> {
         } else {
             // Property
             let value = if self.match_token(&TokenKind::Assign) {
-                Some(Box::new(self.parse_assignment_expression()?))
+                Some(self.arena.alloc(self.parse_assignment_expression()?))
             } else {
                 None
             };
@@ -616,17 +622,17 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse if statement
-    fn parse_if_statement(&mut self) -> ParseResult<Statement<'src>> {
+    fn parse_if_statement(&mut self) -> ParseResult<Statement<'src, 'arena>> {
         let start = self.current.span.start;
         self.expect(&TokenKind::If, "if")?;
         self.expect(&TokenKind::LeftParen, "(")?;
-        let test = Box::new(self.parse_expression()?);
+        let test = self.arena.alloc(self.parse_expression()?);
         self.expect(&TokenKind::RightParen, ")")?;
 
-        let consequent = Box::new(self.parse_statement()?);
+        let consequent = self.arena.alloc(self.parse_statement()?);
 
         let alternate = if self.match_token(&TokenKind::Else) {
-            Some(Box::new(self.parse_statement()?))
+            Some(self.arena.alloc(self.parse_statement()?))
         } else {
             None
         };
@@ -641,14 +647,14 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse while statement
-    fn parse_while_statement(&mut self) -> ParseResult<Statement<'src>> {
+    fn parse_while_statement(&mut self) -> ParseResult<Statement<'src, 'arena>> {
         let start = self.current.span.start;
         self.expect(&TokenKind::While, "while")?;
         self.expect(&TokenKind::LeftParen, "(")?;
-        let test = Box::new(self.parse_expression()?);
+        let test = self.arena.alloc(self.parse_expression()?);
         self.expect(&TokenKind::RightParen, ")")?;
 
-        let body = Box::new(self.parse_statement()?);
+        let body = self.arena.alloc(self.parse_statement()?);
         let end = self.previous.span.end;
 
         Ok(Statement::While(WhileStatement {
@@ -659,15 +665,15 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse do-while statement
-    fn parse_do_while_statement(&mut self) -> ParseResult<Statement<'src>> {
+    fn parse_do_while_statement(&mut self) -> ParseResult<Statement<'src, 'arena>> {
         let start = self.current.span.start;
         self.expect(&TokenKind::Do, "do")?;
 
-        let body = Box::new(self.parse_statement()?);
+        let body = self.arena.alloc(self.parse_statement()?);
 
         self.expect(&TokenKind::While, "while")?;
         self.expect(&TokenKind::LeftParen, "(")?;
-        let test = Box::new(self.parse_expression()?);
+        let test = self.arena.alloc(self.parse_expression()?);
         self.expect(&TokenKind::RightParen, ")")?;
         self.match_token(&TokenKind::Semicolon);
 
@@ -680,7 +686,7 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse for statement (for, for-in, for-of)
-    fn parse_for_statement(&mut self) -> ParseResult<Statement<'src>> {
+    fn parse_for_statement(&mut self) -> ParseResult<Statement<'src, 'arena>> {
         let start = self.current.span.start;
         self.expect(&TokenKind::For, "for")?;
         let is_await = self.match_token(&TokenKind::Await);
@@ -692,7 +698,7 @@ impl<'src> Parser<'src> {
         } else if self.check(&TokenKind::Var) || self.check(&TokenKind::Let) || self.check(&TokenKind::Const) {
             Some(self.parse_for_init_var()?)
         } else {
-            Some(ForInit::Expression(Box::new(self.parse_expression()?)))
+            Some(ForInit::Expression(self.arena.alloc(self.parse_expression()?)))
         };
 
         // Check for for-in or for-of
@@ -706,18 +712,18 @@ impl<'src> Parser<'src> {
         let test = if self.check(&TokenKind::Semicolon) {
             None
         } else {
-            Some(Box::new(self.parse_expression()?))
+            Some(self.arena.alloc(self.parse_expression()?))
         };
         self.expect(&TokenKind::Semicolon, ";")?;
 
         let update = if self.check(&TokenKind::RightParen) {
             None
         } else {
-            Some(Box::new(self.parse_expression()?))
+            Some(self.arena.alloc(self.parse_expression()?))
         };
         self.expect(&TokenKind::RightParen, ")")?;
 
-        let body = Box::new(self.parse_statement()?);
+        let body = self.arena.alloc(self.parse_statement()?);
         let end = self.previous.span.end;
 
         Ok(Statement::For(ForStatement {
@@ -730,7 +736,7 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse for-loop init (var/let/const)
-    fn parse_for_init_var(&mut self) -> ParseResult<ForInit<'src>> {
+    fn parse_for_init_var(&mut self) -> ParseResult<ForInit<'src, 'arena>> {
         let kind = match &self.current.kind {
             TokenKind::Var => VariableKind::Var,
             TokenKind::Let => VariableKind::Let,
@@ -739,7 +745,7 @@ impl<'src> Parser<'src> {
         };
         let start = self.advance().span.start;
 
-        let mut declarations = Vec::new();
+        let mut declarations = AstVecBuilder::new();
         loop {
             let decl = self.parse_variable_declarator()?;
             declarations.push(decl);
@@ -752,7 +758,7 @@ impl<'src> Parser<'src> {
         let end = self.previous.span.end;
         Ok(ForInit::VariableDeclaration(VariableDeclaration {
             kind,
-            declarations,
+            declarations: declarations.freeze(self.arena),
             span: Span::new(start, end),
         }))
     }
@@ -761,9 +767,9 @@ impl<'src> Parser<'src> {
     fn parse_for_in_of(
         &mut self,
         start: u32,
-        init: Option<ForInit<'src>>,
+        init: Option<ForInit<'src, 'arena>>,
         is_await: bool,
-    ) -> ParseResult<Statement<'src>> {
+    ) -> ParseResult<Statement<'src, 'arena>> {
         let is_of = self.match_token(&TokenKind::Of);
         if !is_of {
             self.expect(&TokenKind::In, "in")?;
@@ -773,7 +779,7 @@ impl<'src> Parser<'src> {
             Some(ForInit::VariableDeclaration(decl)) => ForInLeft::VariableDeclaration(decl),
             Some(ForInit::Expression(expr)) => {
                 // Convert expression to pattern
-                ForInLeft::Pattern(self.expression_to_pattern(*expr)?)
+                ForInLeft::Pattern(self.expression_to_pattern(expr)?)
             }
             None => {
                 return Err(ParseError::invalid_syntax(
@@ -783,10 +789,10 @@ impl<'src> Parser<'src> {
             }
         };
 
-        let right = Box::new(self.parse_assignment_expression()?);
+        let right = self.arena.alloc(self.parse_assignment_expression()?);
         self.expect(&TokenKind::RightParen, ")")?;
 
-        let body = Box::new(self.parse_statement()?);
+        let body = self.arena.alloc(self.parse_statement()?);
         let end = self.previous.span.end;
 
         if is_of {
@@ -808,9 +814,12 @@ impl<'src> Parser<'src> {
     }
 
     /// Convert expression to pattern (for destructuring)
-    fn expression_to_pattern(&self, expr: Expression<'src>) -> ParseResult<Pattern<'src>> {
+    fn expression_to_pattern(
+        &self,
+        expr: &Expression<'src, 'arena>,
+    ) -> ParseResult<Pattern<'src, 'arena>> {
         match expr {
-            Expression::Identifier(ident) => Ok(Pattern::Identifier(ident)),
+            Expression::Identifier(ident) => Ok(Pattern::Identifier(ident.clone())),
             _ => Err(ParseError::invalid_syntax(
                 expr.span(),
                 "Invalid destructuring pattern",
@@ -819,7 +828,7 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse return statement
-    fn parse_return_statement(&mut self) -> ParseResult<Statement<'src>> {
+    fn parse_return_statement(&mut self) -> ParseResult<Statement<'src, 'arena>> {
         let start = self.current.span.start;
         self.expect(&TokenKind::Return, "return")?;
 
@@ -829,7 +838,7 @@ impl<'src> Parser<'src> {
         {
             None
         } else {
-            Some(Box::new(self.parse_expression()?))
+            Some(self.arena.alloc(self.parse_expression()?))
         };
 
         self.match_token(&TokenKind::Semicolon);
@@ -842,7 +851,7 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse break statement
-    fn parse_break_statement(&mut self) -> ParseResult<Statement<'src>> {
+    fn parse_break_statement(&mut self) -> ParseResult<Statement<'src, 'arena>> {
         let start = self.current.span.start;
         self.expect(&TokenKind::Break, "break")?;
 
@@ -862,7 +871,7 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse continue statement
-    fn parse_continue_statement(&mut self) -> ParseResult<Statement<'src>> {
+    fn parse_continue_statement(&mut self) -> ParseResult<Statement<'src, 'arena>> {
         let start = self.current.span.start;
         self.expect(&TokenKind::Continue, "continue")?;
 
@@ -882,12 +891,12 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse throw statement
-    fn parse_throw_statement(&mut self) -> ParseResult<Statement<'src>> {
+    fn parse_throw_statement(&mut self) -> ParseResult<Statement<'src, 'arena>> {
         let start = self.current.span.start;
         self.expect(&TokenKind::Throw, "throw")?;
 
         // Throw must have an argument (no line terminator between throw and expression)
-        let argument = Box::new(self.parse_expression()?);
+        let argument = self.arena.alloc(self.parse_expression()?);
         self.match_token(&TokenKind::Semicolon);
         let end = self.previous.span.end;
 
@@ -898,7 +907,7 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse try statement
-    fn parse_try_statement(&mut self) -> ParseResult<Statement<'src>> {
+    fn parse_try_statement(&mut self) -> ParseResult<Statement<'src, 'arena>> {
         let start = self.current.span.start;
         self.expect(&TokenKind::Try, "try")?;
 
@@ -939,16 +948,16 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse switch statement
-    fn parse_switch_statement(&mut self) -> ParseResult<Statement<'src>> {
+    fn parse_switch_statement(&mut self) -> ParseResult<Statement<'src, 'arena>> {
         let start = self.current.span.start;
         self.expect(&TokenKind::Switch, "switch")?;
         self.expect(&TokenKind::LeftParen, "(")?;
-        let discriminant = Box::new(self.parse_expression()?);
+        let discriminant = self.arena.alloc(self.parse_expression()?);
         self.expect(&TokenKind::RightParen, ")")?;
 
         self.expect(&TokenKind::LeftBrace, "{")?;
 
-        let mut cases = Vec::new();
+        let mut cases = AstVecBuilder::new();
         while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
             let case = self.parse_switch_case()?;
             cases.push(case);
@@ -959,17 +968,17 @@ impl<'src> Parser<'src> {
 
         Ok(Statement::Switch(SwitchStatement {
             discriminant,
-            cases,
+            cases: cases.freeze(self.arena),
             span: Span::new(start, end),
         }))
     }
 
     /// Parse switch case
-    fn parse_switch_case(&mut self) -> ParseResult<SwitchCase<'src>> {
+    fn parse_switch_case(&mut self) -> ParseResult<SwitchCase<'src, 'arena>> {
         let start = self.current.span.start;
 
         let test = if self.match_token(&TokenKind::Case) {
-            Some(Box::new(self.parse_expression()?))
+            Some(self.arena.alloc(self.parse_expression()?))
         } else {
             self.expect(&TokenKind::Default, "case or default")?;
             None
@@ -977,7 +986,7 @@ impl<'src> Parser<'src> {
 
         self.expect(&TokenKind::Colon, ":")?;
 
-        let mut consequent = Vec::new();
+        let mut consequent = AstVecBuilder::new();
         while !self.check(&TokenKind::Case)
             && !self.check(&TokenKind::Default)
             && !self.check(&TokenKind::RightBrace)
@@ -990,25 +999,25 @@ impl<'src> Parser<'src> {
         let end = self.previous.span.end;
         Ok(SwitchCase {
             test,
-            consequent,
+            consequent: consequent.freeze(self.arena),
             span: Span::new(start, end),
         })
     }
 
     /// Parse block statement
-    fn parse_block_statement(&mut self) -> ParseResult<Statement<'src>> {
+    fn parse_block_statement(&mut self) -> ParseResult<Statement<'src, 'arena>> {
         let block = self.parse_block_statement_inner()?;
         Ok(Statement::Block(block))
     }
 
     /// Parse block statement (inner)
     #[inline]
-    fn parse_block_statement_inner(&mut self) -> ParseResult<BlockStatement<'src>> {
+    fn parse_block_statement_inner(&mut self) -> ParseResult<BlockStatement<'src, 'arena>> {
         let start = self.current.span.start;
         self.expect(&TokenKind::LeftBrace, "{")?;
 
         // Typical block has 3-8 statements
-        let mut body = Vec::with_capacity(4);
+        let mut body = AstVecBuilder::with_capacity(4);
         while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
             match self.parse_statement() {
                 Ok(stmt) => body.push(stmt),
@@ -1023,15 +1032,15 @@ impl<'src> Parser<'src> {
         let end = self.previous.span.end;
 
         Ok(BlockStatement {
-            body,
+            body: body.freeze(self.arena),
             span: Span::new(start, end),
         })
     }
 
     /// Parse expression statement
-    fn parse_expression_statement(&mut self) -> ParseResult<Statement<'src>> {
+    fn parse_expression_statement(&mut self) -> ParseResult<Statement<'src, 'arena>> {
         let start = self.current.span.start;
-        let expression = Box::new(self.parse_expression()?);
+        let expression = self.arena.alloc(self.parse_expression()?);
         self.match_token(&TokenKind::Semicolon);
         let end = self.previous.span.end;
 
@@ -1046,17 +1055,17 @@ impl<'src> Parser<'src> {
     // ========================================================================
 
     /// Parse expression
-    fn parse_expression(&mut self) -> ParseResult<Expression<'src>> {
+    fn parse_expression(&mut self) -> ParseResult<Expression<'src, 'arena>> {
         self.parse_expression_bp(BindingPower::MIN)
     }
 
     /// Parse assignment expression (excludes comma)
-    fn parse_assignment_expression(&mut self) -> ParseResult<Expression<'src>> {
+    fn parse_assignment_expression(&mut self) -> ParseResult<Expression<'src, 'arena>> {
         self.parse_expression_bp(BindingPower::COMMA)
     }
 
     /// Parse expression with binding power (Pratt core)
-    fn parse_expression_bp(&mut self, min_bp: BindingPower) -> ParseResult<Expression<'src>> {
+    fn parse_expression_bp(&mut self, min_bp: BindingPower) -> ParseResult<Expression<'src, 'arena>> {
         // Parse prefix (unary/primary)
         let mut lhs = self.parse_prefix_expression()?;
 
@@ -1089,7 +1098,7 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse prefix expression
-    fn parse_prefix_expression(&mut self) -> ParseResult<Expression<'src>> {
+    fn parse_prefix_expression(&mut self) -> ParseResult<Expression<'src, 'arena>> {
         let token = &self.current;
 
         // Check for prefix operators
@@ -1099,7 +1108,7 @@ impl<'src> Parser<'src> {
 
             // Unary operator
             if let Some(op) = token_to_unary_op(&op_token.kind) {
-                let argument = Box::new(self.parse_expression_bp(bp)?);
+                let argument = self.arena.alloc(self.parse_expression_bp(bp)?);
                 let end = self.previous.span.end;
                 return Ok(Expression::Unary(UnaryExpression {
                     operator: op,
@@ -1111,7 +1120,7 @@ impl<'src> Parser<'src> {
 
             // Update operator (prefix)
             if let Some(op) = token_to_update_op(&op_token.kind) {
-                let argument = Box::new(self.parse_expression_bp(bp)?);
+                let argument = self.arena.alloc(self.parse_expression_bp(bp)?);
                 let end = self.previous.span.end;
                 return Ok(Expression::Update(UpdateExpression {
                     operator: op,
@@ -1123,7 +1132,7 @@ impl<'src> Parser<'src> {
 
             // Await
             if matches!(op_token.kind, TokenKind::Await) {
-                let argument = Box::new(self.parse_expression_bp(bp)?);
+                let argument = self.arena.alloc(self.parse_expression_bp(bp)?);
                 let end = self.previous.span.end;
                 return Ok(Expression::Await(AwaitExpression {
                     argument,
@@ -1140,7 +1149,7 @@ impl<'src> Parser<'src> {
                 {
                     None
                 } else {
-                    Some(Box::new(self.parse_expression_bp(bp)?))
+                    Some(self.arena.alloc(self.parse_expression_bp(bp)?))
                 };
                 let end = self.previous.span.end;
                 return Ok(Expression::Yield(YieldExpression {
@@ -1161,13 +1170,13 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse new expression
-    fn parse_new_expression(&mut self, start: u32) -> ParseResult<Expression<'src>> {
-        let callee = Box::new(self.parse_expression_bp(BindingPower::NEW)?);
+    fn parse_new_expression(&mut self, start: u32) -> ParseResult<Expression<'src, 'arena>> {
+        let callee = self.arena.alloc(self.parse_expression_bp(BindingPower::NEW)?);
 
         let arguments = if self.match_token(&TokenKind::LeftParen) {
             self.parse_arguments()?
         } else {
-            Vec::new()
+            &[]
         };
 
         let end = self.previous.span.end;
@@ -1181,16 +1190,16 @@ impl<'src> Parser<'src> {
     /// Parse infix expression
     fn parse_infix_expression(
         &mut self,
-        lhs: Expression<'src>,
+        lhs: Expression<'src, 'arena>,
         right_bp: BindingPower,
-    ) -> ParseResult<Expression<'src>> {
+    ) -> ParseResult<Expression<'src, 'arena>> {
         let start = lhs.span().start;
         let op_token = self.advance();
 
         // Assignment operators
         if let Some(op) = token_to_assignment_op(&op_token.kind) {
             let target = self.expression_to_assignment_target(lhs)?;
-            let right = Box::new(self.parse_expression_bp(right_bp)?);
+            let right = self.arena.alloc(self.parse_expression_bp(right_bp)?);
             let end = self.previous.span.end;
             return Ok(Expression::Assignment(AssignmentExpression {
                 operator: op,
@@ -1202,12 +1211,12 @@ impl<'src> Parser<'src> {
 
         // Conditional (ternary)
         if matches!(op_token.kind, TokenKind::Question) {
-            let consequent = Box::new(self.parse_assignment_expression()?);
+            let consequent = self.arena.alloc(self.parse_assignment_expression()?);
             self.expect(&TokenKind::Colon, ":")?;
-            let alternate = Box::new(self.parse_expression_bp(right_bp)?);
+            let alternate = self.arena.alloc(self.parse_expression_bp(right_bp)?);
             let end = self.previous.span.end;
             return Ok(Expression::Conditional(ConditionalExpression {
-                test: Box::new(lhs),
+                test: self.arena.alloc(lhs),
                 consequent,
                 alternate,
                 span: Span::new(start, end),
@@ -1216,11 +1225,11 @@ impl<'src> Parser<'src> {
 
         // Logical operators
         if let Some(op) = token_to_logical_op(&op_token.kind) {
-            let right = Box::new(self.parse_expression_bp(right_bp)?);
+            let right = self.arena.alloc(self.parse_expression_bp(right_bp)?);
             let end = self.previous.span.end;
             return Ok(Expression::Logical(LogicalExpression {
                 operator: op,
-                left: Box::new(lhs),
+                left: self.arena.alloc(lhs),
                 right,
                 span: Span::new(start, end),
             }));
@@ -1228,11 +1237,11 @@ impl<'src> Parser<'src> {
 
         // Binary operators
         if let Some(op) = token_to_binary_op(&op_token.kind) {
-            let right = Box::new(self.parse_expression_bp(right_bp)?);
+            let right = self.arena.alloc(self.parse_expression_bp(right_bp)?);
             let end = self.previous.span.end;
             return Ok(Expression::Binary(BinaryExpression {
                 operator: op,
-                left: Box::new(lhs),
+                left: self.arena.alloc(lhs),
                 right,
                 span: Span::new(start, end),
             }));
@@ -1240,14 +1249,15 @@ impl<'src> Parser<'src> {
 
         // Comma operator
         if matches!(op_token.kind, TokenKind::Comma) {
-            let mut expressions = vec![lhs];
+            let mut expressions = AstVecBuilder::new();
+            expressions.push(lhs);
             expressions.push(self.parse_expression_bp(right_bp)?);
             while self.match_token(&TokenKind::Comma) {
                 expressions.push(self.parse_expression_bp(right_bp)?);
             }
             let end = self.previous.span.end;
             return Ok(Expression::Sequence(SequenceExpression {
-                expressions,
+                expressions: expressions.freeze(self.arena),
                 span: Span::new(start, end),
             }));
         }
@@ -1260,7 +1270,7 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse postfix expression
-    fn parse_postfix_expression(&mut self, lhs: Expression<'src>) -> ParseResult<Expression<'src>> {
+    fn parse_postfix_expression(&mut self, lhs: Expression<'src, 'arena>) -> ParseResult<Expression<'src, 'arena>> {
         let start = lhs.span().start;
 
         // Postfix update operators
@@ -1269,7 +1279,7 @@ impl<'src> Parser<'src> {
             let end = self.previous.span.end;
             return Ok(Expression::Update(UpdateExpression {
                 operator: op,
-                argument: Box::new(lhs),
+                argument: self.arena.alloc(lhs),
                 prefix: false,
                 span: Span::new(start, end),
             }));
@@ -1277,10 +1287,10 @@ impl<'src> Parser<'src> {
 
         // Member access (dot)
         if self.match_token(&TokenKind::Dot) {
-            let property = Box::new(Expression::Identifier(self.parse_identifier()?));
+            let property = self.arena.alloc(Expression::Identifier(self.parse_identifier()?));
             let end = self.previous.span.end;
             return Ok(Expression::Member(MemberExpression {
-                object: Box::new(lhs),
+                object: self.arena.alloc(lhs),
                 property,
                 computed: false,
                 optional: false,
@@ -1296,7 +1306,7 @@ impl<'src> Parser<'src> {
                 let arguments = self.parse_arguments()?;
                 let end = self.previous.span.end;
                 return Ok(Expression::Call(CallExpression {
-                    callee: Box::new(lhs),
+                    callee: self.arena.alloc(lhs),
                     arguments,
                     optional: true,
                     span: Span::new(start, end),
@@ -1304,11 +1314,11 @@ impl<'src> Parser<'src> {
             } else if self.check(&TokenKind::LeftBracket) {
                 // Optional computed member: x?.[y]
                 self.advance();
-                let property = Box::new(self.parse_expression()?);
+                let property = self.arena.alloc(self.parse_expression()?);
                 self.expect(&TokenKind::RightBracket, "]")?;
                 let end = self.previous.span.end;
                 return Ok(Expression::Member(MemberExpression {
-                    object: Box::new(lhs),
+                    object: self.arena.alloc(lhs),
                     property,
                     computed: true,
                     optional: true,
@@ -1316,10 +1326,10 @@ impl<'src> Parser<'src> {
                 }));
             }
             // Optional member: x?.y
-            let property = Box::new(Expression::Identifier(self.parse_identifier()?));
+            let property = self.arena.alloc(Expression::Identifier(self.parse_identifier()?));
             let end = self.previous.span.end;
             return Ok(Expression::Member(MemberExpression {
-                object: Box::new(lhs),
+                object: self.arena.alloc(lhs),
                 property,
                 computed: false,
                 optional: true,
@@ -1329,11 +1339,11 @@ impl<'src> Parser<'src> {
 
         // Computed member access
         if self.match_token(&TokenKind::LeftBracket) {
-            let property = Box::new(self.parse_expression()?);
+            let property = self.arena.alloc(self.parse_expression()?);
             self.expect(&TokenKind::RightBracket, "]")?;
             let end = self.previous.span.end;
             return Ok(Expression::Member(MemberExpression {
-                object: Box::new(lhs),
+                object: self.arena.alloc(lhs),
                 property,
                 computed: true,
                 optional: false,
@@ -1346,7 +1356,7 @@ impl<'src> Parser<'src> {
             let arguments = self.parse_arguments()?;
             let end = self.previous.span.end;
             return Ok(Expression::Call(CallExpression {
-                callee: Box::new(lhs),
+                callee: self.arena.alloc(lhs),
                 arguments,
                 optional: false,
                 span: Span::new(start, end),
@@ -1358,7 +1368,7 @@ impl<'src> Parser<'src> {
             let quasi = self.parse_template_literal()?;
             let end = self.previous.span.end;
             return Ok(Expression::TaggedTemplate(TaggedTemplateExpression {
-                tag: Box::new(lhs),
+                tag: self.arena.alloc(lhs),
                 quasi,
                 span: Span::new(start, end),
             }));
@@ -1372,15 +1382,17 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse arguments list
-    fn parse_arguments(&mut self) -> ParseResult<Vec<Argument<'src>>> {
-        let mut args = Vec::new();
+    fn parse_arguments(
+        &mut self,
+    ) -> ParseResult<AstVec<'arena, Argument<'src, 'arena>>> {
+        let mut args = AstVecBuilder::new();
 
         while !self.check(&TokenKind::RightParen) && !self.is_at_end() {
             if self.check(&TokenKind::Ellipsis) {
                 self.advance();
                 let arg = self.parse_assignment_expression()?;
                 args.push(Argument::Spread(SpreadElement {
-                    argument: Box::new(arg),
+                    argument: self.arena.alloc(arg),
                     span: self.previous.span,
                 }));
             } else {
@@ -1394,11 +1406,11 @@ impl<'src> Parser<'src> {
         }
 
         self.expect(&TokenKind::RightParen, ")")?;
-        Ok(args)
+        Ok(args.freeze(self.arena))
     }
 
     /// Parse primary expression
-    fn parse_primary_expression(&mut self) -> ParseResult<Expression<'src>> {
+    fn parse_primary_expression(&mut self) -> ParseResult<Expression<'src, 'arena>> {
         match &self.current.kind {
             // Identifiers
             TokenKind::Identifier(_) => {
@@ -1492,7 +1504,7 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse number literal
-    fn parse_number_literal(&mut self) -> ParseResult<Expression<'src>> {
+    fn parse_number_literal(&mut self) -> ParseResult<Expression<'src, 'arena>> {
         let token = self.advance();
         let raw = self.text(token.span);
 
@@ -1520,7 +1532,7 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse string literal
-    fn parse_string_literal(&mut self) -> ParseResult<Expression<'src>> {
+    fn parse_string_literal(&mut self) -> ParseResult<Expression<'src, 'arena>> {
         let token = self.advance();
         let raw = self.text(token.span);
         // Remove quotes for value
@@ -1534,7 +1546,7 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse regexp literal
-    fn parse_regexp_literal(&mut self) -> ParseResult<Expression<'src>> {
+    fn parse_regexp_literal(&mut self) -> ParseResult<Expression<'src, 'arena>> {
         let token = self.advance();
         match &token.kind {
             TokenKind::RegExp(pattern) => {
@@ -1562,7 +1574,7 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse parenthesized expression or arrow function
-    fn parse_parenthesized_or_arrow(&mut self) -> ParseResult<Expression<'src>> {
+    fn parse_parenthesized_or_arrow(&mut self) -> ParseResult<Expression<'src, 'arena>> {
         let start = self.current.span.start;
         self.expect(&TokenKind::LeftParen, "(")?;
 
@@ -1585,21 +1597,24 @@ impl<'src> Parser<'src> {
         // Check for arrow function
         if self.check(&TokenKind::Arrow) {
             // Convert expression to parameters
-            let params = self.expression_to_params(expr)?;
+            let params = self.expression_to_params(&expr)?;
             return self.parse_arrow_function(start, params, false);
         }
 
         let end = self.previous.span.end;
         Ok(Expression::Parenthesized(ParenthesizedExpression {
-            expression: Box::new(expr),
+            expression: self.arena.alloc(expr),
             span: Span::new(start, end),
         }))
     }
 
     /// Convert expression to arrow function parameters
-    fn expression_to_params(&self, expr: Expression<'src>) -> ParseResult<Vec<Pattern<'src>>> {
+    fn expression_to_params(
+        &self,
+        expr: &Expression<'src, 'arena>,
+    ) -> ParseResult<Vec<Pattern<'src, 'arena>>> {
         match expr {
-            Expression::Identifier(ident) => Ok(vec![Pattern::Identifier(ident)]),
+            Expression::Identifier(ident) => Ok(vec![Pattern::Identifier(ident.clone())]),
             Expression::Sequence(seq) => {
                 let mut params = Vec::new();
                 for e in seq.expressions {
@@ -1618,15 +1633,21 @@ impl<'src> Parser<'src> {
     fn parse_arrow_function(
         &mut self,
         start: u32,
-        params: Vec<Pattern<'src>>,
+        params: Vec<Pattern<'src, 'arena>>,
         is_async: bool,
-    ) -> ParseResult<Expression<'src>> {
+    ) -> ParseResult<Expression<'src, 'arena>> {
         self.expect(&TokenKind::Arrow, "=>")?;
 
         let body = if self.check(&TokenKind::LeftBrace) {
             ArrowBody::Block(self.parse_block_statement_inner()?)
         } else {
-            ArrowBody::Expression(Box::new(self.parse_assignment_expression()?))
+            ArrowBody::Expression(self.arena.alloc(self.parse_assignment_expression()?))
+        };
+
+        let params = if params.is_empty() {
+            &[]
+        } else {
+            self.arena.alloc_slice_from_iter(params.into_iter())
         };
 
         let end = self.previous.span.end;
@@ -1639,11 +1660,11 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse array literal
-    fn parse_array_literal(&mut self) -> ParseResult<Expression<'src>> {
+    fn parse_array_literal(&mut self) -> ParseResult<Expression<'src, 'arena>> {
         let start = self.current.span.start;
         self.expect(&TokenKind::LeftBracket, "[")?;
 
-        let mut elements = Vec::new();
+        let mut elements = AstVecBuilder::new();
         while !self.check(&TokenKind::RightBracket) && !self.is_at_end() {
             if self.check(&TokenKind::Comma) {
                 // Elision
@@ -1652,7 +1673,7 @@ impl<'src> Parser<'src> {
                 self.advance();
                 let arg = self.parse_assignment_expression()?;
                 elements.push(ArrayElement::Spread(SpreadElement {
-                    argument: Box::new(arg),
+                    argument: self.arena.alloc(arg),
                     span: self.previous.span,
                 }));
             } else {
@@ -1669,23 +1690,23 @@ impl<'src> Parser<'src> {
         let end = self.previous.span.end;
 
         Ok(Expression::Array(ArrayExpression {
-            elements,
+            elements: elements.freeze(self.arena),
             span: Span::new(start, end),
         }))
     }
 
     /// Parse object literal
-    fn parse_object_literal(&mut self) -> ParseResult<Expression<'src>> {
+    fn parse_object_literal(&mut self) -> ParseResult<Expression<'src, 'arena>> {
         let start = self.current.span.start;
         self.expect(&TokenKind::LeftBrace, "{")?;
 
-        let mut properties = Vec::new();
+        let mut properties = AstVecBuilder::new();
         while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
             if self.check(&TokenKind::Ellipsis) {
                 self.advance();
                 let arg = self.parse_assignment_expression()?;
                 properties.push(ObjectProperty::SpreadProperty(SpreadElement {
-                    argument: Box::new(arg),
+                    argument: self.arena.alloc(arg),
                     span: self.previous.span,
                 }));
             } else {
@@ -1702,13 +1723,13 @@ impl<'src> Parser<'src> {
         let end = self.previous.span.end;
 
         Ok(Expression::Object(ObjectExpression {
-            properties,
+            properties: properties.freeze(self.arena),
             span: Span::new(start, end),
         }))
     }
 
     /// Parse object property
-    fn parse_object_property(&mut self) -> ParseResult<Property<'src>> {
+    fn parse_object_property(&mut self) -> ParseResult<Property<'src, 'arena>> {
         let start = self.current.span.start;
         let computed = self.check(&TokenKind::LeftBracket);
 
@@ -1731,7 +1752,7 @@ impl<'src> Parser<'src> {
             let end = self.previous.span.end;
             return Ok(Property {
                 key,
-                value: Box::new(Expression::Identifier(ident)),
+                value: self.arena.alloc(Expression::Identifier(ident)),
                 kind: PropertyKind::Init,
                 method: false,
                 shorthand: true,
@@ -1760,7 +1781,7 @@ impl<'src> Parser<'src> {
 
             return Ok(Property {
                 key,
-                value: Box::new(func),
+                value: self.arena.alloc(func),
                 kind,
                 method,
                 shorthand: false,
@@ -1771,7 +1792,7 @@ impl<'src> Parser<'src> {
 
         // Regular property: { x: y }
         self.expect(&TokenKind::Colon, ":")?;
-        let value = Box::new(self.parse_assignment_expression()?);
+        let value = self.arena.alloc(self.parse_assignment_expression()?);
         let end = self.previous.span.end;
 
         Ok(Property {
@@ -1786,11 +1807,11 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse property key
-    fn parse_property_key(&mut self) -> ParseResult<PropertyKey<'src>> {
+    fn parse_property_key(&mut self) -> ParseResult<PropertyKey<'src, 'arena>> {
         if self.match_token(&TokenKind::LeftBracket) {
             let expr = self.parse_assignment_expression()?;
             self.expect(&TokenKind::RightBracket, "]")?;
-            return Ok(PropertyKey::Computed(Box::new(expr)));
+            return Ok(PropertyKey::Computed(self.arena.alloc(expr)));
         }
 
         match &self.current.kind {
@@ -1821,7 +1842,7 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse function expression
-    fn parse_function_expression(&mut self) -> ParseResult<Expression<'src>> {
+    fn parse_function_expression(&mut self) -> ParseResult<Expression<'src, 'arena>> {
         let start = self.current.span.start;
         let is_async = self.previous.kind == TokenKind::Async;
         self.expect(&TokenKind::Function, "function")?;
@@ -1852,7 +1873,7 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse class expression
-    fn parse_class_expression(&mut self) -> ParseResult<Expression<'src>> {
+    fn parse_class_expression(&mut self) -> ParseResult<Expression<'src, 'arena>> {
         let start = self.current.span.start;
         self.expect(&TokenKind::Class, "class")?;
 
@@ -1863,7 +1884,7 @@ impl<'src> Parser<'src> {
         };
 
         let super_class = if self.match_token(&TokenKind::Extends) {
-            Some(Box::new(self.parse_left_hand_side_expression()?))
+            Some(self.arena.alloc(self.parse_left_hand_side_expression()?))
         } else {
             None
         };
@@ -1880,7 +1901,7 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse async expression (function or arrow)
-    fn parse_async_expression(&mut self) -> ParseResult<Expression<'src>> {
+    fn parse_async_expression(&mut self) -> ParseResult<Expression<'src, 'arena>> {
         let start = self.current.span.start;
         self.expect(&TokenKind::Async, "async")?;
 
@@ -1921,7 +1942,7 @@ impl<'src> Parser<'src> {
             }
             let expr = self.parse_expression()?;
             self.expect(&TokenKind::RightParen, ")")?;
-            let params = self.expression_to_params(expr)?;
+            let params = self.expression_to_params(&expr)?;
             return self.parse_arrow_function(start, params, true);
         }
 
@@ -1942,7 +1963,7 @@ impl<'src> Parser<'src> {
     /// Parse template literal
     /// Note: The lexer produces a single Template token for the entire template.
     /// Full template literal parsing with expressions would require lexer changes.
-    fn parse_template_literal(&mut self) -> ParseResult<TemplateLiteral<'src>> {
+    fn parse_template_literal(&mut self) -> ParseResult<TemplateLiteral<'src, 'arena>> {
         let start = self.current.span.start;
         let token = self.advance();
 
@@ -1957,16 +1978,16 @@ impl<'src> Parser<'src> {
                     Some(raw)
                 };
 
-                let quasis = vec![TemplateElement {
+                let quasis = self.arena.alloc_slice_from_iter(std::iter::once(TemplateElement {
                     raw: cooked.unwrap_or(""),
                     cooked,
                     tail: true,
                     span: token.span,
-                }];
+                }));
 
                 Ok(TemplateLiteral {
                     quasis,
-                    expressions: Vec::new(),
+                    expressions: &[],
                     span: Span::new(start, token.span.end),
                 })
             }
@@ -1979,15 +2000,15 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse left-hand side expression (for new, call, member)
-    fn parse_left_hand_side_expression(&mut self) -> ParseResult<Expression<'src>> {
+    fn parse_left_hand_side_expression(&mut self) -> ParseResult<Expression<'src, 'arena>> {
         self.parse_expression_bp(BindingPower::NEW)
     }
 
     /// Convert expression to assignment target
     fn expression_to_assignment_target(
         &self,
-        expr: Expression<'src>,
-    ) -> ParseResult<AssignmentTarget<'src>> {
+        expr: Expression<'src, 'arena>,
+    ) -> ParseResult<AssignmentTarget<'src, 'arena>> {
         match expr {
             Expression::Identifier(ident) => Ok(AssignmentTarget::Identifier(ident)),
             Expression::Member(member) => Ok(AssignmentTarget::Member(member)),
@@ -2000,20 +2021,18 @@ impl<'src> Parser<'src> {
 mod tests {
     use super::*;
 
-    fn parse(source: &str) -> (Program<'_>, Vec<ParseError>) {
-        Parser::new(source).parse()
-    }
-
     #[test]
     fn test_simple_expression() {
-        let (program, errors) = parse("42;");
+        let arena = AstArena::new();
+        let (program, errors) = Parser::new("42;", &arena).parse();
         assert!(errors.is_empty());
         assert_eq!(program.body.len(), 1);
     }
 
     #[test]
     fn test_variable_declaration() {
-        let (program, errors) = parse("let x = 10;");
+        let arena = AstArena::new();
+        let (program, errors) = Parser::new("let x = 10;", &arena).parse();
         assert!(errors.is_empty());
         assert_eq!(program.body.len(), 1);
         match &program.body[0] {
@@ -2027,7 +2046,9 @@ mod tests {
 
     #[test]
     fn test_function_declaration() {
-        let (program, errors) = parse("function add(a, b) { return a + b; }");
+        let arena = AstArena::new();
+        let (program, errors) =
+            Parser::new("function add(a, b) { return a + b; }", &arena).parse();
         assert!(errors.is_empty());
         assert_eq!(program.body.len(), 1);
         match &program.body[0] {
@@ -2041,7 +2062,8 @@ mod tests {
 
     #[test]
     fn test_if_statement() {
-        let (program, errors) = parse("if (x) { y; } else { z; }");
+        let arena = AstArena::new();
+        let (program, errors) = Parser::new("if (x) { y; } else { z; }", &arena).parse();
         assert!(errors.is_empty());
         match &program.body[0] {
             Statement::If(if_stmt) => {
@@ -2053,20 +2075,24 @@ mod tests {
 
     #[test]
     fn test_binary_expression() {
-        let (_program, errors) = parse("1 + 2 * 3;");
+        let arena = AstArena::new();
+        let (_program, errors) = Parser::new("1 + 2 * 3;", &arena).parse();
         assert!(errors.is_empty());
         // The AST should reflect precedence: 1 + (2 * 3)
     }
 
     #[test]
     fn test_arrow_function() {
-        let (_program, errors) = parse("const f = (x) => x * 2;");
+        let arena = AstArena::new();
+        let (_program, errors) = Parser::new("const f = (x) => x * 2;", &arena).parse();
         assert!(errors.is_empty());
     }
 
     #[test]
     fn test_class_declaration() {
-        let (program, errors) = parse("class Foo { constructor() {} bar() {} }");
+        let arena = AstArena::new();
+        let (program, errors) =
+            Parser::new("class Foo { constructor() {} bar() {} }", &arena).parse();
         assert!(errors.is_empty());
         match &program.body[0] {
             Statement::ClassDeclaration(cls) => {
@@ -2078,7 +2104,8 @@ mod tests {
 
     #[test]
     fn test_error_recovery() {
-        let (_program, errors) = parse("let x = ; let y = 2;");
+        let arena = AstArena::new();
+        let (_program, errors) = Parser::new("let x = ; let y = 2;", &arena).parse();
         // Should recover and parse second declaration
         assert!(!errors.is_empty());
     }

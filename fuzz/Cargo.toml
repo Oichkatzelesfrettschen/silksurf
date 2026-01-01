@@ -1,0 +1,12 @@
+[package]
+name = "silksurf-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+rust-version = "1.94.0"
+
+[dependencies]
+libfuzzer-sys = "0.4.10"
+silksurf-css = { path = "../crates/silksurf-css" }
+silksurf-engine = { path = "../crates/silksurf-engine" }
+silksurf-html = { path = "../crates/silksurf-html" }

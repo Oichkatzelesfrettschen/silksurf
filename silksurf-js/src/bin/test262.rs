@@ -250,12 +250,6 @@ fn run_single_test(
                 eprintln!("FAIL: {:?} - {}", path, reason);
             }
         }
-        TestOutcome::Skip(reason) => {
-            results.skipped += 1;
-            if verbose {
-                println!("SKIP: {:?} - {}", path, reason);
-            }
-        }
     }
 }
 
@@ -326,7 +320,6 @@ fn extract_test_source(content: &str) -> String {
 enum TestOutcome {
     Pass,
     Fail(String),
-    Skip(String),
 }
 
 fn run_lexer_test(source: &str, metadata: &SimpleMetadata) -> TestOutcome {

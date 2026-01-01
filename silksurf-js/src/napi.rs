@@ -25,6 +25,7 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
 use crate::lexer::Lexer;
+use crate::parser::ast_arena::AstArena;
 use crate::parser::Parser;
 use crate::bytecode::Compiler;
 use crate::vm::Vm;
@@ -55,7 +56,8 @@ impl Engine {
         }
 
         // Parse
-        let parser = Parser::new(&source);
+        let ast_arena = AstArena::new();
+        let parser = Parser::new(&source, &ast_arena);
         let (ast, errors) = parser.parse();
         if !errors.is_empty() {
             return Err(Error::from_reason(format!("Parse error: {:?}", errors[0])));
@@ -88,7 +90,8 @@ impl Engine {
         }
 
         // Parse
-        let parser = Parser::new(&source);
+        let ast_arena = AstArena::new();
+        let parser = Parser::new(&source, &ast_arena);
         let (_, errors) = parser.parse();
         errors.is_empty()
     }
@@ -124,7 +127,8 @@ pub fn is_valid_syntax(source: String) -> bool {
     }
 
     // Parse
-    let parser = Parser::new(&source);
+    let ast_arena = AstArena::new();
+    let parser = Parser::new(&source, &ast_arena);
     let (_, errors) = parser.parse();
     errors.is_empty()
 }

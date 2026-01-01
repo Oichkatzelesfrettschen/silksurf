@@ -6,6 +6,7 @@
 #[cfg(kani)]
 mod proofs {
     use crate::lexer::{Lexer, Span, TokenKind};
+    use crate::parser::ast_arena::AstArena;
     use crate::parser::Parser;
 
     /// Verify that Span creation never panics for valid inputs
@@ -75,7 +76,8 @@ mod proofs {
     fn verify_parser_simple_expression() {
         // Test with a simple numeric literal
         let source = "42;";
-        let parser = Parser::new(source);
+        let arena = AstArena::new();
+        let parser = Parser::new(source, &arena);
         let (program, errors) = parser.parse();
 
         // Should parse without errors

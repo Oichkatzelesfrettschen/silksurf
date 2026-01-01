@@ -1,9 +1,11 @@
 [package]
 name = "silksurf-layout"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+rust-version = "1.94.0"
 publish = false
 
 [dependencies]
-silksurf-dom = { path = "../silksurf-dom" }
+silksurf-core = { path = "../silksurf-core" }
 silksurf-css = { path = "../silksurf-css" }
+silksurf-dom = { path = "../silksurf-dom" }

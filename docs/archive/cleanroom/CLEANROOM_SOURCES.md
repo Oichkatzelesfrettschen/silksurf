@@ -18,3 +18,5 @@ into SilkSurf-owned specs and tests.
 ## Guardrails
 - No source files from reference repos are included in the Rust workspace.
 - Keep research notes separate from implementation code.
+- Record dependency choices and rationale in `docs/DEPENDENCY_RATIONALE.md`.
+- Log each intake in `docs/CLEANROOM_INTAKE_LOG.md`.

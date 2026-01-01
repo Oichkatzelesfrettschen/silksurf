@@ -1,10 +1,12 @@
 [package]
 name = "silksurf-core"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+rust-version = "1.94.0"
 publish = false
 
 [dependencies]
 bumpalo = { workspace = true }
 lasso = { workspace = true }
+smol_str = { workspace = true }
 thiserror = { workspace = true }

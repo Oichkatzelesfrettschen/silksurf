@@ -217,6 +217,7 @@ impl<'src> Lexer<'src> {
 
     /// Scan the next token
     #[inline]
+    #[cfg_attr(feature = "tracing-full", tracing::instrument(level = "trace", skip(self)))]
     pub fn next_token(&mut self) -> Token<'src> {
         self.skip_trivia();
         self.start = self.pos;

@@ -7,6 +7,13 @@
 
 use crate::bytecode::Chunk;
 
+#[cfg(feature = "mmap")]
+use memmap2::Mmap;
+#[cfg(feature = "mmap")]
+use std::fs::File;
+#[cfg(feature = "mmap")]
+use std::path::Path;
+
 /// A serializable primitive value (no Rc/RefCell)
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum PrimitiveValue {
@@ -113,6 +120,32 @@ pub struct VmSnapshot {
     pub strings: Vec<String>,
     /// Maximum call stack depth setting
     pub max_stack_depth: u32,
+}
+
+/// Memory-mapped snapshot view (zero-copy).
+#[cfg(feature = "mmap")]
+pub struct MmapSnapshot {
+    mmap: Mmap,
+}
+
+#[cfg(feature = "mmap")]
+impl MmapSnapshot {
+    /// Map a snapshot file into memory.
+    pub fn open(path: impl AsRef<Path>) -> Result<Self, SnapshotError> {
+        let file = File::open(path).map_err(|_| SnapshotError::DeserializeFailed)?;
+        let mmap = unsafe { Mmap::map(&file).map_err(|_| SnapshotError::DeserializeFailed)? };
+        Ok(Self { mmap })
+    }
+
+    /// Access archived snapshot without deserializing.
+    pub fn archived(&self) -> Result<&ArchivedVmSnapshot, SnapshotError> {
+        VmSnapshot::access_archived(&self.mmap)
+    }
+
+    /// Raw mapped bytes.
+    pub fn bytes(&self) -> &[u8] {
+        &self.mmap
+    }
 }
 
 /// Error during snapshot operations

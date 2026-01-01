@@ -78,7 +78,7 @@ struct LoopContext {
 }
 
 /// Bytecode compiler
-pub struct Compiler<'src> {
+pub struct Compiler<'src, 'arena> {
     chunk: Chunk,
     scopes: Vec<Scope>,
     current_scope: usize,
@@ -87,10 +87,10 @@ pub struct Compiler<'src> {
     loop_stack: Vec<LoopContext>,
     strict: bool,
     errors: Vec<CompileError>,
-    _phantom: std::marker::PhantomData<&'src ()>,
+    _phantom: std::marker::PhantomData<(&'src (), &'arena ())>,
 }
 
-impl<'src> Compiler<'src> {
+impl<'src, 'arena> Compiler<'src, 'arena> {
     pub fn new() -> Self {
         let mut scopes = Vec::new();
         scopes.push(Scope::new(None, 0));
@@ -109,11 +109,11 @@ impl<'src> Compiler<'src> {
     }
 
     /// Compile a program to bytecode
-    pub fn compile(mut self, program: &Program<'src>) -> CompileResult<Chunk> {
+    pub fn compile(mut self, program: &Program<'src, 'arena>) -> CompileResult<Chunk> {
         self.check_strict_directive(program);
         self.collect_declarations(&program.body);
 
-        for stmt in &program.body {
+        for stmt in program.body {
             self.compile_statement(stmt)?;
         }
 
@@ -128,9 +128,9 @@ impl<'src> Compiler<'src> {
         Ok(self.chunk)
     }
 
-    fn check_strict_directive(&mut self, program: &Program<'src>) {
+    fn check_strict_directive(&mut self, program: &Program<'src, 'arena>) {
         if let Some(Statement::Expression(expr_stmt)) = program.body.first() {
-            if let Expression::Literal(Literal::String(s)) = expr_stmt.expression.as_ref() {
+            if let Expression::Literal(Literal::String(s)) = expr_stmt.expression {
                 if s.value == "use strict" {
                     self.strict = true;
                 }
@@ -138,11 +138,11 @@ impl<'src> Compiler<'src> {
         }
     }
 
-    fn collect_declarations(&mut self, stmts: &[Statement<'src>]) {
+    fn collect_declarations(&mut self, stmts: &[Statement<'src, 'arena>]) {
         for stmt in stmts {
             if let Statement::VariableDeclaration(decl) = stmt {
                 if decl.kind == VariableKind::Var {
-                    for declarator in &decl.declarations {
+                    for declarator in decl.declarations {
                         if let crate::parser::Pattern::Identifier(id) = &declarator.id {
                             self.declare_var(id.name, VariableKind::Var, false);
                         }
@@ -240,11 +240,11 @@ impl<'src> Compiler<'src> {
 
     // Statement compilation
 
-    fn compile_statement(&mut self, stmt: &Statement<'src>) -> CompileResult<()> {
+    fn compile_statement(&mut self, stmt: &Statement<'src, 'arena>) -> CompileResult<()> {
         match stmt {
             Statement::Expression(expr_stmt) => {
                 let checkpoint = self.next_register;
-                let _reg = self.compile_expression(&expr_stmt.expression)?;
+                let _reg = self.compile_expression(expr_stmt.expression)?;
                 self.free_registers_to(checkpoint);
             }
             Statement::VariableDeclaration(decl) => {
@@ -252,17 +252,17 @@ impl<'src> Compiler<'src> {
             }
             Statement::Block(block) => {
                 self.enter_scope();
-                for s in &block.body {
+                for s in block.body {
                     self.compile_statement(s)?;
                 }
                 self.exit_scope();
             }
             Statement::If(if_stmt) => {
-                let cond_reg = self.compile_expression(&if_stmt.test)?;
+                let cond_reg = self.compile_expression(if_stmt.test)?;
                 let else_jump = self.emit(Instruction::new_r_offset(Opcode::JmpFalse, cond_reg.0, 0));
-                self.compile_statement(&if_stmt.consequent)?;
+                self.compile_statement(if_stmt.consequent)?;
 
-                if let Some(ref alternate) = if_stmt.alternate {
+                if let Some(alternate) = if_stmt.alternate {
                     let end_jump = self.emit(Instruction::new_offset(Opcode::Jmp, 0));
                     self.patch_jump(else_jump);
                     self.compile_statement(alternate)?;
@@ -278,9 +278,9 @@ impl<'src> Compiler<'src> {
                     continue_targets: Vec::new(),
                 });
 
-                let cond_reg = self.compile_expression(&while_stmt.test)?;
+                let cond_reg = self.compile_expression(while_stmt.test)?;
                 let exit_jump = self.emit(Instruction::new_r_offset(Opcode::JmpFalse, cond_reg.0, 0));
-                self.compile_statement(&while_stmt.body)?;
+                self.compile_statement(while_stmt.body)?;
 
                 let back_offset = (loop_start as i32) - (self.current_offset() as i32) - 1;
                 self.emit(Instruction::new_offset(Opcode::Jmp, back_offset));
@@ -298,13 +298,13 @@ impl<'src> Compiler<'src> {
             Statement::For(for_stmt) => {
                 self.enter_scope();
 
-                if let Some(ref init) = for_stmt.init {
+                if let Some(init) = for_stmt.init.as_ref() {
                     match init {
                         ForInit::VariableDeclaration(decl) => {
                             self.compile_var_declaration(decl)?;
                         }
                         ForInit::Expression(expr) => {
-                            let _ = self.compile_expression(expr)?;
+                            let _ = self.compile_expression(*expr)?;
                         }
                     }
                 }
@@ -315,18 +315,18 @@ impl<'src> Compiler<'src> {
                     continue_targets: Vec::new(),
                 });
 
-                let exit_jump = if let Some(ref test) = for_stmt.test {
-                    let cond_reg = self.compile_expression(test)?;
+                let exit_jump = if let Some(test) = for_stmt.test.as_ref() {
+                    let cond_reg = self.compile_expression(*test)?;
                     Some(self.emit(Instruction::new_r_offset(Opcode::JmpFalse, cond_reg.0, 0)))
                 } else {
                     None
                 };
 
-                self.compile_statement(&for_stmt.body)?;
+                self.compile_statement(for_stmt.body)?;
                 let continue_target = self.current_offset();
 
-                if let Some(ref update) = for_stmt.update {
-                    let _ = self.compile_expression(update)?;
+                if let Some(update) = for_stmt.update.as_ref() {
+                    let _ = self.compile_expression(*update)?;
                 }
 
                 let back_offset = (loop_start as i32) - (self.current_offset() as i32) - 1;
@@ -348,15 +348,15 @@ impl<'src> Compiler<'src> {
                 self.exit_scope();
             }
             Statement::Return(ret) => {
-                if let Some(ref arg) = ret.argument {
-                    let reg = self.compile_expression(arg)?;
+                if let Some(arg) = ret.argument.as_ref() {
+                    let reg = self.compile_expression(*arg)?;
                     self.emit_at(Instruction::new_r(Opcode::Ret, reg.0), ret.span);
                 } else {
                     self.emit_at(Instruction::new(Opcode::RetUndefined), ret.span);
                 }
             }
             Statement::Throw(throw) => {
-                let reg = self.compile_expression(&throw.argument)?;
+                let reg = self.compile_expression(throw.argument)?;
                 self.emit_at(Instruction::new_r(Opcode::Throw, reg.0), throw.span);
             }
             Statement::Break(brk) => {
@@ -392,15 +392,15 @@ impl<'src> Compiler<'src> {
         Ok(())
     }
 
-    fn compile_var_declaration(&mut self, decl: &VariableDeclaration<'src>) -> CompileResult<()> {
-        for declarator in &decl.declarations {
+    fn compile_var_declaration(&mut self, decl: &VariableDeclaration<'src, 'arena>) -> CompileResult<()> {
+        for declarator in decl.declarations {
             if let crate::parser::Pattern::Identifier(id) = &declarator.id {
                 if decl.kind != VariableKind::Var {
                     self.declare_var(id.name, decl.kind, false);
                 }
 
-                if let Some(ref init) = declarator.init {
-                    let value_reg = self.compile_expression(init)?;
+                if let Some(init) = declarator.init.as_ref() {
+                    let value_reg = self.compile_expression(*init)?;
 
                     if let Some((depth, slot)) = self.lookup_var(id.name) {
                         if depth == 0 {
@@ -429,7 +429,7 @@ impl<'src> Compiler<'src> {
 
     // Expression compilation
 
-    fn compile_expression(&mut self, expr: &Expression<'src>) -> CompileResult<Register> {
+    fn compile_expression(&mut self, expr: &Expression<'src, 'arena>) -> CompileResult<Register> {
         match expr {
             Expression::Literal(lit) => self.compile_literal(lit),
             Expression::Identifier(id) => self.compile_identifier(id),
@@ -448,7 +448,7 @@ impl<'src> Compiler<'src> {
                 self.emit_at(Instruction::new_rr(Opcode::GetLocal, reg.0, Register::THIS.0), *span);
                 Ok(reg)
             }
-            Expression::Parenthesized(paren) => self.compile_expression(&paren.expression),
+            Expression::Parenthesized(paren) => self.compile_expression(paren.expression),
             Expression::Sequence(seq) => {
                 let mut last_reg = self.alloc_register();
                 for (i, e) in seq.expressions.iter().enumerate() {
@@ -528,9 +528,9 @@ impl<'src> Compiler<'src> {
         Ok(reg)
     }
 
-    fn compile_binary(&mut self, bin: &crate::parser::BinaryExpression<'src>) -> CompileResult<Register> {
-        let left_reg = self.compile_expression(&bin.left)?;
-        let right_reg = self.compile_expression(&bin.right)?;
+    fn compile_binary(&mut self, bin: &crate::parser::BinaryExpression<'src, 'arena>) -> CompileResult<Register> {
+        let left_reg = self.compile_expression(bin.left)?;
+        let right_reg = self.compile_expression(bin.right)?;
         let result_reg = self.alloc_register();
 
         let opcode = match bin.operator {
@@ -562,8 +562,8 @@ impl<'src> Compiler<'src> {
         Ok(result_reg)
     }
 
-    fn compile_unary(&mut self, unary: &crate::parser::UnaryExpression<'src>) -> CompileResult<Register> {
-        let arg_reg = self.compile_expression(&unary.argument)?;
+    fn compile_unary(&mut self, unary: &crate::parser::UnaryExpression<'src, 'arena>) -> CompileResult<Register> {
+        let arg_reg = self.compile_expression(unary.argument)?;
         let result_reg = self.alloc_register();
 
         let opcode = match unary.operator {
@@ -589,8 +589,8 @@ impl<'src> Compiler<'src> {
         Ok(result_reg)
     }
 
-    fn compile_logical(&mut self, logical: &crate::parser::LogicalExpression<'src>) -> CompileResult<Register> {
-        let left_reg = self.compile_expression(&logical.left)?;
+    fn compile_logical(&mut self, logical: &crate::parser::LogicalExpression<'src, 'arena>) -> CompileResult<Register> {
+        let left_reg = self.compile_expression(logical.left)?;
         let result_reg = self.alloc_register();
 
         self.emit(Instruction::new_rr(Opcode::Mov, result_reg.0, left_reg.0));
@@ -601,32 +601,32 @@ impl<'src> Compiler<'src> {
             LogicalOperator::NullishCoalescing => self.emit(Instruction::new_r_offset(Opcode::JmpNotNullish, result_reg.0, 0)),
         };
 
-        let right_reg = self.compile_expression(&logical.right)?;
+        let right_reg = self.compile_expression(logical.right)?;
         self.emit(Instruction::new_rr(Opcode::Mov, result_reg.0, right_reg.0));
         self.patch_jump(skip_right);
 
         Ok(result_reg)
     }
 
-    fn compile_conditional(&mut self, cond: &crate::parser::ConditionalExpression<'src>) -> CompileResult<Register> {
-        let test_reg = self.compile_expression(&cond.test)?;
+    fn compile_conditional(&mut self, cond: &crate::parser::ConditionalExpression<'src, 'arena>) -> CompileResult<Register> {
+        let test_reg = self.compile_expression(cond.test)?;
         let result_reg = self.alloc_register();
 
         let else_jump = self.emit(Instruction::new_r_offset(Opcode::JmpFalse, test_reg.0, 0));
-        let cons_reg = self.compile_expression(&cond.consequent)?;
+        let cons_reg = self.compile_expression(cond.consequent)?;
         self.emit(Instruction::new_rr(Opcode::Mov, result_reg.0, cons_reg.0));
         let end_jump = self.emit(Instruction::new_offset(Opcode::Jmp, 0));
 
         self.patch_jump(else_jump);
-        let alt_reg = self.compile_expression(&cond.alternate)?;
+        let alt_reg = self.compile_expression(cond.alternate)?;
         self.emit(Instruction::new_rr(Opcode::Mov, result_reg.0, alt_reg.0));
         self.patch_jump(end_jump);
 
         Ok(result_reg)
     }
 
-    fn compile_assignment(&mut self, assign: &crate::parser::AssignmentExpression<'src>) -> CompileResult<Register> {
-        let value_reg = self.compile_expression(&assign.right)?;
+    fn compile_assignment(&mut self, assign: &crate::parser::AssignmentExpression<'src, 'arena>) -> CompileResult<Register> {
+        let value_reg = self.compile_expression(assign.right)?;
         let result_reg = self.alloc_register();
 
         let final_value = if assign.operator != AssignmentOperator::Assign {
@@ -676,9 +676,9 @@ impl<'src> Compiler<'src> {
                 }
             }
             AssignmentTarget::Member(member) => {
-                let obj_reg = self.compile_expression(&member.object)?;
+                let obj_reg = self.compile_expression(member.object)?;
                 if member.computed {
-                    let key_reg = self.compile_expression(&member.property)?;
+                    let key_reg = self.compile_expression(member.property)?;
                     self.emit(Instruction::new_rrr(Opcode::SetElem, obj_reg.0, key_reg.0, final_value.0));
                 } else {
                     let name_idx = self.chunk.add_constant(Constant::String(0));
@@ -692,7 +692,7 @@ impl<'src> Compiler<'src> {
         Ok(result_reg)
     }
 
-    fn compile_update(&mut self, update: &crate::parser::UpdateExpression<'src>) -> CompileResult<Register> {
+    fn compile_update(&mut self, update: &crate::parser::UpdateExpression<'src, 'arena>) -> CompileResult<Register> {
         let result_reg = self.alloc_register();
 
         if let Expression::Identifier(id) = &*update.argument {
@@ -727,12 +727,12 @@ impl<'src> Compiler<'src> {
         Ok(result_reg)
     }
 
-    fn compile_call(&mut self, call: &crate::parser::CallExpression<'src>) -> CompileResult<Register> {
+    fn compile_call(&mut self, call: &crate::parser::CallExpression<'src, 'arena>) -> CompileResult<Register> {
         let result_reg = self.alloc_register();
-        let callee_reg = self.compile_expression(&call.callee)?;
+        let callee_reg = self.compile_expression(call.callee)?;
 
         let arg_base = self.next_register;
-        for arg in &call.arguments {
+        for arg in call.arguments {
             match arg {
                 Argument::Expression(expr) => {
                     let _ = self.compile_expression(expr)?;
@@ -750,12 +750,12 @@ impl<'src> Compiler<'src> {
         Ok(result_reg)
     }
 
-    fn compile_member(&mut self, member: &crate::parser::MemberExpression<'src>) -> CompileResult<Register> {
-        let obj_reg = self.compile_expression(&member.object)?;
+    fn compile_member(&mut self, member: &crate::parser::MemberExpression<'src, 'arena>) -> CompileResult<Register> {
+        let obj_reg = self.compile_expression(member.object)?;
         let result_reg = self.alloc_register();
 
         if member.computed {
-            let key_reg = self.compile_expression(&member.property)?;
+            let key_reg = self.compile_expression(member.property)?;
             self.emit_at(Instruction::new_rrr(Opcode::GetElem, result_reg.0, obj_reg.0, key_reg.0), member.span);
         } else {
             let name_idx = self.chunk.add_constant(Constant::String(0));
@@ -765,7 +765,7 @@ impl<'src> Compiler<'src> {
         Ok(result_reg)
     }
 
-    fn compile_array(&mut self, arr: &crate::parser::ArrayExpression<'src>) -> CompileResult<Register> {
+    fn compile_array(&mut self, arr: &crate::parser::ArrayExpression<'src, 'arena>) -> CompileResult<Register> {
         let result_reg = self.alloc_register();
         let len = arr.elements.len() as u16;
 
@@ -791,14 +791,14 @@ impl<'src> Compiler<'src> {
         Ok(result_reg)
     }
 
-    fn compile_object(&mut self, obj: &crate::parser::ObjectExpression<'src>) -> CompileResult<Register> {
+    fn compile_object(&mut self, obj: &crate::parser::ObjectExpression<'src, 'arena>) -> CompileResult<Register> {
         let result_reg = self.alloc_register();
         self.emit_at(Instruction::new_r(Opcode::NewObject, result_reg.0), obj.span);
 
-        for prop in &obj.properties {
+        for prop in obj.properties {
             match prop {
                 ObjectProperty::Property(p) => {
-                    let val_reg = self.compile_expression(&p.value)?;
+                    let val_reg = self.compile_expression(p.value)?;
 
                     match &p.key {
                         PropertyKey::Identifier(_id) => {
@@ -827,7 +827,7 @@ impl<'src> Compiler<'src> {
     }
 }
 
-impl Default for Compiler<'_> {
+impl Default for Compiler<'_, '_> {
     fn default() -> Self {
         Self::new()
     }
@@ -836,10 +836,12 @@ impl Default for Compiler<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parser::ast_arena::AstArena;
     use crate::parser::Parser;
 
     fn compile(source: &str) -> CompileResult<Chunk> {
-        let parser = Parser::new(source);
+        let arena = AstArena::new();
+        let parser = Parser::new(source, &arena);
         let (program, errors) = parser.parse();
         assert!(errors.is_empty(), "Parse errors: {:?}", errors);
         Compiler::new().compile(&program)

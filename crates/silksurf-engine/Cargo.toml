@@ -1,16 +1,26 @@
 [package]
 name = "silksurf-engine"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+rust-version = "1.94.0"
 publish = false
 
 [dependencies]
+silksurf-core = { path = "../silksurf-core" }
 silksurf-html = { path = "../silksurf-html" }
 silksurf-css = { path = "../silksurf-css" }
 silksurf-dom = { path = "../silksurf-dom" }
 silksurf-layout = { path = "../silksurf-layout" }
 silksurf-render = { path = "../silksurf-render" }
-silksurf-gui = { path = "../silksurf-gui" }
-silksurf-net = { path = "../silksurf-net" }
-silksurf-tls = { path = "../silksurf-tls" }
-silksurf-js = { path = "../../silksurf-js" }
+silksurf-gui = { path = "../silksurf-gui", optional = true }
+silksurf-net = { path = "../silksurf-net", optional = true }
+silksurf-tls = { path = "../silksurf-tls", optional = true }
+silksurf-js = { path = "../../silksurf-js", optional = true }
+
+[features]
+default = []
+full = ["gui", "js", "net", "tls"]
+gui = ["dep:silksurf-gui"]
+js = ["dep:silksurf-js"]
+net = ["dep:silksurf-net"]
+tls = ["dep:silksurf-tls"]
