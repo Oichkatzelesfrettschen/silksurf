@@ -1,1 +1,4 @@
-diff-analysis/tools-output/tokei/servo.json filter=lfs diff=lfs merge=lfs -text
+# Analysis artifacts / large datasets
+diff-analysis/tools-output/** filter=lfs diff=lfs merge=lfs -text
+*.perf.data filter=lfs diff=lfs merge=lfs -text
+*.zst filter=lfs diff=lfs merge=lfs -text
