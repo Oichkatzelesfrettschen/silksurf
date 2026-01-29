@@ -39,3 +39,4 @@
 *.db-wal
 *.profraw
 *.data
+build-fuzz/

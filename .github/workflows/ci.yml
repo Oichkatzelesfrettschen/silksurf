@@ -1,0 +1,432 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  # Force terminal colors in CI logs
+  TERM: xterm-256color
+  # AFL++ configuration
+  AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES: 1
+
+jobs:
+  # ============================================================
+  # BUILD JOBS - Test different configurations
+  # ============================================================
+
+  build-debug:
+    name: Build (Debug)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb1-dev libxcb-damage0-dev libxcb-composite0-dev \
+            libxcb-util-dev libxcb-shm0-dev \
+            libhubbub-dev libcss-dev libdom-dev libparserutils-dev \
+            libpixman-1-dev valgrind cmake build-essential
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Configure (Debug)
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-debug
+          path: |
+            build/test_*
+            build/silksurf
+          retention-days: 1
+
+  build-release:
+    name: Build (Release)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb1-dev libxcb-damage0-dev libxcb-composite0-dev \
+            libxcb-util-dev libxcb-shm0-dev \
+            libhubbub-dev libcss-dev libdom-dev libparserutils-dev \
+            libpixman-1-dev cmake build-essential
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Configure (Release)
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Check binary size
+        run: |
+          ls -lh build/silksurf
+          size build/silksurf
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-release
+          path: build/silksurf
+          retention-days: 7
+
+  build-asan:
+    name: Build (AddressSanitizer)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb1-dev libxcb-damage0-dev libxcb-composite0-dev \
+            libxcb-util-dev libxcb-shm0-dev \
+            libhubbub-dev libcss-dev libdom-dev libparserutils-dev \
+            libpixman-1-dev cmake build-essential
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Configure (ASAN)
+        run: cmake -B build -DSANITIZER=address -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build --target test_dom_parsing test_css_engine test_css_cascade test_simd_detection -j$(nproc)
+
+      - name: Upload ASAN artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-asan
+          path: build/test_*
+          retention-days: 1
+
+  build-ubsan:
+    name: Build (UndefinedBehaviorSanitizer)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb1-dev libxcb-damage0-dev libxcb-composite0-dev \
+            libxcb-util-dev libxcb-shm0-dev \
+            libhubbub-dev libcss-dev libdom-dev libparserutils-dev \
+            libpixman-1-dev cmake build-essential
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Configure (UBSAN)
+        run: cmake -B build -DSANITIZER=undefined -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build --target test_dom_parsing test_css_engine test_css_cascade test_simd_detection -j$(nproc)
+
+      - name: Upload UBSAN artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-ubsan
+          path: build/test_*
+          retention-days: 1
+
+  # ============================================================
+  # TEST JOBS - Run test suites
+  # ============================================================
+
+  test:
+    name: Tests
+    runs-on: ubuntu-24.04
+    needs: build-debug
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb1-dev libxcb-damage0-dev libxcb-composite0-dev \
+            libxcb-util-dev libxcb-shm0-dev \
+            libhubbub-dev libcss-dev libdom-dev libparserutils-dev \
+            libpixman-1-dev
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-debug
+          path: build
+
+      - name: Make executables runnable
+        run: chmod +x build/test_*
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Test results summary
+        if: always()
+        run: |
+          echo "### Test Results" >> $GITHUB_STEP_SUMMARY
+          ctest --test-dir build --output-on-failure 2>&1 | tee test_output.txt
+          cat test_output.txt >> $GITHUB_STEP_SUMMARY
+
+  test-asan:
+    name: Tests (AddressSanitizer)
+    runs-on: ubuntu-24.04
+    needs: build-asan
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb1-dev libxcb-damage0-dev libxcb-composite0-dev \
+            libxcb-util-dev libxcb-shm0-dev \
+            libhubbub-dev libcss-dev libdom-dev libparserutils-dev \
+            libpixman-1-dev
+
+      - name: Download ASAN artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-asan
+          path: build
+
+      - name: Make executables runnable
+        run: chmod +x build/test_*
+
+      - name: Run ASAN tests
+        run: |
+          ./build/test_dom_parsing
+          ./build/test_css_engine
+          ./build/test_simd_detection
+
+  test-ubsan:
+    name: Tests (UndefinedBehaviorSanitizer)
+    runs-on: ubuntu-24.04
+    needs: build-ubsan
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb1-dev libxcb-damage0-dev libxcb-composite0-dev \
+            libxcb-util-dev libxcb-shm0-dev \
+            libhubbub-dev libcss-dev libdom-dev libparserutils-dev \
+            libpixman-1-dev
+
+      - name: Download UBSAN artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-ubsan
+          path: build
+
+      - name: Make executables runnable
+        run: chmod +x build/test_*
+
+      - name: Run UBSAN tests
+        run: |
+          ./build/test_dom_parsing
+          ./build/test_css_engine
+          ./build/test_simd_detection
+
+  # ============================================================
+  # LINT JOBS - Static analysis
+  # ============================================================
+
+  lint-clang-tidy:
+    name: Lint (clang-tidy)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang-tidy libxcb1-dev libxcb-damage0-dev libxcb-composite0-dev \
+            libxcb-util-dev libxcb-shm0-dev \
+            libhubbub-dev libcss-dev libdom-dev libparserutils-dev \
+            libpixman-1-dev cmake
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      - name: Run clang-tidy
+        run: |
+          clang-tidy --version
+          find src -name '*.c' -not -path '*/fuzz_*' | \
+            xargs clang-tidy -p build --warnings-as-errors='*' \
+            --checks='-*,bugprone-*,clang-analyzer-*,readability-*,performance-*'
+
+  lint-cppcheck:
+    name: Lint (cppcheck)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cppcheck
+        run: sudo apt-get update && sudo apt-get install -y cppcheck
+
+      - name: Run cppcheck
+        run: |
+          cppcheck --version
+          cppcheck --enable=warning,style,performance,portability \
+                   --error-exitcode=1 \
+                   --suppress=missingIncludeSystem \
+                   --inline-suppr \
+                   -I include -I src \
+                   src/
+
+  # ============================================================
+  # FUZZING JOB - Security testing (5 minutes)
+  # ============================================================
+
+  fuzz:
+    name: Fuzzing (5 min)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            afl++ libxcb1-dev libxcb-damage0-dev libxcb-composite0-dev \
+            libxcb-util-dev libxcb-shm0-dev \
+            libhubbub-dev libcss-dev libdom-dev libparserutils-dev \
+            libpixman-1-dev cmake
+
+      - name: Configure with AFL++
+        run: cmake -B build-fuzz -DENABLE_FUZZING=ON
+
+      - name: Build fuzzers
+        run: cmake --build build-fuzz --target silksurf_fuzz silksurf_css_fuzz -j$(nproc)
+
+      - name: Run HTML fuzzing (5 min)
+        run: |
+          timeout 300 afl-fuzz -i fuzz_corpus/html/input \
+                               -o fuzz_corpus/html/output \
+                               -m none \
+                               -- ./build-fuzz/silksurf_fuzz || true
+
+      - name: Check for crashes
+        run: |
+          if [ -d fuzz_corpus/html/output/default/crashes ]; then
+            CRASHES=$(ls fuzz_corpus/html/output/default/crashes | wc -l)
+            if [ "$CRASHES" -gt 0 ]; then
+              echo "::error::Found $CRASHES crashes during fuzzing"
+              exit 1
+            fi
+          fi
+
+      - name: Upload fuzzing artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes
+          path: fuzz_corpus/html/output/default/crashes/
+
+  # ============================================================
+  # PERFORMANCE JOB - Track regressions
+  # ============================================================
+
+  performance:
+    name: Performance Tracking
+    runs-on: ubuntu-24.04
+    needs: build-release
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download release build
+        uses: actions/download-artifact@v4
+        with:
+          name: build-release
+          path: build
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb1 libxcb-damage0 libxcb-composite0 \
+            libxcb-util1 libxcb-shm0 \
+            libhubbub0 libcss0 libdom0 libparserutils0 \
+            libpixman-1-0 time
+
+      - name: Make binary runnable
+        run: chmod +x build/silksurf
+
+      - name: Measure binary size
+        run: |
+          SIZE=$(stat -c%s build/silksurf)
+          echo "Binary size: $SIZE bytes"
+          echo "TARGET_SIZE=2097152" >> $GITHUB_ENV  # 2MB target
+          if [ $SIZE -gt $TARGET_SIZE ]; then
+            echo "::warning::Binary size ($SIZE bytes) exceeds target ($TARGET_SIZE bytes)"
+          fi
+
+      - name: Measure SIMD detection performance
+        run: |
+          echo "### SIMD Performance" >> $GITHUB_STEP_SUMMARY
+          if [ -f build/test_simd_detection ]; then
+            chmod +x build/test_simd_detection
+            ./build/test_simd_detection | tee -a $GITHUB_STEP_SUMMARY
+          fi
+
+  # ============================================================
+  # STATUS CHECK - Summary job
+  # ============================================================
+
+  ci-success:
+    name: CI Success
+    runs-on: ubuntu-24.04
+    needs:
+      - build-debug
+      - build-release
+      - build-asan
+      - build-ubsan
+      - test
+      - test-asan
+      - test-ubsan
+      - lint-clang-tidy
+      - lint-cppcheck
+      - fuzz
+      - performance
+    if: always()
+    steps:
+      - name: Check all jobs succeeded
+        run: |
+          if [ "${{ contains(needs.*.result, 'failure') }}" = "true" ]; then
+            echo "::error::One or more CI jobs failed"
+            exit 1
+          fi
+          echo "### ✅ All CI checks passed!" >> $GITHUB_STEP_SUMMARY
