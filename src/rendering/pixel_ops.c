@@ -8,6 +8,15 @@
 static int detected_sse2 = -1;
 static int detected_avx2 = -1;
 
+/* CPUID intrinsic wrapper for x86/x86_64 CPU feature detection */
+#if defined(__x86_64__) || defined(__i386__)
+#include <cpuid.h>
+
+static void cpuid(unsigned int leaf, unsigned int *eax, unsigned int *ebx,
+                   unsigned int *ecx, unsigned int *edx) {
+    __cpuid_count(leaf, 0, *eax, *ebx, *ecx, *edx);
+}
+
 static void detect_cpu_features(void) {
     if (detected_sse2 != -1)
         return;  /* Already detected */
@@ -15,15 +24,46 @@ static void detect_cpu_features(void) {
     detected_sse2 = 0;
     detected_avx2 = 0;
 
-    /* TODO: Implement CPUID-based detection for SSE2/AVX2
-       For now, assume SSE2 available (nearly universal) and no AVX2 */
-#ifdef __SSE2__
-    detected_sse2 = 1;
-#endif
-#ifdef __AVX2__
-    detected_avx2 = 1;
-#endif
+    /* Query CPU feature flags via CPUID instruction
+     * Leaf 0x1: Processor Info and Feature Bits
+     * EDX bit 26: SSE2 support
+     * Leaf 0x7: Extended Features (subleaf 0)
+     * EBX bit 5: AVX2 support
+     */
+
+    unsigned int eax, ebx, ecx, edx;
+
+    /* Get maximum supported leaf */
+    cpuid(0, &eax, &ebx, &ecx, &edx);
+    unsigned int max_leaf = eax;
+
+    if (max_leaf >= 1) {
+        /* Check SSE2 support (leaf 1, EDX bit 26) */
+        cpuid(1, &eax, &ebx, &ecx, &edx);
+        if (edx & (1 << 26)) {
+            detected_sse2 = 1;
+        }
+    }
+
+    if (max_leaf >= 7) {
+        /* Check AVX2 support (leaf 7, subleaf 0, EBX bit 5) */
+        cpuid(7, &eax, &ebx, &ecx, &edx);
+        if (ebx & (1 << 5)) {
+            detected_avx2 = 1;
+        }
+    }
 }
+
+#else
+/* Non-x86 architectures: disable SIMD */
+static void detect_cpu_features(void) {
+    if (detected_sse2 != -1)
+        return;
+
+    detected_sse2 = 0;
+    detected_avx2 = 0;
+}
+#endif
 
 int silk_cpu_has_sse2(void) {
     detect_cpu_features();
