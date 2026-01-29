@@ -42,8 +42,12 @@ static css_error node_name(void *pw, void *node, css_qname *qname) {
         return CSS_NOMEM;
     }
 
-    /* No namespace for now */
-    qname->ns = NULL;
+    /* HTML namespace (empty string for default HTML namespace) */
+    lerr = lwc_intern_string("", 0, &qname->ns);
+    if (lerr != lwc_error_ok) {
+        lwc_string_unref(qname->name);
+        return CSS_NOMEM;
+    }
 
     return CSS_OK;
 }
@@ -89,6 +93,7 @@ static css_error node_has_attribute(void *pw, void *node, const css_qname *qname
 }
 
 /* Get the value of an attribute */
+__attribute__((unused))
 static css_error node_attribute_value(void *pw, void *node, const css_qname *qname, lwc_string **value) {
     dom_node *n = (dom_node *)node;
     (void)pw;
@@ -177,6 +182,7 @@ static css_error node_next_sibling(void *pw, void *node, void **sibling) {
 }
 
 /* Get previous sibling */
+__attribute__((unused))
 static css_error node_prev_sibling(void *pw, void *node, void **sibling) {
     dom_node *n = (dom_node *)node;
     dom_node *s = NULL;
@@ -196,6 +202,7 @@ static css_error node_prev_sibling(void *pw, void *node, void **sibling) {
 }
 
 /* Get first child */
+__attribute__((unused))
 static css_error node_first_child(void *pw, void *node, void **child) {
     dom_node *n = (dom_node *)node;
     dom_node *c = NULL;
@@ -215,6 +222,7 @@ static css_error node_first_child(void *pw, void *node, void **child) {
 }
 
 /* Get last child */
+__attribute__((unused))
 static css_error node_last_child(void *pw, void *node, void **child) {
     dom_node *n = (dom_node *)node;
     dom_node *c = NULL;
@@ -519,16 +527,58 @@ static css_error node_has_attribute_substring(void *pw, void *node, const css_qn
     return CSS_OK;
 }
 
+/* LibCSS node data storage - for internal libcss caching */
+static css_error set_libcss_node_data(void *pw, void *node, void *libcss_node_data) {
+    (void)pw;
+    (void)node;
+    (void)libcss_node_data;
+    /* TODO: Store this on the dom_node for caching - for now just accept it */
+    return CSS_OK;
+}
+
+static css_error get_libcss_node_data(void *pw, void *node, void **libcss_node_data) {
+    (void)pw;
+    (void)node;
+    /* TODO: Retrieve stored data - for now return NULL (no cached data) */
+    *libcss_node_data = NULL;
+    return CSS_OK;
+}
+
+/* Named node optimization callbacks - stub implementations */
+static css_error named_ancestor_node(void *pw, void *node, const css_qname *qname, void **ancestor) {
+    (void)pw; (void)node; (void)qname;
+    *ancestor = NULL;
+    return CSS_INVALID;  /* Not found - let libcss use parent_node fallback */
+}
+
+static css_error named_parent_node(void *pw, void *node, const css_qname *qname, void **parent) {
+    (void)pw; (void)node; (void)qname;
+    *parent = NULL;
+    return CSS_INVALID;  /* Not found - let libcss use parent_node fallback */
+}
+
+static css_error named_sibling_node(void *pw, void *node, const css_qname *qname, void **sibling) {
+    (void)pw; (void)node; (void)qname;
+    *sibling = NULL;
+    return CSS_INVALID;  /* Not found - let libcss use sibling_node fallback */
+}
+
+static css_error named_generic_sibling_node(void *pw, void *node, const css_qname *qname, void **sibling) {
+    (void)pw; (void)node; (void)qname;
+    *sibling = NULL;
+    return CSS_INVALID;  /* Not found - let libcss use sibling_node fallback */
+}
+
 /* Global selection handler */
 static css_select_handler silk_select_handler = {
     .handler_version = CSS_SELECT_HANDLER_VERSION_1,
     .node_name = node_name,
     .node_classes = node_classes,
     .node_id = node_id,
-    .named_ancestor_node = NULL,
-    .named_parent_node = NULL,
-    .named_sibling_node = NULL,
-    .named_generic_sibling_node = NULL,
+    .named_ancestor_node = named_ancestor_node,
+    .named_parent_node = named_parent_node,
+    .named_sibling_node = named_sibling_node,
+    .named_generic_sibling_node = named_generic_sibling_node,
     .parent_node = node_parent_node,
     .sibling_node = node_next_sibling,
     .node_has_name = node_has_name,
@@ -556,6 +606,8 @@ static css_select_handler silk_select_handler = {
     .node_is_lang = node_is_lang,
     .node_presentational_hint = node_presentational_hint,
     .ua_default_for_property = ua_default_for_property,
+    .set_libcss_node_data = set_libcss_node_data,
+    .get_libcss_node_data = get_libcss_node_data,
 };
 
 /* Get the selection handler */

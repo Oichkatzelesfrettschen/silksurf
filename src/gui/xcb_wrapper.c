@@ -247,6 +247,13 @@ void silk_pixmap_put_image(silk_display_t *dpy, silk_window_t *win,
                             silk_gc_t *gc, silk_pixmap_t *pm,
                             const uint8_t *data, int x, int y,
                             int width, int height) {
+    (void)win;  /* Unused - reserved for future XShm integration */
+    (void)gc;   /* Unused - reserved for future XShm integration */
+    (void)x;    /* Unused - pending implementation */
+    (void)y;    /* Unused - pending implementation */
+    (void)width;  /* Unused - pending implementation */
+    (void)height; /* Unused - pending implementation */
+
     if (!dpy || !pm || !data)
         return;
 

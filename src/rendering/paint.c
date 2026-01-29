@@ -23,9 +23,10 @@ void silk_render_queue_push_rect(silk_render_queue_t *queue, int x, int y, int w
     cmd->color = color;
 }
 
-/* 
- * Placeholder for style extraction - will integrate with silk_css_get_computed_style 
+/*
+ * Placeholder for style extraction - will integrate with silk_css_get_computed_style
  */
+__attribute__((unused))
 static uint32_t get_node_background_color(silk_dom_node_t *node) {
     /* For now, return a default red for testing 'First Paint' if it's an element */
     if (silk_dom_node_get_type(node) == SILK_NODE_ELEMENT) {
