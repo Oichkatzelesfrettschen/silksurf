@@ -206,6 +206,16 @@ target_link_libraries(test_css_cascade
     m
 )
 
+# SIMD detection test
+add_executable(test_simd_detection
+    tests/test_simd_detection.c
+    src/rendering/pixel_ops.c
+)
+
+target_link_libraries(test_simd_detection
+    m
+)
+
 # Fuzzing harness
 add_executable(silksurf_fuzz
     src/fuzz_harness.c
@@ -246,6 +256,7 @@ add_test(NAME parser_basic COMMAND test_parser_basic)
 add_test(NAME dom_parsing COMMAND test_dom_parsing)
 add_test(NAME css_engine COMMAND test_css_engine)
 add_test(NAME css_cascade COMMAND test_css_cascade)
+add_test(NAME simd_detection COMMAND test_simd_detection)
 
 # Fuzzing custom targets (requires AFL++ and ENABLE_FUZZING=ON)
 if(ENABLE_FUZZING AND AFL_CC)
