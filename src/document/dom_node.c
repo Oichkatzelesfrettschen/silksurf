@@ -268,16 +268,75 @@ const char *silk_dom_node_get_tag_name(silk_dom_node_t *node) {
 }
 
 const char *silk_dom_node_get_text_content(silk_dom_node_t *node) {
-    return ""; /* Prototype fallback */
+    if (!node || !node->libdom_node) return "";
+
+    dom_node_type node_type;
+    dom_exception err = dom_node_get_node_type(node->libdom_node, &node_type);
+    if (err != DOM_NO_ERR) return "";
+
+    /* Only text nodes have text content */
+    if (node_type != DOM_TEXT_NODE) return "";
+
+    /* Get text data from characterdata interface */
+    dom_string *content = NULL;
+    err = dom_characterdata_get_data((dom_characterdata *)node->libdom_node, &content);
+    if (err != DOM_NO_ERR || !content) return "";
+
+    /* Use thread-local static buffer for returned string */
+    static _Thread_local char text_buf[4096];
+    const char *data = dom_string_data(content);
+    size_t len = dom_string_byte_length(content);
+
+    /* Copy with bounds checking */
+    if (len >= sizeof(text_buf)) len = sizeof(text_buf) - 1;
+    memcpy(text_buf, data, len);
+    text_buf[len] = '\0';
+
+    dom_string_unref(content);
+    return text_buf;
 }
 
 /* ========== Attributes ========== */
 
 const char *silk_dom_node_get_attribute(silk_dom_node_t *node, const char *name) {
-    return NULL;
+    if (!node || !name || !node->libdom_node) return NULL;
+
+    /* Only element nodes have attributes */
+    dom_node_type node_type;
+    dom_exception err = dom_node_get_node_type(node->libdom_node, &node_type);
+    if (err != DOM_NO_ERR || node_type != DOM_ELEMENT_NODE) return NULL;
+
+    /* Convert attribute name to libdom string */
+    dom_string *attr_name = NULL;
+    err = dom_string_create((const uint8_t *)name, strlen(name), &attr_name);
+    if (err != DOM_NO_ERR || !attr_name) return NULL;
+
+    /* Get attribute value */
+    dom_string *attr_value = NULL;
+    err = dom_element_get_attribute((dom_element *)node->libdom_node,
+                                    attr_name, &attr_value);
+    dom_string_unref(attr_name);
+
+    if (err != DOM_NO_ERR || !attr_value) return NULL;
+
+    /* Use thread-local static buffer for returned string */
+    static _Thread_local char attr_buf[1024];
+    const char *data = dom_string_data(attr_value);
+    size_t len = dom_string_byte_length(attr_value);
+
+    /* Copy with bounds checking */
+    if (len >= sizeof(attr_buf)) len = sizeof(attr_buf) - 1;
+    memcpy(attr_buf, data, len);
+    attr_buf[len] = '\0';
+
+    dom_string_unref(attr_value);
+    return attr_buf;
 }
 
 dom_exception silk_dom_node_set_attribute(silk_dom_node_t *node, const char *name, const char *value) {
+    (void)node;  /* Unused - pending implementation */
+    (void)name;  /* Unused - pending implementation */
+    (void)value; /* Unused - pending implementation */
     return DOM_NO_ERR;
 }
 
@@ -288,7 +347,20 @@ void silk_dom_node_ref(silk_dom_node_t *node) {
 }
 
 void silk_dom_node_unref(silk_dom_node_t *node) {
-    if (node && node->ref_count > 0) node->ref_count--;
+    if (!node) return;
+
+    if (node->ref_count > 0) {
+        node->ref_count--;
+
+        /* When reference count hits zero, cleanup the libdom node reference */
+        if (node->ref_count == 0) {
+            if (node->libdom_node) {
+                dom_node_unref(node->libdom_node);
+                node->libdom_node = NULL;
+            }
+            /* Note: Wrapper itself is arena-allocated, no manual free needed */
+        }
+    }
 }
 
 /* ========== Layout Index ========== */

@@ -302,6 +302,7 @@ int silk_css_get_computed_style(silk_css_engine_t *engine,
     }
 
     fprintf(stderr, "[CSS] Calling css_select_style with libdom node: %p\n", libdom_node);
+    fprintf(stderr, "[CSS] select_ctx=%p, handler=%p\n", (void *)engine->select_ctx, (void *)silk_css_get_select_handler());
 
     /* Use libcss to compute styles for this element */
     css_select_results *results = NULL;

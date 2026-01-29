@@ -3,7 +3,7 @@ project(silksurf C)
 
 # Settings
 set(CMAKE_C_STANDARD 11)
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -march=native -Wall -Wextra -fno-exceptions")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -march=native -Wall -Wextra -Werror -fno-exceptions")
 
 # Packages
 find_package(PkgConfig REQUIRED)

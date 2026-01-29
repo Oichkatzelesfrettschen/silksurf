@@ -62,8 +62,10 @@ silk_document_t *silk_document_create(size_t arena_size) {
     silk_dom_set_arena(arena);
 
     /* Initialize metadata */
-    strcpy(doc->title, "Untitled Document");
-    strcpy(doc->content_type, "text/html");
+    strncpy(doc->title, "Untitled Document", sizeof(doc->title) - 1);
+    doc->title[sizeof(doc->title) - 1] = '\0';
+    strncpy(doc->content_type, "text/html", sizeof(doc->content_type) - 1);
+    doc->content_type[sizeof(doc->content_type) - 1] = '\0';
 
     fprintf(stderr, "[Document] Created document: %p (arena: %p)\n",
             (void *)doc, (void *)arena);

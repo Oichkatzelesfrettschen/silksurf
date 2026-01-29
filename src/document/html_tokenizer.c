@@ -639,8 +639,12 @@ static void emit_token(silk_html_tokenizer_t *tok, silk_html_token_t *token) {
     if (token->type == HTML_TOKEN_START_TAG) {
         /* Track last start tag name for appropriate end tag checks */
         if (token->tag_name) {
-            tok->last_start_tag_name = silk_arena_alloc(tok->arena, strlen(token->tag_name) + 1);
-            if (tok->last_start_tag_name) strcpy(tok->last_start_tag_name, token->tag_name);
+            size_t tag_len = strlen(token->tag_name);
+            tok->last_start_tag_name = silk_arena_alloc(tok->arena, tag_len + 1);
+            if (tok->last_start_tag_name) {
+                memcpy(tok->last_start_tag_name, token->tag_name, tag_len);
+                tok->last_start_tag_name[tag_len] = '\0';
+            }
         }
     }
 

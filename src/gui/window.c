@@ -113,6 +113,8 @@ void silk_window_hide(silk_app_window_t *win) {
 }
 
 void silk_window_set_title(silk_app_window_t *win, const char *title) {
+    (void)win;   /* Unused - pending implementation */
+    (void)title; /* Unused - pending implementation */
     /* Title was already set at creation; would need display reference
        to change it. This is a placeholder. */
 }
@@ -125,6 +127,7 @@ void silk_window_get_size(silk_app_window_t *win, int *w, int *h) {
 }
 
 void silk_window_get_position(silk_app_window_t *win, int *x, int *y) {
+    (void)win; /* Unused - position not currently tracked */
     if (x) *x = 0;  /* Not tracked */
     if (y) *y = 0;
 }
