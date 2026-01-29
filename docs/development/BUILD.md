@@ -107,27 +107,31 @@ cmake --build build
 
 ### Sanitizer Builds
 
+SilkSurf supports AddressSanitizer (ASAN) and UndefinedBehaviorSanitizer (UBSAN) for detecting memory errors and undefined behavior. Use the `SANITIZER` CMake option to enable them.
+
 **AddressSanitizer (ASAN)** - Detect memory errors:
 ```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Debug \
-               -DCMAKE_C_FLAGS="-fsanitize=address -fno-omit-frame-pointer"
+cmake -B build -DSANITIZER=address -DCMAKE_BUILD_TYPE=Debug
 cmake --build build
 ./build/test_dom_parsing
 ```
 
 **UndefinedBehaviorSanitizer (UBSAN)** - Detect undefined behavior:
 ```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Debug \
-               -DCMAKE_C_FLAGS="-fsanitize=undefined -fno-omit-frame-pointer"
+cmake -B build -DSANITIZER=undefined -DCMAKE_BUILD_TYPE=Debug
 cmake --build build
 ```
 
-**Combined Sanitizers**:
+**Combined Sanitizers** - Both ASAN and UBSAN:
 ```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Debug \
-               -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
+cmake -B build -DSANITIZER=address,undefined -DCMAKE_BUILD_TYPE=Debug
 cmake --build build
 ```
+
+**Notes**:
+- Sanitizer builds automatically reduce optimization to -O1 for better stack traces
+- Memory leaks from libdom (external library) are expected and documented
+- Use sanitizers during development to catch issues early
 
 ### Profile-Guided Optimization (PGO)
 ```bash

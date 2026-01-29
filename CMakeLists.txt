@@ -5,6 +5,18 @@ project(silksurf C)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -march=native -Wall -Wextra -Werror -fno-exceptions")
 
+# Sanitizer support
+set(SANITIZER "" CACHE STRING "Enable sanitizer(s): address, undefined, address,undefined, or leave empty")
+if(SANITIZER)
+    message(STATUS "Sanitizer enabled: ${SANITIZER}")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=${SANITIZER} -fno-omit-frame-pointer")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=${SANITIZER}")
+    # Disable optimizations for better stack traces in sanitizer builds
+    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+        string(REPLACE "-O3" "-O1" CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
+    endif()
+endif()
+
 # Packages
 find_package(PkgConfig REQUIRED)
 
@@ -225,6 +237,8 @@ install(TARGETS silksurf DESTINATION bin)
 
 # Print config
 message(STATUS "SilkSurf Configuration:")
+message(STATUS "  Build Type: ${CMAKE_BUILD_TYPE}")
+message(STATUS "  Sanitizer: ${SANITIZER}")
 message(STATUS "  XCB Found: ${XCB_FOUND}")
 message(STATUS "  libhubbub Found: ${LIBHUBBUB_FOUND}")
 message(STATUS "  libcss Found: ${LIBCSS_FOUND}")
