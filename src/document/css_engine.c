@@ -123,7 +123,7 @@ silk_css_engine_t *silk_css_engine_create(silk_arena_t *arena) {
             err = css_stylesheet_data_done(ua_sheet);
             if (err == CSS_OK) {
                 err = css_select_ctx_append_sheet(engine->select_ctx, ua_sheet,
-                                                   CSS_ORIGIN_UA, NULL);
+                                                   CSS_ORIGIN_UA, "screen");
                 if (err == CSS_OK) {
                     engine->sheets[engine->sheet_count++] = ua_sheet;
                     fprintf(stderr, "[CSS] Added UA stylesheet\n");
@@ -217,7 +217,7 @@ int silk_css_parse_string(silk_css_engine_t *engine, const char *css, size_t css
 
     /* Append to selection context */
     err = css_select_ctx_append_sheet(engine->select_ctx, sheet,
-                                       CSS_ORIGIN_AUTHOR, NULL);
+                                       CSS_ORIGIN_AUTHOR, "screen");
     if (err != CSS_OK) {
         fprintf(stderr, "[CSS] ERROR: Failed to append sheet to context: %d\n", err);
         return -1;
@@ -280,12 +280,20 @@ int silk_css_get_computed_style(silk_css_engine_t *engine,
         return -1;
     }
 
+    /* Debug: Check how many sheets are in the select context */
+    uint32_t ctx_sheet_count = 0;
+    css_select_ctx_count_sheets(engine->select_ctx, &ctx_sheet_count);
+    fprintf(stderr, "[CSS] Select context has %u sheets\n", ctx_sheet_count);
+
     /* Set up unit context for DPI calculation */
     css_unit_ctx unit_ctx;
-    unit_ctx.device_dpi = 96.0;  /* Standard screen DPI */
-    unit_ctx.viewport_width = 1024;
-    unit_ctx.viewport_height = 768;
+    unit_ctx.device_dpi = INTTOFIX(96);  /* Standard screen DPI */
+    unit_ctx.viewport_width = INTTOFIX(1024);
+    unit_ctx.viewport_height = INTTOFIX(768);
+    unit_ctx.font_size_default = INTTOFIX(16);  /* 16px default font size */
+    unit_ctx.font_size_minimum = INTTOFIX(0);   /* No minimum */
     unit_ctx.root_style = NULL;
+    unit_ctx.pw = NULL;  /* No client private data */
 
     /* Set up media query context (required even if not using media queries) */
     css_media media;
@@ -293,6 +301,8 @@ int silk_css_get_computed_style(silk_css_engine_t *engine,
     media.type = CSS_MEDIA_SCREEN;
     media.width = INTTOFIX(1024);   /* Viewport width in CSS pixels */
     media.height = INTTOFIX(768);   /* Viewport height in CSS pixels */
+    media.aspect_ratio = INTTOFIX(1024) / INTTOFIX(768);  /* 4:3 aspect ratio */
+    media.color = INTTOFIX(8);  /* 8 bits per color channel (24-bit color) */
 
     /* Get underlying libdom node for libcss (it expects raw libdom nodes) */
     void *libdom_node = silk_dom_node_get_libdom_node(element);
@@ -300,6 +310,19 @@ int silk_css_get_computed_style(silk_css_engine_t *engine,
         fprintf(stderr, "[CSS] ERROR: Could not unwrap libdom node\n");
         return -1;
     }
+
+    /* Verify this is an element node */
+    dom_node_type node_type;
+    dom_exception dom_err = dom_node_get_node_type((dom_node *)libdom_node, &node_type);
+    if (dom_err != DOM_NO_ERR) {
+        fprintf(stderr, "[CSS] ERROR: Failed to get node type: %d\n", dom_err);
+        return -1;
+    }
+    if (node_type != DOM_ELEMENT_NODE) {
+        fprintf(stderr, "[CSS] ERROR: Node is not an element (type=%d)\n", node_type);
+        return -1;
+    }
+    fprintf(stderr, "[CSS] Node is an element (type=%d)\n", node_type);
 
     fprintf(stderr, "[CSS] Calling css_select_style with libdom node: %p\n", libdom_node);
     fprintf(stderr, "[CSS] select_ctx=%p, handler=%p\n", (void *)engine->select_ctx, (void *)silk_css_get_select_handler());

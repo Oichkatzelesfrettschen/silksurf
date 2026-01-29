@@ -34,20 +34,30 @@ static css_error node_name(void *pw, void *node, css_qname *qname) {
 
     /* Convert dom_string to lwc_string */
     const char *name_data = dom_string_data(name);
-    lwc_error lerr = lwc_intern_string(name_data, dom_string_byte_length(name), &qname->name);
+    size_t name_len = dom_string_byte_length(name);
+
+    fprintf(stderr, "[CSS Handler] node_name: got name='%.*s' (len=%zu)\n",
+            (int)name_len, name_data, name_len);
+
+    lwc_error lerr = lwc_intern_string(name_data, name_len, &qname->name);
 
     dom_string_unref(name);
 
     if (lerr != lwc_error_ok) {
+        fprintf(stderr, "[CSS Handler] node_name: lwc_intern_string failed for name: %d\n", lerr);
         return CSS_NOMEM;
     }
 
     /* HTML namespace (empty string for default HTML namespace) */
     lerr = lwc_intern_string("", 0, &qname->ns);
     if (lerr != lwc_error_ok) {
+        fprintf(stderr, "[CSS Handler] node_name: lwc_intern_string failed for namespace: %d\n", lerr);
         lwc_string_unref(qname->name);
         return CSS_NOMEM;
     }
+
+    fprintf(stderr, "[CSS Handler] node_name: returning CSS_OK with name=%p, ns=%p\n",
+            (void *)qname->name, (void *)qname->ns);
 
     return CSS_OK;
 }
