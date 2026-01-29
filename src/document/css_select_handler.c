@@ -1,6 +1,8 @@
 /* CSS Selection Handler - Bridge between libcss selector matching and libdom */
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
 #include <libcss/libcss.h>
 #include <dom/dom.h>
 #include "silksurf/css_parser.h"
@@ -65,13 +67,100 @@ static css_error node_name(void *pw, void *node, css_qname *qname) {
 /* Get the class names of a node */
 static css_error node_classes(void *pw, void *node, lwc_string ***classes, uint32_t *n_classes) {
     dom_node *n = (dom_node *)node;
+    dom_string *class_str = NULL;
+    dom_exception err;
     (void)pw;
-    (void)n;
 
-    /* TODO: Implement class attribute parsing */
-    /* For now, no classes */
     *classes = NULL;
     *n_classes = 0;
+
+    if (!n) {
+        return CSS_OK;
+    }
+
+    /* Get "class" attribute */
+    dom_string *class_name = NULL;
+    err = dom_string_create((const uint8_t *)"class", 5, &class_name);
+    if (err != DOM_NO_ERR) {
+        return CSS_OK;
+    }
+
+    err = dom_element_get_attribute((dom_element *)n, class_name, &class_str);
+    dom_string_unref(class_name);
+
+    if (err != DOM_NO_ERR || !class_str) {
+        return CSS_OK;
+    }
+
+    /* Parse class string (space-separated tokens) */
+    const char *class_data = dom_string_data(class_str);
+    size_t class_len = dom_string_byte_length(class_str);
+
+    if (class_len == 0) {
+        dom_string_unref(class_str);
+        return CSS_OK;
+    }
+
+    /* Count classes (count spaces + 1, but trim leading/trailing) */
+    uint32_t count = 0;
+    bool in_token = false;
+    for (size_t i = 0; i < class_len; i++) {
+        if (class_data[i] == ' ' || class_data[i] == '\t' ||
+            class_data[i] == '\n' || class_data[i] == '\r') {
+            in_token = false;
+        } else if (!in_token) {
+            count++;
+            in_token = true;
+        }
+    }
+
+    if (count == 0) {
+        dom_string_unref(class_str);
+        return CSS_OK;
+    }
+
+    /* Allocate array for class lwc_strings */
+    lwc_string **class_array = malloc(count * sizeof(lwc_string *));
+    if (!class_array) {
+        dom_string_unref(class_str);
+        return CSS_NOMEM;
+    }
+
+    /* Extract each class token */
+    uint32_t idx = 0;
+    size_t token_start = 0;
+    in_token = false;
+
+    for (size_t i = 0; i <= class_len; i++) {
+        bool is_space = (i == class_len ||
+                          class_data[i] == ' ' || class_data[i] == '\t' ||
+                          class_data[i] == '\n' || class_data[i] == '\r');
+
+        if (!is_space && !in_token) {
+            token_start = i;
+            in_token = true;
+        } else if (is_space && in_token) {
+            /* End of token */
+            size_t token_len = i - token_start;
+            lwc_error lerr = lwc_intern_string(class_data + token_start, token_len,
+                                                &class_array[idx++]);
+            if (lerr != lwc_error_ok) {
+                /* Free allocated strings on error */
+                for (uint32_t j = 0; j < idx - 1; j++) {
+                    lwc_string_unref(class_array[j]);
+                }
+                free(class_array);
+                dom_string_unref(class_str);
+                return CSS_NOMEM;
+            }
+            in_token = false;
+        }
+    }
+
+    dom_string_unref(class_str);
+
+    *classes = class_array;
+    *n_classes = idx;
 
     return CSS_OK;
 }
@@ -79,12 +168,40 @@ static css_error node_classes(void *pw, void *node, lwc_string ***classes, uint3
 /* Get the ID of a node */
 static css_error node_id(void *pw, void *node, lwc_string **id) {
     dom_node *n = (dom_node *)node;
+    dom_string *id_str = NULL;
+    dom_exception err;
     (void)pw;
-    (void)n;
 
-    /* TODO: Implement ID attribute retrieval */
-    /* For now, no ID */
     *id = NULL;
+
+    if (!n) {
+        return CSS_OK;
+    }
+
+    /* Get "id" attribute */
+    dom_string *id_name = NULL;
+    err = dom_string_create((const uint8_t *)"id", 2, &id_name);
+    if (err != DOM_NO_ERR) {
+        return CSS_OK;
+    }
+
+    err = dom_element_get_attribute((dom_element *)n, id_name, &id_str);
+    dom_string_unref(id_name);
+
+    if (err != DOM_NO_ERR || !id_str) {
+        return CSS_OK;
+    }
+
+    /* Convert dom_string to lwc_string */
+    const char *id_data = dom_string_data(id_str);
+    size_t id_len = dom_string_byte_length(id_str);
+    lwc_error lerr = lwc_intern_string(id_data, id_len, id);
+
+    dom_string_unref(id_str);
+
+    if (lerr != lwc_error_ok) {
+        return CSS_NOMEM;
+    }
 
     return CSS_OK;
 }
@@ -92,12 +209,33 @@ static css_error node_id(void *pw, void *node, lwc_string **id) {
 /* Check if node has a given attribute */
 static css_error node_has_attribute(void *pw, void *node, const css_qname *qname, bool *match) {
     dom_node *n = (dom_node *)node;
+    dom_string *attr_name = NULL;
+    dom_exception err;
     (void)pw;
-    (void)n;
-    (void)qname;
 
-    /* TODO: Implement attribute checking */
     *match = false;
+
+    if (!n || !qname || !qname->name) {
+        return CSS_OK;
+    }
+
+    /* Convert lwc_string to dom_string */
+    const char *name_data = lwc_string_data(qname->name);
+    size_t name_len = lwc_string_length(qname->name);
+
+    err = dom_string_create((const uint8_t *)name_data, name_len, &attr_name);
+    if (err != DOM_NO_ERR) {
+        return CSS_OK;
+    }
+
+    /* Check if attribute exists */
+    err = dom_element_has_attribute((dom_element *)n, attr_name, match);
+    dom_string_unref(attr_name);
+
+    if (err != DOM_NO_ERR) {
+        *match = false;
+        return CSS_OK;
+    }
 
     return CSS_OK;
 }
@@ -106,38 +244,100 @@ static css_error node_has_attribute(void *pw, void *node, const css_qname *qname
 __attribute__((unused))
 static css_error node_attribute_value(void *pw, void *node, const css_qname *qname, lwc_string **value) {
     dom_node *n = (dom_node *)node;
+    dom_string *attr_name = NULL;
+    dom_string *attr_value = NULL;
+    dom_exception err;
     (void)pw;
-    (void)n;
-    (void)qname;
 
-    /* TODO: Implement attribute value retrieval */
     *value = NULL;
+
+    if (!n || !qname || !qname->name) {
+        return CSS_OK;
+    }
+
+    /* Convert lwc_string to dom_string */
+    const char *name_data = lwc_string_data(qname->name);
+    size_t name_len = lwc_string_length(qname->name);
+
+    err = dom_string_create((const uint8_t *)name_data, name_len, &attr_name);
+    if (err != DOM_NO_ERR) {
+        return CSS_OK;
+    }
+
+    /* Get attribute value */
+    err = dom_element_get_attribute((dom_element *)n, attr_name, &attr_value);
+    dom_string_unref(attr_name);
+
+    if (err != DOM_NO_ERR || !attr_value) {
+        return CSS_OK;
+    }
+
+    /* Convert dom_string to lwc_string */
+    const char *value_data = dom_string_data(attr_value);
+    size_t value_len = dom_string_byte_length(attr_value);
+    lwc_error lerr = lwc_intern_string(value_data, value_len, value);
+
+    dom_string_unref(attr_value);
+
+    if (lerr != lwc_error_ok) {
+        return CSS_NOMEM;
+    }
 
     return CSS_OK;
 }
 
 /* Check if node has a given class */
 static css_error node_has_class(void *pw, void *node, lwc_string *name, bool *match) {
-    dom_node *n = (dom_node *)node;
+    lwc_string **classes = NULL;
+    uint32_t n_classes = 0;
+    css_error err;
     (void)pw;
-    (void)n;
-    (void)name;
 
-    /* TODO: Implement class checking */
     *match = false;
+
+    /* Get all classes for this node */
+    err = node_classes(pw, node, &classes, &n_classes);
+    if (err != CSS_OK) {
+        return err;
+    }
+
+    /* Check if any class matches */
+    for (uint32_t i = 0; i < n_classes; i++) {
+        bool is_match = false;
+        if (lwc_string_isequal(name, classes[i], &is_match) == lwc_error_ok && is_match) {
+            *match = true;
+            break;
+        }
+    }
+
+    /* Free allocated class strings */
+    for (uint32_t i = 0; i < n_classes; i++) {
+        lwc_string_unref(classes[i]);
+    }
+    free(classes);
 
     return CSS_OK;
 }
 
 /* Check if node has a given ID */
 static css_error node_has_id(void *pw, void *node, lwc_string *name, bool *match) {
-    dom_node *n = (dom_node *)node;
+    lwc_string *element_id = NULL;
+    css_error err;
     (void)pw;
-    (void)n;
-    (void)name;
 
-    /* TODO: Implement ID checking */
     *match = false;
+
+    /* Get the node's ID */
+    err = node_id(pw, node, &element_id);
+    if (err != CSS_OK) {
+        return err;
+    }
+
+    if (element_id != NULL) {
+        /* Compare IDs */
+        *match = (lwc_string_isequal(name, element_id, match) == lwc_error_ok && *match);
+        lwc_string_unref(element_id);
+    }
 
     return CSS_OK;
 }
@@ -284,19 +484,105 @@ static css_error node_is_root(void *pw, void *node, bool *match) {
 /* Count siblings (for :nth-child support) */
 static css_error node_count_siblings(void *pw, void *node, bool same_name, bool after, int32_t *count) {
     dom_node *n = (dom_node *)node;
+    dom_node *sibling = NULL;
+    dom_exception err;
+    int32_t cnt = 0;
     (void)pw;
 
+    *count = 0;
+
     if (!n) {
-        *count = 0;
         return CSS_OK;
     }
 
-    /* TODO: Implement sibling counting for :nth-child */
-    /* This requires iterating siblings and optionally filtering by name */
-    /* For now, return 0 as libcss will fall back to defaults */
-    (void)same_name;
-    (void)after;
-    *count = 0;
+    /* Get node name if we need to filter by name */
+    dom_string *target_name = NULL;
+    if (same_name) {
+        err = dom_node_get_node_name(n, &target_name);
+        if (err != DOM_NO_ERR || !target_name) {
+            return CSS_OK;
+        }
+    }
+
+    if (after) {
+        /* Count siblings after this node */
+        sibling = n;
+        dom_node_ref(sibling);  /* Take reference */
+
+        while (true) {
+            dom_node *next = NULL;
+            err = dom_node_get_next_sibling(sibling, &next);
+            dom_node_unref(sibling);
+
+            if (err != DOM_NO_ERR || !next) {
+                break;
+            }
+
+            sibling = next;
+
+            /* Check if this is an element node */
+            dom_node_type type;
+            err = dom_node_get_node_type(sibling, &type);
+            if (err == DOM_NO_ERR && type == DOM_ELEMENT_NODE) {
+                /* If filtering by name, check if names match */
+                if (same_name && target_name) {
+                    dom_string *sibling_name = NULL;
+                    err = dom_node_get_node_name(sibling, &sibling_name);
+                    if (err == DOM_NO_ERR && sibling_name) {
+                        bool match = dom_string_isequal(target_name, sibling_name);
+                        dom_string_unref(sibling_name);
+                        if (match) {
+                            cnt++;
+                        }
+                    }
+                } else {
+                    cnt++;
+                }
+            }
+        }
+    } else {
+        /* Count siblings before this node */
+        sibling = n;
+        dom_node_ref(sibling);
+
+        while (true) {
+            dom_node *prev = NULL;
+            err = dom_node_get_previous_sibling(sibling, &prev);
+            dom_node_unref(sibling);
+
+            if (err != DOM_NO_ERR || !prev) {
+                break;
+            }
+
+            sibling = prev;
+
+            /* Check if this is an element node */
+            dom_node_type type;
+            err = dom_node_get_node_type(sibling, &type);
+            if (err == DOM_NO_ERR && type == DOM_ELEMENT_NODE) {
+                /* If filtering by name, check if names match */
+                if (same_name && target_name) {
+                    dom_string *sibling_name = NULL;
+                    err = dom_node_get_node_name(sibling, &sibling_name);
+                    if (err == DOM_NO_ERR && sibling_name) {
+                        bool match = dom_string_isequal(target_name, sibling_name);
+                        dom_string_unref(sibling_name);
+                        if (match) {
+                            cnt++;
+                        }
+                    }
+                } else {
+                    cnt++;
+                }
+            }
+        }
+    }
+
+    if (target_name) {
+        dom_string_unref(target_name);
+    }
+
+    *count = cnt;
 
     return CSS_OK;
 }
