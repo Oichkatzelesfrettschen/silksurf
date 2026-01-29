@@ -199,16 +199,58 @@ valgrind --leak-check=full --show-leak-kinds=all \
 **Expected**: 0 errors, some leaks from libdom (external library)
 
 ### Fuzz Testing
+
+SilkSurf includes AFL++ fuzzing harnesses for HTML and CSS parsers.
+
+**Prerequisites**:
 ```bash
-# Build fuzzer
-cmake --build build --target silksurf_fuzz
-
-# Run for 5 minutes
-timeout 300 ./build/silksurf_fuzz -i fuzz_in -o fuzz_out
-
-# Check for crashes
-ls fuzz_out/crashes/
+# Install AFL++
+sudo pacman -S afl++        # Arch Linux
+sudo apt install afl++      # Ubuntu/Debian
 ```
+
+**Build with AFL++ instrumentation**:
+```bash
+# Configure with AFL++ compiler
+cmake -B build-fuzz -DENABLE_FUZZING=ON
+cmake --build build-fuzz
+
+# Verify instrumentation
+afl-showmap -o /dev/null -- ./build-fuzz/silksurf_fuzz < fuzz_corpus/html/input/basic.html
+```
+
+**Run fuzzing campaigns**:
+```bash
+# 5-minute smoke test
+cd build-fuzz && make fuzz_quick
+
+# Full HTML fuzzing (run until interrupted with Ctrl+C)
+cd build-fuzz && make fuzz_html
+
+# Full CSS fuzzing
+cd build-fuzz && make fuzz_css
+
+# Manual fuzzing with custom options
+afl-fuzz -i ../fuzz_corpus/html/input \
+         -o ../fuzz_corpus/html/output \
+         -m none \
+         -- ./silksurf_fuzz
+```
+
+**Check results**:
+```bash
+# View statistics
+afl-whatsup fuzz_corpus/html/output
+
+# Examine crashes
+ls fuzz_corpus/html/output/default/crashes/
+cat fuzz_corpus/html/output/default/crashes/id:000000*
+
+# Reproduce crash
+./build-fuzz/silksurf_fuzz < fuzz_corpus/html/output/default/crashes/id:000000*
+```
+
+**Expected**: 24 hours with zero crashes for production readiness
 
 ---
 

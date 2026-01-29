@@ -286,14 +286,16 @@ int silk_css_get_computed_style(silk_css_engine_t *engine,
     fprintf(stderr, "[CSS] Select context has %u sheets\n", ctx_sheet_count);
 
     /* Set up unit context for DPI calculation */
-    css_unit_ctx unit_ctx;
-    unit_ctx.device_dpi = INTTOFIX(96);  /* Standard screen DPI */
-    unit_ctx.viewport_width = INTTOFIX(1024);
-    unit_ctx.viewport_height = INTTOFIX(768);
-    unit_ctx.font_size_default = INTTOFIX(16);  /* 16px default font size */
-    unit_ctx.font_size_minimum = INTTOFIX(0);   /* No minimum */
-    unit_ctx.root_style = NULL;
-    unit_ctx.pw = NULL;  /* No client private data */
+    css_unit_ctx unit_ctx = {
+        .viewport_width = INTTOFIX(1024),
+        .viewport_height = INTTOFIX(768),
+        .font_size_default = INTTOFIX(16),  /* 16px default font size */
+        .font_size_minimum = INTTOFIX(0),   /* No minimum */
+        .device_dpi = INTTOFIX(96),         /* Standard screen DPI */
+        .root_style = NULL,
+        .pw = NULL,                         /* No client private data */
+        .measure = NULL                     /* No font measurement callback */
+    };
 
     /* Set up media query context (required even if not using media queries) */
     css_media media;

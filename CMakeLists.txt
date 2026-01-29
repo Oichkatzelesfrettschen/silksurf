@@ -17,6 +17,19 @@ if(SANITIZER)
     endif()
 endif()
 
+# AFL++ fuzzing support
+option(ENABLE_FUZZING "Build with AFL++ instrumentation for fuzzing" OFF)
+if(ENABLE_FUZZING)
+    find_program(AFL_CC afl-clang-fast)
+    if(AFL_CC)
+        message(STATUS "AFL++ fuzzing enabled with afl-clang-fast")
+        set(CMAKE_C_COMPILER ${AFL_CC})
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g")
+    else()
+        message(WARNING "AFL++ not found, fuzzing will not be instrumented")
+    endif()
+endif()
+
 # Packages
 find_package(PkgConfig REQUIRED)
 
@@ -212,7 +225,9 @@ target_link_libraries(silksurf_fuzz
 add_executable(silksurf_css_fuzz
     src/css/fuzz_css.c
     src/document/css_engine.c
+    src/css/css_tokenizer.c
     src/css/selector.c
+    src/css/cascade.c
     ${MEMORY_SOURCES}
     ${DOCUMENT_SOURCES}
 )
@@ -231,6 +246,42 @@ add_test(NAME parser_basic COMMAND test_parser_basic)
 add_test(NAME dom_parsing COMMAND test_dom_parsing)
 add_test(NAME css_engine COMMAND test_css_engine)
 add_test(NAME css_cascade COMMAND test_css_cascade)
+
+# Fuzzing custom targets (requires AFL++ and ENABLE_FUZZING=ON)
+if(ENABLE_FUZZING AND AFL_CC)
+    # HTML fuzzing target
+    add_custom_target(fuzz_html
+        COMMAND afl-fuzz -i ${CMAKE_SOURCE_DIR}/fuzz_corpus/html/input
+                         -o ${CMAKE_SOURCE_DIR}/fuzz_corpus/html/output
+                         -m none
+                         -- $<TARGET_FILE:silksurf_fuzz>
+        DEPENDS silksurf_fuzz
+        COMMENT "Running AFL++ HTML fuzzing campaign"
+        USES_TERMINAL
+    )
+
+    # CSS fuzzing target
+    add_custom_target(fuzz_css
+        COMMAND afl-fuzz -i ${CMAKE_SOURCE_DIR}/fuzz_corpus/css/input
+                         -o ${CMAKE_SOURCE_DIR}/fuzz_corpus/css/output
+                         -m none
+                         -- $<TARGET_FILE:silksurf_css_fuzz>
+        DEPENDS silksurf_css_fuzz
+        COMMENT "Running AFL++ CSS fuzzing campaign"
+        USES_TERMINAL
+    )
+
+    # Quick smoke test fuzzing (5 minutes)
+    add_custom_target(fuzz_quick
+        COMMAND timeout 300 afl-fuzz -i ${CMAKE_SOURCE_DIR}/fuzz_corpus/html/input
+                                      -o ${CMAKE_SOURCE_DIR}/fuzz_corpus/html/output
+                                      -m none
+                                      -- $<TARGET_FILE:silksurf_fuzz> || true
+        DEPENDS silksurf_fuzz
+        COMMENT "Running 5-minute AFL++ smoke test"
+        USES_TERMINAL
+    )
+endif()
 
 # Install
 install(TARGETS silksurf DESTINATION bin)
