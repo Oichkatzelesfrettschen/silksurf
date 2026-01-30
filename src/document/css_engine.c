@@ -297,15 +297,15 @@ int silk_css_get_computed_style(silk_css_engine_t *engine,
         .measure = NULL                     /* No font measurement callback (text measurement deferred) */
     };
 
-    /* Set up media query context (required even if not using media queries) */
+    /* Set up media query context - full css_media structure */
     css_media media;
     memset(&media, 0, sizeof(media));
     media.type = CSS_MEDIA_SCREEN;
-    media.width = INTTOFIX(1024);   /* Viewport width in CSS pixels */
-    media.height = INTTOFIX(768);   /* Viewport height in CSS pixels */
-    /* Aspect ratio: 1024/768 = 4/3 = 1.333... in fixed-point (approx 1365 with 10-bit radix) */
-    media.aspect_ratio = 1365;  /* 4/3 as fixed-point (1 << 10) + (1 << 10)/3 */
-    media.color = INTTOFIX(8);  /* 8 bits per color channel (24-bit color) */
+    media.width = INTTOFIX(1024);
+    media.height = INTTOFIX(768);
+    media.aspect_ratio = INTTOFIX(4) / 3;  /* 4/3 aspect ratio */
+    media.color = INTTOFIX(8);
+    /* All other fields remain 0 (uninitialized/not used) */
 
     /* Get underlying libdom node for libcss (it expects raw libdom nodes) */
     void *libdom_node = silk_dom_node_get_libdom_node(element);
@@ -328,14 +328,15 @@ int silk_css_get_computed_style(silk_css_engine_t *engine,
     fprintf(stderr, "[CSS] Node is an element (type=%d)\n", node_type);
 
     fprintf(stderr, "[CSS] Calling css_select_style with libdom node: %p\n", libdom_node);
-    fprintf(stderr, "[CSS] select_ctx=%p, handler=%p\n", (void *)engine->select_ctx, (void *)silk_css_get_select_handler());
+    fprintf(stderr, "[CSS] select_ctx=%p, handler=%p\n",
+            (void *)engine->select_ctx, (void *)silk_css_get_select_handler());
 
     /* Use libcss to compute styles for this element */
     css_select_results *results = NULL;
     css_error err = css_select_style(engine->select_ctx,
                                       libdom_node,  /* raw libdom node */
                                       &unit_ctx,
-                                      &media,  /* media context */
+                                      &media,  /* media context structure */
                                       NULL,  /* inline_style */
                                       silk_css_get_select_handler(),
                                       NULL,  /* handler private data */
