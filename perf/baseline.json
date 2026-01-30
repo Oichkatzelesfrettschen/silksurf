@@ -1,0 +1,51 @@
+{
+  "metadata": {
+    "version": "1.0",
+    "description": "SilkSurf performance baseline for regression tracking",
+    "updated": "2026-01-29T00:00:00Z",
+    "commit": "643dc4cc",
+    "branch": "main"
+  },
+  "metrics": {
+    "binary_size_bytes": 1845264,
+    "binary_size_mb": 1.76,
+    "test_count": 9,
+    "test_pass_count": 8,
+    "pass_rate_percent": 88.9,
+    "css_cascade_blocked": true,
+    "blocked_reason": "Task #22 - libcss CSS_BADPARM integration"
+  },
+  "thresholds": {
+    "max_binary_size_bytes": 2097152,
+    "max_binary_size_percent_over": 10.0,
+    "min_pass_rate_percent": 85.0,
+    "max_regression_percent": 10.0
+  },
+  "performance": {
+    "estimated_startup_time_ms": 50,
+    "estimated_page_load_time_ms": 500,
+    "estimated_render_fps": 60,
+    "xshm_transfer_speed_mbps": 1024,
+    "socket_transfer_speed_mbps": 100,
+    "xshm_speedup_factor": 10.24
+  },
+  "cpu_features": {
+    "simd_detection": "runtime_cpuid",
+    "sse2_available": true,
+    "avx2_available": true,
+    "auto_select": "highest_available"
+  },
+  "memory": {
+    "estimated_min_memory_mb": 10,
+    "estimated_typical_memory_mb": 50,
+    "estimated_max_memory_mb": 100,
+    "arena_allocator": true
+  },
+  "notes": [
+    "Binary size includes all symbols (non-stripped)",
+    "Test timing varies on CI runner (Ubuntu 24.04)",
+    "XShm performance tested on system with shared memory support",
+    "CSS cascade test blocked pending libcss integration (Task #22)",
+    "Performance targets are aspirational (Phase 3 implementation)"
+  ]
+}
