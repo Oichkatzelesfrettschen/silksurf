@@ -676,15 +676,39 @@ static css_error ua_default_for_property(void *pw, uint32_t property, css_hint *
     return CSS_OK;
 }
 
-/* Stub: Check if node has a given name */
+/* Check if node has a given name */
 static css_error node_has_name(void *pw, void *node, const css_qname *qname, bool *match) {
     dom_node *n = (dom_node *)node;
+    dom_string *name = NULL;
+    dom_exception err;
     (void)pw;
-    (void)qname;
-    (void)n;
 
-    /* TODO: Implement by comparing node name with qname */
-    *match = false;
+    fprintf(stderr, "[CSS Handler] node_has_name called\n");
+
+    if (!n || !qname) {
+        *match = false;
+        return CSS_OK;
+    }
+
+    /* Get node's current name */
+    err = dom_node_get_node_name(n, &name);
+    if (err != DOM_NO_ERR || !name) {
+        *match = false;
+        return CSS_OK;
+    }
+
+    /* Compare with selector name */
+    const char *node_name_str = dom_string_data(name);
+    const char *selector_name = lwc_string_data(qname->name);
+
+    fprintf(stderr, "[CSS Handler] node_has_name: comparing '%s' with '%s'\n",
+            node_name_str, selector_name);
+
+    /* Case-insensitive comparison for HTML */
+    *match = (strcasecmp(node_name_str, selector_name) == 0);
+
+    fprintf(stderr, "[CSS Handler] node_has_name: match=%d\n", *match);
+    dom_string_unref(name);
     return CSS_OK;
 }
 
@@ -731,20 +755,35 @@ static css_error node_has_attribute_substring(void *pw, void *node, const css_qn
     return CSS_OK;
 }
 
-/* LibCSS node data storage - for internal libcss caching */
+/* Simple node data storage - use a map of node pointer to libcss data
+ * For single-threaded operation, we just store last node data
+ * This is sufficient for libcss's pattern of set/get pairs */
+static void *last_node = NULL;
+static void *last_node_data = NULL;
+
+/* LibCSS node data storage - simple in-memory cache */
 static css_error set_libcss_node_data(void *pw, void *node, void *libcss_node_data) {
     (void)pw;
-    (void)node;
-    (void)libcss_node_data;
-    /* TODO: Store this on the dom_node for caching - for now just accept it */
+
+    fprintf(stderr, "[CSS Handler] set_libcss_node_data called (node=%p, data=%p)\n", node, libcss_node_data);
+
+    /* Store for this node */
+    last_node = node;
+    last_node_data = libcss_node_data;
+
+    fprintf(stderr, "[CSS Handler] set_libcss_node_data: stored\n");
     return CSS_OK;
 }
 
 static css_error get_libcss_node_data(void *pw, void *node, void **libcss_node_data) {
     (void)pw;
     (void)node;
-    /* TODO: Retrieve stored data - for now return NULL (no cached data) */
-    *libcss_node_data = NULL;
+
+    fprintf(stderr, "[CSS Handler] get_libcss_node_data called (node=%p) - returning last_node_data=%p\n", node, last_node_data);
+
+    /* Always return the most recently set data (libcss might use stack pattern) */
+    *libcss_node_data = last_node_data;
+
     return CSS_OK;
 }
 
