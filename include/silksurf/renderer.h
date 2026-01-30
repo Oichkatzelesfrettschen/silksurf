@@ -7,6 +7,7 @@
 #include "silksurf/damage_tracker.h"
 #include "silksurf/pixmap_cache.h"
 #include "silksurf/pixel_ops.h"
+#include "silksurf/layout.h"
 
 /* Command types for batch rendering */
 typedef struct {
@@ -37,6 +38,31 @@ void silk_render_queue_push_rect(silk_render_queue_t *queue, int x, int y, int w
 
 /* High-level painting */
 struct silk_dom_node;
+
+/**
+ * Paint layout tree to rendering commands (preferred)
+ *
+ * Converts computed layout boxes (with geometry and styles) to
+ * low-level rendering commands. This is the primary painting path
+ * after layout computation.
+ *
+ * \param root_box Root layout box from silk_layout_compute()
+ * \param dom_root Root DOM element (for style lookup)
+ * \param queue Render queue to populate with drawing commands
+ */
+void silk_paint_layout_tree(const layout_box_t *root_box,
+                            struct silk_dom_node *dom_root,
+                            silk_render_queue_t *queue);
+
+/**
+ * Paint DOM tree directly (legacy, for backward compatibility)
+ *
+ * WARNING: Deprecated. Use silk_paint_layout_tree() instead.
+ * Direct DOM painting bypasses layout engine and doesn't handle:
+ * - Auto sizing
+ * - Margin collapse
+ * - Proper positioning
+ */
 void silk_paint_node(struct silk_dom_node *node, silk_render_queue_t *queue);
 
 /* Frame lifecycle */
