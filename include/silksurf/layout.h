@@ -252,6 +252,71 @@ int32_t silk_layout_resolve_margin(
 int32_t silk_layout_collapse_margins(int32_t margin1, int32_t margin2);
 
 /**
+ * Collapse whitespace in text per CSS spec
+ *
+ * Reduces sequences of whitespace (spaces, tabs, newlines) to single space.
+ * Per CSS 2.2: "Sequences of whitespace are collapsed into a single space"
+ *
+ * Examples:
+ * - "  hello   world  " → " hello world "
+ * - "hello\n\tworld" → "hello world"
+ *
+ * \param text Input text (may have multiple spaces/tabs/newlines)
+ * \param length Input text length
+ * \param output Output buffer for collapsed text
+ * \param output_size Output buffer capacity
+ * \return Length of collapsed text (not including null terminator)
+ */
+size_t silk_layout_collapse_whitespace(
+    const char *text,
+    size_t length,
+    char *output,
+    size_t output_size
+);
+
+/**
+ * Measure text width in pixels
+ *
+ * Approximates text width based on character count and font size.
+ * Full implementation would use actual font metrics (FreeType + HarfBuzz).
+ *
+ * Current implementation: monospace approximation
+ * - Average character width ≈ 0.6 * font_size
+ * - Spaces ≈ 0.25 * font_size
+ * - Uppercase letters ≈ 0.875 * font_size
+ *
+ * \param text Text to measure
+ * \param length Number of characters
+ * \param font_size Font size in pixels
+ * \return Approximate width in pixels (may differ from actual with proportional fonts)
+ */
+int32_t silk_layout_measure_text(
+    const char *text,
+    size_t length,
+    int32_t font_size
+);
+
+/**
+ * Find line break position
+ *
+ * Given available width, finds where text can be wrapped to next line.
+ * Uses binary search to find longest text that fits within width.
+ * Useful for responsive layout and text wrapping.
+ *
+ * \param text Text to break
+ * \param length Text length
+ * \param available_width Width available for line (in pixels)
+ * \param font_size Font size for text measurement
+ * \return Position to break text (0 if even first character too wide)
+ */
+size_t silk_layout_find_line_break(
+    const char *text,
+    size_t length,
+    int32_t available_width,
+    int32_t font_size
+);
+
+/**
  * Apply min/max width constraints to computed width
  *
  * Clamps: computed_width = max(min_width, min(computed_width, max_width))

@@ -31,7 +31,7 @@
 #include "silksurf/allocator.h"
 
 /* Internal helper: safely add two edge values, detect overflow */
-static bool safe_add_edges(int32_t a, int32_t b, int32_t *result) {
+static inline bool safe_add_edges(int32_t a, int32_t b, int32_t *result) {
     if ((b > 0 && a > INT32_MAX - b) || (b < 0 && a < INT32_MIN - b)) {
         return false;  /* Overflow */
     }
@@ -347,44 +347,7 @@ layout_box_t silk_layout_compute_block(
     return box;
 }
 
-/**
- * Layout inline-level element (span, a, em, etc.)
- *
- * Inline elements flow horizontally within line boxes:
- * - Width: determined by content
- * - No meaningful margins/borders
- * - Height: font metrics (ascent, descent)
- *
- * For now, returns minimal box (actual inline layout requires
- * text measurement and line breaking - complex scope).
- */
-layout_box_t silk_layout_compute_inline(
-    layout_context_t *ctx,
-    void *element,
-    const layout_box_t *parent_box
-) {
-    if (!ctx || !element || !parent_box) {
-        return box_init();
-    }
-
-    layout_box_t box = box_init();
-    box.display = DISPLAY_INLINE;
-
-    /* Inline elements don't have meaningful positioning */
-    box.x = parent_box->x;
-    box.y = parent_box->y;
-    box.width = 0;       /* Determined by text content */
-    box.height = 16;     /* Default: ~1em at 16px font */
-
-    /* TODO: Full inline layout requires:
-       - Text measurement (measure glyph width)
-       - Line breaking (when text exceeds container)
-       - Baseline alignment
-       - Implicit line box creation */
-
-    ctx->box_count++;
-    return box;
-}
+/* silk_layout_compute_inline is implemented in src/layout/inline.c */
 
 /**
  * Layout replaced element (img, video, canvas, etc.)
@@ -461,6 +424,9 @@ bool silk_layout_compute(layout_context_t *ctx) {
     */
     ctx->box_count = 1;
     ctx->reflow_count++;
+
+    /* Store root box for future subtree layout */
+    (void)root_box;  /* Will be used in full implementation */
 
     return true;
 }
