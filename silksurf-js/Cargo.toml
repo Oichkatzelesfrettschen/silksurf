@@ -1,8 +1,8 @@
 [package]
 name = "silksurf-js"
 version = "0.1.0"
-edition = "2024"
-rust-version = "1.94.0"
+edition = "2021"
+rust-version = "1.70.0"
 authors = ["SilkSurf Project"]
 description = "Pure Rust JavaScript engine - cleanroom implementation with zero-copy lexer, arena GC, and bytecode VM"
 license = "MIT OR Apache-2.0"
@@ -228,7 +228,7 @@ harness = false
 [lints.rust]
 # Compiler lints
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)', 'cfg(miri)'] }
-# unsafe_op_in_unsafe_fn = "warn"  # Enable after codebase update
+# unsafe_op_in_unsafe_fn = "warn"  # TODO: Enable after codebase audit (Phase 4)
 # missing_docs = "warn"  # Enable after documentation pass
 
 [lints.clippy]

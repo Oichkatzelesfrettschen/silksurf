@@ -48,6 +48,9 @@ static void handle_event(silk_event_t *event) {
 }
 
 int main(int argc, char *argv[]) {
+    (void)argc;    /* Unused - command-line parsing deferred to Phase 4 */
+    (void)argv;    /* Unused - command-line parsing deferred to Phase 4 */
+
     printf("SilkSurf Browser - Phase 3 (Rendering Pipeline)\n");
     printf("================================================\n\n");
 
@@ -58,7 +61,7 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Failed to create arena allocator\n");
         return 1;
     }
-    printf("  Arena: %zu MB allocated\n", SILK_ARENA_SIZE / (1024 * 1024));
+    printf("  Arena: %lu MB allocated\n", (unsigned long)(SILK_ARENA_SIZE / (1024 * 1024)));
 
     /* Initialize JS Engine */
     printf("Initializing Rust JS Engine...\n");
