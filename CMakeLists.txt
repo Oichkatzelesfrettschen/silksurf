@@ -216,6 +216,25 @@ target_link_libraries(test_simd_detection
     m
 )
 
+# End-to-end rendering pipeline test
+add_executable(test_e2e_rendering
+    tests/test_e2e_rendering.c
+    ${MEMORY_SOURCES}
+    ${DOCUMENT_SOURCES}
+    src/rendering/pixel_ops.c
+    src/rendering/paint.c
+    src/layout/box_model.c
+)
+
+target_link_libraries(test_e2e_rendering
+    ${XCB_LIBRARIES}
+    ${LIBHUBBUB_LIBRARIES}
+    ${LIBCSS_LIBRARIES}
+    ${LIBDOM_LIBRARIES}
+    ${LIBPARSERUTILS_LIBRARIES}
+    m
+)
+
 # Fuzzing harness
 add_executable(silksurf_fuzz
     src/fuzz_harness.c
@@ -257,6 +276,7 @@ add_test(NAME dom_parsing COMMAND test_dom_parsing)
 add_test(NAME css_engine COMMAND test_css_engine)
 add_test(NAME css_cascade COMMAND test_css_cascade)
 add_test(NAME simd_detection COMMAND test_simd_detection)
+add_test(NAME e2e_rendering COMMAND test_e2e_rendering)
 
 # Fuzzing custom targets (requires AFL++ and ENABLE_FUZZING=ON)
 if(ENABLE_FUZZING AND AFL_CC)
