@@ -303,7 +303,8 @@ int silk_css_get_computed_style(silk_css_engine_t *engine,
     media.type = CSS_MEDIA_SCREEN;
     media.width = INTTOFIX(1024);
     media.height = INTTOFIX(768);
-    media.aspect_ratio = INTTOFIX(4) / 3;  /* 4/3 aspect ratio */
+    /* aspect_ratio: 1024/768 = 4/3 = 1.333...  (computed properly as fixed-point) */
+    media.aspect_ratio = INTTOFIX(1024) / INTTOFIX(768);
     media.color = INTTOFIX(8);
     /* All other fields remain 0 (uninitialized/not used) */
 
@@ -339,7 +340,7 @@ int silk_css_get_computed_style(silk_css_engine_t *engine,
                                       &media,  /* media context structure */
                                       NULL,  /* inline_style */
                                       silk_css_get_select_handler(),
-                                      NULL,  /* handler private data */
+                                      (void *)engine,  /* handler private data - pass engine context */
                                       &results);
 
     fprintf(stderr, "[CSS] css_select_style returned: %d\n", err);

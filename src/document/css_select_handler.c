@@ -34,27 +34,17 @@ static css_error node_name(void *pw, void *node, css_qname *qname) {
         return CSS_BADPARM;
     }
 
-    /* Convert dom_string to lwc_string */
-    const char *name_data = dom_string_data(name);
-    size_t name_len = dom_string_byte_length(name);
+    fprintf(stderr, "[CSS Handler] node_name: got name='%s'\n", dom_string_data(name));
 
-    fprintf(stderr, "[CSS Handler] node_name: got name='%.*s' (len=%zu)\n",
-            (int)name_len, name_data, name_len);
+    /* Default HTML namespace (NULL for no namespace) */
+    qname->ns = NULL;
 
-    lwc_error lerr = lwc_intern_string(name_data, name_len, &qname->name);
-
+    /* Intern the dom_string directly to lwc_string */
+    err = dom_string_intern(name, &qname->name);
     dom_string_unref(name);
 
-    if (lerr != lwc_error_ok) {
-        fprintf(stderr, "[CSS Handler] node_name: lwc_intern_string failed for name: %d\n", lerr);
-        return CSS_NOMEM;
-    }
-
-    /* HTML namespace (empty string for default HTML namespace) */
-    lerr = lwc_intern_string("", 0, &qname->ns);
-    if (lerr != lwc_error_ok) {
-        fprintf(stderr, "[CSS Handler] node_name: lwc_intern_string failed for namespace: %d\n", lerr);
-        lwc_string_unref(qname->name);
+    if (err != DOM_NO_ERR) {
+        fprintf(stderr, "[CSS Handler] node_name: dom_string_intern failed: %d\n", err);
         return CSS_NOMEM;
     }
 
@@ -67,7 +57,6 @@ static css_error node_name(void *pw, void *node, css_qname *qname) {
 /* Get the class names of a node */
 static css_error node_classes(void *pw, void *node, lwc_string ***classes, uint32_t *n_classes) {
     dom_node *n = (dom_node *)node;
-    dom_string *class_str = NULL;
     dom_exception err;
     (void)pw;
 
@@ -78,89 +67,11 @@ static css_error node_classes(void *pw, void *node, lwc_string ***classes, uint3
         return CSS_OK;
     }
 
-    /* Get "class" attribute */
-    dom_string *class_name = NULL;
-    err = dom_string_create((const uint8_t *)"class", 5, &class_name);
+    /* Use proper DOM API to get classes */
+    err = dom_element_get_classes((dom_element *)n, classes, n_classes);
     if (err != DOM_NO_ERR) {
-        return CSS_OK;
-    }
-
-    err = dom_element_get_attribute((dom_element *)n, class_name, &class_str);
-    dom_string_unref(class_name);
-
-    if (err != DOM_NO_ERR || !class_str) {
-        return CSS_OK;
-    }
-
-    /* Parse class string (space-separated tokens) */
-    const char *class_data = dom_string_data(class_str);
-    size_t class_len = dom_string_byte_length(class_str);
-
-    if (class_len == 0) {
-        dom_string_unref(class_str);
-        return CSS_OK;
-    }
-
-    /* Count classes (count spaces + 1, but trim leading/trailing) */
-    uint32_t count = 0;
-    bool in_token = false;
-    for (size_t i = 0; i < class_len; i++) {
-        if (class_data[i] == ' ' || class_data[i] == '\t' ||
-            class_data[i] == '\n' || class_data[i] == '\r') {
-            in_token = false;
-        } else if (!in_token) {
-            count++;
-            in_token = true;
-        }
-    }
-
-    if (count == 0) {
-        dom_string_unref(class_str);
-        return CSS_OK;
-    }
-
-    /* Allocate array for class lwc_strings */
-    lwc_string **class_array = malloc(count * sizeof(lwc_string *));
-    if (!class_array) {
-        dom_string_unref(class_str);
         return CSS_NOMEM;
     }
-
-    /* Extract each class token */
-    uint32_t idx = 0;
-    size_t token_start = 0;
-    in_token = false;
-
-    for (size_t i = 0; i <= class_len; i++) {
-        bool is_space = (i == class_len ||
-                          class_data[i] == ' ' || class_data[i] == '\t' ||
-                          class_data[i] == '\n' || class_data[i] == '\r');
-
-        if (!is_space && !in_token) {
-            token_start = i;
-            in_token = true;
-        } else if (is_space && in_token) {
-            /* End of token */
-            size_t token_len = i - token_start;
-            lwc_error lerr = lwc_intern_string(class_data + token_start, token_len,
-                                                &class_array[idx++]);
-            if (lerr != lwc_error_ok) {
-                /* Free allocated strings on error */
-                for (uint32_t j = 0; j < idx - 1; j++) {
-                    lwc_string_unref(class_array[j]);
-                }
-                free(class_array);
-                dom_string_unref(class_str);
-                return CSS_NOMEM;
-            }
-            in_token = false;
-        }
-    }
-
-    dom_string_unref(class_str);
-
-    *classes = class_array;
-    *n_classes = idx;
 
     return CSS_OK;
 }
@@ -168,7 +79,7 @@ static css_error node_classes(void *pw, void *node, lwc_string ***classes, uint3
 /* Get the ID of a node */
 static css_error node_id(void *pw, void *node, lwc_string **id) {
     dom_node *n = (dom_node *)node;
-    dom_string *id_str = NULL;
+    dom_string *attr = NULL;
     dom_exception err;
     (void)pw;
 
@@ -178,29 +89,20 @@ static css_error node_id(void *pw, void *node, lwc_string **id) {
         return CSS_OK;
     }
 
-    /* Get "id" attribute */
-    dom_string *id_name = NULL;
-    err = dom_string_create((const uint8_t *)"id", 2, &id_name);
+    /* Use HTML element API to get the id attribute */
+    err = dom_html_element_get_id((dom_html_element *)n, &attr);
     if (err != DOM_NO_ERR) {
-        return CSS_OK;
-    }
-
-    err = dom_element_get_attribute((dom_element *)n, id_name, &id_str);
-    dom_string_unref(id_name);
-
-    if (err != DOM_NO_ERR || !id_str) {
-        return CSS_OK;
-    }
-
-    /* Convert dom_string to lwc_string */
-    const char *id_data = dom_string_data(id_str);
-    size_t id_len = dom_string_byte_length(id_str);
-    lwc_error lerr = lwc_intern_string(id_data, id_len, id);
-
-    dom_string_unref(id_str);
-
-    if (lerr != lwc_error_ok) {
         return CSS_NOMEM;
+    }
+
+    if (attr != NULL) {
+        /* Convert dom_string to lwc_string */
+        err = dom_string_intern(attr, id);
+        dom_string_unref(attr);
+
+        if (err != DOM_NO_ERR) {
+            return CSS_NOMEM;
+        }
     }
 
     return CSS_OK;
@@ -740,6 +642,11 @@ static css_error node_presentational_hint(void *pw, void *node, uint32_t *nhints
 static css_error ua_default_for_property(void *pw, uint32_t property, css_hint *hint) {
     (void)pw;
 
+    static int call_count = 0;
+    if (++call_count <= 20) {
+        fprintf(stderr, "[CSS Handler] ua_default_for_property called (#%d) for property=%u\n", call_count, property);
+    }
+
     /* Provide sensible defaults for common properties */
     switch (property) {
         case CSS_PROP_COLOR:
@@ -762,6 +669,7 @@ static css_error ua_default_for_property(void *pw, uint32_t property, css_hint *
             break;
 
         default:
+            fprintf(stderr, "[CSS Handler] ua_default_for_property: property %u not handled, returning CSS_INVALID\n", property);
             return CSS_INVALID;
     }
 
