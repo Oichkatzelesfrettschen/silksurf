@@ -255,6 +255,32 @@ target_link_libraries(test_css_cascade_integration
     m
 )
 
+# CSS selector matching test (native selector matching)
+add_executable(test_css_selector_matching
+    tests/test_css_selector_matching.c
+    ${MEMORY_SOURCES}
+    src/document/css_selector_match.c
+)
+
+target_link_libraries(test_css_selector_matching
+    ${LIBDOM_LIBRARIES}
+    m
+)
+
+# CSS native pipeline validation test (Phase 2 validation)
+add_executable(test_css_native_pipeline
+    tests/test_css_native_pipeline.c
+    ${MEMORY_SOURCES}
+    src/document/css_selector_match.c
+    src/document/css_cascade.c
+    src/document/css_property_spec.c
+)
+
+target_link_libraries(test_css_native_pipeline
+    ${LIBDOM_LIBRARIES}
+    m
+)
+
 # End-to-end rendering pipeline test
 add_executable(test_e2e_rendering
     tests/test_e2e_rendering.c
@@ -348,6 +374,8 @@ add_test(NAME css_engine COMMAND test_css_engine)
 add_test(NAME css_cascade COMMAND test_css_cascade)
 add_test(NAME css_cascade_native COMMAND test_css_cascade_native)
 add_test(NAME css_cascade_integration COMMAND test_css_cascade_integration)
+add_test(NAME css_selector_matching COMMAND test_css_selector_matching)
+add_test(NAME css_native_pipeline COMMAND test_css_native_pipeline)
 add_test(NAME simd_detection COMMAND test_simd_detection)
 add_test(NAME e2e_rendering COMMAND test_e2e_rendering)
 add_test(NAME inline_layout COMMAND test_inline_layout)
