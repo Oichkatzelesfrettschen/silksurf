@@ -158,6 +158,15 @@ target_link_libraries(test_dom_parsing
     m
 )
 
+# Optional: Link optional libraries to test targets too
+if(XCB_SHM_FOUND)
+    target_link_libraries(test_dom_parsing ${XCB_SHM_LIBRARIES})
+endif()
+
+if(PIXMAN_FOUND)
+    target_link_libraries(test_dom_parsing ${PIXMAN_LIBRARIES})
+endif()
+
 # Parser basic test
 add_executable(test_parser_basic
     tests/test_parser_basic.c

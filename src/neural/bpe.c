@@ -37,7 +37,6 @@ SilkBPEOutput silk_bpe_encode(SilkBPETokenizer *bpe, const char *input, size_t l
     
     while (p < end) {
         SilkBPENode *curr = bpe->root;
-        const unsigned char *match_end = p;
         uint16_t best_token = *p; /* Fallback to raw byte */
         size_t match_len = 1;
         
