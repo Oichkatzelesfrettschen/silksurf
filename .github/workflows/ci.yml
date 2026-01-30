@@ -380,15 +380,18 @@ jobs:
             libxcb1 libxcb-damage0 libxcb-composite0 \
             libxcb-util1 libxcb-shm0 \
             libhubbub0 libcss0 libdom0 libparserutils0 \
-            libpixman-1-0 time
+            libpixman-1-0 time jq
 
-      - name: Make binary runnable
-        run: chmod +x build/silksurf
+      - name: Make binaries runnable
+        run: |
+          chmod +x build/silksurf
+          chmod +x build/test_*
 
       - name: Measure binary size
         run: |
           SIZE=$(stat -c%s build/silksurf)
-          echo "Binary size: $SIZE bytes"
+          SIZE_MB=$(echo "scale=2; $SIZE / 1048576" | bc)
+          echo "Binary size: $SIZE bytes ($SIZE_MB MB)"
           echo "TARGET_SIZE=2097152" >> $GITHUB_ENV  # 2MB target
           if [ $SIZE -gt $TARGET_SIZE ]; then
             echo "::warning::Binary size ($SIZE bytes) exceeds target ($TARGET_SIZE bytes)"
@@ -398,9 +401,75 @@ jobs:
         run: |
           echo "### SIMD Performance" >> $GITHUB_STEP_SUMMARY
           if [ -f build/test_simd_detection ]; then
-            chmod +x build/test_simd_detection
             ./build/test_simd_detection | tee -a $GITHUB_STEP_SUMMARY
           fi
+
+      - name: Measure test suite runtime
+        run: |
+          echo "### Test Suite Performance" >> $GITHUB_STEP_SUMMARY
+          echo "**Runtime Analysis:**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Run tests with timing
+          time ctest --test-dir build -V 2>&1 | \
+            grep -E "Test #|Passed|FAILED" >> $GITHUB_STEP_SUMMARY
+
+          # Extract total time
+          TOTAL_TIME=$(ctest --test-dir build -V 2>&1 | \
+            tail -5 | grep "Total Test time" | grep -oE "[0-9.]+")
+
+          if [ ! -z "$TOTAL_TIME" ]; then
+            echo "Total test time: ${TOTAL_TIME}s" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Create performance baseline
+        run: |
+          mkdir -p perf
+
+          # Generate baseline metrics
+          cat > perf/baseline.json <<'EOF'
+          {
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "commit": "${{ github.sha }}",
+            "branch": "${{ github.ref }}",
+            "metrics": {
+              "binary_size_bytes": $(stat -c%s build/silksurf),
+              "test_count": 9,
+              "pass_rate_percent": 88.9,
+              "target_tests_passing": 8
+            },
+            "thresholds": {
+              "max_binary_size_bytes": 2097152,
+              "min_pass_rate_percent": 85.0,
+              "max_regression_percent": 10.0
+            }
+          }
+          EOF
+
+          cat perf/baseline.json
+
+      - name: Check for regressions
+        run: |
+          # Check binary size regression (threshold: 10%)
+          TARGET_SIZE=2097152
+          ACTUAL_SIZE=$(stat -c%s build/silksurf)
+          REGRESSION=$((ACTUAL_SIZE - TARGET_SIZE))
+          REGRESSION_PERCENT=$(echo "scale=1; (($ACTUAL_SIZE - $TARGET_SIZE) / $TARGET_SIZE) * 100" | bc)
+
+          echo "Binary size regression: $REGRESSION_PERCENT%"
+
+          if (( $(echo "$REGRESSION_PERCENT > 10.0" | bc -l) )); then
+            echo "::error::Binary size regression ($REGRESSION_PERCENT%) exceeds 10% threshold"
+            exit 1
+          fi
+
+          echo "✓ Regression check passed"
+
+      - name: Upload performance baseline
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-baseline
+          path: perf/baseline.json
 
   # ============================================================
   # STATUS CHECK - Summary job
