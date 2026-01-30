@@ -641,8 +641,13 @@ static css_error node_presentational_hint(void *pw, void *node, uint32_t *nhints
 /* UA default style callback - provides browser default styles */
 static css_error ua_default_for_property(void *pw, uint32_t property, css_hint *hint) {
     (void)pw;
-    (void)property;
     (void)hint;
+
+    static int call_count = 0;
+    if (++call_count <= 10) {
+        fprintf(stderr, "[CSS Handler] ua_default_for_property called (#%d) for property=%u\n",
+                call_count, property);
+    }
 
     /*
      * KEY INSIGHT: Instead of trying to match all property types with their specific
