@@ -290,11 +290,11 @@ int silk_css_get_computed_style(silk_css_engine_t *engine,
         .viewport_width = INTTOFIX(1024),
         .viewport_height = INTTOFIX(768),
         .font_size_default = INTTOFIX(16),  /* 16px default font size */
-        .font_size_minimum = INTTOFIX(0),   /* No minimum */
-        .device_dpi = INTTOFIX(96),         /* Standard screen DPI */
+        .font_size_minimum = INTTOFIX(6),   /* Minimum 6px to avoid zero */
+        .device_dpi = INTTOFIX(96),         /* Standard screen DPI (96 DPI) */
         .root_style = NULL,
         .pw = NULL,                         /* No client private data */
-        .measure = NULL                     /* No font measurement callback */
+        .measure = NULL                     /* No font measurement callback (text measurement deferred) */
     };
 
     /* Set up media query context (required even if not using media queries) */
@@ -303,7 +303,8 @@ int silk_css_get_computed_style(silk_css_engine_t *engine,
     media.type = CSS_MEDIA_SCREEN;
     media.width = INTTOFIX(1024);   /* Viewport width in CSS pixels */
     media.height = INTTOFIX(768);   /* Viewport height in CSS pixels */
-    media.aspect_ratio = INTTOFIX(1024) / INTTOFIX(768);  /* 4:3 aspect ratio */
+    /* Aspect ratio: 1024/768 = 4/3 = 1.333... in fixed-point (approx 1365 with 10-bit radix) */
+    media.aspect_ratio = 1365;  /* 4/3 as fixed-point (1 << 10) + (1 << 10)/3 */
     media.color = INTTOFIX(8);  /* 8 bits per color channel (24-bit color) */
 
     /* Get underlying libdom node for libcss (it expects raw libdom nodes) */
