@@ -227,6 +227,18 @@ target_link_libraries(test_simd_detection
     m
 )
 
+# Native CSS cascade algorithm test (no libcss dependency)
+add_executable(test_css_cascade_native
+    tests/test_css_cascade_native.c
+    ${MEMORY_SOURCES}
+    src/document/css_cascade.c
+    src/document/css_property_spec.c
+)
+
+target_link_libraries(test_css_cascade_native
+    m
+)
+
 # End-to-end rendering pipeline test
 add_executable(test_e2e_rendering
     tests/test_e2e_rendering.c
@@ -318,6 +330,7 @@ add_test(NAME parser_basic COMMAND test_parser_basic)
 add_test(NAME dom_parsing COMMAND test_dom_parsing)
 add_test(NAME css_engine COMMAND test_css_engine)
 add_test(NAME css_cascade COMMAND test_css_cascade)
+add_test(NAME css_cascade_native COMMAND test_css_cascade_native)
 add_test(NAME simd_detection COMMAND test_simd_detection)
 add_test(NAME e2e_rendering COMMAND test_e2e_rendering)
 add_test(NAME inline_layout COMMAND test_inline_layout)

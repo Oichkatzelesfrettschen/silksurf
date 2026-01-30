@@ -346,8 +346,21 @@ int silk_css_get_computed_style(silk_css_engine_t *engine,
     fprintf(stderr, "[CSS] css_select_style returned: %d\n", err);
 
     if (err != CSS_OK || !results) {
-        fprintf(stderr, "[CSS] ERROR: Style selection failed: %d (results=%p)\n", err, (void *)results);
-        return -1;
+        fprintf(stderr, "[CSS] WARNING: Style selection failed: %d (results=%p)\n", err, (void *)results);
+
+        /* Phase 1: Fallback to default styles when libcss cascade fails */
+        /* This occurs when ua_default_for_property() returns CSS_INVALID for unhandled properties */
+        /* TODO: Replace with native CSS cascade engine in Phase 2 */
+        memset(out_style, 0, sizeof(*out_style));
+        out_style->display = 0;  /* CSS_DISPLAY_BLOCK */
+        out_style->width = -1;   /* auto */
+        out_style->height = -1;  /* auto */
+        out_style->color = 0xFF000000;  /* black */
+        out_style->background_color = 0x00000000;  /* transparent */
+        out_style->font_size = 16;  /* default */
+
+        fprintf(stderr, "[CSS] WARNING: Using fallback defaults instead of error\n");
+        return 0;  /* Success with fallback */
     }
 
     /* Extract computed styles from results */
