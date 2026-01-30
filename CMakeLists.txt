@@ -52,6 +52,7 @@ include_directories(
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/src
     ${XCB_INCLUDE_DIRS}
+    ${XCB_SHM_INCLUDE_DIRS}
     ${LIBHUBBUB_INCLUDE_DIRS}
     ${LIBCSS_INCLUDE_DIRS}
     ${LIBDOM_INCLUDE_DIRS}
@@ -61,6 +62,7 @@ include_directories(
 # Link directories
 link_directories(
     ${XCB_LIBRARY_DIRS}
+    ${XCB_SHM_LIBRARY_DIRS}
     ${LIBHUBBUB_LIBRARY_DIRS}
     ${LIBCSS_LIBRARY_DIRS}
     ${LIBDOM_LIBRARY_DIRS}
@@ -258,6 +260,15 @@ target_link_libraries(test_replaced_elements
     m
 )
 
+# XCB Shared Memory test
+add_executable(test_xcb_shm
+    tests/test_xcb_shm.c
+)
+
+target_link_libraries(test_xcb_shm
+    m
+)
+
 # Fuzzing harness
 add_executable(silksurf_fuzz
     src/fuzz_harness.c
@@ -302,6 +313,7 @@ add_test(NAME simd_detection COMMAND test_simd_detection)
 add_test(NAME e2e_rendering COMMAND test_e2e_rendering)
 add_test(NAME inline_layout COMMAND test_inline_layout)
 add_test(NAME replaced_elements COMMAND test_replaced_elements)
+add_test(NAME xcb_shm COMMAND test_xcb_shm)
 
 # Fuzzing custom targets (requires AFL++ and ENABLE_FUZZING=ON)
 if(ENABLE_FUZZING AND AFL_CC)
