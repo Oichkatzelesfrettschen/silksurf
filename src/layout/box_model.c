@@ -350,16 +350,79 @@ layout_box_t silk_layout_compute_block(
 /* silk_layout_compute_inline is implemented in src/layout/inline.c */
 
 /**
+ * Detect if element is a replaced element (img, video, canvas, etc.)
+ *
+ * Replaced elements have intrinsic dimensions and don't have children to layout.
+ *
+ * \param tag_name Element tag name
+ * \return true if replaced element, false otherwise
+ */
+static bool is_replaced_element(const char *tag_name) {
+    if (!tag_name) return false;
+
+    /* Per HTML spec: replaced elements */
+    return strcmp(tag_name, "img") == 0 ||
+           strcmp(tag_name, "video") == 0 ||
+           strcmp(tag_name, "audio") == 0 ||
+           strcmp(tag_name, "canvas") == 0 ||
+           strcmp(tag_name, "embed") == 0 ||
+           strcmp(tag_name, "iframe") == 0 ||
+           strcmp(tag_name, "input") == 0 ||
+           strcmp(tag_name, "object") == 0;
+}
+
+/**
+ * Parse dimension attribute as integer
+ *
+ * Handles "100", "100px", "50%" formats
+ * Returns -1 if cannot parse or value is invalid
+ *
+ * \param attr_value Attribute value string
+ * \return Dimension in pixels, -1 if invalid/percentage, 0 if auto
+ */
+static inline int32_t __attribute__((unused)) parse_dimension_attribute(const char *attr_value) {
+    if (!attr_value) return 0;  /* auto */
+
+    char *endptr;
+    long value = strtol(attr_value, &endptr, 10);
+
+    if (value < 0 || value > INT32_MAX) {
+        return 0;  /* Invalid or out of range */
+    }
+
+    /* Check for "px" suffix or just numeric */
+    if (*endptr == '\0' || strcmp(endptr, "px") == 0) {
+        return (int32_t)value;
+    }
+
+    /* Percentage not handled here (would need container width) */
+    if (*endptr == '%') {
+        return -1;  /* Mark as percentage */
+    }
+
+    return 0;  /* Invalid format */
+}
+
+/**
  * Layout replaced element (img, video, canvas, etc.)
  *
- * Replaced elements have intrinsic dimensions:
- * - Image: width x height from file
- * - Video: width x height specified in HTML attributes
- * - Canvas: width x height from element size
+ * Replaced elements:
+ * - Have intrinsic width/height (from element attributes or defaults)
+ * - Do not have children to layout
+ * - Aspect ratio preserved if only one dimension specified
+ * - Can be overridden by CSS width/height properties
  *
- * Aspect ratio is preserved if only one dimension is specified:
+ * Algorithm:
+ * 1. Get intrinsic dimensions from element (attributes or defaults)
+ * 2. Apply CSS width/height (explicit values override intrinsic)
+ * 3. Preserve aspect ratio if only one dimension specified
+ * 4. Clamp to min/max width constraints
+ * 5. Apply margins, padding, borders
+ *
+ * Aspect ratio formula:
  * - If width specified, height = width / aspect_ratio
  * - If height specified, width = height * aspect_ratio
+ * - Both specified: use as-is (don't preserve ratio)
  */
 layout_box_t silk_layout_compute_replaced(
     layout_context_t *ctx,
@@ -371,14 +434,109 @@ layout_box_t silk_layout_compute_replaced(
 
     layout_box_t box = box_init();
     box.is_replaced = 1;
+    box.display = DISPLAY_INLINE;  /* Replaced elements are inline-level */
 
-    /* TODO: Read element type (img, video, etc.)
-       TODO: Get intrinsic dimensions
-       TODO: Apply CSS width/height (may override intrinsic)
-       TODO: Preserve aspect ratio */
+    /* ================================================================
+       STEP 1: DETECT ELEMENT TYPE AND GET INTRINSIC DIMENSIONS
+       ================================================================ */
 
-    box.width = 100;     /* Default: 100px */
-    box.height = 100;
+    /* For now, use default intrinsic dimensions
+       TODO: Get actual dimensions from element attributes (width, height)
+       TODO: For images, would need image file metadata (requires image loading)
+       TODO: For canvas, get from canvas.width and canvas.height attributes */
+
+    int32_t intrinsic_width = 150;   /* Default: 150px (common for replaced) */
+    int32_t intrinsic_height = 150;
+    double aspect_ratio = 1.0;       /* Default: 1:1 (square) */
+
+    /* ================================================================
+       STEP 2: RESOLVE MARGINS, PADDING, BORDER (like block layout)
+       ================================================================ */
+
+    int32_t available_width = ctx->viewport_width;
+    if (ctx->root_node && !is_replaced_element("")) {
+        /* Would get parent width if integrated with tree layout */
+    }
+
+    box.margin.left = silk_layout_resolve_margin(
+        element, "margin-left", available_width);
+    box.margin.right = silk_layout_resolve_margin(
+        element, "margin-right", available_width);
+    box.margin.top = silk_layout_resolve_margin(
+        element, "margin-top", available_width);
+    box.margin.bottom = silk_layout_resolve_margin(
+        element, "margin-bottom", available_width);
+
+    /* TODO: Resolve padding and border from CSS
+       For now, use defaults */
+    memset(&box.padding, 0, sizeof(box.padding));
+    memset(&box.border, 0, sizeof(box.border));
+
+    /* ================================================================
+       STEP 3: RESOLVE CSS WIDTH AND HEIGHT
+       ================================================================ */
+
+    int32_t css_width = silk_layout_resolve_width(element, available_width);
+    int32_t css_height = silk_layout_resolve_height(element, ctx->viewport_height);
+
+    /* ================================================================
+       STEP 4: APPLY DIMENSIONS WITH ASPECT RATIO PRESERVATION
+       ================================================================ */
+
+    int32_t final_width = intrinsic_width;
+    int32_t final_height = intrinsic_height;
+
+    if (css_width > 0 && css_height > 0) {
+        /* Both specified: use as-is, don't preserve ratio */
+        final_width = css_width;
+        final_height = css_height;
+    } else if (css_width > 0) {
+        /* Only width specified: preserve aspect ratio */
+        final_width = css_width;
+        if (aspect_ratio > 0) {
+            final_height = (int32_t)(css_width / aspect_ratio);
+        } else {
+            final_height = intrinsic_height;
+        }
+    } else if (css_height > 0) {
+        /* Only height specified: preserve aspect ratio */
+        final_height = css_height;
+        if (aspect_ratio > 0) {
+            final_width = (int32_t)(css_height * aspect_ratio);
+        } else {
+            final_width = intrinsic_width;
+        }
+    } else {
+        /* Neither specified: use intrinsic dimensions */
+        final_width = intrinsic_width;
+        final_height = intrinsic_height;
+    }
+
+    /* ================================================================
+       STEP 5: APPLY CONSTRAINTS AND FINALIZE
+       ================================================================ */
+
+    /* Apply min/max width constraints */
+    final_width = silk_layout_constrain_width(
+        final_width,
+        box.min_width,
+        box.max_width);
+
+    /* Similar for height (TODO: implement silk_layout_constrain_height) */
+    if (box.min_height > 0 && final_height < box.min_height) {
+        final_height = box.min_height;
+    }
+    if (box.max_height > 0 && final_height > box.max_height) {
+        final_height = box.max_height;
+    }
+
+    /* Position (inherited from parent, set by block layout) */
+    box.x = 0;
+    box.y = 0;
+
+    /* Content dimensions (not including margin/padding/border) */
+    box.width = final_width;
+    box.height = final_height;
 
     ctx->box_count++;
     return box;
