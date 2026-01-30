@@ -235,6 +235,18 @@ target_link_libraries(test_e2e_rendering
     m
 )
 
+# Inline layout test
+add_executable(test_inline_layout
+    tests/test_inline_layout.c
+    src/layout/inline.c
+    src/layout/box_model.c
+    ${MEMORY_SOURCES}
+)
+
+target_link_libraries(test_inline_layout
+    m
+)
+
 # Fuzzing harness
 add_executable(silksurf_fuzz
     src/fuzz_harness.c
@@ -277,6 +289,7 @@ add_test(NAME css_engine COMMAND test_css_engine)
 add_test(NAME css_cascade COMMAND test_css_cascade)
 add_test(NAME simd_detection COMMAND test_simd_detection)
 add_test(NAME e2e_rendering COMMAND test_e2e_rendering)
+add_test(NAME inline_layout COMMAND test_inline_layout)
 
 # Fuzzing custom targets (requires AFL++ and ENABLE_FUZZING=ON)
 if(ENABLE_FUZZING AND AFL_CC)
