@@ -97,17 +97,13 @@ fn vm_loop_benchmark(c: &mut Criterion) {
         let ops = (iterations as u64) * 3; // 3 ops per iteration
 
         group.throughput(Throughput::Elements(ops));
-        group.bench_with_input(
-            BenchmarkId::new("iterations", iterations),
-            &chunk,
-            |b, chunk| {
-                b.iter(|| {
-                    let mut vm = Vm::new();
-                    let idx = vm.add_chunk(chunk.clone());
-                    black_box(vm.execute(idx))
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("iterations", iterations), &chunk, |b, chunk| {
+            b.iter(|| {
+                let mut vm = Vm::new();
+                let idx = vm.add_chunk(chunk.clone());
+                black_box(vm.execute(idx))
+            });
+        });
     }
 
     group.finish();

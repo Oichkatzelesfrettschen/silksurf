@@ -9,6 +9,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/silksurf/silksurf"
 keywords = ["javascript", "js", "ecmascript", "vm", "interpreter"]
 categories = ["compilers", "parsing", "wasm"]
+readme = "../README.md"
 
 # CLEANROOM NOTICE: This is an independent implementation.
 # No code from Boa, QuickJS, or other JS engines.

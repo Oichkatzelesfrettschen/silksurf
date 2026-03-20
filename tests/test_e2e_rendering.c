@@ -39,7 +39,6 @@
 #include "silksurf/html_tokenizer.h"
 #include "silksurf/document.h"
 #include "silksurf/dom_node.h"
-#include "silksurf/cascade.h"
 #include "silksurf/layout.h"
 #include "silksurf/renderer.h"
 #include "silksurf/allocator.h"

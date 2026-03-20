@@ -5,8 +5,8 @@
 //! - Heap: Longer strings on the heap
 //! - Interned: Deduplicated strings referenced by index
 //!
-//! Design principles from V8's String, SpiderMonkey's JSLinearString,
-//! and Rust's SmallVec.
+//! Design principles from V8's String, `SpiderMonkey`'s `JSLinearString`,
+//! and Rust's `SmallVec`.
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -18,10 +18,7 @@ const SSO_CAPACITY: usize = 22;
 #[derive(Clone)]
 enum StringRepr {
     /// Inline small string (up to 22 bytes)
-    Inline {
-        bytes: [u8; SSO_CAPACITY],
-        len: u8,
-    },
+    Inline { bytes: [u8; SSO_CAPACITY], len: u8 },
     /// Heap-allocated string
     Heap(Box<HeapString>),
     /// Interned string reference
@@ -50,6 +47,7 @@ pub struct JsString {
 
 impl JsString {
     /// Create from a string slice
+    #[must_use]
     pub fn new(s: &str) -> Self {
         if s.len() <= SSO_CAPACITY {
             let mut bytes = [0u8; SSO_CAPACITY];
@@ -68,6 +66,7 @@ impl JsString {
     }
 
     /// Create from owned String
+    #[must_use]
     pub fn from_string(s: String) -> Self {
         if s.len() <= SSO_CAPACITY {
             let mut bytes = [0u8; SSO_CAPACITY];
@@ -86,6 +85,7 @@ impl JsString {
     }
 
     /// Create interned string reference
+    #[must_use]
     pub fn interned(index: u32) -> Self {
         Self {
             repr: StringRepr::Interned(index),
@@ -93,21 +93,25 @@ impl JsString {
     }
 
     /// Check if inline
+    #[must_use]
     pub fn is_inline(&self) -> bool {
         matches!(self.repr, StringRepr::Inline { .. })
     }
 
     /// Check if heap-allocated
+    #[must_use]
     pub fn is_heap(&self) -> bool {
         matches!(self.repr, StringRepr::Heap(_))
     }
 
     /// Check if interned
+    #[must_use]
     pub fn is_interned(&self) -> bool {
         matches!(self.repr, StringRepr::Interned(_))
     }
 
-    /// Get interned index (only valid if is_interned())
+    /// Get interned index (only valid if `is_interned()`)
+    #[must_use]
     pub fn interned_index(&self) -> Option<u32> {
         match &self.repr {
             StringRepr::Interned(idx) => Some(*idx),
@@ -118,6 +122,7 @@ impl JsString {
     /// Get string as &str (for non-interned strings)
     ///
     /// For interned strings, use the string table.
+    #[must_use]
     pub fn as_str(&self) -> Option<&str> {
         match &self.repr {
             StringRepr::Inline { bytes, len } => {
@@ -130,6 +135,7 @@ impl JsString {
     }
 
     /// Get string length
+    #[must_use]
     pub fn len(&self) -> usize {
         match &self.repr {
             StringRepr::Inline { len, .. } => *len as usize,
@@ -139,16 +145,18 @@ impl JsString {
     }
 
     /// Check if empty
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     /// Get hash (for non-interned strings)
+    #[must_use]
     pub fn hash_value(&self) -> u64 {
         match &self.repr {
             StringRepr::Inline { bytes, len } => hash_bytes(&bytes[..*len as usize]),
             StringRepr::Heap(h) => h.hash,
-            StringRepr::Interned(idx) => *idx as u64, // Use index as pseudo-hash
+            StringRepr::Interned(idx) => u64::from(*idx), // Use index as pseudo-hash
         }
     }
 }
@@ -183,7 +191,7 @@ impl Hash for JsString {
 impl std::fmt::Debug for JsString {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.as_str() {
-            Some(s) => write!(f, "JsString({:?})", s),
+            Some(s) => write!(f, "JsString({s:?})"),
             None => write!(f, "JsString(interned:{})", self.interned_index().unwrap_or(0)),
         }
     }
@@ -197,7 +205,7 @@ fn hash_str(s: &str) -> u64 {
 fn hash_bytes(bytes: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325; // FNV-1a offset basis
     for &byte in bytes {
-        hash ^= byte as u64;
+        hash ^= u64::from(byte);
         hash = hash.wrapping_mul(0x0100_0000_01b3); // FNV-1a prime
     }
     hash
@@ -214,6 +222,7 @@ pub struct StringInternTable {
 
 impl StringInternTable {
     /// Create empty intern table
+    #[must_use]
     pub fn new() -> Self {
         Self {
             strings: Vec::new(),
@@ -222,6 +231,7 @@ impl StringInternTable {
     }
 
     /// Create with capacity
+    #[must_use]
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             strings: Vec::with_capacity(capacity),
@@ -275,16 +285,18 @@ impl StringInternTable {
     }
 
     /// Number of interned strings
+    #[must_use]
     pub fn len(&self) -> usize {
         self.strings.len()
     }
 
     /// Check if empty
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.strings.is_empty()
     }
 
-    /// Create a JsString reference to an interned string
+    /// Create a `JsString` reference to an interned string
     pub fn make_ref(&mut self, s: &str) -> JsString {
         let idx = self.intern(s);
         JsString::interned(idx)
@@ -298,18 +310,19 @@ impl Default for StringInternTable {
 }
 
 /// Concatenation helper - creates a new string or rope
+#[must_use]
 pub fn concat(a: &JsString, b: &JsString, table: &StringInternTable) -> JsString {
     // Get actual strings
     let s1 = match a.as_str() {
         Some(s) => s.to_string(),
-        None => table.get(a.interned_index().unwrap_or(0))
+        None => table
+            .get(a.interned_index().unwrap_or(0))
             .unwrap_or("")
             .to_string(),
     };
     let s2 = match b.as_str() {
         Some(s) => s,
-        None => table.get(b.interned_index().unwrap_or(0))
-            .unwrap_or(""),
+        None => table.get(b.interned_index().unwrap_or(0)).unwrap_or(""),
     };
 
     let result = s1 + s2;
@@ -317,11 +330,11 @@ pub fn concat(a: &JsString, b: &JsString, table: &StringInternTable) -> JsString
 }
 
 /// Substring helper
+#[must_use]
 pub fn substring(s: &JsString, start: usize, end: usize, table: &StringInternTable) -> JsString {
     let str_content = match s.as_str() {
         Some(s) => s,
-        None => table.get(s.interned_index().unwrap_or(0))
-            .unwrap_or(""),
+        None => table.get(s.interned_index().unwrap_or(0)).unwrap_or(""),
     };
 
     let start = start.min(str_content.len());

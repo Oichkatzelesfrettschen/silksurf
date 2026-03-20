@@ -1,8 +1,16 @@
 #include "css_selector_match.h"
-#include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <ctype.h>
+
+/* Copy at most len bytes of src into arena-owned memory and NUL-terminate. */
+static const char *arena_strndup(silk_arena_t *arena, const char *src, size_t len) {
+    char *dst = silk_arena_alloc(arena, len + 1);
+    if (!dst) return NULL;
+    memcpy(dst, src, len);
+    dst[len] = '\0';
+    return dst;
+}
 
 /* ============================================================================
  * CSS Selector Matching Implementation
@@ -101,10 +109,10 @@ static bool element_has_attribute(dom_element *element, const char *attr_name, c
  * Selector Parsing
  * ============================================================================ */
 
-css_rule_selector_t *css_selector_parse(const char *selector_str) {
-    if (!selector_str) return NULL;
+css_rule_selector_t *css_selector_parse(silk_arena_t *arena, const char *selector_str) {
+    if (!arena || !selector_str) return NULL;
 
-    css_rule_selector_t *selector = malloc(sizeof(css_rule_selector_t));
+    css_rule_selector_t *selector = silk_arena_alloc(arena, sizeof(css_rule_selector_t));
     if (!selector) return NULL;
 
     memset(selector, 0, sizeof(*selector));
@@ -119,7 +127,7 @@ css_rule_selector_t *css_selector_parse(const char *selector_str) {
         while (*p && isspace(*p)) p++;
         if (!*p) break;
 
-        css_selector_t *sel = malloc(sizeof(css_selector_t));
+        css_selector_t *sel = silk_arena_alloc(arena, sizeof(css_selector_t));
         if (!sel) return selector;
 
         memset(sel, 0, sizeof(*sel));
@@ -132,7 +140,7 @@ css_rule_selector_t *css_selector_parse(const char *selector_str) {
             while (*p && !isspace(*p) && *p != '>' && *p != '+') p++;
 
             size_t len = p - class_start;
-            sel->name = strndup(class_start, len);
+            sel->name = arena_strndup(arena, class_start, len);
             sel->type = CSS_SELECTOR_CLASS;
             sel->specificity.classes_and_attrs = 1;
         } else if (*p == '#') {
@@ -142,7 +150,7 @@ css_rule_selector_t *css_selector_parse(const char *selector_str) {
             while (*p && !isspace(*p) && *p != '>' && *p != '+') p++;
 
             size_t len = p - id_start;
-            sel->name = strndup(id_start, len);
+            sel->name = arena_strndup(arena, id_start, len);
             sel->type = CSS_SELECTOR_ID;
             sel->specificity.ids = 1;
         } else if (*p == '*') {
@@ -155,7 +163,7 @@ css_rule_selector_t *css_selector_parse(const char *selector_str) {
             while (*p && !isspace(*p) && *p != '>' && *p != '+' && *p != '.' && *p != '#') p++;
 
             size_t len = p - type_start;
-            sel->name = strndup(type_start, len);
+            sel->name = arena_strndup(arena, type_start, len);
             sel->type = CSS_SELECTOR_TYPE;
             sel->specificity.elements = 1;
         }
@@ -174,18 +182,10 @@ css_rule_selector_t *css_selector_parse(const char *selector_str) {
 }
 
 void css_selector_free(css_rule_selector_t *selector) {
-    if (!selector) return;
-
-    css_selector_t *current = selector->selectors;
-    while (current) {
-        css_selector_t *next = current->next;
-        free((void *)current->name);
-        free((void *)current->value);
-        free(current);
-        current = next;
-    }
-
-    free(selector);
+    /* No-op: all memory is arena-owned and freed as a batch when the arena
+     * is reset or destroyed.  The parameter is accepted for API compatibility
+     * with callers that existed before the arena migration. */
+    (void)selector;
 }
 
 css_specificity_t css_selector_specificity(const css_rule_selector_t *selector) {
@@ -274,6 +274,7 @@ bool css_selector_matches(
  * ============================================================================ */
 
 css_match_results_t *css_stylesheet_match_element(
+    silk_arena_t *arena,
     css_stylesheet *stylesheet,
     dom_element *element,
     dom_element *parent,
@@ -282,9 +283,9 @@ css_match_results_t *css_stylesheet_match_element(
     (void)parent;   /* Reserved for pseudo-class context */
     (void)origin;   /* Reserved for origin tracking */
 
-    if (!stylesheet || !element) return NULL;
+    if (!arena || !stylesheet || !element) return NULL;
 
-    css_match_results_t *results = malloc(sizeof(css_match_results_t));
+    css_match_results_t *results = silk_arena_alloc(arena, sizeof(css_match_results_t));
     if (!results) return NULL;
 
     memset(results, 0, sizeof(*results));
@@ -297,11 +298,8 @@ css_match_results_t *css_stylesheet_match_element(
 }
 
 void css_match_results_free(css_match_results_t *results) {
-    if (!results) return;
-    free(results->matched_rules);
-    free(results->specificities);
-    free(results->origins);
-    free(results);
+    /* No-op: all memory is arena-owned.  Accepted for API compatibility. */
+    (void)results;
 }
 
 /* ============================================================================

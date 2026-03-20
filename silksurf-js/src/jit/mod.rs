@@ -20,13 +20,13 @@
 
 #![cfg(feature = "jit")]
 
+mod code_cache;
 mod compiler;
 mod ir_builder;
-mod code_cache;
 
-pub use compiler::{JitCompiler, JitError, CompiledFunction};
-pub use ir_builder::IrBuilder;
 pub use code_cache::CodeCache;
+pub use compiler::{CompiledFunction, JitCompiler, JitError};
+pub use ir_builder::IrBuilder;
 
 /// Threshold for JIT compilation (number of calls)
 pub const JIT_THRESHOLD: u32 = 100;

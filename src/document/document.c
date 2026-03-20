@@ -6,6 +6,9 @@
 #include "silksurf/document.h"
 #include "silksurf/allocator.h"
 #include "silksurf/dom_node.h"
+#include "silksurf/css_parser.h"
+#include "silksurf/layout.h"
+#include "silksurf/renderer.h"
 
 /* Document structure - holds DOM tree and rendering state */
 struct silk_document {
@@ -27,6 +30,13 @@ struct silk_document {
     int loaded;
     dom_hubbub_parser *parser;      /* libdom/hubbub parser instance */
     dom_document *dom_doc;          /* Underlying libdom document */
+
+    /* CSS Engine */
+    silk_css_engine_t *css_engine;
+
+    /* Layout */
+    layout_context_t *layout_ctx;
+    layout_box_t *root_box;
 
     /* Statistics */
     int element_count;
@@ -244,39 +254,86 @@ int silk_document_load_html_file(silk_document_t *doc, const char *filename) {
     return result;
 }
 
+/* Recursive CSS style computation for entire subtree */
+static void apply_styles_recursive(silk_css_engine_t *engine, silk_dom_node_t *node) {
+    if (!node || !engine) return;
+
+    if (silk_dom_node_get_type(node) == SILK_NODE_ELEMENT) {
+        silk_computed_style_t *style = silk_dom_node_get_style(node);
+        if (style) {
+            silk_css_get_computed_style(engine, node, style);
+        }
+    }
+
+    silk_dom_node_t *child = silk_dom_node_get_first_child(node);
+    while (child) {
+        apply_styles_recursive(engine, child);
+        child = silk_dom_node_get_next_sibling(child);
+    }
+}
+
 /* Layout document - compute element positions and sizes */
 int silk_document_layout(silk_document_t *doc, int width, int height) {
-    if (!doc || width <= 0 || height <= 0)
-        return -1;
-
-    if (!doc->root)
-        return -1;  /* No DOM tree to layout */
+    if (!doc || width <= 0 || height <= 0) return -1;
+    if (!doc->root) return -1;
 
     doc->viewport_width = width;
     doc->viewport_height = height;
 
-    /* TODO: Implement layout algorithm
-       - Traverse DOM tree
-       - Apply CSS styles
-       - Compute box model for each element
-       - Handle positioned elements
-       - Text wrapping and measurement
-    */
+    /* Step 1: Create/reuse CSS engine */
+    if (!doc->css_engine) {
+        doc->css_engine = silk_css_engine_create(doc->arena);
+        if (!doc->css_engine) return -1;
+    }
+
+    /* Step 2: Apply CSS styles to all elements */
+    apply_styles_recursive(doc->css_engine, doc->root);
+
+    /* Step 3: Compute layout */
+    doc->layout_ctx = silk_layout_context_create(
+        doc->root, width, height, doc->arena);
+    if (!doc->layout_ctx) return -1;
+
+    if (!silk_layout_compute(doc->layout_ctx)) return -1;
+
+    /* Cache root layout box for the render phase */
+    doc->root_box = doc->layout_ctx->root_box;
 
     return 0;
 }
 
 /* Render document to screen via renderer */
 void silk_document_render(silk_document_t *doc) {
-    if (!doc || !doc->renderer || !doc->loaded)
-        return;
+    if (!doc || !doc->renderer || !doc->loaded || !doc->root) return;
 
-    /* TODO: Implement rendering
-       - Traverse layout nodes
-       - Call renderer methods for each element
-       - Handle damage regions
-       - Update display
-    */
+    /* Build render queue from layout tree */
+    silk_render_queue_t queue;
+    silk_render_queue_init(&queue);
+
+    /* Paint via layout tree when available (uses correct x/y from layout engine),
+     * or fall back to legacy DOM paint for pages that skipped silk_document_layout(). */
+    if (doc->root_box) {
+        silk_paint_layout_tree(doc->root_box, NULL, &queue);
+    } else {
+        silk_paint_node(doc->root, &queue);
+    }
+
+    /* Execute render commands */
+    silk_renderer_begin_frame(doc->renderer);
+    silk_renderer_clear(doc->renderer, SILK_COLOR_WHITE);
+
+    for (int i = 0; i < queue.count; i++) {
+        silk_draw_rect_cmd_t *cmd = &queue.commands[i];
+        uint8_t a = (cmd->color >> 24) & 0xFF;
+        uint8_t r = (cmd->color >> 16) & 0xFF;
+        uint8_t g = (cmd->color >> 8) & 0xFF;
+        uint8_t b = cmd->color & 0xFF;
+        silk_renderer_fill_rect(doc->renderer, cmd->x, cmd->y, cmd->w, cmd->h,
+                                silk_color(a, r, g, b));
+    }
+
+    silk_renderer_end_frame(doc->renderer);
+    silk_renderer_present(doc->renderer);
 }
 
 /* Set the rendering backend */

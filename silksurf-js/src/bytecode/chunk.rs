@@ -17,7 +17,7 @@ pub enum Constant {
     String(u32),
     /// Function reference (index into function table)
     Function(u32),
-    /// BigInt (stored as bytes for arbitrary precision)
+    /// `BigInt` (stored as bytes for arbitrary precision)
     BigInt(Vec<u8>),
     /// Regular expression (pattern index, flags)
     RegExp { pattern: u32, flags: u16 },
@@ -85,6 +85,7 @@ pub struct Chunk {
 
 impl Chunk {
     /// Create a new empty chunk
+    #[must_use]
     pub fn new() -> Self {
         Self {
             instructions: Vec::new(),
@@ -102,7 +103,7 @@ impl Chunk {
     /// Add a constant and return its index
     pub fn add_constant(&mut self, constant: Constant) -> u16 {
         let idx = self.constants.len();
-        assert!(idx <= u16::MAX as usize, "constant pool overflow");
+        assert!(u16::try_from(idx).is_ok(), "constant pool overflow");
         self.constants.push(constant);
         idx as u16
     }
@@ -150,21 +151,25 @@ impl Chunk {
     }
 
     /// Get instruction at offset
+    #[must_use]
     pub fn get(&self, offset: usize) -> Option<Instruction> {
         self.instructions.get(offset).copied()
     }
 
     /// Get constant at index
+    #[must_use]
     pub fn get_constant(&self, idx: u16) -> Option<&Constant> {
         self.constants.get(idx as usize)
     }
 
     /// Current instruction count
+    #[must_use]
     pub fn len(&self) -> usize {
         self.instructions.len()
     }
 
     /// Check if empty
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.instructions.is_empty()
     }
@@ -182,6 +187,7 @@ impl Chunk {
     }
 
     /// Find handler for instruction at given offset
+    #[must_use]
     pub fn find_handler(&self, offset: usize) -> Option<&ExceptionHandler> {
         let offset = offset as u32;
         self.handlers
@@ -190,14 +196,18 @@ impl Chunk {
     }
 
     /// Disassemble the chunk into human-readable form
+    #[must_use]
     pub fn disassemble(&self) -> String {
+        use std::fmt::Write as _;
         let mut output = String::new();
-        output.push_str(&format!(
-            "; Chunk: {} instructions, {} constants, {} registers\n",
+        writeln!(
+            output,
+            "; Chunk: {} instructions, {} constants, {} registers",
             self.instructions.len(),
             self.constants.len(),
             self.register_count
-        ));
+        )
+        .unwrap();
 
         if self.strict {
             output.push_str("; strict mode\n");
@@ -211,28 +221,34 @@ impl Chunk {
 
         output.push_str("\n; Constants:\n");
         for (i, c) in self.constants.iter().enumerate() {
-            output.push_str(&format!("  #{}: {:?}\n", i, c));
+            writeln!(output, "  #{i}: {c:?}").unwrap();
         }
 
         output.push_str("\n; Instructions:\n");
         for (offset, instr) in self.instructions.iter().enumerate() {
-            output.push_str(&format!(
-                "  {:04x}: {}\n",
-                offset,
-                self.disassemble_instruction(*instr)
-            ));
+            writeln!(output, "  {:04x}: {}", offset, Self::disassemble_instruction(*instr))
+                .unwrap();
         }
 
         output
     }
 
     /// Disassemble a single instruction
-    fn disassemble_instruction(&self, instr: Instruction) -> String {
+    fn disassemble_instruction(instr: Instruction) -> String {
         let Some(op) = instr.opcode_enum() else {
             return format!("UNKNOWN(0x{:02x})", instr.opcode());
         };
 
-        use Opcode::*;
+        use Opcode::{
+            Add, BitAnd, BitNot, BitOr, BitXor, Call, CallMethod, Debugger, Dec, DeleteElem,
+            DeleteProp, Div, Eq, Ge, GetCapture, GetElem, GetGlobal, GetLocal, GetProp, Gt, Halt,
+            In, Inc, Instanceof, Jmp, JmpFalse, JmpNotNullish, JmpNullish, JmpTrue, Le, LoadConst,
+            LoadFalse, LoadMinusOne, LoadNull, LoadOne, LoadSmi, LoadTrue, LoadUndefined, LoadZero,
+            Lt, Mod, Mov, Mul, Ne, Neg, NewArray, NewArrow, NewAsync, NewClass, NewFunction,
+            NewGenerator, NewObject, NewRegExp, Nop, Not, Pow, Ret, RetUndefined, SetCapture,
+            SetElem, SetGlobal, SetLocal, SetProp, Shl, Shr, StrictEq, StrictNe, Sub, TailCall,
+            Throw, Typeof, Ushr,
+        };
         match op {
             // No operands
             Nop => "NOP".to_string(),
@@ -299,7 +315,9 @@ impl Chunk {
 
             // Calls
             Call => format!("CALL r{}, r{}, argc={}", instr.dst(), instr.src1(), instr.src2()),
-            CallMethod => format!("CALL_METHOD r{}, r{}, #{}", instr.dst(), instr.src1(), instr.src2()),
+            CallMethod => {
+                format!("CALL_METHOD r{}, r{}, #{}", instr.dst(), instr.src1(), instr.src2())
+            }
             TailCall => format!("TAIL_CALL r{}, argc={}", instr.dst(), instr.src1()),
 
             // Properties
@@ -307,10 +325,16 @@ impl Chunk {
             SetProp => format!("SET_PROP r{}, #{}, r{}", instr.dst(), instr.src1(), instr.src2()),
             GetElem => format!("GET_ELEM r{}, r{}, r{}", instr.dst(), instr.src1(), instr.src2()),
             SetElem => format!("SET_ELEM r{}, r{}, r{}", instr.dst(), instr.src1(), instr.src2()),
-            DeleteProp => format!("DELETE_PROP r{}, r{}, #{}", instr.dst(), instr.src1(), instr.src2()),
-            DeleteElem => format!("DELETE_ELEM r{}, r{}, r{}", instr.dst(), instr.src1(), instr.src2()),
+            DeleteProp => {
+                format!("DELETE_PROP r{}, r{}, #{}", instr.dst(), instr.src1(), instr.src2())
+            }
+            DeleteElem => {
+                format!("DELETE_ELEM r{}, r{}, r{}", instr.dst(), instr.src1(), instr.src2())
+            }
             In => format!("IN r{}, r{}, r{}", instr.dst(), instr.src1(), instr.src2()),
-            Instanceof => format!("INSTANCEOF r{}, r{}, r{}", instr.dst(), instr.src1(), instr.src2()),
+            Instanceof => {
+                format!("INSTANCEOF r{}, r{}, r{}", instr.dst(), instr.src1(), instr.src2())
+            }
 
             // Object creation
             NewObject => format!("NEW_OBJECT r{}", instr.dst()),
@@ -325,8 +349,18 @@ impl Chunk {
             // Scope
             GetLocal => format!("GET_LOCAL r{}, slot={}", instr.dst(), instr.src1()),
             SetLocal => format!("SET_LOCAL slot={}, r{}", instr.dst(), instr.src1()),
-            GetCapture => format!("GET_CAPTURE r{}, depth={}, slot={}", instr.dst(), instr.src1(), instr.src2()),
-            SetCapture => format!("SET_CAPTURE depth={}, slot={}, r{}", instr.dst(), instr.src1(), instr.src2()),
+            GetCapture => format!(
+                "GET_CAPTURE r{}, depth={}, slot={}",
+                instr.dst(),
+                instr.src1(),
+                instr.src2()
+            ),
+            SetCapture => format!(
+                "SET_CAPTURE depth={}, slot={}, r{}",
+                instr.dst(),
+                instr.src1(),
+                instr.src2()
+            ),
             GetGlobal => format!("GET_GLOBAL r{}, #{}", instr.dst(), instr.const_idx()),
             SetGlobal => format!("SET_GLOBAL #{}, r{}", instr.const_idx(), instr.dst()),
 
@@ -339,6 +373,7 @@ impl Chunk {
     ///
     /// Uses rkyv for zero-copy deserialization. The returned bytes can be
     /// written to disk and memory-mapped for instant loading.
+    #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         rkyv::to_bytes::<rkyv::rancor::Error>(self)
             .expect("chunk serialization failed")

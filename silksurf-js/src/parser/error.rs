@@ -2,8 +2,9 @@
 //!
 //! Error recovery: panic mode + synchronization at statement boundaries.
 
-use crate::lexer::{Span, TokenKind};
 use std::fmt;
+
+use crate::lexer::{Span, TokenKind};
 
 /// A parse error
 #[derive(Debug, Clone)]
@@ -30,6 +31,7 @@ pub enum ParseErrorKind {
 }
 
 impl ParseError {
+    #[must_use]
     pub fn unexpected_token(span: Span, expected: Vec<&'static str>, found: &str) -> Self {
         Self {
             kind: ParseErrorKind::UnexpectedToken {
@@ -41,6 +43,7 @@ impl ParseError {
         }
     }
 
+    #[must_use]
     pub fn unexpected_eof(span: Span, expected: &'static str) -> Self {
         Self {
             kind: ParseErrorKind::UnexpectedEof { expected },
@@ -59,6 +62,7 @@ impl ParseError {
         }
     }
 
+    #[must_use]
     pub fn invalid_assignment_target(span: Span) -> Self {
         Self {
             kind: ParseErrorKind::InvalidAssignmentTarget,
@@ -67,6 +71,7 @@ impl ParseError {
         }
     }
 
+    #[must_use]
     pub fn with_context(mut self, context: impl Into<String>) -> Self {
         self.context = Some(context.into());
         self
@@ -78,18 +83,18 @@ impl fmt::Display for ParseError {
         match &self.kind {
             ParseErrorKind::UnexpectedToken { expected, found } => {
                 if expected.is_empty() {
-                    write!(f, "Unexpected token: {}", found)
+                    write!(f, "Unexpected token: {found}")
                 } else if expected.len() == 1 {
                     write!(f, "Expected {}, found {}", expected[0], found)
                 } else {
-                    write!(f, "Expected one of {:?}, found {}", expected, found)
+                    write!(f, "Expected one of {expected:?}, found {found}")
                 }
             }
             ParseErrorKind::UnexpectedEof { expected } => {
-                write!(f, "Unexpected end of file, expected {}", expected)
+                write!(f, "Unexpected end of file, expected {expected}")
             }
             ParseErrorKind::InvalidSyntax { message } => {
-                write!(f, "Invalid syntax: {}", message)
+                write!(f, "Invalid syntax: {message}")
             }
             ParseErrorKind::InvalidAssignmentTarget => {
                 write!(f, "Invalid left-hand side in assignment")
@@ -102,7 +107,7 @@ impl fmt::Display for ParseError {
         write!(f, " at {}:{}", self.span.start, self.span.end)?;
 
         if let Some(ctx) = &self.context {
-            write!(f, " ({})", ctx)?;
+            write!(f, " ({ctx})")?;
         }
 
         Ok(())
@@ -124,6 +129,7 @@ pub enum SyncPoint {
 }
 
 /// Check if a token kind is a synchronization point
+#[must_use]
 pub fn is_sync_point(kind: &TokenKind, point: SyncPoint) -> bool {
     match point {
         SyncPoint::Statement => matches!(

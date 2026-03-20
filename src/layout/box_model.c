@@ -29,6 +29,13 @@
 
 #include "silksurf/layout.h"
 #include "silksurf/allocator.h"
+#include "silksurf/css_parser.h"
+
+#include "silksurf/dom_node.h"
+
+/* Flag set by silk_layout_compute to indicate DOM-aware mode.
+ * When false, resolve functions return defaults (for math-only tests). */
+static bool g_layout_dom_mode = false;
 
 /* Internal helper: safely add two edge values, detect overflow */
 static inline bool safe_add_edges(int32_t a, int32_t b, int32_t *result) {
@@ -144,14 +151,16 @@ int32_t silk_layout_resolve_width(
     void *element,
     int32_t container_width
 ) {
-    (void)element;      /* Unused: would read CSS computed_style */
+    if (!element || !g_layout_dom_mode) return 0;
+
+    silk_computed_style_t *style = silk_dom_node_get_style((silk_dom_node_t *)element);
+    if (!style) return 0;
+
+    if (style->width == -1) return 0;
+    if (style->width > 0) return style->width;
+
     (void)container_width;
-
-    /* TODO: Read element->computed_style->width */
-    /* TODO: Parse CSS value (px, %, em, etc.) */
-    /* TODO: Return computed width or 0 for auto */
-
-    return 0;  /* Auto width (caller handles) */
+    return 0;
 }
 
 /**
@@ -164,13 +173,16 @@ int32_t silk_layout_resolve_height(
     void *element,
     int32_t container_height
 ) {
-    (void)element;
+    if (!element || !g_layout_dom_mode) return 0;
+
+    silk_computed_style_t *style = silk_dom_node_get_style((silk_dom_node_t *)element);
+    if (!style) return 0;
+
+    if (style->height == -1) return 0;
+    if (style->height > 0) return style->height;
+
     (void)container_height;
-
-    /* TODO: Read element->computed_style->height */
-    /* TODO: Return computed height or 0 for auto */
-
-    return 0;  /* Auto height (determined by children) */
+    return 0;
 }
 
 /**
@@ -189,14 +201,19 @@ int32_t silk_layout_resolve_margin(
     const char *property_name,
     int32_t container_width
 ) {
-    (void)element;
-    (void)property_name;
+    if (!element || !property_name || !g_layout_dom_mode) return 0;
+
+    silk_computed_style_t *style = silk_dom_node_get_style((silk_dom_node_t *)element);
+    if (!style) return 0;
+
     (void)container_width;
 
-    /* TODO: Read element->computed_style->(margin-left/right/top/bottom) */
-    /* TODO: Parse and return value */
+    if (strcmp(property_name, "margin-top") == 0) return style->margin_top;
+    if (strcmp(property_name, "margin-right") == 0) return style->margin_right;
+    if (strcmp(property_name, "margin-bottom") == 0) return style->margin_bottom;
+    if (strcmp(property_name, "margin-left") == 0) return style->margin_left;
 
-    return 0;  /* Zero margin (default) */
+    return 0;
 }
 
 /**
@@ -372,38 +389,6 @@ static bool is_replaced_element(const char *tag_name) {
 }
 
 /**
- * Parse dimension attribute as integer
- *
- * Handles "100", "100px", "50%" formats
- * Returns -1 if cannot parse or value is invalid
- *
- * \param attr_value Attribute value string
- * \return Dimension in pixels, -1 if invalid/percentage, 0 if auto
- */
-static inline int32_t __attribute__((unused)) parse_dimension_attribute(const char *attr_value) {
-    if (!attr_value) return 0;  /* auto */
-
-    char *endptr;
-    long value = strtol(attr_value, &endptr, 10);
-
-    if (value < 0 || value > INT32_MAX) {
-        return 0;  /* Invalid or out of range */
-    }
-
-    /* Check for "px" suffix or just numeric */
-    if (*endptr == '\0' || strcmp(endptr, "px") == 0) {
-        return (int32_t)value;
-    }
-
-    /* Percentage not handled here (would need container width) */
-    if (*endptr == '%') {
-        return -1;  /* Mark as percentage */
-    }
-
-    return 0;  /* Invalid format */
-}
-
-/**
  * Layout replaced element (img, video, canvas, etc.)
  *
  * Replaced elements:
@@ -556,35 +541,116 @@ layout_box_t silk_layout_compute_replaced(
  * Time complexity: O(n) where n = element count
  * Space complexity: O(h) where h = tree height (recursion stack)
  */
-bool silk_layout_compute(layout_context_t *ctx) {
-    if (!ctx || !ctx->root_node) {
-        return false;
+/* Recursive layout: compute layout box for a DOM node and its children */
+static layout_box_t *layout_node_recursive(
+    layout_context_t *ctx,
+    silk_dom_node_t *node,
+    const layout_box_t *parent_box,
+    int32_t *cursor_y
+) {
+    if (!node || !ctx || !ctx->arena) return NULL;
+
+    /* Skip non-element nodes (text, comment, etc.) */
+    if (silk_dom_node_get_type(node) != SILK_NODE_ELEMENT) return NULL;
+
+    /* Check display type from computed style */
+    silk_computed_style_t *style = silk_dom_node_get_style(node);
+    if (style && style->display == 4) return NULL;  /* display: none */
+
+    /* Compute this element's box */
+    layout_box_t *box = silk_arena_alloc(ctx->arena, sizeof(layout_box_t));
+    if (!box) return NULL;
+
+    *box = silk_layout_compute_block(ctx, node, parent_box);
+
+    /* Link this box back to its DOM node for the paint phase */
+    box->dom_node = node;
+    box->first_child = NULL;
+    box->next_sibling = NULL;
+
+    /* Set vertical position from cursor */
+    box->y = *cursor_y + box->margin.top;
+
+    /* Extract padding and border from style */
+    if (style) {
+        box->padding.top = style->padding_top;
+        box->padding.right = style->padding_right;
+        box->padding.bottom = style->padding_bottom;
+        box->padding.left = style->padding_left;
+        box->border.top = style->border_top;
+        box->border.right = style->border_right;
+        box->border.bottom = style->border_bottom;
+        box->border.left = style->border_left;
     }
 
-    /* Root layout box covers entire viewport */
-    layout_box_t root_box = {0};
-    root_box.x = 0;
-    root_box.y = 0;
-    root_box.width = ctx->viewport_width;
-    root_box.height = ctx->viewport_height;
-    root_box.display = DISPLAY_BLOCK;
-    root_box.opacity = 255;
+    /* Layout children, building the sibling chain for the paint phase */
+    int32_t child_cursor_y = box->y + box->border.top + box->padding.top;
+    int32_t prev_margin_bottom = 0;
+    layout_box_t *last_child_box = NULL;
 
-    /* TODO: Implement recursive tree traversal
-       - Read element's display type from CSS
-       - Call appropriate layout function
-       - Store computed box (in arena allocation pool)
-       - Recurse on children
-       - Collapse margins for adjacent siblings
-       - Calculate auto height (sum of children)
+    silk_dom_node_t *child = silk_dom_node_get_first_child(node);
+    while (child) {
+        if (silk_dom_node_get_type(child) == SILK_NODE_ELEMENT) {
+            silk_computed_style_t *child_style = silk_dom_node_get_style(child);
+            int32_t child_margin_top = child_style ? child_style->margin_top : 0;
 
-       For now, just count that we're processing:
-    */
-    ctx->box_count = 1;
+            /* Margin collapse between siblings */
+            int32_t collapsed = silk_layout_collapse_margins(prev_margin_bottom, child_margin_top);
+            child_cursor_y -= prev_margin_bottom;
+            child_cursor_y -= child_margin_top;
+            child_cursor_y += collapsed;
+
+            layout_box_t *child_box = layout_node_recursive(ctx, child, box, &child_cursor_y);
+            if (child_box) {
+                /* Link into parent's child chain */
+                if (!box->first_child) {
+                    box->first_child = child_box;
+                } else {
+                    last_child_box->next_sibling = child_box;
+                }
+                last_child_box = child_box;
+
+                int32_t child_total = child_box->y + child_box->border.top + child_box->padding.top
+                    + child_box->height + child_box->padding.bottom + child_box->border.bottom;
+                prev_margin_bottom = child_box->margin.bottom;
+                child_cursor_y = child_total + prev_margin_bottom;
+            }
+        }
+        child = silk_dom_node_get_next_sibling(child);
+    }
+
+    /* Auto height: from content top to last child bottom */
+    if (box->height == 0) {
+        int32_t content_top = box->y + box->border.top + box->padding.top;
+        box->height = child_cursor_y - content_top - prev_margin_bottom;
+        if (box->height < 0) box->height = 0;
+    }
+
+    /* Update cursor past this box */
+    *cursor_y = box->y + box->border.top + box->padding.top + box->height
+                + box->padding.bottom + box->border.bottom;
+
+    /* Store box on the node for paint phase */
+    silk_dom_node_set_layout_index(node, (int)ctx->box_count);
+    ctx->box_count++;
+
+    return box;
+}
+
+bool silk_layout_compute(layout_context_t *ctx) {
+    if (!ctx || !ctx->root_node) return false;
+
+    g_layout_dom_mode = true;
+
+    layout_box_t viewport = {0};
+    viewport.width = ctx->viewport_width;
+    viewport.height = ctx->viewport_height;
+    viewport.display = DISPLAY_BLOCK;
+    viewport.opacity = 255;
+
+    int32_t cursor_y = 0;
+    ctx->root_box = layout_node_recursive(ctx, (silk_dom_node_t *)ctx->root_node, &viewport, &cursor_y);
     ctx->reflow_count++;
-
-    /* Store root box for future subtree layout */
-    (void)root_box;  /* Will be used in full implementation */
 
     return true;
 }

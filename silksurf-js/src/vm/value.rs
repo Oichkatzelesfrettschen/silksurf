@@ -3,16 +3,17 @@
 //! Simple tagged enum for Phase 4. Phase 5 will implement NaN-boxing
 //! for 64-bit pointer-sized values with inline numbers.
 
-use std::rc::Rc;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 /// JavaScript value (simple representation for Phase 4)
 ///
 /// Phase 5 will replace this with NaN-boxed representation for performance.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum Value {
     /// undefined
+    #[default]
     Undefined,
     /// null
     Null,
@@ -28,39 +29,38 @@ pub enum Value {
     Function(Rc<JsFunction>),
 }
 
-impl Default for Value {
-    fn default() -> Self {
-        Value::Undefined
-    }
-}
-
 impl Value {
     /// Create undefined
     #[inline]
+    #[must_use]
     pub const fn undefined() -> Self {
         Value::Undefined
     }
 
     /// Create null
     #[inline]
+    #[must_use]
     pub const fn null() -> Self {
         Value::Null
     }
 
     /// Create boolean
     #[inline]
+    #[must_use]
     pub const fn boolean(b: bool) -> Self {
         Value::Boolean(b)
     }
 
     /// Create number
     #[inline]
+    #[must_use]
     pub const fn number(n: f64) -> Self {
         Value::Number(n)
     }
 
-    /// Check if value is truthy (ToBoolean)
+    /// Check if value is truthy (`ToBoolean`)
     #[inline]
+    #[must_use]
     pub fn is_truthy(&self) -> bool {
         match self {
             Value::Undefined | Value::Null => false,
@@ -73,23 +73,31 @@ impl Value {
 
     /// Check if value is nullish (null or undefined)
     #[inline]
+    #[must_use]
     pub fn is_nullish(&self) -> bool {
         matches!(self, Value::Undefined | Value::Null)
     }
 
-    /// ToNumber conversion
+    /// `ToNumber` conversion
+    #[must_use]
     pub fn to_number(&self) -> f64 {
         match self {
-            Value::Undefined => f64::NAN,
             Value::Null => 0.0,
-            Value::Boolean(b) => if *b { 1.0 } else { 0.0 },
+            Value::Boolean(b) => {
+                if *b {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
             Value::Number(n) => *n,
-            Value::String(_) => f64::NAN, // Simplified - real impl parses string
-            Value::Object(_) | Value::Function(_) => f64::NAN,
+            // String parsing, objects, undefined all yield NaN in simplified impl
+            Value::Undefined | Value::String(_) | Value::Object(_) | Value::Function(_) => f64::NAN,
         }
     }
 
-    /// ToInt32 conversion
+    /// `ToInt32` conversion
+    #[must_use]
     pub fn to_i32(&self) -> i32 {
         let n = self.to_number();
         if n.is_nan() || n.is_infinite() || n == 0.0 {
@@ -102,20 +110,21 @@ impl Value {
         int32 as i32
     }
 
-    /// ToUint32 conversion
+    /// `ToUint32` conversion
+    #[must_use]
     pub fn to_u32(&self) -> u32 {
         self.to_i32() as u32
     }
 
     /// Type of value (for typeof operator)
+    #[must_use]
     pub fn type_of(&self) -> &'static str {
         match self {
             Value::Undefined => "undefined",
-            Value::Null => "object", // Historical quirk
+            Value::Null | Value::Object(_) => "object", // Null is 'object' (historical quirk)
             Value::Boolean(_) => "boolean",
             Value::Number(_) => "number",
             Value::String(_) => "string",
-            Value::Object(_) => "object",
             Value::Function(_) => "function",
         }
     }
@@ -132,6 +141,7 @@ pub struct Object {
 
 impl Object {
     /// Create empty object
+    #[must_use]
     pub fn new() -> Self {
         Self {
             properties: HashMap::new(),
@@ -140,6 +150,7 @@ impl Object {
     }
 
     /// Get property
+    #[must_use]
     pub fn get(&self, key: u32) -> Value {
         if let Some(val) = self.properties.get(&key) {
             val.clone()
@@ -175,6 +186,7 @@ pub struct JsFunction {
 
 impl JsFunction {
     /// Create new function
+    #[must_use]
     pub fn new(chunk_idx: u32) -> Self {
         Self {
             chunk_idx,

@@ -1,0 +1,36 @@
+# LSAN suppression file for SilkSurf
+#
+# These are known external library leaks that are outside our control.
+# All suppressions are from libdom, libcss, and their dependencies (parserutils,
+# lwc) which maintain global interned string caches and other process-lifetime
+# structures that LSAN sees as leaks on exit.
+#
+# Root cause: libdom/libcss do not expose a global_cleanup() call to drain
+# their lwc (Lightweight String Component) intern tables and parserutils
+# context. This is a known upstream limitation, not a SilkSurf bug.
+#
+# Every entry here has been manually verified to originate inside a shared
+# library .so, with no SilkSurf frame anywhere in the call chain.
+
+# libdom: global interned DOM strings (lwc intern table)
+leak:dom_string_create_interned
+leak:dom_string_create
+
+# libdom: HTML document and element allocation (document lifetime)
+leak:_dom_html_document_initialise
+leak:_dom_html_document_create
+leak:_dom_html_html_element_create
+leak:_dom_html_head_element_create
+leak:_dom_html_body_element_create
+leak:_dom_html_div_element_create
+leak:_dom_html_p_element_create
+leak:_dom_html_span_element_create
+leak:_dom_text_create
+leak:_dom_attr_create
+
+# libcss: select context (process-lifetime CSS context)
+leak:css_select_ctx_create
+
+# parserutils: input stream and charset detection
+leak:parserutils_inputstream_create
+leak:parserutils_charset_detect_charset

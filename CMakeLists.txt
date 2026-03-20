@@ -72,18 +72,26 @@ link_directories(
 file(GLOB_RECURSE SOURCES "src/**/*.c")
 file(GLOB CSS_SOURCES "src/css/*.c")
 list(APPEND SOURCES ${CSS_SOURCES})
+# tree_builder.c: incomplete HTML5 tree builder, not yet integrated
 list(FILTER SOURCES EXCLUDE REGEX "tree_builder\\.c")
+# fuzz_*.c: AFL++ fuzzing harnesses, built as separate targets
 list(FILTER SOURCES EXCLUDE REGEX "fuzz_.*\\.c")
+# main_gui.c: legacy GUI entry point, replaced by main.c
 list(FILTER SOURCES EXCLUDE REGEX "main_gui\\.c")
+# box_model.c: layout engine, linked explicitly per-target (needs specific deps)
 list(FILTER SOURCES EXCLUDE REGEX "box_model\\.c")
+# bpe_bench.c: neural/BPE benchmark tool, not part of browser
 list(FILTER SOURCES EXCLUDE REGEX "bpe_bench\\.c")
-list(FILTER SOURCES EXCLUDE REGEX "main\\.c") # Exclude main.c from SOURCES as it is added explicitly
+# main.c: added explicitly to silksurf executable target
+list(FILTER SOURCES EXCLUDE REGEX "main\\.c")
 
 # Rust Integration
 find_program(CARGO_EXECUTABLE cargo REQUIRED)
 
 set(RUST_SOURCE_DIR "${CMAKE_SOURCE_DIR}/silksurf-js")
-set(RUST_TARGET_DIR "${RUST_SOURCE_DIR}/target")
+# Cargo workspace root at CMAKE_SOURCE_DIR redirects all build artifacts
+# to ${CMAKE_SOURCE_DIR}/target, not ${RUST_SOURCE_DIR}/target.
+set(RUST_TARGET_DIR "${CMAKE_SOURCE_DIR}/target")
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     set(CARGO_CMD ${CARGO_EXECUTABLE} build --release --manifest-path ${RUST_SOURCE_DIR}/Cargo.toml)
@@ -106,6 +114,7 @@ add_dependencies(silksurf_js silksurf_js_target)
 # Create executable
 add_executable(silksurf
     src/main.c
+    src/layout/box_model.c
     ${SOURCES}
 )
 
@@ -140,6 +149,28 @@ list(FILTER GUI_SOURCES EXCLUDE REGEX "main_gui\\.c")
 file(GLOB RENDERING_SOURCES "src/rendering/*.c")
 file(GLOB DOCUMENT_SOURCES "src/document/*.c")
 list(FILTER DOCUMENT_SOURCES EXCLUDE REGEX "tree_builder\\.c")
+# Document dependencies: CSS parser (for native pipeline), layout, rendering, GUI
+file(GLOB CSS_ENGINE_DEPS "src/css/css_parser.c" "src/css/css_tokenizer.c")
+list(APPEND DOCUMENT_SOURCES ${CSS_ENGINE_DEPS})
+list(APPEND DOCUMENT_SOURCES ${RENDERING_SOURCES})
+list(APPEND DOCUMENT_SOURCES ${GUI_SOURCES})
+list(APPEND DOCUMENT_SOURCES src/layout/box_model.c)
+
+# Common link libraries for targets using DOCUMENT_SOURCES
+set(DOCUMENT_LINK_LIBS
+    ${XCB_LIBRARIES}
+    ${LIBHUBBUB_LIBRARIES}
+    ${LIBCSS_LIBRARIES}
+    ${LIBDOM_LIBRARIES}
+    ${LIBPARSERUTILS_LIBRARIES}
+    m
+)
+if(XCB_SHM_FOUND)
+    list(APPEND DOCUMENT_LINK_LIBS ${XCB_SHM_LIBRARIES})
+endif()
+if(PIXMAN_FOUND)
+    list(APPEND DOCUMENT_LINK_LIBS ${PIXMAN_LIBRARIES})
+endif()
 
 add_executable(test_dom_parsing
     tests/test_dom_parsing.c
@@ -149,23 +180,7 @@ add_executable(test_dom_parsing
     ${DOCUMENT_SOURCES}
 )
 
-target_link_libraries(test_dom_parsing
-    ${XCB_LIBRARIES}
-    ${LIBHUBBUB_LIBRARIES}
-    ${LIBCSS_LIBRARIES}
-    ${LIBDOM_LIBRARIES}
-    ${LIBPARSERUTILS_LIBRARIES}
-    m
-)
-
-# Optional: Link optional libraries to test targets too
-if(XCB_SHM_FOUND)
-    target_link_libraries(test_dom_parsing ${XCB_SHM_LIBRARIES})
-endif()
-
-if(PIXMAN_FOUND)
-    target_link_libraries(test_dom_parsing ${PIXMAN_LIBRARIES})
-endif()
+target_link_libraries(test_dom_parsing ${DOCUMENT_LINK_LIBS})
 
 # Parser basic test
 add_executable(test_parser_basic
@@ -192,14 +207,7 @@ add_executable(test_css_engine
     ${DOCUMENT_SOURCES}
 )
 
-target_link_libraries(test_css_engine
-    ${XCB_LIBRARIES}
-    ${LIBHUBBUB_LIBRARIES}
-    ${LIBCSS_LIBRARIES}
-    ${LIBDOM_LIBRARIES}
-    ${LIBPARSERUTILS_LIBRARIES}
-    m
-)
+target_link_libraries(test_css_engine ${DOCUMENT_LINK_LIBS})
 
 # CSS cascade test
 add_executable(test_css_cascade
@@ -208,14 +216,7 @@ add_executable(test_css_cascade
     ${DOCUMENT_SOURCES}
 )
 
-target_link_libraries(test_css_cascade
-    ${XCB_LIBRARIES}
-    ${LIBHUBBUB_LIBRARIES}
-    ${LIBCSS_LIBRARIES}
-    ${LIBDOM_LIBRARIES}
-    ${LIBPARSERUTILS_LIBRARIES}
-    m
-)
+target_link_libraries(test_css_cascade ${DOCUMENT_LINK_LIBS})
 
 # SIMD detection test
 add_executable(test_simd_detection
@@ -246,14 +247,7 @@ add_executable(test_css_cascade_integration
     ${DOCUMENT_SOURCES}
 )
 
-target_link_libraries(test_css_cascade_integration
-    ${XCB_LIBRARIES}
-    ${LIBHUBBUB_LIBRARIES}
-    ${LIBCSS_LIBRARIES}
-    ${LIBDOM_LIBRARIES}
-    ${LIBPARSERUTILS_LIBRARIES}
-    m
-)
+target_link_libraries(test_css_cascade_integration ${DOCUMENT_LINK_LIBS})
 
 # CSS selector matching test (native selector matching)
 add_executable(test_css_selector_matching
@@ -291,14 +285,7 @@ add_executable(test_e2e_rendering
     src/layout/box_model.c
 )
 
-target_link_libraries(test_e2e_rendering
-    ${XCB_LIBRARIES}
-    ${LIBHUBBUB_LIBRARIES}
-    ${LIBCSS_LIBRARIES}
-    ${LIBDOM_LIBRARIES}
-    ${LIBPARSERUTILS_LIBRARIES}
-    m
-)
+target_link_libraries(test_e2e_rendering ${DOCUMENT_LINK_LIBS})
 
 # Inline layout test
 add_executable(test_inline_layout
@@ -306,22 +293,20 @@ add_executable(test_inline_layout
     src/layout/inline.c
     src/layout/box_model.c
     ${MEMORY_SOURCES}
+    ${DOCUMENT_SOURCES}
 )
 
-target_link_libraries(test_inline_layout
-    m
-)
+target_link_libraries(test_inline_layout ${DOCUMENT_LINK_LIBS})
 
 # Replaced elements test
 add_executable(test_replaced_elements
     tests/test_replaced_elements.c
     src/layout/box_model.c
     ${MEMORY_SOURCES}
+    ${DOCUMENT_SOURCES}
 )
 
-target_link_libraries(test_replaced_elements
-    m
-)
+target_link_libraries(test_replaced_elements ${DOCUMENT_LINK_LIBS})
 
 # XCB Shared Memory test
 add_executable(test_xcb_shm
@@ -339,13 +324,7 @@ add_executable(silksurf_fuzz
     ${DOCUMENT_SOURCES}
 )
 
-target_link_libraries(silksurf_fuzz
-    ${LIBHUBBUB_LIBRARIES}
-    ${LIBCSS_LIBRARIES}
-    ${LIBDOM_LIBRARIES}
-    ${LIBPARSERUTILS_LIBRARIES}
-    m
-)
+target_link_libraries(silksurf_fuzz ${DOCUMENT_LINK_LIBS})
 
 # CSS Fuzzing harness
 add_executable(silksurf_css_fuzz
@@ -353,21 +332,49 @@ add_executable(silksurf_css_fuzz
     src/document/css_engine.c
     src/css/css_tokenizer.c
     src/css/selector.c
-    src/css/cascade.c
     ${MEMORY_SOURCES}
     ${DOCUMENT_SOURCES}
 )
 
-target_link_libraries(silksurf_css_fuzz
-    ${LIBHUBBUB_LIBRARIES}
-    ${LIBCSS_LIBRARIES}
-    ${LIBDOM_LIBRARIES}
-    ${LIBPARSERUTILS_LIBRARIES}
+target_link_libraries(silksurf_css_fuzz ${DOCUMENT_LINK_LIBS})
+
+# CSS Tokenizer test (native, no libcss dependency)
+add_executable(test_css_tokenizer
+    tests/test_css_tokenizer.c
+    src/css/css_tokenizer.c
+    ${MEMORY_SOURCES}
+)
+
+target_link_libraries(test_css_tokenizer
     m
 )
 
+# CSS Parser test (native, no libcss dependency)
+add_executable(test_css_parser
+    tests/test_css_parser.c
+    src/css/css_parser.c
+    src/css/css_tokenizer.c
+    ${MEMORY_SOURCES}
+)
+
+target_link_libraries(test_css_parser
+    m
+)
+
+# Full pipeline integration test
+add_executable(test_full_pipeline
+    tests/test_full_pipeline.c
+    ${MEMORY_SOURCES}
+    ${DOCUMENT_SOURCES}
+)
+
+target_link_libraries(test_full_pipeline ${DOCUMENT_LINK_LIBS})
+
 # Enable testing
 enable_testing()
+add_test(NAME css_tokenizer COMMAND test_css_tokenizer)
+add_test(NAME css_parser COMMAND test_css_parser)
+add_test(NAME full_pipeline COMMAND test_full_pipeline)
 add_test(NAME parser_basic COMMAND test_parser_basic)
 add_test(NAME dom_parsing COMMAND test_dom_parsing)
 add_test(NAME css_engine COMMAND test_css_engine)

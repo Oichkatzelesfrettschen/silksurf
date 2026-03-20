@@ -2,13 +2,13 @@
 //!
 //! Translates SilkSurfJS bytecode instructions to Cranelift IR.
 
-use cranelift_codegen::ir::{self, InstBuilder, Value};
 use cranelift_codegen::ir::types::I64;
+use cranelift_codegen::ir::{self, InstBuilder, Value};
 use cranelift_frontend::FunctionBuilder;
 use cranelift_module::Module;
 
-use crate::bytecode::{Chunk, Instruction, Opcode};
 use super::compiler::JitError;
+use crate::bytecode::{Chunk, Instruction, Opcode};
 
 /// Builds Cranelift IR from bytecode
 pub struct IrBuilder<'a, 'b, M: Module> {
@@ -83,14 +83,20 @@ impl<'a, 'b, M: Module> IrBuilder<'a, 'b, M> {
             Opcode::LoadUndefined => {
                 let dst = instr.dst();
                 // Undefined represented as special NaN-boxed value
-                let val = self.builder.ins().iconst(I64, 0x7FF8_0000_0000_0000u64 as i64);
+                let val = self
+                    .builder
+                    .ins()
+                    .iconst(I64, 0x7FF8_0000_0000_0000u64 as i64);
                 self.set_reg(dst, val);
             }
 
             Opcode::LoadNull => {
                 let dst = instr.dst();
                 // Null represented as special NaN-boxed value
-                let val = self.builder.ins().iconst(I64, 0x7FF9_0000_0000_0000u64 as i64);
+                let val = self
+                    .builder
+                    .ins()
+                    .iconst(I64, 0x7FF9_0000_0000_0000u64 as i64);
                 self.set_reg(dst, val);
             }
 
@@ -258,7 +264,10 @@ impl<'a, 'b, M: Module> IrBuilder<'a, 'b, M> {
                 if let Some(val) = self.get_reg(src) {
                     // Logical not: 0 -> 1, non-zero -> 0
                     let zero = self.builder.ins().iconst(I64, 0);
-                    let cmp = self.builder.ins().icmp(ir::condcodes::IntCC::Equal, val, zero);
+                    let cmp = self
+                        .builder
+                        .ins()
+                        .icmp(ir::condcodes::IntCC::Equal, val, zero);
                     let result = self.builder.ins().uextend(I64, cmp);
                     self.set_reg(dst, result);
                 }
@@ -280,7 +289,10 @@ impl<'a, 'b, M: Module> IrBuilder<'a, 'b, M> {
                 let lhs = instr.src1();
                 let rhs = instr.src2();
                 if let (Some(l), Some(r)) = (self.get_reg(lhs), self.get_reg(rhs)) {
-                    let cmp = self.builder.ins().icmp(ir::condcodes::IntCC::NotEqual, l, r);
+                    let cmp = self
+                        .builder
+                        .ins()
+                        .icmp(ir::condcodes::IntCC::NotEqual, l, r);
                     let result = self.builder.ins().uextend(I64, cmp);
                     self.set_reg(dst, result);
                 }
@@ -291,7 +303,10 @@ impl<'a, 'b, M: Module> IrBuilder<'a, 'b, M> {
                 let lhs = instr.src1();
                 let rhs = instr.src2();
                 if let (Some(l), Some(r)) = (self.get_reg(lhs), self.get_reg(rhs)) {
-                    let cmp = self.builder.ins().icmp(ir::condcodes::IntCC::SignedLessThan, l, r);
+                    let cmp = self
+                        .builder
+                        .ins()
+                        .icmp(ir::condcodes::IntCC::SignedLessThan, l, r);
                     let result = self.builder.ins().uextend(I64, cmp);
                     self.set_reg(dst, result);
                 }
@@ -302,7 +317,10 @@ impl<'a, 'b, M: Module> IrBuilder<'a, 'b, M> {
                 let lhs = instr.src1();
                 let rhs = instr.src2();
                 if let (Some(l), Some(r)) = (self.get_reg(lhs), self.get_reg(rhs)) {
-                    let cmp = self.builder.ins().icmp(ir::condcodes::IntCC::SignedLessThanOrEqual, l, r);
+                    let cmp =
+                        self.builder
+                            .ins()
+                            .icmp(ir::condcodes::IntCC::SignedLessThanOrEqual, l, r);
                     let result = self.builder.ins().uextend(I64, cmp);
                     self.set_reg(dst, result);
                 }
@@ -313,7 +331,10 @@ impl<'a, 'b, M: Module> IrBuilder<'a, 'b, M> {
                 let lhs = instr.src1();
                 let rhs = instr.src2();
                 if let (Some(l), Some(r)) = (self.get_reg(lhs), self.get_reg(rhs)) {
-                    let cmp = self.builder.ins().icmp(ir::condcodes::IntCC::SignedGreaterThan, l, r);
+                    let cmp =
+                        self.builder
+                            .ins()
+                            .icmp(ir::condcodes::IntCC::SignedGreaterThan, l, r);
                     let result = self.builder.ins().uextend(I64, cmp);
                     self.set_reg(dst, result);
                 }
@@ -324,7 +345,11 @@ impl<'a, 'b, M: Module> IrBuilder<'a, 'b, M> {
                 let lhs = instr.src1();
                 let rhs = instr.src2();
                 if let (Some(l), Some(r)) = (self.get_reg(lhs), self.get_reg(rhs)) {
-                    let cmp = self.builder.ins().icmp(ir::condcodes::IntCC::SignedGreaterThanOrEqual, l, r);
+                    let cmp = self.builder.ins().icmp(
+                        ir::condcodes::IntCC::SignedGreaterThanOrEqual,
+                        l,
+                        r,
+                    );
                     let result = self.builder.ins().uextend(I64, cmp);
                     self.set_reg(dst, result);
                 }
@@ -343,7 +368,10 @@ impl<'a, 'b, M: Module> IrBuilder<'a, 'b, M> {
 
             Opcode::RetUndefined => {
                 // Return undefined (special NaN-boxed value)
-                let undefined = self.builder.ins().iconst(I64, 0x7FF8_0000_0000_0000u64 as i64);
+                let undefined = self
+                    .builder
+                    .ins()
+                    .iconst(I64, 0x7FF8_0000_0000_0000u64 as i64);
                 self.builder.ins().return_(&[undefined]);
                 self.has_terminator = true;
             }

@@ -10,7 +10,7 @@
 //! - Polymorphic: 2-4 shapes cached (still fast)
 //! - Megamorphic: Too many shapes, fall back to generic lookup
 //!
-//! Design informed by V8's IC system and SpiderMonkey's CacheIR.
+//! Design informed by V8's IC system and `SpiderMonkey`'s `CacheIR`.
 
 use crate::vm::shape::{PropertyKey, ShapeId};
 
@@ -27,9 +27,10 @@ pub struct ICEntry {
 }
 
 /// Inline cache state
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum ICState {
     /// No cached entries yet
+    #[default]
     Uninitialized,
     /// Single shape cached (most common case)
     Monomorphic(ICEntry),
@@ -37,12 +38,6 @@ pub enum ICState {
     Polymorphic(Vec<ICEntry>),
     /// Too many shapes - use generic lookup
     Megamorphic,
-}
-
-impl Default for ICState {
-    fn default() -> Self {
-        Self::Uninitialized
-    }
 }
 
 /// Inline cache for a single property access site
@@ -60,6 +55,7 @@ pub struct InlineCache {
 
 impl InlineCache {
     /// Create new uninitialized cache for a property key
+    #[must_use]
     pub fn new(key: PropertyKey) -> Self {
         Self {
             key,
@@ -75,7 +71,7 @@ impl InlineCache {
     #[inline]
     pub fn lookup(&mut self, shape_id: ShapeId) -> Option<u32> {
         match &self.state {
-            ICState::Uninitialized => {
+            ICState::Uninitialized | ICState::Megamorphic => {
                 self.misses += 1;
                 None
             }
@@ -95,10 +91,6 @@ impl InlineCache {
                         return Some(entry.slot);
                     }
                 }
-                self.misses += 1;
-                None
-            }
-            ICState::Megamorphic => {
                 self.misses += 1;
                 None
             }
@@ -124,7 +116,7 @@ impl InlineCache {
             }
             ICState::Polymorphic(entries) => {
                 // Check if we already have this shape
-                for e in entries.iter_mut() {
+                for e in &mut *entries {
                     if e.shape_id == shape_id {
                         e.slot = slot;
                         return;
@@ -152,16 +144,18 @@ impl InlineCache {
     }
 
     /// Get hit rate (0.0 to 1.0)
+    #[must_use]
     pub fn hit_rate(&self) -> f64 {
         let total = self.hits + self.misses;
         if total == 0 {
             0.0
         } else {
-            self.hits as f64 / total as f64
+            f64::from(self.hits) / f64::from(total)
         }
     }
 
     /// Check if cache is megamorphic
+    #[must_use]
     pub fn is_megamorphic(&self) -> bool {
         matches!(self.state, ICState::Megamorphic)
     }
@@ -176,11 +170,13 @@ pub struct ICVector {
 
 impl ICVector {
     /// Create new empty IC vector
+    #[must_use]
     pub fn new() -> Self {
         Self { caches: Vec::new() }
     }
 
     /// Create IC vector with capacity
+    #[must_use]
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             caches: Vec::with_capacity(capacity),
@@ -196,6 +192,7 @@ impl ICVector {
 
     /// Get cache by ID
     #[inline]
+    #[must_use]
     pub fn get(&self, id: u32) -> Option<&InlineCache> {
         self.caches.get(id as usize)
     }
@@ -207,11 +204,13 @@ impl ICVector {
     }
 
     /// Number of caches
+    #[must_use]
     pub fn len(&self) -> usize {
         self.caches.len()
     }
 
     /// Check if empty
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.caches.is_empty()
     }
@@ -224,6 +223,7 @@ impl ICVector {
     }
 
     /// Get aggregate statistics
+    #[must_use]
     pub fn stats(&self) -> ICStats {
         let mut stats = ICStats::default();
         for cache in &self.caches {
@@ -255,12 +255,13 @@ pub struct ICStats {
 
 impl ICStats {
     /// Overall hit rate
+    #[must_use]
     pub fn hit_rate(&self) -> f64 {
         let total = self.hits + self.misses;
         if total == 0 {
             0.0
         } else {
-            self.hits as f64 / total as f64
+            f64::from(self.hits) / f64::from(total)
         }
     }
 }
@@ -289,6 +290,7 @@ pub struct LoadICEntry {
 }
 
 impl LoadIC {
+    #[must_use]
     pub fn new(key: PropertyKey) -> Self {
         Self {
             key,
@@ -360,6 +362,7 @@ pub struct StoreICEntry {
 }
 
 impl StoreIC {
+    #[must_use]
     pub fn new(key: PropertyKey) -> Self {
         Self {
             key,

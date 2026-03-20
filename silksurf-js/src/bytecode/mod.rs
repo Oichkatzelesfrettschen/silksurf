@@ -9,13 +9,15 @@
 //! Architecture derived from publicly documented V8 Ignition design.
 //! No code copied - independent implementation per SILKSURF-JS-DESIGN.md.
 
-pub mod opcode;
-pub mod instruction;
 pub mod chunk;
 pub mod compiler;
+pub mod instruction;
+pub mod opcode;
 
 // Re-exports
+pub use chunk::{
+    Chunk, ChunkDeserializeError, Constant, DebugInfo, ExceptionHandler, SourceLocation,
+};
+pub use compiler::{CompileError, CompileResult, Compiler};
+pub use instruction::{Instruction, InstructionBuilder, Register};
 pub use opcode::Opcode;
-pub use instruction::{Instruction, Register, InstructionBuilder};
-pub use chunk::{Chunk, Constant, SourceLocation, DebugInfo, ExceptionHandler, ChunkDeserializeError};
-pub use compiler::{Compiler, CompileError, CompileResult};

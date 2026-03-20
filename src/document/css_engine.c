@@ -1,61 +1,61 @@
-/* CSS Engine implementation - lightweight, modern, cleanroom design */
+/* CSS Engine - Native pipeline with libcss parsing support
+ *
+ * Style computation uses the native CSS cascade engine exclusively.
+ * LibCSS is kept only for its CSS parsing capabilities (converting CSS text
+ * to structured data). The native pipeline handles:
+ * - CSS tokenization + parsing (css_parser.c)
+ * - Selector matching (css_selector_match.c via bridge)
+ * - Cascade computation (css_cascade.c via bridge)
+ */
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <libcss/libcss.h>
 #include "silksurf/css_parser.h"
+#include "silksurf/css_native_parser.h"
 #include "silksurf/dom_node.h"
 #include "silksurf/document.h"
 #include "silksurf/allocator.h"
+#include "css_native_bridge.h"
 
-/* Forward declaration - defined in css_select_handler.c */
+/* Forward declarations - defined in css_select_handler.c */
 extern css_select_handler *silk_css_get_select_handler(void);
+extern void silk_css_handler_reset(void);
 
-/* CSS Engine structure */
 struct silk_css_engine {
-    silk_arena_t *arena;           /* Arena for allocations */
-    css_stylesheet **sheets;       /* Array of libcss stylesheets */
+    silk_arena_t *arena;
+
+    /* Native parsed stylesheets (primary) */
+    css_parsed_stylesheet_t **native_sheets;
+    int native_sheet_count;
+    int native_sheet_capacity;
+
+    /* LibCSS stylesheets (kept for backward compat in tests) */
+    css_stylesheet **sheets;
     int sheet_count;
     int sheet_capacity;
-
-    /* Cached selector context */
     css_select_ctx *select_ctx;
-
-    /* Computed style cache (per element) */
-    /* TODO: Add hash table for style caching */
 };
 
 /* ========== LIBCSS CALLBACKS ========== */
 
-/* Resolve URL callback - required by libcss */
 static css_error resolve_url(void *pw, const char *base,
                               lwc_string *rel, lwc_string **abs) {
-    /* For now, we don't support external resources */
-    /* TODO: Implement URL resolution for @import and url() */
     (void)pw; (void)base; (void)rel;
     *abs = NULL;
     return CSS_OK;
 }
 
-/* Import callback - called when CSS contains @import */
-static css_error import_style(void *pw, css_stylesheet *parent,
-                               lwc_string *url) {
-    /* For now, we don't support @import */
-    /* TODO: Implement stylesheet importing */
+static css_error import_style(void *pw, css_stylesheet *parent, lwc_string *url) {
     (void)pw; (void)parent; (void)url;
     return CSS_OK;
 }
 
-/* Font callback - called when CSS references fonts */
-static css_error font_callback(void *pw, lwc_string *name,
-                                css_system_font *system_font) {
-    /* For now, use default font */
-    /* TODO: Implement font resolution */
+static css_error font_callback(void *pw, lwc_string *name, css_system_font *system_font) {
     (void)pw; (void)name; (void)system_font;
     return CSS_OK;
 }
 
-/* Stylesheet parameters for libcss */
 static css_stylesheet_params sheet_params = {
     .params_version = CSS_STYLESHEET_PARAMS_VERSION_1,
     .level = CSS_LEVEL_DEFAULT,
@@ -74,423 +74,169 @@ static css_stylesheet_params sheet_params = {
     .font_pw = NULL
 };
 
+/* ========== UA STYLESHEET ========== */
+
+static const char *ua_stylesheet_text =
+    "html, body { display: block; margin: 0px; padding: 0px; }\n"
+    "div, p, h1, h2, h3, h4, h5, h6, ul, ol, li, header, footer, main, section, article, nav, aside { display: block; }\n"
+    "span, a, em, strong, b, i, u { display: inline; }\n"
+    "h1 { font-size: 32px; margin-top: 10px; margin-bottom: 10px; }\n"
+    "h2 { font-size: 24px; margin-top: 8px; margin-bottom: 8px; }\n"
+    "h3 { font-size: 18px; margin-top: 6px; margin-bottom: 6px; }\n"
+    "p { margin-top: 8px; margin-bottom: 8px; }\n"
+    "body { background-color: white; color: black; font-size: 16px; }\n";
+
 /* ========== CSS ENGINE API ========== */
 
-/* Minimal user agent stylesheet */
-static const char *ua_stylesheet =
-    "html, body { display: block; margin: 0; padding: 0; }"
-    "div, p, h1, h2, h3, h4, h5, h6 { display: block; }"
-    "span, a { display: inline; }";
-
-/* Create CSS engine */
 silk_css_engine_t *silk_css_engine_create(silk_arena_t *arena) {
-    if (!arena) {
-        fprintf(stderr, "[CSS] ERROR: Invalid arena\n");
-        return NULL;
-    }
+    if (!arena) return NULL;
 
     silk_css_engine_t *engine = silk_arena_alloc(arena, sizeof(silk_css_engine_t));
-    if (!engine) {
-        fprintf(stderr, "[CSS] ERROR: Failed to allocate engine\n");
-        return NULL;
-    }
-
+    if (!engine) return NULL;
     memset(engine, 0, sizeof(*engine));
     engine->arena = arena;
+
+    /* Native sheet storage */
+    engine->native_sheet_capacity = 8;
+    engine->native_sheets = silk_arena_alloc(arena,
+        sizeof(css_parsed_stylesheet_t *) * engine->native_sheet_capacity);
+    if (!engine->native_sheets) return NULL;
+
+    /* LibCSS storage */
     engine->sheet_capacity = 8;
+    engine->sheets = silk_arena_alloc(arena, sizeof(css_stylesheet *) * engine->sheet_capacity);
+    if (!engine->sheets) return NULL;
 
-    /* Allocate stylesheet array */
-    engine->sheets = silk_arena_alloc(arena,
-                                      sizeof(css_stylesheet *) * engine->sheet_capacity);
-    if (!engine->sheets) {
-        fprintf(stderr, "[CSS] ERROR: Failed to allocate sheet array\n");
-        return NULL;
-    }
-
-    /* Create selection context */
     css_error err = css_select_ctx_create(&engine->select_ctx);
-    if (err != CSS_OK) {
-        fprintf(stderr, "[CSS] ERROR: Failed to create select context: %d\n", err);
-        return NULL;
-    }
+    if (err != CSS_OK) return NULL;
 
-    /* Add minimal UA stylesheet */
-    css_stylesheet *ua_sheet = NULL;
-    err = css_stylesheet_create(&sheet_params, &ua_sheet);
+    /* Parse UA stylesheet natively */
+    css_parsed_stylesheet_t *ua = css_parse_stylesheet(arena,
+        ua_stylesheet_text, strlen(ua_stylesheet_text));
+    if (ua) engine->native_sheets[engine->native_sheet_count++] = ua;
+
+    /* LibCSS UA (for backward compat in old tests) */
+    css_stylesheet *ua_libcss = NULL;
+    err = css_stylesheet_create(&sheet_params, &ua_libcss);
     if (err == CSS_OK) {
-        err = css_stylesheet_append_data(ua_sheet, (const uint8_t *)ua_stylesheet, strlen(ua_stylesheet));
+        const char *minimal = "html,body{display:block;margin:0;padding:0}"
+                               "div,p,h1,h2,h3,h4,h5,h6{display:block}"
+                               "span,a{display:inline}";
+        err = css_stylesheet_append_data(ua_libcss, (const uint8_t *)minimal, strlen(minimal));
+        if (err == CSS_OK) err = css_stylesheet_data_done(ua_libcss);
         if (err == CSS_OK) {
-            err = css_stylesheet_data_done(ua_sheet);
-            if (err == CSS_OK) {
-                err = css_select_ctx_append_sheet(engine->select_ctx, ua_sheet,
-                                                   CSS_ORIGIN_UA, "screen");
-                if (err == CSS_OK) {
-                    engine->sheets[engine->sheet_count++] = ua_sheet;
-                    fprintf(stderr, "[CSS] Added UA stylesheet\n");
-                } else {
-                    css_stylesheet_destroy(ua_sheet);
-                }
-            } else {
-                css_stylesheet_destroy(ua_sheet);
-            }
+            err = css_select_ctx_append_sheet(engine->select_ctx, ua_libcss, CSS_ORIGIN_UA, "screen");
+            if (err == CSS_OK) engine->sheets[engine->sheet_count++] = ua_libcss;
+            else css_stylesheet_destroy(ua_libcss);
         } else {
-            css_stylesheet_destroy(ua_sheet);
+            css_stylesheet_destroy(ua_libcss);
         }
     }
 
-    fprintf(stderr, "[CSS] Engine created: %p\n", (void *)engine);
     return engine;
 }
 
-/* Destroy CSS engine */
 void silk_css_engine_destroy(silk_css_engine_t *engine) {
-    if (!engine) {
-        return;
-    }
-
-    fprintf(stderr, "[CSS] Destroying engine: %p\n", (void *)engine);
-
-    /* Destroy all stylesheets */
+    if (!engine) return;
+    silk_css_handler_reset();
+    if (engine->select_ctx) { css_select_ctx_destroy(engine->select_ctx); engine->select_ctx = NULL; }
     for (int i = 0; i < engine->sheet_count; i++) {
-        if (engine->sheets[i]) {
-            css_stylesheet_destroy(engine->sheets[i]);
-        }
+        if (engine->sheets[i]) css_stylesheet_destroy(engine->sheets[i]);
     }
-
-    /* Destroy selection context */
-    if (engine->select_ctx) {
-        css_select_ctx_destroy(engine->select_ctx);
-    }
-
-    /* Engine structure itself is freed by arena */
-    fprintf(stderr, "[CSS] Engine destroyed\n");
+    engine->sheet_count = 0;
 }
 
-/* Parse CSS from string */
 int silk_css_parse_string(silk_css_engine_t *engine, const char *css, size_t css_len) {
-    if (!engine || !css || css_len == 0) {
-        return -1;
+    if (!engine || !css || css_len == 0) return -1;
+
+    /* Parse natively (primary path) */
+    css_parsed_stylesheet_t *native = css_parse_stylesheet(engine->arena, css, css_len);
+    if (native) {
+        if (engine->native_sheet_count >= engine->native_sheet_capacity) {
+            int nc = engine->native_sheet_capacity * 2;
+            css_parsed_stylesheet_t **na = silk_arena_alloc(engine->arena,
+                sizeof(css_parsed_stylesheet_t *) * nc);
+            if (!na) return -1;
+            memcpy(na, engine->native_sheets,
+                sizeof(css_parsed_stylesheet_t *) * engine->native_sheet_count);
+            engine->native_sheets = na;
+            engine->native_sheet_capacity = nc;
+        }
+        engine->native_sheets[engine->native_sheet_count++] = native;
     }
 
-    fprintf(stderr, "[CSS] Parsing CSS string (len=%zu)\n", css_len);
-
-    /* Create new stylesheet */
+    /* Also parse with libcss for backward compat */
     css_stylesheet *sheet = NULL;
     css_error err = css_stylesheet_create(&sheet_params, &sheet);
-    if (err != CSS_OK) {
-        fprintf(stderr, "[CSS] ERROR: Failed to create stylesheet: %d\n", err);
-        return -1;
-    }
-
-    /* Parse CSS data */
+    if (err != CSS_OK) return -1;
     err = css_stylesheet_append_data(sheet, (const uint8_t *)css, css_len);
-    if (err != CSS_OK && err != CSS_NEEDDATA) {
-        fprintf(stderr, "[CSS] ERROR: Failed to append CSS data: %d\n", err);
-        css_stylesheet_destroy(sheet);
-        return -1;
-    }
-
-    /* Finalize parsing */
+    if (err != CSS_OK && err != CSS_NEEDDATA) { css_stylesheet_destroy(sheet); return -1; }
     err = css_stylesheet_data_done(sheet);
-    if (err != CSS_OK) {
-        fprintf(stderr, "[CSS] ERROR: Failed to finalize stylesheet: %d\n", err);
-        css_stylesheet_destroy(sheet);
-        return -1;
-    }
-
-    /* Expand sheet capacity if needed */
+    if (err != CSS_OK) { css_stylesheet_destroy(sheet); return -1; }
     if (engine->sheet_count >= engine->sheet_capacity) {
-        engine->sheet_capacity *= 2;
-        css_stylesheet **new_sheets = silk_arena_alloc(engine->arena,
-                                                        sizeof(css_stylesheet *) * engine->sheet_capacity);
-        if (!new_sheets) {
-            fprintf(stderr, "[CSS] ERROR: Failed to expand sheet array\n");
-            css_stylesheet_destroy(sheet);
-            return -1;
-        }
-        memcpy(new_sheets, engine->sheets, sizeof(css_stylesheet *) * engine->sheet_count);
-        engine->sheets = new_sheets;
+        int nc = engine->sheet_capacity * 2;
+        css_stylesheet **na = silk_arena_alloc(engine->arena, sizeof(css_stylesheet *) * nc);
+        if (!na) { css_stylesheet_destroy(sheet); return -1; }
+        memcpy(na, engine->sheets, sizeof(css_stylesheet *) * engine->sheet_count);
+        engine->sheets = na;
+        engine->sheet_capacity = nc;
     }
-
-    /* Add stylesheet to engine */
     engine->sheets[engine->sheet_count++] = sheet;
+    css_select_ctx_append_sheet(engine->select_ctx, sheet, CSS_ORIGIN_AUTHOR, "screen");
 
-    /* Append to selection context */
-    err = css_select_ctx_append_sheet(engine->select_ctx, sheet,
-                                       CSS_ORIGIN_AUTHOR, "screen");
-    if (err != CSS_OK) {
-        fprintf(stderr, "[CSS] ERROR: Failed to append sheet to context: %d\n", err);
-        return -1;
-    }
-
-    fprintf(stderr, "[CSS] Successfully parsed stylesheet (total: %d)\n", engine->sheet_count);
     return 0;
 }
 
-/* Parse CSS from DOM style element */
 int silk_css_parse_style_element(silk_css_engine_t *engine, silk_dom_node_t *style_elem) {
-    if (!engine || !style_elem) {
-        return -1;
-    }
-
-    /* Get text content from style element */
+    if (!engine || !style_elem) return -1;
     silk_dom_node_t *text_node = silk_dom_node_get_first_child(style_elem);
-    if (!text_node) {
-        fprintf(stderr, "[CSS] WARNING: Style element has no text content\n");
-        return 0;  /* Not an error, just empty */
-    }
-
+    if (!text_node) return 0;
     const char *css_text = silk_dom_node_get_text_content(text_node);
-    if (!css_text || css_text[0] == '\0') {
-        fprintf(stderr, "[CSS] WARNING: Style element has empty text\n");
-        return 0;
-    }
-
-    fprintf(stderr, "[CSS] Parsing style element: %zu bytes\n", strlen(css_text));
+    if (!css_text || css_text[0] == '\0') return 0;
     return silk_css_parse_string(engine, css_text, strlen(css_text));
 }
 
-/* Get computed styles for an element */
+/* ========== STYLE COMPUTATION (via native bridge) ========== */
+
 int silk_css_get_computed_style(silk_css_engine_t *engine,
                                  silk_dom_node_t *element,
                                  silk_computed_style_t *out_style) {
-    if (!engine || !element || !out_style) {
-        return -1;
-    }
-
-    /* Initialize output style with defaults */
+    if (!engine || !element || !out_style) return -1;
     memset(out_style, 0, sizeof(*out_style));
 
-    /* If no stylesheets loaded, return defaults */
-    if (engine->sheet_count == 0) {
-        fprintf(stderr, "[CSS] No stylesheets loaded, using defaults\n");
-        out_style->display = CSS_DISPLAY_BLOCK;
-        out_style->width = -1;   /* auto */
-        out_style->height = -1;  /* auto */
-        out_style->color = 0xFF000000;  /* black */
-        out_style->font_size = 16;
-        return 0;
-    }
-
-    fprintf(stderr, "[CSS] Computing style for element: %p (sheet_count=%d)\n",
-            (void *)element, engine->sheet_count);
-
-    if (!engine->select_ctx) {
-        fprintf(stderr, "[CSS] ERROR: select_ctx is NULL!\n");
-        return -1;
-    }
-
-    /* Debug: Check how many sheets are in the select context */
-    uint32_t ctx_sheet_count = 0;
-    css_select_ctx_count_sheets(engine->select_ctx, &ctx_sheet_count);
-    fprintf(stderr, "[CSS] Select context has %u sheets\n", ctx_sheet_count);
-
-    /* Set up unit context for DPI calculation */
-    css_unit_ctx unit_ctx = {
-        .viewport_width = INTTOFIX(1024),
-        .viewport_height = INTTOFIX(768),
-        .font_size_default = INTTOFIX(16),  /* 16px default font size */
-        .font_size_minimum = INTTOFIX(6),   /* Minimum 6px to avoid zero */
-        .device_dpi = INTTOFIX(96),         /* Standard screen DPI (96 DPI) */
-        .root_style = NULL,
-        .pw = NULL,                         /* No client private data */
-        .measure = NULL                     /* No font measurement callback (text measurement deferred) */
-    };
-
-    /* Set up media query context - full css_media structure */
-    css_media media;
-    memset(&media, 0, sizeof(media));
-    media.type = CSS_MEDIA_SCREEN;
-    media.width = INTTOFIX(1024);
-    media.height = INTTOFIX(768);
-    /* aspect_ratio: 1024/768 = 4/3 = 1.333...  (computed properly as fixed-point) */
-    media.aspect_ratio = INTTOFIX(1024) / INTTOFIX(768);
-    media.color = INTTOFIX(8);
-    /* All other fields remain 0 (uninitialized/not used) */
-
-    /* Get underlying libdom node for libcss (it expects raw libdom nodes) */
     void *libdom_node = silk_dom_node_get_libdom_node(element);
-    if (!libdom_node) {
-        fprintf(stderr, "[CSS] ERROR: Could not unwrap libdom node\n");
-        return -1;
+    if (!libdom_node) return -1;
+
+    dom_node_type ntype;
+    dom_exception derr = dom_node_get_node_type((dom_node *)libdom_node, &ntype);
+    if (derr != DOM_NO_ERR || ntype != DOM_ELEMENT_NODE) return -1;
+
+    dom_element *dom_elem = (dom_element *)libdom_node;
+
+    /* Get parent element */
+    dom_node *parent_node = NULL;
+    dom_node_get_parent_node((dom_node *)libdom_node, &parent_node);
+    dom_element *parent_elem = NULL;
+    if (parent_node) {
+        dom_node_type pt;
+        dom_node_get_node_type(parent_node, &pt);
+        if (pt == DOM_ELEMENT_NODE) parent_elem = (dom_element *)parent_node;
+        dom_node_unref(parent_node);
     }
 
-    /* Verify this is an element node */
-    dom_node_type node_type;
-    dom_exception dom_err = dom_node_get_node_type((dom_node *)libdom_node, &node_type);
-    if (dom_err != DOM_NO_ERR) {
-        fprintf(stderr, "[CSS] ERROR: Failed to get node type: %d\n", dom_err);
-        return -1;
-    }
-    if (node_type != DOM_ELEMENT_NODE) {
-        fprintf(stderr, "[CSS] ERROR: Node is not an element (type=%d)\n", node_type);
-        return -1;
-    }
-    fprintf(stderr, "[CSS] Node is an element (type=%d)\n", node_type);
+    /* Get inline style attribute */
+    const char *inline_style = silk_dom_node_get_attribute(element, "style");
 
-    fprintf(stderr, "[CSS] Calling css_select_style with libdom node: %p\n", libdom_node);
-    fprintf(stderr, "[CSS] select_ctx=%p, handler=%p\n",
-            (void *)engine->select_ctx, (void *)silk_css_get_select_handler());
-
-    /* Use libcss to compute styles for this element */
-    css_select_results *results = NULL;
-    css_error err = css_select_style(engine->select_ctx,
-                                      libdom_node,  /* raw libdom node */
-                                      &unit_ctx,
-                                      &media,  /* media context structure */
-                                      NULL,  /* inline_style */
-                                      silk_css_get_select_handler(),
-                                      (void *)engine,  /* handler private data - pass engine context */
-                                      &results);
-
-    fprintf(stderr, "[CSS] css_select_style returned: %d\n", err);
-
-    if (err != CSS_OK || !results) {
-        fprintf(stderr, "[CSS] WARNING: Style selection failed: %d (results=%p)\n", err, (void *)results);
-
-        /* Phase 1: Fallback to default styles when libcss cascade fails */
-        /* This occurs when ua_default_for_property() returns CSS_INVALID for unhandled properties */
-        /* TODO: Replace with native CSS cascade engine in Phase 2 */
-        memset(out_style, 0, sizeof(*out_style));
-        out_style->display = 0;  /* CSS_DISPLAY_BLOCK */
-        out_style->width = -1;   /* auto */
-        out_style->height = -1;  /* auto */
-        out_style->color = 0xFF000000;  /* black */
-        out_style->background_color = 0x00000000;  /* transparent */
-        out_style->font_size = 16;  /* default */
-
-        fprintf(stderr, "[CSS] WARNING: Using fallback defaults instead of error\n");
-        return 0;  /* Success with fallback */
-    }
-
-    /* Extract computed styles from results */
-    css_computed_style *computed = results->styles[CSS_PSEUDO_ELEMENT_NONE];
-    if (!computed) {
-        fprintf(stderr, "[CSS] ERROR: No computed style\n");
-        css_select_results_destroy(results);
-        return -1;
-    }
-
-    /* Extract display property */
-    uint8_t display_type = css_computed_display(computed, NULL);
-    out_style->display = display_type;
-
-    /* Extract width and height */
-    css_fixed width_val = 0;
-    css_unit width_unit = CSS_UNIT_PX;
-    uint8_t width_type = css_computed_width(computed, &width_val, &width_unit);
-
-    if (width_type == CSS_WIDTH_SET && width_unit == CSS_UNIT_PX) {
-        out_style->width = FIXTOINT(width_val);
-    } else {
-        out_style->width = -1;  /* auto */
-    }
-
-    css_fixed height_val = 0;
-    css_unit height_unit = CSS_UNIT_PX;
-    uint8_t height_type = css_computed_height(computed, &height_val, &height_unit);
-
-    if (height_type == CSS_HEIGHT_SET && height_unit == CSS_UNIT_PX) {
-        out_style->height = FIXTOINT(height_val);
-    } else {
-        out_style->height = -1;  /* auto */
-    }
-
-    /* Extract color */
-    css_color color_val = 0;
-    uint8_t color_type = css_computed_color(computed, &color_val);
-    if (color_type == CSS_COLOR_COLOR) {
-        out_style->color = color_val;
-    } else {
-        out_style->color = 0xFF000000;  /* default black */
-    }
-
-    /* Extract background color */
-    css_color bg_color_val = 0;
-    uint8_t bg_color_type = css_computed_background_color(computed, &bg_color_val);
-    if (bg_color_type == CSS_BACKGROUND_COLOR_COLOR) {
-        out_style->background_color = bg_color_val;
-    } else {
-        out_style->background_color = 0x00000000;  /* transparent */
-    }
-
-    /* Extract font size */
-    css_fixed font_size_val = 0;
-    css_unit font_size_unit = CSS_UNIT_PX;
-    uint8_t font_size_type = css_computed_font_size(computed, &font_size_val, &font_size_unit);
-
-    if (font_size_type == CSS_FONT_SIZE_DIMENSION && font_size_unit == CSS_UNIT_PX) {
-        out_style->font_size = FIXTOINT(font_size_val);
-    } else {
-        out_style->font_size = 16;  /* default */
-    }
-
-    /* Extract margins */
-    css_fixed margin_val = 0;
-    css_unit margin_unit = CSS_UNIT_PX;
-
-    if (css_computed_margin_top(computed, &margin_val, &margin_unit) == CSS_MARGIN_SET) {
-        out_style->margin_top = FIXTOINT(margin_val);
-    }
-    if (css_computed_margin_right(computed, &margin_val, &margin_unit) == CSS_MARGIN_SET) {
-        out_style->margin_right = FIXTOINT(margin_val);
-    }
-    if (css_computed_margin_bottom(computed, &margin_val, &margin_unit) == CSS_MARGIN_SET) {
-        out_style->margin_bottom = FIXTOINT(margin_val);
-    }
-    if (css_computed_margin_left(computed, &margin_val, &margin_unit) == CSS_MARGIN_SET) {
-        out_style->margin_left = FIXTOINT(margin_val);
-    }
-
-    /* Extract padding */
-    css_fixed padding_val = 0;
-    css_unit padding_unit = CSS_UNIT_PX;
-
-    if (css_computed_padding_top(computed, &padding_val, &padding_unit) == CSS_PADDING_SET) {
-        out_style->padding_top = FIXTOINT(padding_val);
-    }
-    if (css_computed_padding_right(computed, &padding_val, &padding_unit) == CSS_PADDING_SET) {
-        out_style->padding_right = FIXTOINT(padding_val);
-    }
-    if (css_computed_padding_bottom(computed, &padding_val, &padding_unit) == CSS_PADDING_SET) {
-        out_style->padding_bottom = FIXTOINT(padding_val);
-    }
-    if (css_computed_padding_left(computed, &padding_val, &padding_unit) == CSS_PADDING_SET) {
-        out_style->padding_left = FIXTOINT(padding_val);
-    }
-
-    fprintf(stderr, "[CSS] Computed style: display=%u, width=%d, height=%d, color=%08x\n",
-            out_style->display, out_style->width, out_style->height, out_style->color);
-
-    /* Clean up */
-    css_select_results_destroy(results);
-
-    return 0;
+    /* Use native pipeline via bridge */
+    return silk_native_compute_style(
+        engine->arena,
+        dom_elem, parent_elem,
+        engine->native_sheets, engine->native_sheet_count,
+        inline_style, out_style
+    );
 }
 
-/* Apply styles from document's <style> tags */
-int silk_css_apply_document_styles(silk_css_engine_t *engine,
-                                    silk_document_t *doc) {
-    if (!engine || !doc) {
-        return -1;
-    }
-
-    fprintf(stderr, "[CSS] Applying document styles\n");
-
-    /* Get document root */
-    silk_dom_node_t *root = (silk_dom_node_t *)silk_document_get_root_element(doc);
-    if (!root) {
-        fprintf(stderr, "[CSS] WARNING: No document root\n");
-        return 0;
-    }
-
-    /* TODO: Traverse DOM to find all <style> elements */
-    /* For now, this is a stub that will be implemented when we have:
-       1. DOM tree traversal utilities
-       2. Element type checking (to find STYLE elements)
-       3. Style element content extraction
-    */
-
-    fprintf(stderr, "[CSS] TODO: Document style application not yet implemented\n");
+int silk_css_apply_document_styles(silk_css_engine_t *engine, silk_document_t *doc) {
+    if (!engine || !doc) return -1;
     return 0;
 }

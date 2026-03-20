@@ -3,21 +3,23 @@
 //! Register-based VM with function-pointer dispatch for performance.
 //! Architecture derived from studying V8 Ignition design patterns.
 
-pub mod value;
+pub mod gc_integration;
+pub mod ic;
 pub mod nanbox;
 pub mod shape;
-pub mod ic;
-pub mod string;
-pub mod gc_integration;
 pub mod snapshot;
+pub mod string;
+pub mod value;
 
 #[cfg(feature = "jit")]
 pub mod jit_integration;
 
-use crate::bytecode::{Chunk, Constant, Instruction, Opcode};
-use value::{Value, Object, JsFunction};
-use std::rc::Rc;
 use std::cell::RefCell;
+use std::rc::Rc;
+
+use value::{JsFunction, Object, Value};
+
+use crate::bytecode::{Chunk, Constant, Instruction, Opcode};
 
 /// VM execution error
 #[derive(Debug, Clone)]
@@ -63,8 +65,11 @@ pub struct StringTable {
 }
 
 impl StringTable {
+    #[must_use]
     pub fn new() -> Self {
-        Self { strings: Vec::new() }
+        Self {
+            strings: Vec::new(),
+        }
     }
 
     pub fn intern(&mut self, s: String) -> u32 {
@@ -189,6 +194,7 @@ static DISPATCH_TABLE: [OpHandler; 256] = {
 
 impl Vm {
     /// Create new VM
+    #[must_use]
     pub fn new() -> Self {
         Self {
             registers: vec![Value::Undefined; 256],
@@ -208,7 +214,10 @@ impl Vm {
     }
 
     /// Execute a chunk by index
-    #[cfg_attr(feature = "tracing-full", tracing::instrument(level = "trace", skip(self)))]
+    #[cfg_attr(
+        feature = "tracing-full",
+        tracing::instrument(level = "trace", skip(self))
+    )]
     pub fn execute(&mut self, chunk_idx: usize) -> VmResult<Value> {
         if chunk_idx >= self.chunks.len() {
             return Err(VmError::OutOfBounds);
@@ -247,7 +256,7 @@ impl Vm {
             debug_assert!(opcode < DISPATCH_TABLE.len());
             let handler = unsafe { *DISPATCH_TABLE.get_unchecked(opcode) };
             match handler(self, instr) {
-                Ok(()) => continue,
+                Ok(()) => {}
                 Err(VmError::Halted) => {
                     // Normal halt - return accumulator
                     // SAFETY: register 0 is always valid.
@@ -368,7 +377,7 @@ fn op_mov(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
 }
 
 fn op_load_smi(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
-    let value = instr.offset16() as f64;
+    let value = f64::from(instr.offset16());
     vm.set_reg(instr.dst(), Value::Number(value));
     Ok(())
 }
@@ -460,9 +469,8 @@ fn op_eq(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     let result = match (lhs, rhs) {
         (Value::Number(a), Value::Number(b)) => a == b,
         (Value::Boolean(a), Value::Boolean(b)) => a == b,
-        (Value::Null, Value::Null) => true,
-        (Value::Undefined, Value::Undefined) => true,
-        (Value::Null, Value::Undefined) | (Value::Undefined, Value::Null) => true,
+        // Null and Undefined are equal to each other (loose equality)
+        (Value::Null | Value::Undefined, Value::Null | Value::Undefined) => true,
         _ => false,
     };
     vm.set_reg(instr.dst(), Value::Boolean(result));
@@ -475,8 +483,7 @@ fn op_strict_eq(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     let result = match (lhs, rhs) {
         (Value::Number(a), Value::Number(b)) => a == b,
         (Value::Boolean(a), Value::Boolean(b)) => a == b,
-        (Value::Null, Value::Null) => true,
-        (Value::Undefined, Value::Undefined) => true,
+        (Value::Null, Value::Null) | (Value::Undefined, Value::Undefined) => true,
         (Value::String(a), Value::String(b)) => a == b,
         _ => false, // Different types are never strictly equal
     };
@@ -536,49 +543,49 @@ fn op_not(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
 
 fn op_bitnot(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     let val = vm.get_reg(instr.src1()).to_i32();
-    vm.set_reg(instr.dst(), Value::Number((!val) as f64));
+    vm.set_reg(instr.dst(), Value::Number(f64::from(!val)));
     Ok(())
 }
 
 fn op_bitand(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     let lhs = vm.get_reg(instr.src1()).to_i32();
     let rhs = vm.get_reg(instr.src2()).to_i32();
-    vm.set_reg(instr.dst(), Value::Number((lhs & rhs) as f64));
+    vm.set_reg(instr.dst(), Value::Number(f64::from(lhs & rhs)));
     Ok(())
 }
 
 fn op_bitor(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     let lhs = vm.get_reg(instr.src1()).to_i32();
     let rhs = vm.get_reg(instr.src2()).to_i32();
-    vm.set_reg(instr.dst(), Value::Number((lhs | rhs) as f64));
+    vm.set_reg(instr.dst(), Value::Number(f64::from(lhs | rhs)));
     Ok(())
 }
 
 fn op_bitxor(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     let lhs = vm.get_reg(instr.src1()).to_i32();
     let rhs = vm.get_reg(instr.src2()).to_i32();
-    vm.set_reg(instr.dst(), Value::Number((lhs ^ rhs) as f64));
+    vm.set_reg(instr.dst(), Value::Number(f64::from(lhs ^ rhs)));
     Ok(())
 }
 
 fn op_shl(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     let lhs = vm.get_reg(instr.src1()).to_i32();
     let rhs = vm.get_reg(instr.src2()).to_u32() & 0x1F;
-    vm.set_reg(instr.dst(), Value::Number((lhs << rhs) as f64));
+    vm.set_reg(instr.dst(), Value::Number(f64::from(lhs << rhs)));
     Ok(())
 }
 
 fn op_shr(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     let lhs = vm.get_reg(instr.src1()).to_i32();
     let rhs = vm.get_reg(instr.src2()).to_u32() & 0x1F;
-    vm.set_reg(instr.dst(), Value::Number((lhs >> rhs) as f64));
+    vm.set_reg(instr.dst(), Value::Number(f64::from(lhs >> rhs)));
     Ok(())
 }
 
 fn op_ushr(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     let lhs = vm.get_reg(instr.src1()).to_u32();
     let rhs = vm.get_reg(instr.src2()).to_u32() & 0x1F;
-    vm.set_reg(instr.dst(), Value::Number((lhs >> rhs) as f64));
+    vm.set_reg(instr.dst(), Value::Number(f64::from(lhs >> rhs)));
     Ok(())
 }
 
@@ -592,7 +599,7 @@ fn op_jmp(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
 
 fn op_jmp_true(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     if vm.get_reg(instr.dst()).is_truthy() {
-        let offset = instr.offset16() as i32;
+        let offset = i32::from(instr.offset16());
         vm.jump(offset);
     }
     Ok(())
@@ -600,7 +607,7 @@ fn op_jmp_true(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
 
 fn op_jmp_false(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     if !vm.get_reg(instr.dst()).is_truthy() {
-        let offset = instr.offset16() as i32;
+        let offset = i32::from(instr.offset16());
         vm.jump(offset);
     }
     Ok(())
@@ -608,7 +615,7 @@ fn op_jmp_false(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
 
 fn op_jmp_nullish(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     if vm.get_reg(instr.dst()).is_nullish() {
-        let offset = instr.offset16() as i32;
+        let offset = i32::from(instr.offset16());
         vm.jump(offset);
     }
     Ok(())
@@ -616,7 +623,7 @@ fn op_jmp_nullish(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
 
 fn op_jmp_not_nullish(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     if !vm.get_reg(instr.dst()).is_nullish() {
-        let offset = instr.offset16() as i32;
+        let offset = i32::from(instr.offset16());
         vm.jump(offset);
     }
     Ok(())
@@ -682,7 +689,7 @@ fn op_throw(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
 
 fn op_get_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     let obj = vm.get_reg(instr.src1());
-    let key = instr.src2() as u32; // Simplified - real impl uses constant pool
+    let key = u32::from(instr.src2()); // Simplified - real impl uses constant pool
     let value = match obj {
         Value::Object(o) => o.borrow().get(key),
         _ => Value::Undefined,
@@ -692,7 +699,7 @@ fn op_get_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
 }
 
 fn op_set_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
-    let key = instr.src1() as u32;
+    let key = u32::from(instr.src1());
     let value = vm.get_reg(instr.src2()).clone();
     let obj = vm.get_reg(instr.dst());
     if let Value::Object(o) = obj {
@@ -746,7 +753,7 @@ fn op_new_array(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
 }
 
 fn op_new_function(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
-    let chunk_idx = instr.const_idx() as u32;
+    let chunk_idx = u32::from(instr.const_idx());
     let func = Rc::new(JsFunction::new(chunk_idx));
     vm.set_reg(instr.dst(), Value::Function(func));
     Ok(())
@@ -768,14 +775,14 @@ fn op_set_local(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
 }
 
 fn op_get_global(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
-    let key = instr.const_idx() as u32;
+    let key = u32::from(instr.const_idx());
     let value = vm.global.borrow().get(key);
     vm.set_reg(instr.dst(), value);
     Ok(())
 }
 
 fn op_set_global(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
-    let key = instr.const_idx() as u32;
+    let key = u32::from(instr.const_idx());
     let value = vm.get_reg(instr.dst()).clone();
     vm.global.borrow_mut().set(key, value);
     Ok(())
@@ -893,7 +900,7 @@ mod tests {
         chunk.emit(Instruction::new_r_offset(Opcode::LoadSmi, 1, 42));
         // r0[0] = r1
         chunk.emit(Instruction::new_rrr(Opcode::SetElem, 0, 1, 1)); // key=1, val=r1
-        // Actually, let's just return the value we set
+                                                                    // Actually, let's just return the value we set
         chunk.emit(Instruction::new_r(Opcode::Ret, 1));
 
         let idx = vm.add_chunk(chunk);

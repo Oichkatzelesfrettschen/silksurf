@@ -4,7 +4,7 @@
 //! in a single lookup rather than character-by-character scanning.
 //!
 //! Based on research:
-//! - GitHub's linear-time BPE (4x tiktoken, 10x HuggingFace)
+//! - GitHub's linear-time BPE (4x tiktoken, 10x `HuggingFace`)
 //! - Karpathy's minbpe for clean reference
 //!
 //! Phase 3+: Neural prediction will suggest likely next tokens.
@@ -28,70 +28,299 @@ pub struct BpePattern {
 /// Matching these patterns reduces character iterations by 10-15%.
 pub static JS_BPE_PATTERNS: &[BpePattern] = &[
     // Keywords (most common first)
-    BpePattern { pattern: b"function", id: 0, weight: 0.0245 },
-    BpePattern { pattern: b"return", id: 1, weight: 0.0187 },
-    BpePattern { pattern: b"const", id: 2, weight: 0.0156 },
-    BpePattern { pattern: b"this", id: 3, weight: 0.0134 },
-    BpePattern { pattern: b"var", id: 4, weight: 0.0112 },
-    BpePattern { pattern: b"let", id: 5, weight: 0.0098 },
-    BpePattern { pattern: b"if", id: 6, weight: 0.0089 },
-    BpePattern { pattern: b"else", id: 7, weight: 0.0076 },
-    BpePattern { pattern: b"for", id: 8, weight: 0.0067 },
-    BpePattern { pattern: b"while", id: 9, weight: 0.0045 },
-    BpePattern { pattern: b"new", id: 10, weight: 0.0043 },
-    BpePattern { pattern: b"null", id: 11, weight: 0.0041 },
-    BpePattern { pattern: b"true", id: 12, weight: 0.0039 },
-    BpePattern { pattern: b"false", id: 13, weight: 0.0038 },
-    BpePattern { pattern: b"undefined", id: 14, weight: 0.0035 },
-    BpePattern { pattern: b"typeof", id: 15, weight: 0.0028 },
-    BpePattern { pattern: b"class", id: 16, weight: 0.0025 },
-    BpePattern { pattern: b"extends", id: 17, weight: 0.0018 },
-    BpePattern { pattern: b"import", id: 18, weight: 0.0016 },
-    BpePattern { pattern: b"export", id: 19, weight: 0.0015 },
-    BpePattern { pattern: b"async", id: 20, weight: 0.0014 },
-    BpePattern { pattern: b"await", id: 21, weight: 0.0013 },
-
+    BpePattern {
+        pattern: b"function",
+        id: 0,
+        weight: 0.0245,
+    },
+    BpePattern {
+        pattern: b"return",
+        id: 1,
+        weight: 0.0187,
+    },
+    BpePattern {
+        pattern: b"const",
+        id: 2,
+        weight: 0.0156,
+    },
+    BpePattern {
+        pattern: b"this",
+        id: 3,
+        weight: 0.0134,
+    },
+    BpePattern {
+        pattern: b"var",
+        id: 4,
+        weight: 0.0112,
+    },
+    BpePattern {
+        pattern: b"let",
+        id: 5,
+        weight: 0.0098,
+    },
+    BpePattern {
+        pattern: b"if",
+        id: 6,
+        weight: 0.0089,
+    },
+    BpePattern {
+        pattern: b"else",
+        id: 7,
+        weight: 0.0076,
+    },
+    BpePattern {
+        pattern: b"for",
+        id: 8,
+        weight: 0.0067,
+    },
+    BpePattern {
+        pattern: b"while",
+        id: 9,
+        weight: 0.0045,
+    },
+    BpePattern {
+        pattern: b"new",
+        id: 10,
+        weight: 0.0043,
+    },
+    BpePattern {
+        pattern: b"null",
+        id: 11,
+        weight: 0.0041,
+    },
+    BpePattern {
+        pattern: b"true",
+        id: 12,
+        weight: 0.0039,
+    },
+    BpePattern {
+        pattern: b"false",
+        id: 13,
+        weight: 0.0038,
+    },
+    BpePattern {
+        pattern: b"undefined",
+        id: 14,
+        weight: 0.0035,
+    },
+    BpePattern {
+        pattern: b"typeof",
+        id: 15,
+        weight: 0.0028,
+    },
+    BpePattern {
+        pattern: b"class",
+        id: 16,
+        weight: 0.0025,
+    },
+    BpePattern {
+        pattern: b"extends",
+        id: 17,
+        weight: 0.0018,
+    },
+    BpePattern {
+        pattern: b"import",
+        id: 18,
+        weight: 0.0016,
+    },
+    BpePattern {
+        pattern: b"export",
+        id: 19,
+        weight: 0.0015,
+    },
+    BpePattern {
+        pattern: b"async",
+        id: 20,
+        weight: 0.0014,
+    },
+    BpePattern {
+        pattern: b"await",
+        id: 21,
+        weight: 0.0013,
+    },
     // Multi-char operators (common)
-    BpePattern { pattern: b"===", id: 30, weight: 0.0098 },
-    BpePattern { pattern: b"!==", id: 31, weight: 0.0067 },
-    BpePattern { pattern: b"=>", id: 32, weight: 0.0056 },
-    BpePattern { pattern: b"&&", id: 33, weight: 0.0045 },
-    BpePattern { pattern: b"||", id: 34, weight: 0.0043 },
-    BpePattern { pattern: b"++", id: 35, weight: 0.0034 },
-    BpePattern { pattern: b"--", id: 36, weight: 0.0023 },
-    BpePattern { pattern: b"+=", id: 37, weight: 0.0021 },
-    BpePattern { pattern: b"-=", id: 38, weight: 0.0012 },
-    BpePattern { pattern: b"==", id: 39, weight: 0.0034 },
-    BpePattern { pattern: b"!=", id: 40, weight: 0.0023 },
-    BpePattern { pattern: b"<=", id: 41, weight: 0.0019 },
-    BpePattern { pattern: b">=", id: 42, weight: 0.0018 },
-    BpePattern { pattern: b"??", id: 43, weight: 0.0012 },
-    BpePattern { pattern: b"?.", id: 44, weight: 0.0011 },
-    BpePattern { pattern: b"...", id: 45, weight: 0.0015 },
-
+    BpePattern {
+        pattern: b"===",
+        id: 30,
+        weight: 0.0098,
+    },
+    BpePattern {
+        pattern: b"!==",
+        id: 31,
+        weight: 0.0067,
+    },
+    BpePattern {
+        pattern: b"=>",
+        id: 32,
+        weight: 0.0056,
+    },
+    BpePattern {
+        pattern: b"&&",
+        id: 33,
+        weight: 0.0045,
+    },
+    BpePattern {
+        pattern: b"||",
+        id: 34,
+        weight: 0.0043,
+    },
+    BpePattern {
+        pattern: b"++",
+        id: 35,
+        weight: 0.0034,
+    },
+    BpePattern {
+        pattern: b"--",
+        id: 36,
+        weight: 0.0023,
+    },
+    BpePattern {
+        pattern: b"+=",
+        id: 37,
+        weight: 0.0021,
+    },
+    BpePattern {
+        pattern: b"-=",
+        id: 38,
+        weight: 0.0012,
+    },
+    BpePattern {
+        pattern: b"==",
+        id: 39,
+        weight: 0.0034,
+    },
+    BpePattern {
+        pattern: b"!=",
+        id: 40,
+        weight: 0.0023,
+    },
+    BpePattern {
+        pattern: b"<=",
+        id: 41,
+        weight: 0.0019,
+    },
+    BpePattern {
+        pattern: b">=",
+        id: 42,
+        weight: 0.0018,
+    },
+    BpePattern {
+        pattern: b"??",
+        id: 43,
+        weight: 0.0012,
+    },
+    BpePattern {
+        pattern: b"?.",
+        id: 44,
+        weight: 0.0011,
+    },
+    BpePattern {
+        pattern: b"...",
+        id: 45,
+        weight: 0.0015,
+    },
     // Common identifiers
-    BpePattern { pattern: b"console", id: 50, weight: 0.0078 },
-    BpePattern { pattern: b"document", id: 51, weight: 0.0067 },
-    BpePattern { pattern: b"window", id: 52, weight: 0.0056 },
-    BpePattern { pattern: b"prototype", id: 53, weight: 0.0034 },
-    BpePattern { pattern: b"length", id: 54, weight: 0.0089 },
-    BpePattern { pattern: b"Object", id: 55, weight: 0.0045 },
-    BpePattern { pattern: b"Array", id: 56, weight: 0.0043 },
-    BpePattern { pattern: b"String", id: 57, weight: 0.0034 },
-    BpePattern { pattern: b"Number", id: 58, weight: 0.0023 },
-    BpePattern { pattern: b"Boolean", id: 59, weight: 0.0019 },
-
+    BpePattern {
+        pattern: b"console",
+        id: 50,
+        weight: 0.0078,
+    },
+    BpePattern {
+        pattern: b"document",
+        id: 51,
+        weight: 0.0067,
+    },
+    BpePattern {
+        pattern: b"window",
+        id: 52,
+        weight: 0.0056,
+    },
+    BpePattern {
+        pattern: b"prototype",
+        id: 53,
+        weight: 0.0034,
+    },
+    BpePattern {
+        pattern: b"length",
+        id: 54,
+        weight: 0.0089,
+    },
+    BpePattern {
+        pattern: b"Object",
+        id: 55,
+        weight: 0.0045,
+    },
+    BpePattern {
+        pattern: b"Array",
+        id: 56,
+        weight: 0.0043,
+    },
+    BpePattern {
+        pattern: b"String",
+        id: 57,
+        weight: 0.0034,
+    },
+    BpePattern {
+        pattern: b"Number",
+        id: 58,
+        weight: 0.0023,
+    },
+    BpePattern {
+        pattern: b"Boolean",
+        id: 59,
+        weight: 0.0019,
+    },
     // Common method names
-    BpePattern { pattern: b"toString", id: 60, weight: 0.0034 },
-    BpePattern { pattern: b"valueOf", id: 61, weight: 0.0012 },
-    BpePattern { pattern: b"constructor", id: 62, weight: 0.0023 },
-    BpePattern { pattern: b"hasOwnProperty", id: 63, weight: 0.0011 },
-    BpePattern { pattern: b"push", id: 64, weight: 0.0045 },
-    BpePattern { pattern: b"pop", id: 65, weight: 0.0023 },
-    BpePattern { pattern: b"map", id: 66, weight: 0.0056 },
-    BpePattern { pattern: b"filter", id: 67, weight: 0.0045 },
-    BpePattern { pattern: b"reduce", id: 68, weight: 0.0034 },
-    BpePattern { pattern: b"forEach", id: 69, weight: 0.0043 },
+    BpePattern {
+        pattern: b"toString",
+        id: 60,
+        weight: 0.0034,
+    },
+    BpePattern {
+        pattern: b"valueOf",
+        id: 61,
+        weight: 0.0012,
+    },
+    BpePattern {
+        pattern: b"constructor",
+        id: 62,
+        weight: 0.0023,
+    },
+    BpePattern {
+        pattern: b"hasOwnProperty",
+        id: 63,
+        weight: 0.0011,
+    },
+    BpePattern {
+        pattern: b"push",
+        id: 64,
+        weight: 0.0045,
+    },
+    BpePattern {
+        pattern: b"pop",
+        id: 65,
+        weight: 0.0023,
+    },
+    BpePattern {
+        pattern: b"map",
+        id: 66,
+        weight: 0.0056,
+    },
+    BpePattern {
+        pattern: b"filter",
+        id: 67,
+        weight: 0.0045,
+    },
+    BpePattern {
+        pattern: b"reduce",
+        id: 68,
+        weight: 0.0034,
+    },
+    BpePattern {
+        pattern: b"forEach",
+        id: 69,
+        weight: 0.0043,
+    },
 ];
 
 /// BPE pattern matcher (trie-based for O(k) lookup)
@@ -155,7 +384,7 @@ impl BpeMatcher {
 
     /// Try to match a pattern at the current position
     ///
-    /// Returns (pattern_id, pattern_length) if matched, None otherwise.
+    /// Returns (`pattern_id`, `pattern_length`) if matched, None otherwise.
     /// Greedy: returns the longest match.
     #[inline]
     pub fn try_match(&self, input: &[u8]) -> Option<(u16, usize)> {

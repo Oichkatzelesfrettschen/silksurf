@@ -9,10 +9,28 @@
 //! Statement parsing uses standard recursive descent.
 
 use crate::lexer::{Interner, Lexer, Span, Token, TokenKind};
-use crate::parser::ast::*;
+use crate::parser::ast::{
+    Argument, ArrayElement, ArrayExpression, ArrayPattern, ArrowBody, ArrowFunctionExpression,
+    AssignmentExpression, AssignmentPattern, AssignmentTarget, AwaitExpression, BinaryExpression,
+    BlockStatement, BooleanLiteral, BreakStatement, CallExpression, CatchClause, ClassBody,
+    ClassDeclaration, ClassElement, ClassExpression, ConditionalExpression, ContinueStatement,
+    DoWhileStatement, Expression, ExpressionStatement, ForInLeft, ForInStatement, ForInit,
+    ForOfStatement, ForStatement, FunctionDeclaration, FunctionExpression, Identifier, IfStatement,
+    Literal, LogicalExpression, MemberExpression, MethodDefinition, MethodKind, NewExpression,
+    NumberLiteral, ObjectExpression, ObjectPattern, ObjectPatternProperty, ObjectProperty,
+    ParenthesizedExpression, Pattern, Program, Property, PropertyDefinition, PropertyKey,
+    PropertyKind, RegExpLiteral, RestElement, ReturnStatement, SequenceExpression, SourceType,
+    SpreadElement, Statement, StringLiteral, SwitchCase, SwitchStatement, TaggedTemplateExpression,
+    TemplateElement, TemplateLiteral, ThrowStatement, TryStatement, UnaryExpression,
+    UpdateExpression, VariableDeclaration, VariableDeclarator, VariableKind, WhileStatement,
+    YieldExpression,
+};
 use crate::parser::ast_arena::{AstArena, AstVec, AstVecBuilder};
 use crate::parser::error::{is_sync_point, ParseError, ParseResult, SyncPoint};
-use crate::parser::precedence::*;
+use crate::parser::precedence::{
+    infix_binding_power, postfix_binding_power, prefix_binding_power, token_to_assignment_op,
+    token_to_binary_op, token_to_logical_op, token_to_unary_op, token_to_update_op, BindingPower,
+};
 
 /// The JavaScript parser
 pub struct Parser<'src, 'arena> {
@@ -56,6 +74,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
     }
 
     /// Parse the source into a Program AST
+    #[must_use]
     pub fn parse(mut self) -> (Program<'src, 'arena>, Vec<ParseError>) {
         // Pre-allocate: estimate ~1 statement per 80 bytes of source
         let estimated_stmts = (self.source.len() / 80).max(8);
@@ -83,11 +102,13 @@ impl<'src, 'arena> Parser<'src, 'arena> {
     }
 
     /// Get the string interner
+    #[must_use]
     pub fn interner(&self) -> &Interner {
         self.lexer.interner()
     }
 
     /// Take the interner (transfers ownership, consumes lexer)
+    #[must_use]
     pub fn into_interner(self) -> Interner {
         self.lexer.into_interner()
     }
@@ -378,7 +399,9 @@ impl<'src, 'arena> Parser<'src, 'arena> {
     }
 
     /// Parse object pattern property
-    fn parse_object_pattern_property(&mut self) -> ParseResult<ObjectPatternProperty<'src, 'arena>> {
+    fn parse_object_pattern_property(
+        &mut self,
+    ) -> ParseResult<ObjectPatternProperty<'src, 'arena>> {
         let start = self.current.span.start;
         let computed = self.check(&TokenKind::LeftBracket);
 
@@ -457,9 +480,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
 
     /// Parse function parameters
     #[inline]
-    fn parse_function_params(
-        &mut self,
-    ) -> ParseResult<AstVec<'arena, Pattern<'src, 'arena>>> {
+    fn parse_function_params(&mut self) -> ParseResult<AstVec<'arena, Pattern<'src, 'arena>>> {
         // Typical function has 0-4 parameters
         let mut params = AstVecBuilder::with_capacity(3);
 
@@ -695,7 +716,10 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         // Parse init part
         let init = if self.check(&TokenKind::Semicolon) {
             None
-        } else if self.check(&TokenKind::Var) || self.check(&TokenKind::Let) || self.check(&TokenKind::Const) {
+        } else if self.check(&TokenKind::Var)
+            || self.check(&TokenKind::Let)
+            || self.check(&TokenKind::Const)
+        {
             Some(self.parse_for_init_var()?)
         } else {
             Some(ForInit::Expression(self.arena.alloc(self.parse_expression()?)))
@@ -779,7 +803,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             Some(ForInit::VariableDeclaration(decl)) => ForInLeft::VariableDeclaration(decl),
             Some(ForInit::Expression(expr)) => {
                 // Convert expression to pattern
-                ForInLeft::Pattern(self.expression_to_pattern(expr)?)
+                ForInLeft::Pattern(Self::expression_to_pattern(expr)?)
             }
             None => {
                 return Err(ParseError::invalid_syntax(
@@ -815,15 +839,11 @@ impl<'src, 'arena> Parser<'src, 'arena> {
 
     /// Convert expression to pattern (for destructuring)
     fn expression_to_pattern(
-        &self,
         expr: &Expression<'src, 'arena>,
     ) -> ParseResult<Pattern<'src, 'arena>> {
         match expr {
             Expression::Identifier(ident) => Ok(Pattern::Identifier(ident.clone())),
-            _ => Err(ParseError::invalid_syntax(
-                expr.span(),
-                "Invalid destructuring pattern",
-            )),
+            _ => Err(ParseError::invalid_syntax(expr.span(), "Invalid destructuring pattern")),
         }
     }
 
@@ -1065,7 +1085,10 @@ impl<'src, 'arena> Parser<'src, 'arena> {
     }
 
     /// Parse expression with binding power (Pratt core)
-    fn parse_expression_bp(&mut self, min_bp: BindingPower) -> ParseResult<Expression<'src, 'arena>> {
+    fn parse_expression_bp(
+        &mut self,
+        min_bp: BindingPower,
+    ) -> ParseResult<Expression<'src, 'arena>> {
         // Parse prefix (unary/primary)
         let mut lhs = self.parse_prefix_expression()?;
 
@@ -1171,7 +1194,9 @@ impl<'src, 'arena> Parser<'src, 'arena> {
 
     /// Parse new expression
     fn parse_new_expression(&mut self, start: u32) -> ParseResult<Expression<'src, 'arena>> {
-        let callee = self.arena.alloc(self.parse_expression_bp(BindingPower::NEW)?);
+        let callee = self
+            .arena
+            .alloc(self.parse_expression_bp(BindingPower::NEW)?);
 
         let arguments = if self.match_token(&TokenKind::LeftParen) {
             self.parse_arguments()?
@@ -1198,7 +1223,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
 
         // Assignment operators
         if let Some(op) = token_to_assignment_op(&op_token.kind) {
-            let target = self.expression_to_assignment_target(lhs)?;
+            let target = Self::expression_to_assignment_target(lhs)?;
             let right = self.arena.alloc(self.parse_expression_bp(right_bp)?);
             let end = self.previous.span.end;
             return Ok(Expression::Assignment(AssignmentExpression {
@@ -1270,7 +1295,10 @@ impl<'src, 'arena> Parser<'src, 'arena> {
     }
 
     /// Parse postfix expression
-    fn parse_postfix_expression(&mut self, lhs: Expression<'src, 'arena>) -> ParseResult<Expression<'src, 'arena>> {
+    fn parse_postfix_expression(
+        &mut self,
+        lhs: Expression<'src, 'arena>,
+    ) -> ParseResult<Expression<'src, 'arena>> {
         let start = lhs.span().start;
 
         // Postfix update operators
@@ -1287,7 +1315,9 @@ impl<'src, 'arena> Parser<'src, 'arena> {
 
         // Member access (dot)
         if self.match_token(&TokenKind::Dot) {
-            let property = self.arena.alloc(Expression::Identifier(self.parse_identifier()?));
+            let property = self
+                .arena
+                .alloc(Expression::Identifier(self.parse_identifier()?));
             let end = self.previous.span.end;
             return Ok(Expression::Member(MemberExpression {
                 object: self.arena.alloc(lhs),
@@ -1326,7 +1356,9 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                 }));
             }
             // Optional member: x?.y
-            let property = self.arena.alloc(Expression::Identifier(self.parse_identifier()?));
+            let property = self
+                .arena
+                .alloc(Expression::Identifier(self.parse_identifier()?));
             let end = self.previous.span.end;
             return Ok(Expression::Member(MemberExpression {
                 object: self.arena.alloc(lhs),
@@ -1382,9 +1414,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
     }
 
     /// Parse arguments list
-    fn parse_arguments(
-        &mut self,
-    ) -> ParseResult<AstVec<'arena, Argument<'src, 'arena>>> {
+    fn parse_arguments(&mut self) -> ParseResult<AstVec<'arena, Argument<'src, 'arena>>> {
         let mut args = AstVecBuilder::new();
 
         while !self.check(&TokenKind::RightParen) && !self.is_at_end() {
@@ -1423,17 +1453,11 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             TokenKind::String(_) => self.parse_string_literal(),
             TokenKind::True => {
                 let span = self.advance().span;
-                Ok(Expression::Literal(Literal::Boolean(BooleanLiteral {
-                    value: true,
-                    span,
-                })))
+                Ok(Expression::Literal(Literal::Boolean(BooleanLiteral { value: true, span })))
             }
             TokenKind::False => {
                 let span = self.advance().span;
-                Ok(Expression::Literal(Literal::Boolean(BooleanLiteral {
-                    value: false,
-                    span,
-                })))
+                Ok(Expression::Literal(Literal::Boolean(BooleanLiteral { value: false, span })))
             }
             TokenKind::Null => {
                 let span = self.advance().span;
@@ -1597,7 +1621,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         // Check for arrow function
         if self.check(&TokenKind::Arrow) {
             // Convert expression to parameters
-            let params = self.expression_to_params(&expr)?;
+            let params = Self::expression_to_params(&expr)?;
             return self.parse_arrow_function(start, params, false);
         }
 
@@ -1610,7 +1634,6 @@ impl<'src, 'arena> Parser<'src, 'arena> {
 
     /// Convert expression to arrow function parameters
     fn expression_to_params(
-        &self,
         expr: &Expression<'src, 'arena>,
     ) -> ParseResult<Vec<Pattern<'src, 'arena>>> {
         match expr {
@@ -1618,14 +1641,11 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             Expression::Sequence(seq) => {
                 let mut params = Vec::new();
                 for e in seq.expressions {
-                    params.extend(self.expression_to_params(e)?);
+                    params.extend(Self::expression_to_params(e)?);
                 }
                 Ok(params)
             }
-            _ => Err(ParseError::invalid_syntax(
-                expr.span(),
-                "Invalid arrow function parameter",
-            )),
+            _ => Err(ParseError::invalid_syntax(expr.span(), "Invalid arrow function parameter")),
         }
     }
 
@@ -1647,7 +1667,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         let params = if params.is_empty() {
             &[]
         } else {
-            self.arena.alloc_slice_from_iter(params.into_iter())
+            self.arena.alloc_slice_from_iter(params)
         };
 
         let end = self.previous.span.end;
@@ -1942,7 +1962,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             }
             let expr = self.parse_expression()?;
             self.expect(&TokenKind::RightParen, ")")?;
-            let params = self.expression_to_params(&expr)?;
+            let params = Self::expression_to_params(&expr)?;
             return self.parse_arrow_function(start, params, true);
         }
 
@@ -1978,12 +1998,14 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                     Some(raw)
                 };
 
-                let quasis = self.arena.alloc_slice_from_iter(std::iter::once(TemplateElement {
-                    raw: cooked.unwrap_or(""),
-                    cooked,
-                    tail: true,
-                    span: token.span,
-                }));
+                let quasis = self
+                    .arena
+                    .alloc_slice_from_iter(std::iter::once(TemplateElement {
+                        raw: cooked.unwrap_or(""),
+                        cooked,
+                        tail: true,
+                        span: token.span,
+                    }));
 
                 Ok(TemplateLiteral {
                     quasis,
@@ -2006,7 +2028,6 @@ impl<'src, 'arena> Parser<'src, 'arena> {
 
     /// Convert expression to assignment target
     fn expression_to_assignment_target(
-        &self,
         expr: Expression<'src, 'arena>,
     ) -> ParseResult<AssignmentTarget<'src, 'arena>> {
         match expr {
@@ -2047,8 +2068,7 @@ mod tests {
     #[test]
     fn test_function_declaration() {
         let arena = AstArena::new();
-        let (program, errors) =
-            Parser::new("function add(a, b) { return a + b; }", &arena).parse();
+        let (program, errors) = Parser::new("function add(a, b) { return a + b; }", &arena).parse();
         assert!(errors.is_empty());
         assert_eq!(program.body.len(), 1);
         match &program.body[0] {

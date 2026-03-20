@@ -11,10 +11,9 @@ use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
 
-use crate::bytecode::{Chunk, Opcode};
-
-use super::ir_builder::IrBuilder;
 use super::code_cache::CodeCache;
+use super::ir_builder::IrBuilder;
+use crate::bytecode::{Chunk, Opcode};
 
 /// Error during JIT compilation
 #[derive(Debug, Clone)]
@@ -89,15 +88,18 @@ impl JitCompiler {
     pub fn new() -> Result<Self, JitError> {
         // Configure for the native target
         let mut flag_builder = settings::builder();
-        flag_builder.set("use_colocated_libcalls", "false")
+        flag_builder
+            .set("use_colocated_libcalls", "false")
             .map_err(|e| JitError::ModuleCreation(e.to_string()))?;
-        flag_builder.set("is_pic", "false")
+        flag_builder
+            .set("is_pic", "false")
             .map_err(|e| JitError::ModuleCreation(e.to_string()))?;
-        flag_builder.set("opt_level", "speed")
+        flag_builder
+            .set("opt_level", "speed")
             .map_err(|e| JitError::ModuleCreation(e.to_string()))?;
 
-        let isa_builder = cranelift_native::builder()
-            .map_err(|e| JitError::ModuleCreation(e.to_string()))?;
+        let isa_builder =
+            cranelift_native::builder().map_err(|e| JitError::ModuleCreation(e.to_string()))?;
 
         let isa = isa_builder
             .finish(settings::Flags::new(flag_builder))
@@ -117,7 +119,11 @@ impl JitCompiler {
     }
 
     /// Compile a bytecode chunk to native code
-    pub fn compile(&mut self, chunk: &Chunk, chunk_idx: usize) -> Result<&CompiledFunction, JitError> {
+    pub fn compile(
+        &mut self,
+        chunk: &Chunk,
+        chunk_idx: usize,
+    ) -> Result<&CompiledFunction, JitError> {
         // Check if already compiled
         if self.cache.get(chunk_idx).is_some() {
             return self.cache.get(chunk_idx).ok_or(JitError::CacheFull);
@@ -125,11 +131,13 @@ impl JitCompiler {
 
         // Create function signature: () -> i64
         let mut sig = self.module.make_signature();
-        sig.returns.push(AbiParam::new(cranelift_codegen::ir::types::I64));
+        sig.returns
+            .push(AbiParam::new(cranelift_codegen::ir::types::I64));
 
         // Declare function
         let func_name = format!("chunk_{}", chunk_idx);
-        let func_id = self.module
+        let func_id = self
+            .module
             .declare_function(&func_name, Linkage::Local, &sig)
             .map_err(|e| JitError::Compilation(e.to_string()))?;
 
@@ -151,7 +159,8 @@ impl JitCompiler {
             .map_err(|e| JitError::Compilation(e.to_string()))?;
 
         // Finalize
-        self.module.finalize_definitions()
+        self.module
+            .finalize_definitions()
             .map_err(|e| JitError::Finalization(e.to_string()))?;
 
         // Get function pointer
@@ -228,7 +237,9 @@ mod tests {
         // LoadSmi r0, 42
         // Ret r0
         let mut chunk = Chunk::default();
-        chunk.instructions.push(Instruction::new_ri(Opcode::LoadSmi, 0, 42));
+        chunk
+            .instructions
+            .push(Instruction::new_ri(Opcode::LoadSmi, 0, 42));
         chunk.instructions.push(Instruction::new_r(Opcode::Ret, 0));
         chunk.register_count = 1;
 
@@ -249,9 +260,15 @@ mod tests {
         // Add r2, r0, r1
         // Ret r2
         let mut chunk = Chunk::default();
-        chunk.instructions.push(Instruction::new_ri(Opcode::LoadSmi, 0, 10));
-        chunk.instructions.push(Instruction::new_ri(Opcode::LoadSmi, 1, 5));
-        chunk.instructions.push(Instruction::new_rrr(Opcode::Add, 2, 0, 1));
+        chunk
+            .instructions
+            .push(Instruction::new_ri(Opcode::LoadSmi, 0, 10));
+        chunk
+            .instructions
+            .push(Instruction::new_ri(Opcode::LoadSmi, 1, 5));
+        chunk
+            .instructions
+            .push(Instruction::new_rrr(Opcode::Add, 2, 0, 1));
         chunk.instructions.push(Instruction::new_r(Opcode::Ret, 2));
         chunk.register_count = 3;
 
@@ -266,7 +283,9 @@ mod tests {
         // LoadSmi r0, 42
         // Ret r0
         let mut chunk = Chunk::default();
-        chunk.instructions.push(Instruction::new_ri(Opcode::LoadSmi, 0, 42));
+        chunk
+            .instructions
+            .push(Instruction::new_ri(Opcode::LoadSmi, 0, 42));
         chunk.instructions.push(Instruction::new_r(Opcode::Ret, 0));
         chunk.register_count = 1;
 
@@ -286,9 +305,15 @@ mod tests {
         // Add r2, r0, r1
         // Ret r2
         let mut chunk = Chunk::default();
-        chunk.instructions.push(Instruction::new_ri(Opcode::LoadSmi, 0, 10));
-        chunk.instructions.push(Instruction::new_ri(Opcode::LoadSmi, 1, 32));
-        chunk.instructions.push(Instruction::new_rrr(Opcode::Add, 2, 0, 1));
+        chunk
+            .instructions
+            .push(Instruction::new_ri(Opcode::LoadSmi, 0, 10));
+        chunk
+            .instructions
+            .push(Instruction::new_ri(Opcode::LoadSmi, 1, 32));
+        chunk
+            .instructions
+            .push(Instruction::new_rrr(Opcode::Add, 2, 0, 1));
         chunk.instructions.push(Instruction::new_r(Opcode::Ret, 2));
         chunk.register_count = 3;
 
@@ -303,7 +328,9 @@ mod tests {
         let mut compiler = JitCompiler::new().unwrap();
 
         let mut chunk = Chunk::default();
-        chunk.instructions.push(Instruction::new_ri(Opcode::LoadSmi, 0, 1));
+        chunk
+            .instructions
+            .push(Instruction::new_ri(Opcode::LoadSmi, 0, 1));
         chunk.instructions.push(Instruction::new_r(Opcode::Ret, 0));
         chunk.register_count = 1;
 

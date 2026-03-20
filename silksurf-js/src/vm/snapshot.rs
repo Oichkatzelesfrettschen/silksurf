@@ -5,14 +5,15 @@
 //! - REPL checkpointing
 //! - Fast startup from saved state
 
-use crate::bytecode::Chunk;
-
-#[cfg(feature = "mmap")]
-use memmap2::Mmap;
 #[cfg(feature = "mmap")]
 use std::fs::File;
 #[cfg(feature = "mmap")]
 use std::path::Path;
+
+#[cfg(feature = "mmap")]
+use memmap2::Mmap;
+
+use crate::bytecode::Chunk;
 
 /// A serializable primitive value (no Rc/RefCell)
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -46,9 +47,7 @@ impl PrimitiveValue {
                 let idx = object_map.get_or_insert_object(obj);
                 PrimitiveValue::ObjectRef(idx)
             }
-            super::Value::Function(func) => {
-                PrimitiveValue::FunctionRef(func.chunk_idx)
-            }
+            super::Value::Function(func) => PrimitiveValue::FunctionRef(func.chunk_idx),
         }
     }
 }
@@ -63,6 +62,7 @@ pub struct ObjectRefMap {
 }
 
 impl ObjectRefMap {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -189,7 +189,7 @@ impl VmSnapshot {
 
         let call_stack: Vec<_> = vm.call_stack.iter().map(SnapshotCallFrame::from).collect();
 
-        let strings: Vec<_> = vm.strings.strings.iter().cloned().collect();
+        let strings: Vec<_> = vm.strings.strings.clone();
 
         Self {
             registers,
@@ -201,6 +201,7 @@ impl VmSnapshot {
     }
 
     /// Serialize snapshot to bytes
+    #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         rkyv::to_bytes::<rkyv::rancor::Error>(self)
             .expect("snapshot serialization failed")
@@ -238,7 +239,8 @@ mod tests {
         let null = PrimitiveValue::from_value(&super::super::Value::Null, &mut object_map);
         assert!(matches!(null, PrimitiveValue::Null));
 
-        let bool_val = PrimitiveValue::from_value(&super::super::Value::Boolean(true), &mut object_map);
+        let bool_val =
+            PrimitiveValue::from_value(&super::super::Value::Boolean(true), &mut object_map);
         assert!(matches!(bool_val, PrimitiveValue::Boolean(true)));
 
         let num = PrimitiveValue::from_value(&super::super::Value::Number(3.14), &mut object_map);

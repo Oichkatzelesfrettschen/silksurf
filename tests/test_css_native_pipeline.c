@@ -11,6 +11,9 @@
 
 #include "../src/document/css_selector_match.h"
 #include "../src/document/css_cascade.h"
+#include "../include/silksurf/allocator.h"
+
+static silk_arena_t *g_test_arena = NULL;
 
 /* ============================================================================
  * Test 1: Selector Parsing Completeness
@@ -22,7 +25,7 @@ static int test_selector_parsing(void) {
     int passed = 1;
 
     /* Type selectors */
-    css_rule_selector_t *div = css_selector_parse("div");
+    css_rule_selector_t *div = css_selector_parse(g_test_arena, "div");
     if (!div || !div->selectors) {
         printf("  FAILED: Type selector parsing\n");
         passed = 0;
@@ -32,7 +35,7 @@ static int test_selector_parsing(void) {
     css_selector_free(div);
 
     /* Class selectors */
-    css_rule_selector_t *cls = css_selector_parse(".container");
+    css_rule_selector_t *cls = css_selector_parse(g_test_arena, ".container");
     if (!cls || !cls->selectors) {
         printf("  FAILED: Class selector parsing\n");
         passed = 0;
@@ -42,7 +45,7 @@ static int test_selector_parsing(void) {
     css_selector_free(cls);
 
     /* ID selectors */
-    css_rule_selector_t *id = css_selector_parse("#main");
+    css_rule_selector_t *id = css_selector_parse(g_test_arena, "#main");
     if (!id || !id->selectors) {
         printf("  FAILED: ID selector parsing\n");
         passed = 0;
@@ -52,7 +55,7 @@ static int test_selector_parsing(void) {
     css_selector_free(id);
 
     /* Universal selector */
-    css_rule_selector_t *uni = css_selector_parse("*");
+    css_rule_selector_t *uni = css_selector_parse(g_test_arena, "*");
     if (!uni || !uni->selectors) {
         printf("  FAILED: Universal selector parsing\n");
         passed = 0;
@@ -62,7 +65,7 @@ static int test_selector_parsing(void) {
     css_selector_free(uni);
 
     /* Compound selectors */
-    css_rule_selector_t *compound = css_selector_parse("div.main#content");
+    css_rule_selector_t *compound = css_selector_parse(g_test_arena, "div.main#content");
     if (!compound || !compound->selectors) {
         printf("  FAILED: Compound selector parsing\n");
         passed = 0;
@@ -84,7 +87,7 @@ static int test_specificity_calculation(void) {
     int passed = 1;
 
     /* Element: (0, 0, 1) */
-    css_rule_selector_t *element = css_selector_parse("div");
+    css_rule_selector_t *element = css_selector_parse(g_test_arena, "div");
     css_specificity_t spec_e = css_selector_specificity(element);
     if (spec_e.ids == 0 && spec_e.classes_and_attrs == 0 && spec_e.elements == 1) {
         printf("  PASSED: Element specificity (0, 0, 1)\n");
@@ -95,7 +98,7 @@ static int test_specificity_calculation(void) {
     css_selector_free(element);
 
     /* Class: (0, 1, 0) */
-    css_rule_selector_t *cls = css_selector_parse(".highlight");
+    css_rule_selector_t *cls = css_selector_parse(g_test_arena, ".highlight");
     css_specificity_t spec_c = css_selector_specificity(cls);
     if (spec_c.ids == 0 && spec_c.classes_and_attrs == 1 && spec_c.elements == 0) {
         printf("  PASSED: Class specificity (0, 1, 0)\n");
@@ -106,7 +109,7 @@ static int test_specificity_calculation(void) {
     css_selector_free(cls);
 
     /* ID: (1, 0, 0) */
-    css_rule_selector_t *id = css_selector_parse("#main");
+    css_rule_selector_t *id = css_selector_parse(g_test_arena, "#main");
     css_specificity_t spec_i = css_selector_specificity(id);
     if (spec_i.ids == 1 && spec_i.classes_and_attrs == 0 && spec_i.elements == 0) {
         printf("  PASSED: ID specificity (1, 0, 0)\n");
@@ -138,7 +141,7 @@ static int test_edge_cases(void) {
     int passed = 1;
 
     /* Empty selector */
-    css_rule_selector_t *empty = css_selector_parse("");
+    css_rule_selector_t *empty = css_selector_parse(g_test_arena, "");
     if (empty && !empty->selectors) {
         printf("  PASSED: Empty selector handled\n");
     } else {
@@ -148,7 +151,7 @@ static int test_edge_cases(void) {
     css_selector_free(empty);
 
     /* NULL input */
-    css_rule_selector_t *null_sel = css_selector_parse(NULL);
+    css_rule_selector_t *null_sel = css_selector_parse(g_test_arena, NULL);
     if (null_sel == NULL) {
         printf("  PASSED: NULL input handled\n");
     } else {
@@ -285,7 +288,7 @@ static int test_performance_baseline(void) {
 
     for (int i = 0; i < iterations; i++) {
         const char *sel_str = test_selectors[i % 6];
-        selectors[i % 100] = css_selector_parse(sel_str);
+        selectors[i % 100] = css_selector_parse(g_test_arena, sel_str);
     }
 
     for (int i = 0; i < 100; i++) {
@@ -306,6 +309,13 @@ static int test_performance_baseline(void) {
 
 int main(void) {
     printf("===== CSS Native Pipeline Validation (Phase 2.3) =====\n\n");
+
+    /* 256 KB -- enough for 1000-iteration performance test plus all other tests */
+    g_test_arena = silk_arena_create(256 * 1024);
+    if (!g_test_arena) {
+        printf("FATAL: could not create test arena\n");
+        return 1;
+    }
 
     int total = 0, passed = 0;
 
@@ -333,8 +343,10 @@ int main(void) {
     printf("\n===== Test Summary =====\n");
     printf("Passed: %d/%d\n", passed, total);
 
+    silk_arena_destroy(g_test_arena);
+
     if (passed == total) {
-        printf("\n✓ All Phase 2 validation tests PASSED\n");
+        printf("\nAll Phase 2 validation tests PASSED\n");
         printf("\n==== Phase 2 Foundation Complete ====\n");
         printf("Components ready for Phase 3 parser integration:\n");
         printf("  1. Selector matching: 8/8 tests passing ✓\n");

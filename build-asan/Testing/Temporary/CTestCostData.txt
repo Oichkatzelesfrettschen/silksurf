@@ -1,0 +1,17 @@
+css_tokenizer 2 0.0112808
+css_parser 2 0.0112902
+full_pipeline 1 0.15825
+parser_basic 2 0.00905774
+dom_parsing 1 0.271752
+css_engine 2 0.0163555
+css_cascade 1 0.307894
+css_cascade_native 2 0.00779721
+css_cascade_integration 1 0.284794
+css_selector_matching 2 0.00986529
+css_native_pipeline 2 0.00888242
+simd_detection 2 0.00751186
+e2e_rendering 2 0.0128449
+inline_layout 2 0.0138706
+replaced_elements 2 0.0133873
+xcb_shm 2 0.0100699
+---

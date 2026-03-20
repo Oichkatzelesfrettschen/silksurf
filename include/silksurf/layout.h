@@ -57,7 +57,7 @@ typedef struct {
  * Layout coordinates: relative to viewport
  * Width/height include content only, not padding/border
  */
-typedef struct {
+typedef struct silk_layout_box {
     /* Position and size (CSS pixels) */
     int32_t x;                   /* Left edge (includes margin) */
     int32_t y;                   /* Top edge (includes margin) */
@@ -88,6 +88,13 @@ typedef struct {
     int32_t baseline;            /* For inline alignment */
     uint8_t collapsible_top;     /* Top margin can collapse */
     uint8_t collapsible_bottom;  /* Bottom margin can collapse */
+
+    /* Tree structure linking layout boxes to DOM and to each other.
+     * Populated by layout_node_recursive(); used by paint phase to
+     * traverse the box tree without re-walking the DOM. */
+    void *dom_node;                          /* Opaque silk_dom_node_t * */
+    struct silk_layout_box *first_child;     /* First child box */
+    struct silk_layout_box *next_sibling;    /* Next sibling box */
 } layout_box_t;
 
 /**
@@ -100,6 +107,9 @@ typedef struct silk_layout_context {
     int32_t viewport_width;
     int32_t viewport_height;
     struct silk_arena *arena;       /* Layout boxes allocated here */
+
+    /* Output: set by silk_layout_compute(), NULL before first layout */
+    layout_box_t *root_box;         /* Root of computed layout box tree */
 
     /* Statistics */
     size_t box_count;               /* Number of boxes computed */

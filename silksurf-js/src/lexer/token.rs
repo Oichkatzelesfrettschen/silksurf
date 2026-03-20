@@ -3,9 +3,10 @@
 //! Tokens hold references to source (&'src str) instead of
 //! owned strings, eliminating allocation during lexing.
 
-use super::span::Span;
-use super::interner::Symbol;
 use phf::phf_map;
+
+use super::interner::Symbol;
+use super::span::Span;
 
 /// A token with source location
 #[derive(Debug, Clone, Copy)]
@@ -248,7 +249,7 @@ pub enum TokenKind<'src> {
     Comment(&'src str),
 }
 
-impl<'src> TokenKind<'src> {
+impl TokenKind<'_> {
     /// Check if this is a keyword
     #[must_use]
     pub const fn is_keyword(&self) -> bool {
@@ -345,21 +346,69 @@ impl<'src> TokenKind<'src> {
 }
 
 /// Keyword ID for perfect hash lookup
-/// Maps to TokenKind variants without lifetime
+/// Maps to `TokenKind` variants without lifetime
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 enum KeywordId {
-    Await, Break, Case, Catch, Class, Const, Continue, Debugger,
-    Default, Delete, Do, Else, Enum, Export, Extends, False,
-    Finally, For, Function, If, Import, In, Instanceof, Let,
-    New, Null, Return, Super, Switch, This, Throw, True, Try,
-    Typeof, Undefined, Var, Void, While, With, Yield,
-    Implements, Interface, Package, Private, Protected, Public,
-    Static, Async, Of, Get, Set, As, From, Target, Meta,
+    Await,
+    Break,
+    Case,
+    Catch,
+    Class,
+    Const,
+    Continue,
+    Debugger,
+    Default,
+    Delete,
+    Do,
+    Else,
+    Enum,
+    Export,
+    Extends,
+    False,
+    Finally,
+    For,
+    Function,
+    If,
+    Import,
+    In,
+    Instanceof,
+    Let,
+    New,
+    Null,
+    Return,
+    Super,
+    Switch,
+    This,
+    Throw,
+    True,
+    Try,
+    Typeof,
+    Undefined,
+    Var,
+    Void,
+    While,
+    With,
+    Yield,
+    Implements,
+    Interface,
+    Package,
+    Private,
+    Protected,
+    Public,
+    Static,
+    Async,
+    Of,
+    Get,
+    Set,
+    As,
+    From,
+    Target,
+    Meta,
 }
 
 impl KeywordId {
-    /// Convert to TokenKind
+    /// Convert to `TokenKind`
     #[inline]
     const fn to_token_kind(self) -> TokenKind<'static> {
         match self {
@@ -485,6 +534,7 @@ static KEYWORDS: phf::Map<&'static str, KeywordId> = phf_map! {
 /// Lookup table for keyword matching (O(1) via perfect hash)
 /// Returns Some(TokenKind) if the string is a keyword, None otherwise.
 #[inline]
+#[must_use]
 pub fn keyword_lookup(s: &str) -> Option<TokenKind<'static>> {
     KEYWORDS.get(s).map(|id| id.to_token_kind())
 }

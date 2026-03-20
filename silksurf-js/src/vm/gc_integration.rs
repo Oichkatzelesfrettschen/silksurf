@@ -32,7 +32,7 @@
 //! 4. **Collection Trigger**: Invoke GC at safe points
 
 use crate::gc::{
-    FinalizationRegistry, FinalizerQueue, GcRef, HeldValue, Heap, RootSet, Trace, Tracer,
+    FinalizationRegistry, FinalizerQueue, GcRef, Heap, HeldValue, RootSet, Trace, Tracer,
     UnregisterToken, WeakTable,
 };
 

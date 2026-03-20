@@ -37,11 +37,12 @@ typedef enum {
 
 typedef struct {
     silk_css_token_type_t type;
-    char *value;
+    const char *value;       /* Points into arena-copied string */
     size_t value_len;
-    /* For numbers/dimensions */
     double numeric_value;
-    char *unit;
+    const char *unit;        /* For dimension tokens (e.g. "px", "em") */
+    size_t unit_len;
+    char delim;              /* For CSS_TOK_DELIM: the single character */
 } silk_css_token_t;
 
 typedef struct {
@@ -53,5 +54,8 @@ typedef struct {
 
 silk_css_tokenizer_t *silk_css_tokenizer_create(silk_arena_t *arena, const char *input, size_t input_len);
 silk_css_token_t *silk_css_tokenizer_next_token(silk_css_tokenizer_t *tok);
+
+/* Peek at next token without consuming */
+silk_css_token_t *silk_css_tokenizer_peek(silk_css_tokenizer_t *tok);
 
 #endif

@@ -3,10 +3,10 @@
 //! Zero-copy design: AST nodes reference the source text via Span.
 //! Arena-allocated: All nodes stored in bump arena for bulk deallocation.
 //!
-//! Based on ESTree spec (https://github.com/estree/estree) with simplifications.
+//! Based on `ESTree` spec (<https://github.com/estree/estree>) with simplifications.
 
-use crate::lexer::{Span, Symbol};
 use super::ast_arena::{AstBox, AstVec};
+use crate::lexer::{Span, Symbol};
 
 /// Root of a JavaScript program
 #[derive(Debug, Clone)]
@@ -47,7 +47,7 @@ pub enum Statement<'src, 'arena> {
     ForIn(ForInStatement<'src, 'arena>),
     /// For-of statement: for (x of iterable) {...}
     ForOf(ForOfStatement<'src, 'arena>),
-    /// Function declaration: function name() {...}
+    /// Function declaration: function `name()` {...}
     FunctionDeclaration(FunctionDeclaration<'src, 'arena>),
     /// Return statement: return expr;
     Return(ReturnStatement<'src, 'arena>),
@@ -388,7 +388,7 @@ pub enum Expression<'src, 'arena> {
     Array(ArrayExpression<'src, 'arena>),
     /// Object literal: { a: 1, b: 2 }
     Object(ObjectExpression<'src, 'arena>),
-    /// Function expression: function() {}
+    /// Function expression: `function()` {}
     Function(FunctionExpression<'src, 'arena>),
     /// Arrow function: () => {}
     Arrow(ArrowFunctionExpression<'src, 'arena>),
@@ -402,7 +402,7 @@ pub enum Expression<'src, 'arena> {
     Member(MemberExpression<'src, 'arena>),
     /// Call expression: fn(args)
     Call(CallExpression<'src, 'arena>),
-    /// New expression: new Foo()
+    /// New expression: new `Foo()`
     New(NewExpression<'src, 'arena>),
     /// Unary expression: !x, -x, typeof x
     Unary(UnaryExpression<'src, 'arena>),
@@ -675,27 +675,27 @@ pub struct BinaryExpression<'src, 'arena> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOperator {
     // Arithmetic
-    Add,    // +
-    Sub,    // -
-    Mul,    // *
-    Div,    // /
-    Mod,    // %
-    Pow,    // **
+    Add, // +
+    Sub, // -
+    Mul, // *
+    Div, // /
+    Mod, // %
+    Pow, // **
     // Comparison
-    Eq,     // ==
-    Ne,     // !=
-    StrictEq,  // ===
-    StrictNe,  // !==
-    Lt,     // <
-    Le,     // <=
-    Gt,     // >
-    Ge,     // >=
+    Eq,       // ==
+    Ne,       // !=
+    StrictEq, // ===
+    StrictNe, // !==
+    Lt,       // <
+    Le,       // <=
+    Gt,       // >
+    Ge,       // >=
     // Bitwise
-    BitwiseOr,  // |
-    BitwiseXor, // ^
-    BitwiseAnd, // &
-    ShiftLeft,  // <<
-    ShiftRight, // >>
+    BitwiseOr,          // |
+    BitwiseXor,         // ^
+    BitwiseAnd,         // &
+    ShiftLeft,          // <<
+    ShiftRight,         // >>
     UnsignedShiftRight, // >>>
     // Other
     In,         // in
@@ -713,8 +713,8 @@ pub struct LogicalExpression<'src, 'arena> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogicalOperator {
-    And,       // &&
-    Or,        // ||
+    And,               // &&
+    Or,                // ||
     NullishCoalescing, // ??
 }
 
@@ -745,22 +745,22 @@ pub enum AssignmentTarget<'src, 'arena> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AssignmentOperator {
-    Assign,         // =
-    AddAssign,      // +=
-    SubAssign,      // -=
-    MulAssign,      // *=
-    DivAssign,      // /=
-    ModAssign,      // %=
-    PowAssign,      // **=
-    ShiftLeftAssign,   // <<=
-    ShiftRightAssign,  // >>=
+    Assign,                   // =
+    AddAssign,                // +=
+    SubAssign,                // -=
+    MulAssign,                // *=
+    DivAssign,                // /=
+    ModAssign,                // %=
+    PowAssign,                // **=
+    ShiftLeftAssign,          // <<=
+    ShiftRightAssign,         // >>=
     UnsignedShiftRightAssign, // >>>=
-    BitwiseOrAssign,   // |=
-    BitwiseXorAssign,  // ^=
-    BitwiseAndAssign,  // &=
-    LogicalOrAssign,   // ||=
-    LogicalAndAssign,  // &&=
-    NullishAssign,     // ??=
+    BitwiseOrAssign,          // |=
+    BitwiseXorAssign,         // ^=
+    BitwiseAndAssign,         // &=
+    LogicalOrAssign,          // ||=
+    LogicalAndAssign,         // &&=
+    NullishAssign,            // ??=
 }
 
 /// Sequence expression
@@ -874,8 +874,9 @@ pub struct AssignmentPattern<'src, 'arena> {
 // IMPL BLOCKS
 // ============================================================================
 
-impl<'src, 'arena> Statement<'src, 'arena> {
+impl Statement<'_, '_> {
     /// Get the span of this statement
+    #[must_use]
     pub fn span(&self) -> Span {
         match self {
             Statement::VariableDeclaration(s) => s.span,
@@ -896,8 +897,7 @@ impl<'src, 'arena> Statement<'src, 'arena> {
             Statement::Switch(s) => s.span,
             Statement::Labeled(s) => s.span,
             Statement::With(s) => s.span,
-            Statement::Debugger(span) => *span,
-            Statement::Empty(span) => *span,
+            Statement::Debugger(span) | Statement::Empty(span) => *span,
             Statement::ClassDeclaration(s) => s.span,
             Statement::Import(s) => s.span,
             Statement::Export(s) => s.span(),
@@ -905,25 +905,26 @@ impl<'src, 'arena> Statement<'src, 'arena> {
     }
 }
 
-impl<'src, 'arena> ExportDeclaration<'src, 'arena> {
+impl ExportDeclaration<'_, '_> {
+    #[must_use]
     pub fn span(&self) -> Span {
         match self {
-            ExportDeclaration::Named { span, .. } => *span,
-            ExportDeclaration::Default { span, .. } => *span,
-            ExportDeclaration::All { span, .. } => *span,
-            ExportDeclaration::Declaration { span, .. } => *span,
+            ExportDeclaration::Named { span, .. }
+            | ExportDeclaration::Default { span, .. }
+            | ExportDeclaration::All { span, .. }
+            | ExportDeclaration::Declaration { span, .. } => *span,
         }
     }
 }
 
-impl<'src, 'arena> Expression<'src, 'arena> {
+impl Expression<'_, '_> {
     /// Get the span of this expression
+    #[must_use]
     pub fn span(&self) -> Span {
         match self {
             Expression::Identifier(e) => e.span,
             Expression::Literal(e) => e.span(),
-            Expression::This(span) => *span,
-            Expression::Super(span) => *span,
+            Expression::This(span) | Expression::Super(span) => *span,
             Expression::Array(e) => e.span,
             Expression::Object(e) => e.span,
             Expression::Function(e) => e.span,
@@ -951,7 +952,8 @@ impl<'src, 'arena> Expression<'src, 'arena> {
     }
 }
 
-impl<'src, 'arena> Literal<'src> {
+impl Literal<'_> {
+    #[must_use]
     pub fn span(&self) -> Span {
         match self {
             Literal::Null(span) => *span,
@@ -964,7 +966,8 @@ impl<'src, 'arena> Literal<'src> {
     }
 }
 
-impl<'src, 'arena> Pattern<'src, 'arena> {
+impl Pattern<'_, '_> {
+    #[must_use]
     pub fn span(&self) -> Span {
         match self {
             Pattern::Identifier(i) => i.span,
@@ -976,13 +979,11 @@ impl<'src, 'arena> Pattern<'src, 'arena> {
     }
 }
 
-impl<'src, 'arena> RestElement<'src, 'arena> {
+impl RestElement<'_, '_> {
+    #[must_use]
     pub fn span(&self) -> Span {
         // Span from ... to end of argument
-        Span::new(
-            self.argument.span().start.saturating_sub(3),
-            self.argument.span().end,
-        )
+        Span::new(self.argument.span().start.saturating_sub(3), self.argument.span().end)
     }
 }
 

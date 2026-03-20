@@ -24,7 +24,10 @@ impl Span {
     #[inline]
     #[must_use]
     pub const fn at(pos: u32) -> Self {
-        Self { start: pos, end: pos }
+        Self {
+            start: pos,
+            end: pos,
+        }
     }
 
     /// Length of the span in bytes
@@ -45,8 +48,16 @@ impl Span {
     #[inline]
     #[must_use]
     pub const fn merge(self, other: Self) -> Self {
-        let start = if self.start < other.start { self.start } else { other.start };
-        let end = if self.end > other.end { self.end } else { other.end };
+        let start = if self.start < other.start {
+            self.start
+        } else {
+            other.start
+        };
+        let end = if self.end > other.end {
+            self.end
+        } else {
+            other.end
+        };
         Self { start, end }
     }
 
@@ -60,7 +71,7 @@ impl Span {
     /// Extract the spanned text from source
     #[inline]
     #[must_use]
-    pub fn text<'src>(self, source: &'src str) -> &'src str {
+    pub fn text(self, source: &str) -> &str {
         &source[self.start as usize..self.end as usize]
     }
 }

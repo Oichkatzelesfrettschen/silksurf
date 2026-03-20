@@ -43,21 +43,6 @@ void silk_render_queue_push_rect(silk_render_queue_t *queue, int x, int y, int w
     cmd->color = color;
 }
 
-/*
- * Placeholder for style extraction - will integrate with silk_css_get_computed_style
- */
-__attribute__((unused))
-static uint32_t get_node_background_color(silk_dom_node_t *node) {
-    /* For now, return a default red for testing 'First Paint' if it's an element */
-    if (silk_dom_node_get_type(node) == SILK_NODE_ELEMENT) {
-        /* TODO: Actually parse style attributes or computed style */
-        const char *tag = silk_dom_node_get_tag_name(node);
-        if (strcmp(tag, "div") == 0) return 0xFFFF0000; /* Red */
-        if (strcmp(tag, "body") == 0) return 0xFFFFFFFF; /* White */
-    }
-    return 0x00000000; /* Transparent */
-}
-
 /**
  * Paint a single layout box with background and borders
  *
@@ -115,23 +100,35 @@ static void paint_layout_box(const layout_box_t *box, silk_dom_node_t *dom_node,
        - Handle border-radius for rounded corners
        - Handle border-style (solid, dashed, dotted, etc.) */
 
-    if (box->border.left > 0 || box->border.top > 0 ||
-        box->border.right > 0 || box->border.bottom > 0) {
-        /* For now, skip border painting - color not extracted */
-        /* TODO: Paint borders when border-color CSS property integrated */
+    uint32_t border_color = 0xFF000000;  /* Default: black */
+    if (style) border_color = style->border_color;
+    if ((border_color >> 24) == 0) border_color = 0xFF000000;
+
+    int bx = box->x;
+    int by = box->y;
+    int outer_w = box->padding.left + box->width + box->padding.right;
+    int outer_h = box->padding.top + box->height + box->padding.bottom;
+
+    /* Top border */
+    if (box->border.top > 0) {
+        silk_render_queue_push_rect(queue, bx, by - box->border.top,
+            outer_w + box->border.left + box->border.right, box->border.top, border_color);
     }
-
-    /* ================================================================
-       STEP 3: PAINT MARGIN/PADDING DEBUG (optional, for development)
-       ================================================================ */
-
-    /* In production, margins and padding are transparent spacing.
-       During development, they can be visualized with debug colors:
-       - Margin: yellow
-       - Padding: green
-       - Border: red */
-
-    /* TODO: Add debug flag to enable visual debugging of box model */
+    /* Bottom border */
+    if (box->border.bottom > 0) {
+        silk_render_queue_push_rect(queue, bx, by + outer_h,
+            outer_w + box->border.left + box->border.right, box->border.bottom, border_color);
+    }
+    /* Left border */
+    if (box->border.left > 0) {
+        silk_render_queue_push_rect(queue, bx - box->border.left, by,
+            box->border.left, outer_h, border_color);
+    }
+    /* Right border */
+    if (box->border.right > 0) {
+        silk_render_queue_push_rect(queue, bx + outer_w, by,
+            box->border.right, outer_h, border_color);
+    }
 }
 
 /**
@@ -155,17 +152,16 @@ static void paint_layout_box_recursive(const layout_box_t *box, silk_dom_node_t 
         return;
     }
 
-    /* Paint current box */
-    paint_layout_box(box, dom_node, queue);
+    /* Paint current box -- use embedded dom_node if caller did not supply one */
+    silk_dom_node_t *node = dom_node ? dom_node : (silk_dom_node_t *)box->dom_node;
+    paint_layout_box(box, node, queue);
 
-    /* Recurse on children
-       TODO: Requires mapping between layout box children and DOM node children
-       For now, just paint the current box */
-
-    /* TODO: Full layout tree traversal:
-       - layout_box *child = ... (need to track children in layout_box_t)
-       - silk_dom_node_t *child_dom = ...
-       - paint_layout_box_recursive(child, child_dom, queue) */
+    /* Recurse on children using the sibling chain populated by layout_node_recursive() */
+    const layout_box_t *child = box->first_child;
+    while (child) {
+        paint_layout_box_recursive(child, (silk_dom_node_t *)child->dom_node, queue);
+        child = child->next_sibling;
+    }
 }
 
 /**
