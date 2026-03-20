@@ -93,17 +93,13 @@ fn lexer_benchmark(c: &mut Criterion) {
     // Medium input (10x)
     let medium = small.repeat(10);
     group.throughput(Throughput::Bytes(medium.len() as u64));
-    group.bench_with_input(
-        BenchmarkId::new("medium", medium.len()),
-        &medium,
-        |b, input| {
-            b.iter(|| {
-                let lexer = Lexer::new(black_box(input));
-                let tokens: Vec<_> = lexer.collect();
-                black_box(tokens.len())
-            });
-        },
-    );
+    group.bench_with_input(BenchmarkId::new("medium", medium.len()), &medium, |b, input| {
+        b.iter(|| {
+            let lexer = Lexer::new(black_box(input));
+            let tokens: Vec<_> = lexer.collect();
+            black_box(tokens.len())
+        });
+    });
 
     // Large input (100x)
     let large = small.repeat(100);
@@ -123,22 +119,21 @@ fn token_types_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("token_types");
 
     // Keywords
-    let keywords = "function const let var if else for while return class extends import export async await".repeat(100);
+    let keywords =
+        "function const let var if else for while return class extends import export async await"
+            .repeat(100);
     group.throughput(Throughput::Bytes(keywords.len() as u64));
-    group.bench_with_input(
-        BenchmarkId::new("keywords", keywords.len()),
-        &keywords,
-        |b, input| {
-            b.iter(|| {
-                let lexer = Lexer::new(black_box(input));
-                let tokens: Vec<_> = lexer.collect();
-                black_box(tokens.len())
-            });
-        },
-    );
+    group.bench_with_input(BenchmarkId::new("keywords", keywords.len()), &keywords, |b, input| {
+        b.iter(|| {
+            let lexer = Lexer::new(black_box(input));
+            let tokens: Vec<_> = lexer.collect();
+            black_box(tokens.len())
+        });
+    });
 
     // Operators
-    let operators = "=== !== => && || ?? ?. ... ++ -- += -= *= /= <<= >>= >>>= &= |= ^=".repeat(100);
+    let operators =
+        "=== !== => && || ?? ?. ... ++ -- += -= *= /= <<= >>= >>>= &= |= ^=".repeat(100);
     group.throughput(Throughput::Bytes(operators.len() as u64));
     group.bench_with_input(
         BenchmarkId::new("operators", operators.len()),
@@ -153,7 +148,8 @@ fn token_types_benchmark(c: &mut Criterion) {
     );
 
     // Identifiers
-    let identifiers = "foo bar baz qux quux corge grault garply waldo fred plugh xyzzy thud ".repeat(100);
+    let identifiers =
+        "foo bar baz qux quux corge grault garply waldo fred plugh xyzzy thud ".repeat(100);
     group.throughput(Throughput::Bytes(identifiers.len() as u64));
     group.bench_with_input(
         BenchmarkId::new("identifiers", identifiers.len()),
@@ -170,17 +166,13 @@ fn token_types_benchmark(c: &mut Criterion) {
     // Numbers
     let numbers = "42 3.14159 0xFF 0b1010 0o777 1e10 2.5e-3 123_456_789 0xDEAD_BEEF ".repeat(100);
     group.throughput(Throughput::Bytes(numbers.len() as u64));
-    group.bench_with_input(
-        BenchmarkId::new("numbers", numbers.len()),
-        &numbers,
-        |b, input| {
-            b.iter(|| {
-                let lexer = Lexer::new(black_box(input));
-                let tokens: Vec<_> = lexer.collect();
-                black_box(tokens.len())
-            });
-        },
-    );
+    group.bench_with_input(BenchmarkId::new("numbers", numbers.len()), &numbers, |b, input| {
+        b.iter(|| {
+            let lexer = Lexer::new(black_box(input));
+            let tokens: Vec<_> = lexer.collect();
+            black_box(tokens.len())
+        });
+    });
 
     group.finish();
 }
@@ -219,7 +211,8 @@ fn simd_benchmark(c: &mut Criterion) {
     );
 
     // Long strings (SIMD via memchr3 for quote/\/\n)
-    let long_strings = r#"const s = "This is a fairly long string literal with some content";"#.repeat(500);
+    let long_strings =
+        r#"const s = "This is a fairly long string literal with some content";"#.repeat(500);
     group.throughput(Throughput::Bytes(long_strings.len() as u64));
     group.bench_with_input(
         BenchmarkId::new("long_strings", long_strings.len()),
@@ -258,7 +251,8 @@ function example(x, y) { // inline comment
     const result = x + y; // another inline
     return result;
 }
-"#.repeat(200);
+"#
+    .repeat(200);
     group.throughput(Throughput::Bytes(heavily_commented.len() as u64));
     group.bench_with_input(
         BenchmarkId::new("heavily_commented", heavily_commented.len()),

@@ -1,4 +1,4 @@
-//! Bytecode opcodes for SilkSurfJS VM
+//! Bytecode opcodes for `SilkSurfJS` VM
 //!
 //! Register-based instruction set with 50+ opcodes.
 //! Derived from ECMA-262 specification requirements.
@@ -16,7 +16,9 @@ use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 /// - `IntoBytes` allows safe conversion to bytes
 /// - The optimized `from_byte` method uses range-based validation for performance
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, TryFromBytes, IntoBytes, KnownLayout, Immutable)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, TryFromBytes, IntoBytes, KnownLayout, Immutable,
+)]
 pub enum Opcode {
     // ========================================
     // Load/Store (0x00-0x0F)
@@ -159,7 +161,7 @@ pub enum Opcode {
     NewObject = 0x60,
     /// Create array: r[dst] = new Array(len)
     NewArray = 0x61,
-    /// Create function: r[dst] = Function(func_idx)
+    /// Create function: r[dst] = `Function(func_idx)`
     NewFunction = 0x62,
     /// Create arrow function
     NewArrow = 0x63,
@@ -169,7 +171,7 @@ pub enum Opcode {
     NewAsync = 0x65,
     /// Create class
     NewClass = 0x66,
-    /// Create RegExp: r[dst] = /pattern/flags
+    /// Create `RegExp`: r[dst] = /pattern/flags
     NewRegExp = 0x67,
     /// Define property with attributes
     DefineProperty = 0x68,
@@ -213,7 +215,7 @@ pub enum Opcode {
     GetIterator = 0x80,
     /// Get async iterator: r[dst] = r[obj][Symbol.asyncIterator]()
     GetAsyncIterator = 0x81,
-    /// Iterator next: r[dst] = r[iter].next()
+    /// Iterator next: r[dst] = r[iter].`next()`
     IterNext = 0x82,
     /// Check iterator done: r[dst] = r[result].done
     IterDone = 0x83,
@@ -296,27 +298,108 @@ pub static OPCODE_META: [OpcodeMeta; 256] = {
     set_ops!(0, false, false, Nop, Debugger, LeaveTry);
     set_ops!(0, false, true, Halt, RetUndefined, Rethrow);
     set_ops!(1, false, true, Ret, Throw);
-    set_ops!(1, false, false, LoadTrue, LoadFalse, LoadNull, LoadUndefined, LoadZero, LoadOne, LoadMinusOne, PushScope, PopScope);
+    set_ops!(
+        1,
+        false,
+        false,
+        LoadTrue,
+        LoadFalse,
+        LoadNull,
+        LoadUndefined,
+        LoadZero,
+        LoadOne,
+        LoadMinusOne,
+        PushScope,
+        PopScope
+    );
 
     set_ops!(2, true, true, Jmp);
-    set_ops!(2, false, false,
-        Mov, Neg, Inc, Dec, Not, BitNot, Typeof, LoadConst, LoadSmi,
-        NewObject, NewArray, GetLocal, SetLocal, GetGlobal, SetGlobal,
-        GetIterator, GetAsyncIterator, IterNext, IterDone, IterValue, IterClose,
-        Yield, YieldStar, Await, EnterTry, EnterCatch, EnterFinally, GetException,
-        NewFunction, NewArrow, NewGenerator, NewAsync, NewClass, NewRegExp,
-        CheckTdz, CreateBinding, Wide
+    set_ops!(
+        2,
+        false,
+        false,
+        Mov,
+        Neg,
+        Inc,
+        Dec,
+        Not,
+        BitNot,
+        Typeof,
+        LoadConst,
+        LoadSmi,
+        NewObject,
+        NewArray,
+        GetLocal,
+        SetLocal,
+        GetGlobal,
+        SetGlobal,
+        GetIterator,
+        GetAsyncIterator,
+        IterNext,
+        IterDone,
+        IterValue,
+        IterClose,
+        Yield,
+        YieldStar,
+        Await,
+        EnterTry,
+        EnterCatch,
+        EnterFinally,
+        GetException,
+        NewFunction,
+        NewArrow,
+        NewGenerator,
+        NewAsync,
+        NewClass,
+        NewRegExp,
+        CheckTdz,
+        CreateBinding,
+        Wide
     );
 
     set_ops!(3, true, false, JmpTrue, JmpFalse, JmpNullish, JmpNotNullish);
     set_ops!(3, false, true, TailCall);
-    set_ops!(3, false, false,
-        Add, Sub, Mul, Div, Mod, Pow,
-        Eq, StrictEq, Ne, StrictNe, Lt, Le, Gt, Ge,
-        BitAnd, BitOr, BitXor, Shl, Shr, Ushr,
-        GetProp, SetProp, GetElem, SetElem, DeleteProp, DeleteElem,
-        In, Instanceof, Call, CallMethod, GetCapture, SetCapture,
-        DefineProperty, DefineGetter, DefineSetter, SpreadArray, SpreadCall
+    set_ops!(
+        3,
+        false,
+        false,
+        Add,
+        Sub,
+        Mul,
+        Div,
+        Mod,
+        Pow,
+        Eq,
+        StrictEq,
+        Ne,
+        StrictNe,
+        Lt,
+        Le,
+        Gt,
+        Ge,
+        BitAnd,
+        BitOr,
+        BitXor,
+        Shl,
+        Shr,
+        Ushr,
+        GetProp,
+        SetProp,
+        GetElem,
+        SetElem,
+        DeleteProp,
+        DeleteElem,
+        In,
+        Instanceof,
+        Call,
+        CallMethod,
+        GetCapture,
+        SetCapture,
+        DefineProperty,
+        DefineGetter,
+        DefineSetter,
+        SpreadArray,
+        SpreadCall
     );
 
     table
@@ -328,6 +411,7 @@ impl Opcode {
     /// This method leverages zerocopy's `TryFromBytes` derive to safely
     /// convert a byte to an Opcode without unsafe code.
     #[inline]
+    #[must_use]
     pub fn from_byte(byte: u8) -> Option<Self> {
         Self::try_read_from_bytes(&[byte]).ok()
     }
@@ -342,14 +426,24 @@ impl Opcode {
     /// The Opcode enum is `#[repr(u8)]` and all bytes in the validated ranges
     /// correspond to valid enum discriminants.
     #[inline]
+    #[must_use]
     pub fn from_byte_fast(byte: u8) -> Option<Self> {
         match byte {
-            0x00..=0x09 | 0x10..=0x18 | 0x20..=0x27 | 0x30..=0x37
-            | 0x40..=0x4A | 0x50..=0x58 | 0x60..=0x6C | 0x70..=0x79
-            | 0x80..=0x88 | 0x90..=0x95 | 0xF0..=0xF1 | 0xFE..=0xFF => {
+            0x00..=0x09
+            | 0x10..=0x18
+            | 0x20..=0x27
+            | 0x30..=0x37
+            | 0x40..=0x4A
+            | 0x50..=0x58
+            | 0x60..=0x6C
+            | 0x70..=0x79
+            | 0x80..=0x88
+            | 0x90..=0x95
+            | 0xF0..=0xF1
+            | 0xFE..=0xFF => {
                 // SAFETY: All bytes in these ranges correspond to valid Opcode discriminants.
                 // The enum is #[repr(u8)] so transmute is sound for valid discriminants.
-                Some(unsafe { std::mem::transmute(byte) })
+                Some(unsafe { std::mem::transmute::<u8, Opcode>(byte) })
             }
             _ => None,
         }
@@ -357,24 +451,28 @@ impl Opcode {
 
     /// Get opcode metadata
     #[inline]
+    #[must_use]
     pub fn meta(self) -> &'static OpcodeMeta {
         &OPCODE_META[self as usize]
     }
 
     /// Get the number of operands this opcode uses
     #[inline]
+    #[must_use]
     pub fn operand_count(self) -> u8 {
         self.meta().operand_count
     }
 
     /// Check if this opcode can branch
     #[inline]
+    #[must_use]
     pub fn is_branch(self) -> bool {
         self.meta().is_branch
     }
 
     /// Check if this opcode terminates a basic block
     #[inline]
+    #[must_use]
     pub fn is_terminator(self) -> bool {
         self.meta().is_terminator
     }

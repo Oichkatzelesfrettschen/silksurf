@@ -54,13 +54,10 @@ reorder_modules = true
 # Functions and Methods
 # =============================================================================
 
-# Function arguments formatting
-fn_args_layout = "Tall"
-
 # Minimum function call arguments to be formatted across multiple lines
 fn_call_width = 80
 
-# Function parameters width
+# Function parameters formatting (replaces deprecated fn_args_layout)
 fn_params_layout = "Tall"
 
 # =============================================================================

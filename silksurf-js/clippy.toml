@@ -87,9 +87,6 @@ arithmetic-side-effects-allowed = [
 # Allow List for Specific Patterns
 # =============================================================================
 
-# Methods that are OK to call on unwrap
-allowed-dotfiles-for-globwalk = []
-
 # Wildcards patterns allowed in dependencies
 allowed-wildcard-imports = ["super::*", "crate::*"]
 
@@ -129,13 +126,6 @@ vec-box-size-threshold = 4096
 
 # Single char patterns in string methods
 single-char-binding-names-threshold = 5
-
-# =============================================================================
-# Unsafe Code Settings
-# =============================================================================
-
-# Allow unsafe blocks in unsafe functions
-allow-unsafe-block-in-doc-comment = false
 
 # =============================================================================
 # Future Compatibility

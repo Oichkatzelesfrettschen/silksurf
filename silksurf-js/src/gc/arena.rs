@@ -6,8 +6,9 @@
 //! - All allocations tied to arena lifetime ('arena)
 //! - Reset invalidates all references (compile-time safety via lifetimes)
 
-use bumpalo::Bump;
 use std::cell::Cell;
+
+use bumpalo::Bump;
 
 /// Generation counter for tracking arena resets
 pub type Generation = u64;
@@ -79,7 +80,8 @@ impl Arena {
     /// Allocate a string in the arena (interned copy)
     #[inline]
     pub fn alloc_str(&self, s: &str) -> &str {
-        self.bytes_allocated.set(self.bytes_allocated.get() + s.len());
+        self.bytes_allocated
+            .set(self.bytes_allocated.get() + s.len());
         self.bump.alloc_str(s)
     }
 

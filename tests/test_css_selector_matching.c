@@ -2,12 +2,16 @@
 #include <string.h>
 #include <assert.h>
 #include "../src/document/css_selector_match.h"
+#include "../include/silksurf/allocator.h"
+
+/* Shared test arena -- reset between tests if needed; destroyed at program exit */
+static silk_arena_t *g_test_arena = NULL;
 
 /* Test 1: Parse type selector */
 static int test_parse_type_selector(void) {
     printf("TEST 1: Parse type selector\n");
 
-    css_rule_selector_t *sel = css_selector_parse("div");
+    css_rule_selector_t *sel = css_selector_parse(g_test_arena, "div");
     if (!sel) {
         printf("  FAILED: Could not parse selector\n");
         return 0;
@@ -29,7 +33,7 @@ static int test_parse_type_selector(void) {
 static int test_parse_class_selector(void) {
     printf("\nTEST 2: Parse class selector\n");
 
-    css_rule_selector_t *sel = css_selector_parse(".highlight");
+    css_rule_selector_t *sel = css_selector_parse(g_test_arena, ".highlight");
     if (!sel) {
         printf("  FAILED: Could not parse selector\n");
         return 0;
@@ -51,7 +55,7 @@ static int test_parse_class_selector(void) {
 static int test_parse_id_selector(void) {
     printf("\nTEST 3: Parse ID selector\n");
 
-    css_rule_selector_t *sel = css_selector_parse("#main");
+    css_rule_selector_t *sel = css_selector_parse(g_test_arena, "#main");
     if (!sel) {
         printf("  FAILED: Could not parse selector\n");
         return 0;
@@ -73,9 +77,9 @@ static int test_parse_id_selector(void) {
 static int test_specificity_calculation(void) {
     printf("\nTEST 4: Specificity calculation\n");
 
-    css_rule_selector_t *type_sel = css_selector_parse("div");
-    css_rule_selector_t *class_sel = css_selector_parse(".highlight");
-    css_rule_selector_t *id_sel = css_selector_parse("#main");
+    css_rule_selector_t *type_sel = css_selector_parse(g_test_arena, "div");
+    css_rule_selector_t *class_sel = css_selector_parse(g_test_arena, ".highlight");
+    css_rule_selector_t *id_sel = css_selector_parse(g_test_arena, "#main");
 
     css_specificity_t type_spec = css_selector_specificity(type_sel);
     css_specificity_t class_spec = css_selector_specificity(class_sel);
@@ -140,7 +144,7 @@ static int test_specificity_comparison(void) {
 static int test_parse_compound_selector(void) {
     printf("\nTEST 6: Parse compound selector\n");
 
-    css_rule_selector_t *sel = css_selector_parse("div.highlight#main");
+    css_rule_selector_t *sel = css_selector_parse(g_test_arena, "div.highlight#main");
     if (!sel || !sel->selectors) {
         printf("  FAILED: Could not parse selector\n");
         return 0;
@@ -169,7 +173,7 @@ static int test_parse_compound_selector(void) {
 static int test_empty_selector(void) {
     printf("\nTEST 7: Empty selector handling\n");
 
-    css_rule_selector_t *sel = css_selector_parse("");
+    css_rule_selector_t *sel = css_selector_parse(g_test_arena, "");
     if (!sel) {
         printf("  FAILED: Could not create empty selector\n");
         return 0;
@@ -191,7 +195,7 @@ static int test_empty_selector(void) {
 static int test_universal_selector(void) {
     printf("\nTEST 8: Universal selector\n");
 
-    css_rule_selector_t *sel = css_selector_parse("*");
+    css_rule_selector_t *sel = css_selector_parse(g_test_arena, "*");
     if (!sel || !sel->selectors) {
         printf("  FAILED: Could not parse universal selector\n");
         return 0;
@@ -210,6 +214,13 @@ static int test_universal_selector(void) {
 
 int main(void) {
     printf("===== CSS Selector Matching Tests =====\n\n");
+
+    /* 64 KB is ample for all selector string allocations in these tests */
+    g_test_arena = silk_arena_create(64 * 1024);
+    if (!g_test_arena) {
+        printf("FATAL: could not create test arena\n");
+        return 1;
+    }
 
     int total = 0, passed = 0;
 
@@ -239,6 +250,8 @@ int main(void) {
 
     printf("\n===== Test Summary =====\n");
     printf("Passed: %d/%d\n", passed, total);
+
+    silk_arena_destroy(g_test_arena);
 
     if (passed == total) {
         printf("All tests PASSED\n");

@@ -4,17 +4,19 @@
 //! - Zero allocation during lexing (tokens reference source)
 //! - BPE pattern matching for common tokens
 //! - String interning for identifiers
-//! - Proper Unicode identifier support (XID_Start, XID_Continue)
+//! - Proper Unicode identifier support (`XID_Start`, `XID_Continue`)
 //! - SIMD-accelerated scanning via memchr (3-6x faster for comments/strings)
 //!
 //! Performance target: 100-200 MB/s throughput
+
+use std::sync::OnceLock;
+
+use memchr::{memchr2, memchr3};
 
 use super::bpe::BpeMatcher;
 use super::interner::Interner;
 use super::span::Span;
 use super::token::{keyword_lookup, Token, TokenKind};
-use memchr::{memchr2, memchr3};
-use std::sync::OnceLock;
 
 /// Global BPE matcher - constructed once, reused across all lexers
 static BPE_MATCHER: OnceLock<BpeMatcher> = OnceLock::new();
@@ -176,29 +178,26 @@ impl<'src> Lexer<'src> {
             }
 
             // SIMD search for `*` (potential end) or newlines (for ASI tracking)
-            match memchr3(b'*', b'\n', b'\r', remaining) {
-                Some(offset) => {
-                    let found = remaining[offset];
-                    self.pos += offset;
+            if let Some(offset) = memchr3(b'*', b'\n', b'\r', remaining) {
+                let found = remaining[offset];
+                self.pos += offset;
 
-                    if found == b'*' {
-                        // Check if this is */
-                        if self.peek_at(1) == Some(b'/') {
-                            self.pos += 2;
-                            return;
-                        }
-                        self.pos += 1; // Skip lone *
-                    } else {
-                        // Found newline
-                        self.saw_line_terminator = true;
-                        self.pos += 1;
+                if found == b'*' {
+                    // Check if this is */
+                    if self.peek_at(1) == Some(b'/') {
+                        self.pos += 2;
+                        return;
                     }
+                    self.pos += 1; // Skip lone *
+                } else {
+                    // Found newline
+                    self.saw_line_terminator = true;
+                    self.pos += 1;
                 }
-                None => {
-                    // No terminator found - comment extends to EOF
-                    self.pos = self.bytes.len();
-                    return;
-                }
+            } else {
+                // No terminator found - comment extends to EOF
+                self.pos = self.bytes.len();
+                return;
             }
         }
     }
@@ -217,7 +216,10 @@ impl<'src> Lexer<'src> {
 
     /// Scan the next token
     #[inline]
-    #[cfg_attr(feature = "tracing-full", tracing::instrument(level = "trace", skip(self)))]
+    #[cfg_attr(
+        feature = "tracing-full",
+        tracing::instrument(level = "trace", skip(self))
+    )]
     pub fn next_token(&mut self) -> Token<'src> {
         self.skip_trivia();
         self.start = self.pos;
@@ -245,7 +247,7 @@ impl<'src> Lexer<'src> {
                         }
                     }
                     // Fall through to regular identifier scanning
-                } else if pattern_id >= 30 && pattern_id <= 45 {
+                } else if (30..=45).contains(&pattern_id) {
                     // Operators (IDs 30-45) - always match
                     self.pos += len;
                     let kind = match pattern_id {
@@ -300,7 +302,7 @@ impl<'src> Lexer<'src> {
                 if self.peek() == Some(b'.') && self.peek_at(1) == Some(b'.') {
                     self.pos += 2;
                     Token::new(TokenKind::Ellipsis, self.make_span())
-                } else if self.peek().map(|b| b.is_ascii_digit()).unwrap_or(false) {
+                } else if self.peek().is_some_and(|b| b.is_ascii_digit()) {
                     self.scan_number()
                 } else {
                     Token::new(TokenKind::Dot, self.make_span())
@@ -517,31 +519,25 @@ impl<'src> Lexer<'src> {
 
             // SIMD search for quote, backslash, or newline
             // Note: We search for \n only; \r is rare and handled in the slow path
-            match memchr3(quote, b'\\', b'\n', remaining) {
-                Some(offset) => {
-                    let found = remaining[offset];
-                    self.pos += offset;
+            if let Some(offset) = memchr3(quote, b'\\', b'\n', remaining) {
+                let found = remaining[offset];
+                self.pos += offset;
 
-                    if found == quote {
-                        self.pos += 1;
-                        let text = self.current_text();
-                        return Token::new(TokenKind::String(text), self.make_span());
-                    } else if found == b'\\' {
-                        // Skip escape sequence (backslash + next char)
-                        self.pos += 2;
-                    } else {
-                        // Found newline - unterminated string
-                        return Token::new(
-                            TokenKind::Error("unterminated string"),
-                            self.make_span(),
-                        );
-                    }
-                }
-                None => {
-                    // No delimiter found - string extends to EOF (error)
-                    self.pos = self.bytes.len();
+                if found == quote {
+                    self.pos += 1;
+                    let text = self.current_text();
+                    return Token::new(TokenKind::String(text), self.make_span());
+                } else if found == b'\\' {
+                    // Skip escape sequence (backslash + next char)
+                    self.pos += 2;
+                } else {
+                    // Found newline - unterminated string
                     return Token::new(TokenKind::Error("unterminated string"), self.make_span());
                 }
+            } else {
+                // No delimiter found - string extends to EOF (error)
+                self.pos = self.bytes.len();
+                return Token::new(TokenKind::Error("unterminated string"), self.make_span());
             }
         }
     }
@@ -557,29 +553,26 @@ impl<'src> Lexer<'src> {
             }
 
             // SIMD search for backtick, backslash, or $ (for template expressions)
-            match memchr3(b'`', b'\\', b'$', remaining) {
-                Some(offset) => {
-                    let found = remaining[offset];
-                    self.pos += offset;
+            if let Some(offset) = memchr3(b'`', b'\\', b'$', remaining) {
+                let found = remaining[offset];
+                self.pos += offset;
 
-                    if found == b'`' {
-                        self.pos += 1;
-                        let text = self.current_text();
-                        return Token::new(TokenKind::Template(text), self.make_span());
-                    } else if found == b'\\' {
-                        // Skip escape sequence
-                        self.pos += 2;
-                    } else if found == b'$' {
-                        // TODO: Handle ${...} expressions properly
-                        // For now, just skip past $
-                        self.pos += 1;
-                    }
+                if found == b'`' {
+                    self.pos += 1;
+                    let text = self.current_text();
+                    return Token::new(TokenKind::Template(text), self.make_span());
+                } else if found == b'\\' {
+                    // Skip escape sequence
+                    self.pos += 2;
+                } else if found == b'$' {
+                    // TODO: Handle ${...} expressions properly
+                    // For now, just skip past $
+                    self.pos += 1;
                 }
-                None => {
-                    // No delimiter found - template extends to EOF (error)
-                    self.pos = self.bytes.len();
-                    return Token::new(TokenKind::Error("unterminated template"), self.make_span());
-                }
+            } else {
+                // No delimiter found - template extends to EOF (error)
+                self.pos = self.bytes.len();
+                return Token::new(TokenKind::Error("unterminated template"), self.make_span());
             }
         }
     }
@@ -647,8 +640,7 @@ impl<'src> Lexer<'src> {
         }
 
         // Decimal point
-        if self.peek() == Some(b'.') && self.peek_at(1).map(|b| b.is_ascii_digit()).unwrap_or(false)
-        {
+        if self.peek() == Some(b'.') && self.peek_at(1).is_some_and(|b| b.is_ascii_digit()) {
             is_float = true;
             self.pos += 1;
             while let Some(b) = self.peek() {
@@ -779,10 +771,7 @@ fn is_identifier_start_byte(b: Option<u8>) -> bool {
 /// Check if a byte can continue an ASCII identifier
 #[inline]
 fn is_identifier_continue_byte(b: Option<u8>) -> bool {
-    matches!(
-        b,
-        Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'$')
-    )
+    matches!(b, Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'$'))
 }
 
 /// Iterator adapter for Lexer

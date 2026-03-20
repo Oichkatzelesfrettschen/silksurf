@@ -1,5 +1,6 @@
-use silksurf_js::parser::{AstArena, Parser};
 use std::time::Instant;
+
+use silksurf_js::parser::{AstArena, Parser};
 
 fn main() {
     let source = r#"

@@ -7,9 +7,9 @@
 use std::collections::HashMap;
 
 #[cfg(feature = "jit")]
-use crate::jit::{JitCompiler, JitError, JIT_THRESHOLD, should_jit_compile};
-#[cfg(feature = "jit")]
 use crate::bytecode::Chunk;
+#[cfg(feature = "jit")]
+use crate::jit::{should_jit_compile, JitCompiler, JitError, JIT_THRESHOLD};
 
 /// Hot function tracker for tiered compilation
 #[cfg(feature = "jit")]
@@ -99,7 +99,8 @@ impl HotFunctionTracker {
     pub fn stats(&self) -> JitStats {
         JitStats {
             tracked_functions: self.call_counts.len(),
-            compiled_functions: self.compiler
+            compiled_functions: self
+                .compiler
                 .as_ref()
                 .map(|c| c.stats().compiled_functions)
                 .unwrap_or(0),
@@ -138,7 +139,9 @@ mod tests {
         for _ in 0..15 {
             chunk.instructions.push(Instruction::new_r(Opcode::Nop, 0));
         }
-        chunk.instructions.push(Instruction::new_ri(Opcode::LoadSmi, 0, 42));
+        chunk
+            .instructions
+            .push(Instruction::new_ri(Opcode::LoadSmi, 0, 42));
         chunk.instructions.push(Instruction::new_r(Opcode::Ret, 0));
         chunk.register_count = 1;
         chunk

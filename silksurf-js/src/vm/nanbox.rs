@@ -1,8 +1,8 @@
 //! NaN-boxed value representation for efficient 64-bit JavaScript values
 //!
 //! IEEE 754 double-precision floats have a large "NaN space" that can encode
-//! non-number values. This technique is used by SpiderMonkey, JavaScriptCore,
-//! and LuaJIT for efficient value representation.
+//! non-number values. This technique is used by `SpiderMonkey`, `JavaScriptCore`,
+//! and `LuaJIT` for efficient value representation.
 //!
 //! Uses bytemuck for safe bit-level transmutes between u64 and f64.
 //!
@@ -87,18 +87,21 @@ impl NanBoxedValue {
 
     /// Create undefined value
     #[inline]
+    #[must_use]
     pub const fn undefined() -> Self {
         Self(TAG_BASE | (TAG_UNDEFINED << TAG_SHIFT))
     }
 
     /// Create null value
     #[inline]
+    #[must_use]
     pub const fn null() -> Self {
         Self(TAG_BASE | (TAG_NULL << TAG_SHIFT))
     }
 
     /// Create boolean value
     #[inline]
+    #[must_use]
     pub const fn boolean(b: bool) -> Self {
         Self(TAG_BASE | (TAG_BOOLEAN << TAG_SHIFT) | (b as u64))
     }
@@ -111,6 +114,7 @@ impl NanBoxedValue {
     ///
     /// Uses bytemuck for safe bit-level transmute.
     #[inline]
+    #[must_use]
     pub fn number(n: f64) -> Self {
         // Just store the bits directly - our tag prefix is in negative NaN space
         // which normal positive doubles (including canonical NaN) won't match
@@ -119,6 +123,7 @@ impl NanBoxedValue {
 
     /// Create small integer (48-bit signed)
     #[inline]
+    #[must_use]
     pub const fn smi(n: i64) -> Self {
         // Truncate to 48 bits (sign-extended on read)
         let payload = (n as u64) & PAYLOAD_MASK;
@@ -155,6 +160,7 @@ impl NanBoxedValue {
 
     /// Create from symbol (interned string index)
     #[inline]
+    #[must_use]
     pub const fn symbol(idx: u32) -> Self {
         Self(TAG_BASE | (TAG_SYMBOL << TAG_SHIFT) | (idx as u64))
     }
@@ -165,60 +171,70 @@ impl NanBoxedValue {
 
     /// Check if value is a number (including NaN, Infinity)
     #[inline]
+    #[must_use]
     pub const fn is_number(self) -> bool {
         !is_tagged(self.0)
     }
 
     /// Check if value is undefined
     #[inline]
+    #[must_use]
     pub const fn is_undefined(self) -> bool {
         self.0 == Self::undefined().0
     }
 
     /// Check if value is null
     #[inline]
+    #[must_use]
     pub const fn is_null(self) -> bool {
         self.0 == Self::null().0
     }
 
     /// Check if value is nullish (null or undefined)
     #[inline]
+    #[must_use]
     pub const fn is_nullish(self) -> bool {
         self.is_null() || self.is_undefined()
     }
 
     /// Check if value is a boolean
     #[inline]
+    #[must_use]
     pub const fn is_boolean(self) -> bool {
         is_tagged(self.0) && self.tag() == TAG_BOOLEAN
     }
 
     /// Check if value is a small integer
     #[inline]
+    #[must_use]
     pub const fn is_smi(self) -> bool {
         is_tagged(self.0) && self.tag() == TAG_SMI
     }
 
     /// Check if value is an object pointer
     #[inline]
+    #[must_use]
     pub const fn is_object(self) -> bool {
         is_tagged(self.0) && self.tag() == TAG_OBJECT
     }
 
     /// Check if value is a string pointer
     #[inline]
+    #[must_use]
     pub const fn is_string(self) -> bool {
         is_tagged(self.0) && self.tag() == TAG_STRING
     }
 
     /// Check if value is a function pointer
     #[inline]
+    #[must_use]
     pub const fn is_function(self) -> bool {
         is_tagged(self.0) && self.tag() == TAG_FUNCTION
     }
 
     /// Check if value is a symbol
     #[inline]
+    #[must_use]
     pub const fn is_symbol(self) -> bool {
         is_tagged(self.0) && self.tag() == TAG_SYMBOL
     }
@@ -243,6 +259,7 @@ impl NanBoxedValue {
     ///
     /// Uses bytemuck for safe bit-level transmute.
     #[inline]
+    #[must_use]
     pub fn as_number(self) -> Option<f64> {
         if self.is_number() {
             Some(bytemuck::cast(self.0))
@@ -255,6 +272,7 @@ impl NanBoxedValue {
 
     /// Extract as boolean
     #[inline]
+    #[must_use]
     pub const fn as_boolean(self) -> Option<bool> {
         if self.is_boolean() {
             Some((self.payload() & 1) != 0)
@@ -265,6 +283,7 @@ impl NanBoxedValue {
 
     /// Extract as small integer
     #[inline]
+    #[must_use]
     pub const fn as_smi(self) -> Option<i64> {
         if self.is_smi() {
             // Sign-extend from 48 bits
@@ -283,6 +302,7 @@ impl NanBoxedValue {
 
     /// Extract as object pointer
     #[inline]
+    #[must_use]
     pub fn as_object_ptr(self) -> Option<*mut ()> {
         if self.is_object() {
             Some(self.payload() as *mut ())
@@ -293,6 +313,7 @@ impl NanBoxedValue {
 
     /// Extract as string pointer
     #[inline]
+    #[must_use]
     pub fn as_string_ptr(self) -> Option<*mut ()> {
         if self.is_string() {
             Some(self.payload() as *mut ())
@@ -303,6 +324,7 @@ impl NanBoxedValue {
 
     /// Extract as function pointer
     #[inline]
+    #[must_use]
     pub fn as_function_ptr(self) -> Option<*mut ()> {
         if self.is_function() {
             Some(self.payload() as *mut ())
@@ -313,6 +335,7 @@ impl NanBoxedValue {
 
     /// Extract as symbol index
     #[inline]
+    #[must_use]
     pub const fn as_symbol(self) -> Option<u32> {
         if self.is_symbol() {
             Some(self.payload() as u32)
@@ -325,8 +348,9 @@ impl NanBoxedValue {
     // JavaScript semantics
     // ========================================================================
 
-    /// ToBoolean - check if value is truthy
+    /// `ToBoolean` - check if value is truthy
     #[inline]
+    #[must_use]
     pub fn is_truthy(self) -> bool {
         if self.is_number() {
             let n: f64 = bytemuck::cast(self.0);
@@ -343,15 +367,20 @@ impl NanBoxedValue {
         }
     }
 
-    /// ToNumber conversion
+    /// `ToNumber` conversion
     #[inline]
+    #[must_use]
     pub fn to_number(self) -> f64 {
         if self.is_number() {
             bytemuck::cast(self.0)
         } else if self.is_smi() {
             self.as_smi().unwrap() as f64
         } else if self.is_boolean() {
-            if self.as_boolean().unwrap() { 1.0 } else { 0.0 }
+            if self.as_boolean().unwrap() {
+                1.0
+            } else {
+                0.0
+            }
         } else if self.is_null() {
             0.0
         } else {
@@ -359,8 +388,9 @@ impl NanBoxedValue {
         }
     }
 
-    /// ToInt32 conversion
+    /// `ToInt32` conversion
     #[inline]
+    #[must_use]
     pub fn to_i32(self) -> i32 {
         if self.is_smi() {
             self.as_smi().unwrap() as i32
@@ -376,14 +406,16 @@ impl NanBoxedValue {
         }
     }
 
-    /// ToUint32 conversion
+    /// `ToUint32` conversion
     #[inline]
+    #[must_use]
     pub fn to_u32(self) -> u32 {
         self.to_i32() as u32
     }
 
     /// typeof operator result
     #[inline]
+    #[must_use]
     pub fn type_of(self) -> &'static str {
         if self.is_undefined() {
             "undefined"
@@ -406,12 +438,14 @@ impl NanBoxedValue {
 
     /// Get raw bits (for debugging/serialization)
     #[inline]
+    #[must_use]
     pub const fn raw(self) -> u64 {
         self.0
     }
 
     /// Create from raw bits
     #[inline]
+    #[must_use]
     pub const fn from_raw(bits: u64) -> Self {
         Self(bits)
     }
@@ -448,7 +482,7 @@ impl std::fmt::Debug for NanBoxedValue {
             write!(f, "{}i", self.as_smi().unwrap())
         } else if self.is_number() {
             let n: f64 = bytemuck::cast(self.0);
-            write!(f, "{}", n)
+            write!(f, "{n}")
         } else if self.is_object() {
             write!(f, "Object({:p})", self.as_object_ptr().unwrap())
         } else if self.is_string() {
@@ -465,8 +499,9 @@ impl std::fmt::Debug for NanBoxedValue {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::mem;
+
+    use super::*;
 
     #[test]
     fn test_size() {

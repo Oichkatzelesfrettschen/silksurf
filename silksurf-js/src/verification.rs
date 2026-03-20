@@ -1,4 +1,4 @@
-//! Kani verification proofs for SilkSurfJS
+//! Kani verification proofs for `SilkSurfJS`
 //!
 //! Uses SMT solvers (bitwuzla, STP, z3) via Kani for formal verification.
 //! Run with: cargo kani --solver bitwuzla
@@ -53,7 +53,9 @@ mod proofs {
         for i in 0..len {
             bytes[i] = kani::any();
             // Restrict to printable ASCII + whitespace
-            kani::assume(bytes[i] >= 0x20 && bytes[i] <= 0x7E || bytes[i] == b'\n' || bytes[i] == b'\t');
+            kani::assume(
+                bytes[i] >= 0x20 && bytes[i] <= 0x7E || bytes[i] == b'\n' || bytes[i] == b'\t',
+            );
         }
 
         // Convert to string (safe since we restricted to ASCII)

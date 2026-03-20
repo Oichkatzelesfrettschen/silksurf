@@ -3,6 +3,7 @@
 //! Manages compiled native code with LRU eviction.
 
 use std::collections::HashMap;
+
 use super::compiler::{CompiledFunction, JitError};
 use super::MAX_CACHED_FUNCTIONS;
 

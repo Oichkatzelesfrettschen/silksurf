@@ -31,8 +31,9 @@
 //! - Finalization callbacks are non-deterministic (run "eventually")
 //! - Unregistered targets don't trigger callbacks
 
-use super::GcRef;
 use std::collections::HashMap;
+
+use super::GcRef;
 
 // ============================================================================
 // Weak Reference Entry
@@ -121,10 +122,7 @@ impl WeakTable {
 
         // Index by target pointer for fast sweep lookup
         let target_ptr = target.as_ptr() as usize;
-        self.target_index
-            .entry(target_ptr)
-            .or_default()
-            .push(id);
+        self.target_index.entry(target_ptr).or_default().push(id);
 
         id
     }
@@ -337,17 +335,11 @@ impl FinalizationRegistry {
 
         // Index by target
         let target_ptr = target.as_ptr() as usize;
-        self.target_index
-            .entry(target_ptr)
-            .or_default()
-            .push(id);
+        self.target_index.entry(target_ptr).or_default().push(id);
 
         // Index by token if provided
         if let Some(token) = unregister_token {
-            self.token_index
-                .entry(token.id())
-                .or_default()
-                .push(id);
+            self.token_index.entry(token.id()).or_default().push(id);
         }
 
         id

@@ -58,6 +58,7 @@
 use std::alloc::{alloc, dealloc, Layout};
 use std::collections::HashMap;
 use std::ptr::NonNull;
+
 use bitvec::vec::BitVec;
 use static_assertions::const_assert_eq;
 
@@ -216,7 +217,12 @@ impl GcHeader {
     #[must_use]
     pub fn payload_ptr(&self) -> *mut u8 {
         // SAFETY: We're computing an offset within the same allocation
-        unsafe { std::ptr::from_ref(self).cast::<u8>().cast_mut().add(HEADER_SIZE) }
+        unsafe {
+            std::ptr::from_ref(self)
+                .cast::<u8>()
+                .cast_mut()
+                .add(HEADER_SIZE)
+        }
     }
 }
 
@@ -415,7 +421,7 @@ pub struct Heap {
     large_objects: Vec<NonNull<GcHeader>>,
     /// All allocated blocks (for sweep traversal)
     all_blocks: Vec<NonNull<GcHeader>>,
-    /// Mark bitmap for current GC cycle (parallel to all_blocks)
+    /// Mark bitmap for current GC cycle (parallel to `all_blocks`)
     mark_bits: BitVec,
     /// Pointer-to-index map for mark bitmap
     mark_index: HashMap<*mut GcHeader, usize>,
@@ -581,7 +587,8 @@ impl Heap {
         let mut bytes_freed = 0usize;
         let mut objects_freed = 0u64;
 
-        let use_bitmap = !self.mark_index.is_empty() && self.mark_bits.len() == self.all_blocks.len();
+        let use_bitmap =
+            !self.mark_index.is_empty() && self.mark_bits.len() == self.all_blocks.len();
 
         for (idx, block) in self.all_blocks.drain(..).enumerate() {
             let header = unsafe { &mut *block.as_ptr() };
@@ -593,12 +600,16 @@ impl Heap {
             }
 
             let is_marked = if use_bitmap {
-                self.mark_bits.get(idx).map_or(false, |bit| *bit)
+                self.mark_bits.get(idx).is_some_and(|bit| *bit)
             } else {
                 matches!(header.color(), Color::Black | Color::Gray)
             };
 
-            if !is_marked {
+            if is_marked {
+                // Alive - reset to white for next cycle
+                header.set_color(Color::White);
+                retained.push(block);
+            } else {
                 // Garbage - notify before freeing
                 if let Some(gc_ref) = unsafe { GcRef::from_raw(block.as_ptr()) } {
                     on_collect(gc_ref);
@@ -619,10 +630,6 @@ impl Heap {
                     let layout = Layout::from_size_align(size, ALIGNMENT).unwrap();
                     unsafe { dealloc(block.as_ptr().cast::<u8>(), layout) };
                 }
-            } else {
-                // Alive - reset to white for next cycle
-                header.set_color(Color::White);
-                retained.push(block);
             }
         }
 

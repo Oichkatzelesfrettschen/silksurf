@@ -5,7 +5,9 @@
 //! Higher binding power = binds tighter.
 
 use crate::lexer::TokenKind;
-use crate::parser::ast::{AssignmentOperator, BinaryOperator, LogicalOperator, UnaryOperator, UpdateOperator};
+use crate::parser::ast::{
+    AssignmentOperator, BinaryOperator, LogicalOperator, UnaryOperator, UpdateOperator,
+};
 
 /// Binding power for operators (higher = binds tighter)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -35,9 +37,10 @@ impl BindingPower {
     pub const PRIMARY: Self = Self(22);
 }
 
-/// Get infix binding power: (left_bp, right_bp)
-/// Left-associative: left_bp < right_bp
-/// Right-associative: left_bp > right_bp
+/// Get infix binding power: (`left_bp`, `right_bp`)
+/// Left-associative: `left_bp` < `right_bp`
+/// Right-associative: `left_bp` > `right_bp`
+#[must_use]
 pub fn infix_binding_power(kind: &TokenKind) -> Option<(BindingPower, BindingPower)> {
     let bp = match kind {
         // Comma - left associative
@@ -97,17 +100,17 @@ pub fn infix_binding_power(kind: &TokenKind) -> Option<(BindingPower, BindingPow
         | TokenKind::Instanceof => (BindingPower::RELATIONAL, BindingPower(14)),
 
         // Shift
-        TokenKind::LeftShift
-        | TokenKind::RightShift
-        | TokenKind::UnsignedRightShift => (BindingPower::SHIFT, BindingPower(15)),
+        TokenKind::LeftShift | TokenKind::RightShift | TokenKind::UnsignedRightShift => {
+            (BindingPower::SHIFT, BindingPower(15))
+        }
 
         // Additive
         TokenKind::Plus | TokenKind::Minus => (BindingPower::ADDITIVE, BindingPower(16)),
 
         // Multiplicative
-        TokenKind::Star
-        | TokenKind::Slash
-        | TokenKind::Percent => (BindingPower::MULTIPLICATIVE, BindingPower(17)),
+        TokenKind::Star | TokenKind::Slash | TokenKind::Percent => {
+            (BindingPower::MULTIPLICATIVE, BindingPower(17))
+        }
 
         // Exponentiation - right associative
         TokenKind::StarStar => (BindingPower(18), BindingPower::EXPONENTIATION),
@@ -119,6 +122,7 @@ pub fn infix_binding_power(kind: &TokenKind) -> Option<(BindingPower, BindingPow
 }
 
 /// Get prefix binding power
+#[must_use]
 pub fn prefix_binding_power(kind: &TokenKind) -> Option<BindingPower> {
     match kind {
         // Unary operators
@@ -128,13 +132,11 @@ pub fn prefix_binding_power(kind: &TokenKind) -> Option<BindingPower> {
         | TokenKind::Minus
         | TokenKind::Typeof
         | TokenKind::Void
-        | TokenKind::Delete => Some(BindingPower::UNARY),
+        | TokenKind::Delete
+        | TokenKind::Await => Some(BindingPower::UNARY),
 
         // Prefix update operators
         TokenKind::PlusPlus | TokenKind::MinusMinus => Some(BindingPower::UPDATE),
-
-        // Await, yield
-        TokenKind::Await => Some(BindingPower::UNARY),
         TokenKind::Yield => Some(BindingPower(4)),
 
         // New
@@ -145,19 +147,20 @@ pub fn prefix_binding_power(kind: &TokenKind) -> Option<BindingPower> {
 }
 
 /// Get postfix binding power
+#[must_use]
 pub fn postfix_binding_power(kind: &TokenKind) -> Option<BindingPower> {
     match kind {
         TokenKind::PlusPlus | TokenKind::MinusMinus => Some(BindingPower::UPDATE),
-        TokenKind::LeftParen
-        | TokenKind::LeftBracket
-        | TokenKind::Dot
-        | TokenKind::QuestionDot => Some(BindingPower::CALL),
+        TokenKind::LeftParen | TokenKind::LeftBracket | TokenKind::Dot | TokenKind::QuestionDot => {
+            Some(BindingPower::CALL)
+        }
         TokenKind::Template(_) => Some(BindingPower::CALL),
         _ => None,
     }
 }
 
 /// Convert token to binary operator
+#[must_use]
 pub fn token_to_binary_op(kind: &TokenKind) -> Option<BinaryOperator> {
     match kind {
         TokenKind::Plus => Some(BinaryOperator::Add),
@@ -187,6 +190,7 @@ pub fn token_to_binary_op(kind: &TokenKind) -> Option<BinaryOperator> {
 }
 
 /// Convert token to logical operator
+#[must_use]
 pub fn token_to_logical_op(kind: &TokenKind) -> Option<LogicalOperator> {
     match kind {
         TokenKind::AmpersandAmpersand => Some(LogicalOperator::And),
@@ -197,6 +201,7 @@ pub fn token_to_logical_op(kind: &TokenKind) -> Option<LogicalOperator> {
 }
 
 /// Convert token to assignment operator
+#[must_use]
 pub fn token_to_assignment_op(kind: &TokenKind) -> Option<AssignmentOperator> {
     match kind {
         TokenKind::Assign => Some(AssignmentOperator::Assign),
@@ -220,6 +225,7 @@ pub fn token_to_assignment_op(kind: &TokenKind) -> Option<AssignmentOperator> {
 }
 
 /// Convert token to unary operator
+#[must_use]
 pub fn token_to_unary_op(kind: &TokenKind) -> Option<UnaryOperator> {
     match kind {
         TokenKind::Minus => Some(UnaryOperator::Minus),
@@ -234,6 +240,7 @@ pub fn token_to_unary_op(kind: &TokenKind) -> Option<UnaryOperator> {
 }
 
 /// Convert token to update operator
+#[must_use]
 pub fn token_to_update_op(kind: &TokenKind) -> Option<UpdateOperator> {
     match kind {
         TokenKind::PlusPlus => Some(UpdateOperator::Increment),
@@ -243,6 +250,7 @@ pub fn token_to_update_op(kind: &TokenKind) -> Option<UpdateOperator> {
 }
 
 /// Check if token is an assignment operator
+#[must_use]
 pub fn is_assignment_op(kind: &TokenKind) -> bool {
     matches!(
         kind,

@@ -13,10 +13,9 @@ use super::instruction::{Instruction, Register};
 use super::opcode::Opcode;
 use crate::lexer::{Span, Symbol};
 use crate::parser::{
-    ArrayElement, Argument, AssignmentOperator, AssignmentTarget, BinaryOperator,
-    Expression, ForInit, Identifier, Literal, LogicalOperator, ObjectProperty,
-    Program, PropertyKey, Statement, UnaryOperator, UpdateOperator,
-    VariableDeclaration, VariableKind,
+    Argument, ArrayElement, AssignmentOperator, AssignmentTarget, BinaryOperator, Expression,
+    ForInit, Identifier, Literal, LogicalOperator, ObjectProperty, Program, PropertyKey, Statement,
+    UnaryOperator, UpdateOperator, VariableDeclaration, VariableKind,
 };
 
 /// Compilation error
@@ -91,9 +90,9 @@ pub struct Compiler<'src, 'arena> {
 }
 
 impl<'src, 'arena> Compiler<'src, 'arena> {
+    #[must_use]
     pub fn new() -> Self {
-        let mut scopes = Vec::new();
-        scopes.push(Scope::new(None, 0));
+        let scopes = vec![Scope::new(None, 0)];
 
         Self {
             chunk: Chunk::new(),
@@ -111,7 +110,7 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
     /// Compile a program to bytecode
     pub fn compile(mut self, program: &Program<'src, 'arena>) -> CompileResult<Chunk> {
         self.check_strict_directive(program);
-        self.collect_declarations(&program.body);
+        self.collect_declarations(program.body);
 
         for stmt in program.body {
             self.compile_statement(stmt)?;
@@ -204,7 +203,9 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
             kind,
             initialized,
         };
-        self.scopes[self.current_scope].bindings.insert(name, binding);
+        self.scopes[self.current_scope]
+            .bindings
+            .insert(name, binding);
     }
 
     fn lookup_var(&self, name: Symbol) -> Option<(u8, u8)> {
@@ -259,7 +260,8 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
             }
             Statement::If(if_stmt) => {
                 let cond_reg = self.compile_expression(if_stmt.test)?;
-                let else_jump = self.emit(Instruction::new_r_offset(Opcode::JmpFalse, cond_reg.0, 0));
+                let else_jump =
+                    self.emit(Instruction::new_r_offset(Opcode::JmpFalse, cond_reg.0, 0));
                 self.compile_statement(if_stmt.consequent)?;
 
                 if let Some(alternate) = if_stmt.alternate {
@@ -279,7 +281,8 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 });
 
                 let cond_reg = self.compile_expression(while_stmt.test)?;
-                let exit_jump = self.emit(Instruction::new_r_offset(Opcode::JmpFalse, cond_reg.0, 0));
+                let exit_jump =
+                    self.emit(Instruction::new_r_offset(Opcode::JmpFalse, cond_reg.0, 0));
                 self.compile_statement(while_stmt.body)?;
 
                 let back_offset = (loop_start as i32) - (self.current_offset() as i32) - 1;
@@ -292,7 +295,8 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 }
                 for cont in loop_ctx.continue_targets {
                     let rel = (loop_start as i32) - (cont.offset as i32) - 1;
-                    self.chunk.instructions[cont.offset] = Instruction::new_offset(Opcode::Jmp, rel);
+                    self.chunk.instructions[cont.offset] =
+                        Instruction::new_offset(Opcode::Jmp, rel);
                 }
             }
             Statement::For(for_stmt) => {
@@ -304,7 +308,7 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                             self.compile_var_declaration(decl)?;
                         }
                         ForInit::Expression(expr) => {
-                            let _ = self.compile_expression(*expr)?;
+                            let _ = self.compile_expression(expr)?;
                         }
                     }
                 }
@@ -316,7 +320,7 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 });
 
                 let exit_jump = if let Some(test) = for_stmt.test.as_ref() {
-                    let cond_reg = self.compile_expression(*test)?;
+                    let cond_reg = self.compile_expression(test)?;
                     Some(self.emit(Instruction::new_r_offset(Opcode::JmpFalse, cond_reg.0, 0)))
                 } else {
                     None
@@ -326,7 +330,7 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 let continue_target = self.current_offset();
 
                 if let Some(update) = for_stmt.update.as_ref() {
-                    let _ = self.compile_expression(*update)?;
+                    let _ = self.compile_expression(update)?;
                 }
 
                 let back_offset = (loop_start as i32) - (self.current_offset() as i32) - 1;
@@ -342,14 +346,15 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 }
                 for cont in loop_ctx.continue_targets {
                     let rel = (continue_target as i32) - (cont.offset as i32) - 1;
-                    self.chunk.instructions[cont.offset] = Instruction::new_offset(Opcode::Jmp, rel);
+                    self.chunk.instructions[cont.offset] =
+                        Instruction::new_offset(Opcode::Jmp, rel);
                 }
 
                 self.exit_scope();
             }
             Statement::Return(ret) => {
                 if let Some(arg) = ret.argument.as_ref() {
-                    let reg = self.compile_expression(*arg)?;
+                    let reg = self.compile_expression(arg)?;
                     self.emit_at(Instruction::new_r(Opcode::Ret, reg.0), ret.span);
                 } else {
                     self.emit_at(Instruction::new(Opcode::RetUndefined), ret.span);
@@ -364,7 +369,8 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 if let Some(loop_ctx) = self.loop_stack.last_mut() {
                     loop_ctx.break_targets.push(JumpLabel { offset });
                 } else {
-                    self.errors.push(CompileError::new("break outside of loop", brk.span));
+                    self.errors
+                        .push(CompileError::new("break outside of loop", brk.span));
                 }
             }
             Statement::Continue(cont) => {
@@ -372,13 +378,13 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 if let Some(loop_ctx) = self.loop_stack.last_mut() {
                     loop_ctx.continue_targets.push(JumpLabel { offset });
                 } else {
-                    self.errors.push(CompileError::new("continue outside of loop", cont.span));
+                    self.errors
+                        .push(CompileError::new("continue outside of loop", cont.span));
                 }
             }
             Statement::Debugger(span) => {
                 self.emit_at(Instruction::new(Opcode::Debugger), *span);
             }
-            Statement::Empty(_) => {}
             Statement::FunctionDeclaration(func) => {
                 let const_idx = self.chunk.add_constant(Constant::Function(0));
                 if let Some(ref id) = func.id {
@@ -392,7 +398,10 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
         Ok(())
     }
 
-    fn compile_var_declaration(&mut self, decl: &VariableDeclaration<'src, 'arena>) -> CompileResult<()> {
+    fn compile_var_declaration(
+        &mut self,
+        decl: &VariableDeclaration<'src, 'arena>,
+    ) -> CompileResult<()> {
         for declarator in decl.declarations {
             if let crate::parser::Pattern::Identifier(id) = &declarator.id {
                 if decl.kind != VariableKind::Var {
@@ -400,17 +409,24 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 }
 
                 if let Some(init) = declarator.init.as_ref() {
-                    let value_reg = self.compile_expression(*init)?;
+                    let value_reg = self.compile_expression(init)?;
 
                     if let Some((depth, slot)) = self.lookup_var(id.name) {
                         if depth == 0 {
                             self.emit(Instruction::new_rr(Opcode::SetLocal, slot, value_reg.0));
                         } else {
-                            self.emit(Instruction::new_rrr(Opcode::SetCapture, depth, slot, value_reg.0));
+                            self.emit(Instruction::new_rrr(
+                                Opcode::SetCapture,
+                                depth,
+                                slot,
+                                value_reg.0,
+                            ));
                         }
                     }
 
-                    if let Some(binding) = self.scopes[self.current_scope].bindings.get_mut(&id.name) {
+                    if let Some(binding) =
+                        self.scopes[self.current_scope].bindings.get_mut(&id.name)
+                    {
                         binding.initialized = true;
                     }
                 } else if decl.kind == VariableKind::Var {
@@ -476,11 +492,18 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 self.emit_at(Instruction::new_r(Opcode::LoadNull, reg.0), *span);
             }
             Literal::Boolean(b) => {
-                let op = if b.value { Opcode::LoadTrue } else { Opcode::LoadFalse };
+                let op = if b.value {
+                    Opcode::LoadTrue
+                } else {
+                    Opcode::LoadFalse
+                };
                 self.emit_at(Instruction::new_r(op, reg.0), b.span);
             }
             Literal::Number(n) => {
-                if n.value.fract() == 0.0 && n.value >= i16::MIN as f64 && n.value <= i16::MAX as f64 {
+                if n.value.fract() == 0.0
+                    && n.value >= f64::from(i16::MIN)
+                    && n.value <= f64::from(i16::MAX)
+                {
                     let smi = n.value as i16;
                     if smi == 0 {
                         self.emit_at(Instruction::new_r(Opcode::LoadZero, reg.0), n.span);
@@ -489,7 +512,10 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                     } else if smi == -1 {
                         self.emit_at(Instruction::new_r(Opcode::LoadMinusOne, reg.0), n.span);
                     } else {
-                        self.emit_at(Instruction::new_ri(Opcode::LoadSmi, reg.0, smi as u16), n.span);
+                        self.emit_at(
+                            Instruction::new_ri(Opcode::LoadSmi, reg.0, smi as u16),
+                            n.span,
+                        );
                     }
                 } else {
                     let idx = self.chunk.add_number(n.value);
@@ -501,7 +527,10 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 self.emit_at(Instruction::new_ri(Opcode::LoadConst, reg.0, idx), s.span);
             }
             Literal::RegExp(r) => {
-                let const_idx = self.chunk.add_constant(Constant::RegExp { pattern: 0, flags: 0 });
+                let const_idx = self.chunk.add_constant(Constant::RegExp {
+                    pattern: 0,
+                    flags: 0,
+                });
                 self.emit_at(Instruction::new_ri(Opcode::NewRegExp, reg.0, const_idx), r.span);
             }
             Literal::BigInt(b) => {
@@ -528,7 +557,10 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
         Ok(reg)
     }
 
-    fn compile_binary(&mut self, bin: &crate::parser::BinaryExpression<'src, 'arena>) -> CompileResult<Register> {
+    fn compile_binary(
+        &mut self,
+        bin: &crate::parser::BinaryExpression<'src, 'arena>,
+    ) -> CompileResult<Register> {
         let left_reg = self.compile_expression(bin.left)?;
         let right_reg = self.compile_expression(bin.right)?;
         let result_reg = self.alloc_register();
@@ -562,7 +594,10 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
         Ok(result_reg)
     }
 
-    fn compile_unary(&mut self, unary: &crate::parser::UnaryExpression<'src, 'arena>) -> CompileResult<Register> {
+    fn compile_unary(
+        &mut self,
+        unary: &crate::parser::UnaryExpression<'src, 'arena>,
+    ) -> CompileResult<Register> {
         let arg_reg = self.compile_expression(unary.argument)?;
         let result_reg = self.alloc_register();
 
@@ -589,16 +624,25 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
         Ok(result_reg)
     }
 
-    fn compile_logical(&mut self, logical: &crate::parser::LogicalExpression<'src, 'arena>) -> CompileResult<Register> {
+    fn compile_logical(
+        &mut self,
+        logical: &crate::parser::LogicalExpression<'src, 'arena>,
+    ) -> CompileResult<Register> {
         let left_reg = self.compile_expression(logical.left)?;
         let result_reg = self.alloc_register();
 
         self.emit(Instruction::new_rr(Opcode::Mov, result_reg.0, left_reg.0));
 
         let skip_right = match logical.operator {
-            LogicalOperator::And => self.emit(Instruction::new_r_offset(Opcode::JmpFalse, result_reg.0, 0)),
-            LogicalOperator::Or => self.emit(Instruction::new_r_offset(Opcode::JmpTrue, result_reg.0, 0)),
-            LogicalOperator::NullishCoalescing => self.emit(Instruction::new_r_offset(Opcode::JmpNotNullish, result_reg.0, 0)),
+            LogicalOperator::And => {
+                self.emit(Instruction::new_r_offset(Opcode::JmpFalse, result_reg.0, 0))
+            }
+            LogicalOperator::Or => {
+                self.emit(Instruction::new_r_offset(Opcode::JmpTrue, result_reg.0, 0))
+            }
+            LogicalOperator::NullishCoalescing => {
+                self.emit(Instruction::new_r_offset(Opcode::JmpNotNullish, result_reg.0, 0))
+            }
         };
 
         let right_reg = self.compile_expression(logical.right)?;
@@ -608,7 +652,10 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
         Ok(result_reg)
     }
 
-    fn compile_conditional(&mut self, cond: &crate::parser::ConditionalExpression<'src, 'arena>) -> CompileResult<Register> {
+    fn compile_conditional(
+        &mut self,
+        cond: &crate::parser::ConditionalExpression<'src, 'arena>,
+    ) -> CompileResult<Register> {
         let test_reg = self.compile_expression(cond.test)?;
         let result_reg = self.alloc_register();
 
@@ -625,16 +672,24 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
         Ok(result_reg)
     }
 
-    fn compile_assignment(&mut self, assign: &crate::parser::AssignmentExpression<'src, 'arena>) -> CompileResult<Register> {
+    fn compile_assignment(
+        &mut self,
+        assign: &crate::parser::AssignmentExpression<'src, 'arena>,
+    ) -> CompileResult<Register> {
         let value_reg = self.compile_expression(assign.right)?;
         let result_reg = self.alloc_register();
 
-        let final_value = if assign.operator != AssignmentOperator::Assign {
+        let final_value = if assign.operator == AssignmentOperator::Assign {
+            value_reg
+        } else {
             let current_reg = match &assign.left {
                 AssignmentTarget::Identifier(id) => self.compile_identifier(id)?,
                 AssignmentTarget::Member(member) => self.compile_member(member)?,
                 AssignmentTarget::Pattern(_) => {
-                    self.errors.push(CompileError::new("pattern assignment not yet supported", assign.span));
+                    self.errors.push(CompileError::new(
+                        "pattern assignment not yet supported",
+                        assign.span,
+                    ));
                     return Ok(result_reg);
                 }
             };
@@ -658,8 +713,6 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
 
             self.emit(Instruction::new_rrr(opcode, computed_reg.0, current_reg.0, value_reg.0));
             computed_reg
-        } else {
-            value_reg
         };
 
         match &assign.left {
@@ -668,7 +721,12 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                     if depth == 0 {
                         self.emit(Instruction::new_rr(Opcode::SetLocal, slot, final_value.0));
                     } else {
-                        self.emit(Instruction::new_rrr(Opcode::SetCapture, depth, slot, final_value.0));
+                        self.emit(Instruction::new_rrr(
+                            Opcode::SetCapture,
+                            depth,
+                            slot,
+                            final_value.0,
+                        ));
                     }
                 } else {
                     let name_idx = self.chunk.add_constant(Constant::String(0));
@@ -679,10 +737,20 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 let obj_reg = self.compile_expression(member.object)?;
                 if member.computed {
                     let key_reg = self.compile_expression(member.property)?;
-                    self.emit(Instruction::new_rrr(Opcode::SetElem, obj_reg.0, key_reg.0, final_value.0));
+                    self.emit(Instruction::new_rrr(
+                        Opcode::SetElem,
+                        obj_reg.0,
+                        key_reg.0,
+                        final_value.0,
+                    ));
                 } else {
                     let name_idx = self.chunk.add_constant(Constant::String(0));
-                    self.emit(Instruction::new_rrr(Opcode::SetProp, obj_reg.0, name_idx as u8, final_value.0));
+                    self.emit(Instruction::new_rrr(
+                        Opcode::SetProp,
+                        obj_reg.0,
+                        name_idx as u8,
+                        final_value.0,
+                    ));
                 }
             }
             AssignmentTarget::Pattern(_) => {}
@@ -692,10 +760,13 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
         Ok(result_reg)
     }
 
-    fn compile_update(&mut self, update: &crate::parser::UpdateExpression<'src, 'arena>) -> CompileResult<Register> {
+    fn compile_update(
+        &mut self,
+        update: &crate::parser::UpdateExpression<'src, 'arena>,
+    ) -> CompileResult<Register> {
         let result_reg = self.alloc_register();
 
-        if let Expression::Identifier(id) = &*update.argument {
+        if let Expression::Identifier(id) = update.argument {
             let current_reg = self.compile_identifier(id)?;
 
             if !update.prefix {
@@ -721,13 +792,17 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 self.emit(Instruction::new_rr(Opcode::Mov, result_reg.0, updated_reg.0));
             }
         } else {
-            self.errors.push(CompileError::new("invalid update target", update.span));
+            self.errors
+                .push(CompileError::new("invalid update target", update.span));
         }
 
         Ok(result_reg)
     }
 
-    fn compile_call(&mut self, call: &crate::parser::CallExpression<'src, 'arena>) -> CompileResult<Register> {
+    fn compile_call(
+        &mut self,
+        call: &crate::parser::CallExpression<'src, 'arena>,
+    ) -> CompileResult<Register> {
         let result_reg = self.alloc_register();
         let callee_reg = self.compile_expression(call.callee)?;
 
@@ -744,28 +819,43 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
         }
         let argc = call.arguments.len() as u8;
 
-        self.emit_at(Instruction::new_rrr(Opcode::Call, result_reg.0, callee_reg.0, argc), call.span);
+        self.emit_at(
+            Instruction::new_rrr(Opcode::Call, result_reg.0, callee_reg.0, argc),
+            call.span,
+        );
         self.free_registers_to(arg_base);
 
         Ok(result_reg)
     }
 
-    fn compile_member(&mut self, member: &crate::parser::MemberExpression<'src, 'arena>) -> CompileResult<Register> {
+    fn compile_member(
+        &mut self,
+        member: &crate::parser::MemberExpression<'src, 'arena>,
+    ) -> CompileResult<Register> {
         let obj_reg = self.compile_expression(member.object)?;
         let result_reg = self.alloc_register();
 
         if member.computed {
             let key_reg = self.compile_expression(member.property)?;
-            self.emit_at(Instruction::new_rrr(Opcode::GetElem, result_reg.0, obj_reg.0, key_reg.0), member.span);
+            self.emit_at(
+                Instruction::new_rrr(Opcode::GetElem, result_reg.0, obj_reg.0, key_reg.0),
+                member.span,
+            );
         } else {
             let name_idx = self.chunk.add_constant(Constant::String(0));
-            self.emit_at(Instruction::new_rrr(Opcode::GetProp, result_reg.0, obj_reg.0, name_idx as u8), member.span);
+            self.emit_at(
+                Instruction::new_rrr(Opcode::GetProp, result_reg.0, obj_reg.0, name_idx as u8),
+                member.span,
+            );
         }
 
         Ok(result_reg)
     }
 
-    fn compile_array(&mut self, arr: &crate::parser::ArrayExpression<'src, 'arena>) -> CompileResult<Register> {
+    fn compile_array(
+        &mut self,
+        arr: &crate::parser::ArrayExpression<'src, 'arena>,
+    ) -> CompileResult<Register> {
         let result_reg = self.alloc_register();
         let len = arr.elements.len() as u16;
 
@@ -777,13 +867,15 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                     let val_reg = self.compile_expression(expr)?;
                     let idx_reg = self.alloc_register();
                     self.emit(Instruction::new_ri(Opcode::LoadSmi, idx_reg.0, i as u16));
-                    self.emit(Instruction::new_rrr(Opcode::SetElem, result_reg.0, idx_reg.0, val_reg.0));
+                    self.emit(Instruction::new_rrr(
+                        Opcode::SetElem,
+                        result_reg.0,
+                        idx_reg.0,
+                        val_reg.0,
+                    ));
                 }
-                ArrayElement::Spread(_) => {
-                    // TODO: Handle spread
-                }
-                ArrayElement::Hole => {
-                    // Elision - skip
+                ArrayElement::Spread(_) | ArrayElement::Hole => {
+                    // TODO: Handle spread and hole/elision
                 }
             }
         }
@@ -791,7 +883,10 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
         Ok(result_reg)
     }
 
-    fn compile_object(&mut self, obj: &crate::parser::ObjectExpression<'src, 'arena>) -> CompileResult<Register> {
+    fn compile_object(
+        &mut self,
+        obj: &crate::parser::ObjectExpression<'src, 'arena>,
+    ) -> CompileResult<Register> {
         let result_reg = self.alloc_register();
         self.emit_at(Instruction::new_r(Opcode::NewObject, result_reg.0), obj.span);
 
@@ -803,17 +898,32 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                     match &p.key {
                         PropertyKey::Identifier(_id) => {
                             let name_idx = self.chunk.add_constant(Constant::String(0));
-                            self.emit(Instruction::new_rrr(Opcode::SetProp, result_reg.0, name_idx as u8, val_reg.0));
+                            self.emit(Instruction::new_rrr(
+                                Opcode::SetProp,
+                                result_reg.0,
+                                name_idx as u8,
+                                val_reg.0,
+                            ));
                         }
                         PropertyKey::Literal(lit) => {
                             if let Literal::String(_) = lit {
                                 let name_idx = self.chunk.add_constant(Constant::String(0));
-                                self.emit(Instruction::new_rrr(Opcode::SetProp, result_reg.0, name_idx as u8, val_reg.0));
+                                self.emit(Instruction::new_rrr(
+                                    Opcode::SetProp,
+                                    result_reg.0,
+                                    name_idx as u8,
+                                    val_reg.0,
+                                ));
                             }
                         }
                         PropertyKey::Computed(expr) => {
                             let key_reg = self.compile_expression(expr)?;
-                            self.emit(Instruction::new_rrr(Opcode::SetElem, result_reg.0, key_reg.0, val_reg.0));
+                            self.emit(Instruction::new_rrr(
+                                Opcode::SetElem,
+                                result_reg.0,
+                                key_reg.0,
+                                val_reg.0,
+                            ));
                         }
                     }
                 }

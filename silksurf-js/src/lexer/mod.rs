@@ -8,13 +8,13 @@
 //!
 //! Performance target: 50-100 MB/s throughput
 
-mod token;
-mod span;
-mod lexer;
 mod bpe;
 mod interner;
+mod lexer;
+mod span;
+mod token;
 
-pub use token::{Token, TokenKind, keyword_lookup};
-pub use span::Span;
-pub use lexer::Lexer;
 pub use interner::{Interner, Symbol};
+pub use lexer::Lexer;
+pub use span::Span;
+pub use token::{keyword_lookup, Token, TokenKind};

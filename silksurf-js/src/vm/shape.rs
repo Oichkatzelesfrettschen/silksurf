@@ -5,11 +5,11 @@
 //! - Inline caching for property operations
 //! - Memory sharing between objects with same structure
 //!
-//! Design informed by V8's Maps and SpiderMonkey's Shapes.
+//! Design informed by V8's Maps and `SpiderMonkey`'s Shapes.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::cell::RefCell;
 
 /// Property key - either a string (interned) or a symbol
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -79,7 +79,7 @@ pub struct Shape {
     /// Total number of properties (including inherited)
     pub property_count: u32,
     /// Transitions to child shapes (key -> child shape)
-    /// Using RefCell for interior mutability
+    /// Using `RefCell` for interior mutability
     transitions: RefCell<HashMap<PropertyKey, Rc<Shape>>>,
     /// Is this shape for a frozen object?
     pub frozen: bool,
@@ -149,6 +149,7 @@ pub struct ShapeTable {
 
 impl ShapeTable {
     /// Create a new shape table with root shape
+    #[must_use]
     pub fn new() -> Self {
         let root = Rc::new(Shape {
             id: 0,
@@ -169,11 +170,13 @@ impl ShapeTable {
     }
 
     /// Get the root (empty object) shape
+    #[must_use]
     pub fn root(&self) -> Rc<Shape> {
         self.root.clone()
     }
 
     /// Get shape by ID
+    #[must_use]
     pub fn get(&self, id: ShapeId) -> Option<Rc<Shape>> {
         self.shapes.get(id as usize).cloned()
     }
@@ -228,11 +231,13 @@ impl ShapeTable {
     }
 
     /// Number of shapes
+    #[must_use]
     pub fn len(&self) -> usize {
         self.shapes.len()
     }
 
     /// Check if empty
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.shapes.is_empty()
     }
@@ -263,6 +268,7 @@ impl ShapedObject {
     }
 
     /// Get property value by key
+    #[must_use]
     pub fn get(&self, key: PropertyKey) -> Option<u64> {
         let desc = self.shape.get_property(key)?;
         self.slots.get(desc.slot as usize).copied()
@@ -284,18 +290,21 @@ impl ShapedObject {
     }
 
     /// Check if object has property
+    #[must_use]
     pub fn has(&self, key: PropertyKey) -> bool {
         self.shape.has_property(key)
     }
 
     /// Get enumerable property keys
+    #[must_use]
     pub fn keys(&self) -> Vec<PropertyKey> {
-        self.shape.property_keys()
+        self.shape
+            .property_keys()
             .into_iter()
             .filter(|k| {
-                self.shape.get_property(*k)
-                    .map(|d| d.attrs.enumerable)
-                    .unwrap_or(false)
+                self.shape
+                    .get_property(*k)
+                    .is_some_and(|d| d.attrs.enumerable)
             })
             .collect()
     }

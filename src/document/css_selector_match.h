@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <dom/dom.h>
 #include "css_cascade.h"
+#include "silksurf/allocator.h"
 
 /* Forward declaration - css_stylesheet defined in libcss */
 typedef struct css_stylesheet css_stylesheet;
@@ -75,8 +76,9 @@ typedef struct {
  * Selector Matching API
  * ============================================================================ */
 
-/* Parse CSS selector string into selector structure */
-css_rule_selector_t *css_selector_parse(const char *selector_str);
+/* Parse CSS selector string into selector structure.
+ * All allocations are made from arena; caller must not free individual nodes. */
+css_rule_selector_t *css_selector_parse(silk_arena_t *arena, const char *selector_str);
 
 /* Free parsed selector */
 void css_selector_free(css_rule_selector_t *selector);
@@ -103,8 +105,10 @@ typedef struct {
     css_origin *origins;        /* Origin for each matched rule */
 } css_match_results_t;
 
-/* Match all rules from stylesheet against element */
+/* Match all rules from stylesheet against element.
+ * All allocations are made from arena; caller must not free result members. */
 css_match_results_t *css_stylesheet_match_element(
+    silk_arena_t *arena,
     css_stylesheet *stylesheet,
     dom_element *element,
     dom_element *parent,

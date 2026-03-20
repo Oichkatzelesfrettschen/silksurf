@@ -24,10 +24,10 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
+use crate::bytecode::Compiler;
 use crate::lexer::Lexer;
 use crate::parser::ast_arena::AstArena;
 use crate::parser::Parser;
-use crate::bytecode::Compiler;
 use crate::vm::Vm;
 
 /// SilkSurfJS engine for Node.js

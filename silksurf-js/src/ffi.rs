@@ -1,6 +1,6 @@
-//! C Foreign Function Interface for SilkSurfJS
+//! C Foreign Function Interface for `SilkSurfJS`
 //!
-//! This module provides a C-compatible API for embedding SilkSurfJS
+//! This module provides a C-compatible API for embedding `SilkSurfJS`
 //! in non-Rust applications. The API follows a handle-based design
 //! where opaque pointers represent engine state.
 //!
@@ -14,14 +14,14 @@
 //! Functions return status codes or null pointers on error.
 //! Use `silksurf_last_error()` to get error details.
 
+use std::cell::RefCell;
 use std::ffi::{c_char, c_int, CStr, CString};
 use std::ptr;
-use std::cell::RefCell;
 
+use crate::bytecode::Compiler;
 use crate::lexer::Lexer;
 use crate::parser::ast_arena::AstArena;
 use crate::parser::Parser;
-use crate::bytecode::Compiler;
 use crate::vm::Vm;
 
 /// Opaque engine handle
@@ -58,7 +58,7 @@ pub enum SilkSurfStatus {
 
 // Thread-local error storage
 thread_local! {
-    static LAST_ERROR: RefCell<Option<CString>> = RefCell::new(None);
+    static LAST_ERROR: RefCell<Option<CString>> = const { RefCell::new(None) };
 }
 
 fn set_error(msg: &str) {
@@ -71,32 +71,25 @@ fn set_error(msg: &str) {
 /// The returned string is valid until the next API call.
 #[no_mangle]
 pub extern "C" fn silksurf_last_error() -> *const c_char {
-    LAST_ERROR.with(|e| {
-        e.borrow().as_ref().map(|s| s.as_ptr()).unwrap_or(ptr::null())
-    })
+    LAST_ERROR.with(|e| e.borrow().as_ref().map_or(ptr::null(), |s| s.as_ptr()))
 }
 
 /// Get the library version string.
 #[no_mangle]
 pub extern "C" fn silksurf_version() -> *const c_char {
     static VERSION: &[u8] = b"0.1.0\0";
-    VERSION.as_ptr() as *const c_char
+    VERSION.as_ptr().cast::<c_char>()
 }
 
 /// Create a new engine instance.
 /// Returns null on failure.
 #[no_mangle]
 pub extern "C" fn silksurf_engine_new() -> *mut SilkSurfEngine {
-    match std::panic::catch_unwind(|| {
-        Box::new(SilkSurfEngine {
-            vm: Vm::new(),
-        })
-    }) {
-        Ok(engine) => Box::into_raw(engine),
-        Err(_) => {
-            set_error("Failed to create engine");
-            ptr::null_mut()
-        }
+    if let Ok(engine) = std::panic::catch_unwind(|| Box::new(SilkSurfEngine { vm: Vm::new() })) {
+        Box::into_raw(engine)
+    } else {
+        set_error("Failed to create engine");
+        ptr::null_mut()
     }
 }
 
@@ -123,19 +116,16 @@ pub extern "C" fn silksurf_compile(
         return ptr::null_mut();
     }
 
-    let source_str = match unsafe { CStr::from_ptr(source) }.to_str() {
-        Ok(s) => s,
-        Err(_) => {
-            set_error("Invalid UTF-8 in source");
-            return ptr::null_mut();
-        }
+    let Ok(source_str) = (unsafe { CStr::from_ptr(source) }).to_str() else {
+        set_error("Invalid UTF-8 in source");
+        return ptr::null_mut();
     };
 
     // Lex - check for errors
     let lexer = Lexer::new(source_str);
     for token in lexer {
         if let crate::lexer::TokenKind::Error(e) = &token.kind {
-            set_error(&format!("Lexer error: {}", e));
+            set_error(&format!("Lexer error: {e}"));
             return ptr::null_mut();
         }
     }
@@ -154,7 +144,7 @@ pub extern "C" fn silksurf_compile(
     let chunk = match compiler.compile(&ast) {
         Ok(c) => c,
         Err(e) => {
-            set_error(&format!("Compile error: {:?}", e));
+            set_error(&format!("Compile error: {e:?}"));
             return ptr::null_mut();
         }
     };
@@ -195,7 +185,7 @@ pub extern "C" fn silksurf_run(
     match engine.vm.execute(script.chunk_idx) {
         Ok(_) => SilkSurfStatus::Ok,
         Err(e) => {
-            set_error(&format!("Runtime error: {:?}", e));
+            set_error(&format!("Runtime error: {e:?}"));
             SilkSurfStatus::ErrorRuntime
         }
     }
@@ -290,7 +280,7 @@ mod tests {
         assert!(!script.is_null());
 
         let count = silksurf_script_instruction_count(script);
-        assert!(count >= 0);  // chunk_idx starts at 0
+        assert!(count >= 0); // chunk_idx starts at 0
 
         silksurf_script_free(script);
         silksurf_engine_free(engine);

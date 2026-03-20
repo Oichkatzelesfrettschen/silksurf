@@ -182,7 +182,7 @@ fn collect_and_run(
                 continue;
             }
             collect_and_run(&path, results, verbose, skip_features);
-        } else if path.extension().map_or(false, |e| e == "js") {
+        } else if path.extension().is_some_and(|e| e == "js") {
             run_single_test(&path, results, verbose, skip_features);
         }
     }
@@ -296,12 +296,7 @@ fn parse_metadata(content: &str) -> SimpleMetadata {
         } else if line.starts_with("phase:") && line.contains("parse") {
             meta.is_negative_parse = true;
         } else if line.starts_with("type:") {
-            meta.negative_type = Some(
-                line.strip_prefix("type:")
-                    .unwrap_or("")
-                    .trim()
-                    .to_string(),
-            );
+            meta.negative_type = Some(line.strip_prefix("type:").unwrap_or("").trim().to_string());
         }
     }
 

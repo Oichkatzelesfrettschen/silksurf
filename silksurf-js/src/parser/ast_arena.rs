@@ -36,8 +36,9 @@
 //! ast_arena.reset();
 //! ```
 
-use crate::gc::Arena;
 use std::cell::RefCell;
+
+use crate::gc::Arena;
 
 // ============================================================================
 // Arena-Allocated Box (AstBox)
@@ -121,7 +122,7 @@ impl<T> AstVecBuilder<T> {
         if self.items.is_empty() {
             return &[];
         }
-        arena.alloc_slice_from_iter(self.items.into_iter())
+        arena.alloc_slice_from_iter(self.items)
     }
 }
 
