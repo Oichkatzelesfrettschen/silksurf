@@ -2,7 +2,7 @@
 name = "silksurf-engine"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.94.0"
+rust-version = "1.96.0"
 publish = false
 
 [dependencies]
@@ -12,6 +12,7 @@ silksurf-css = { path = "../silksurf-css" }
 silksurf-dom = { path = "../silksurf-dom" }
 silksurf-layout = { path = "../silksurf-layout" }
 silksurf-render = { path = "../silksurf-render" }
+rustc-hash = { workspace = true }
 silksurf-gui = { path = "../silksurf-gui", optional = true }
 silksurf-net = { path = "../silksurf-net", optional = true }
 silksurf-tls = { path = "../silksurf-tls", optional = true }

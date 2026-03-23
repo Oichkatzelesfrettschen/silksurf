@@ -26,8 +26,8 @@ pub enum PrimitiveValue {
     Boolean(bool),
     /// Number
     Number(f64),
-    /// String (interned index)
-    String(u32),
+    /// String content
+    String(String),
     /// Object reference placeholder (index into snapshot's object table)
     ObjectRef(u32),
     /// Function reference (chunk index)
@@ -42,12 +42,15 @@ impl PrimitiveValue {
             super::Value::Null => PrimitiveValue::Null,
             super::Value::Boolean(b) => PrimitiveValue::Boolean(*b),
             super::Value::Number(n) => PrimitiveValue::Number(*n),
-            super::Value::String(s) => PrimitiveValue::String(*s),
+            super::Value::String(s) => PrimitiveValue::String(s.as_str().unwrap_or("").to_string()),
             super::Value::Object(obj) => {
                 let idx = object_map.get_or_insert_object(obj);
                 PrimitiveValue::ObjectRef(idx)
             }
             super::Value::Function(func) => PrimitiveValue::FunctionRef(func.chunk_idx),
+            super::Value::NativeFunction(_) | super::Value::HostObject(_) => {
+                PrimitiveValue::Undefined
+            }
         }
     }
 }
@@ -264,7 +267,7 @@ mod tests {
         // Set some register values
         vm.registers[0] = super::super::Value::Number(100.0);
         vm.registers[1] = super::super::Value::Boolean(true);
-        vm.registers[2] = super::super::Value::String(5);
+        vm.registers[2] = super::super::Value::string("hello");
 
         // Intern a string
         vm.strings.intern("hello".to_string());

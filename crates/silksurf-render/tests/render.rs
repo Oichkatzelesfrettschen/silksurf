@@ -1,8 +1,8 @@
 use silksurf_core::SilkArena;
-use silksurf_css::{compute_styles, parse_stylesheet, Color};
+use silksurf_css::{Color, compute_styles, parse_stylesheet};
 use silksurf_dom::{Dom, NodeKind};
-use silksurf_layout::{build_layout_tree, Rect};
-use silksurf_render::{build_display_list, DisplayItem, DisplayList};
+use silksurf_layout::{Rect, build_layout_tree};
+use silksurf_render::{DisplayItem, DisplayList, build_display_list};
 
 #[test]
 fn builds_display_list_for_backgrounds() {

@@ -6,15 +6,15 @@
 
 mod js;
 
+use rustc_hash::FxHashMap;
 use silksurf_core::SilkArena;
 use silksurf_css::{
-    parse_stylesheet_with_interner, ComputedStyle, CssError, StyleCache, Stylesheet,
+    ComputedStyle, CssError, StyleCache, Stylesheet, parse_stylesheet_with_interner,
 };
 use silksurf_dom::{Dom, NodeId};
 use silksurf_html::{TokenizeError, Tokenizer, TreeBuildError, TreeBuilder};
-use silksurf_layout::{build_layout_tree, build_layout_tree_incremental, LayoutTree, Rect};
-use silksurf_render::{build_display_list, DisplayList};
-use std::collections::HashMap;
+use silksurf_layout::{LayoutTree, Rect, build_layout_tree, build_layout_tree_incremental};
+use silksurf_render::{DisplayList, build_display_list};
 use std::sync::Arc;
 
 #[derive(Debug)]
@@ -54,7 +54,7 @@ pub struct RenderOutput<'a> {
     pub dom: Dom,
     pub document: NodeId,
     pub stylesheet: Stylesheet,
-    pub styles: Arc<HashMap<NodeId, ComputedStyle>>,
+    pub styles: Arc<FxHashMap<NodeId, ComputedStyle>>,
     pub style_generation: u64,
     pub layout: LayoutTree<'a>,
     pub display_list: DisplayList,
@@ -121,7 +121,7 @@ impl EnginePipeline {
             viewport,
             dirty_nodes,
         )
-            .ok_or(EngineError::Layout("layout root missing"))?;
+        .ok_or(EngineError::Layout("layout root missing"))?;
         let width = viewport.width.max(0.0).ceil() as u32;
         let height = viewport.height.max(0.0).ceil() as u32;
         let display_list =

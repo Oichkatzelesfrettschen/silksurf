@@ -8,12 +8,17 @@ fn main() {
     let document = dom.create_document();
     let root = dom.create_element("div");
     dom.set_attribute(root, "id", "root").expect("id");
-    dom.set_attribute(root, "class", "container").expect("class");
+    dom.set_attribute(root, "class", "container")
+        .expect("class");
     dom.append_child(document, root).expect("append root");
 
     for i in 0..128 {
         let child = dom.create_element("span");
-        let class = if i % 2 == 0 { "item alpha" } else { "item beta" };
+        let class = if i % 2 == 0 {
+            "item alpha"
+        } else {
+            "item beta"
+        };
         dom.set_attribute(child, "class", class).expect("class");
         dom.append_child(root, child).expect("append child");
     }

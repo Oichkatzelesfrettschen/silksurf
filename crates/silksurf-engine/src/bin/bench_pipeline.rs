@@ -2,7 +2,7 @@ use silksurf_core::SilkArena;
 use silksurf_css::{compute_styles, parse_stylesheet_with_interner};
 use silksurf_engine::parse_html;
 use silksurf_layout::Rect;
-use silksurf_layout::{build_layout_tree, LayoutTree};
+use silksurf_layout::{LayoutTree, build_layout_tree};
 use silksurf_render::build_display_list;
 use std::time::Duration;
 use std::time::Instant;
@@ -50,17 +50,29 @@ fn main() {
         let start = Instant::now();
         let width = viewport.width.max(0.0).ceil() as u32;
         let height = viewport.height.max(0.0).ceil() as u32;
-        let display_list = build_display_list(&document.dom, &styles, &layout)
-            .with_tiles(width, height, 64);
+        let display_list =
+            build_display_list(&document.dom, &styles, &layout).with_tiles(width, height, 64);
         render_total += start.elapsed();
         last_items = display_list.items.len();
         arena.reset();
     }
     let elapsed = parse_total + css_total + style_total + layout_total + render_total;
     let per_iter = elapsed / iterations as u32;
-    println!("parse total: {:?}, per-iter: {:?}", parse_total, parse_total / iterations as u32);
-    println!("css total: {:?}, per-iter: {:?}", css_total, css_total / iterations as u32);
-    println!("style total: {:?}, per-iter: {:?}", style_total, style_total / iterations as u32);
+    println!(
+        "parse total: {:?}, per-iter: {:?}",
+        parse_total,
+        parse_total / iterations as u32
+    );
+    println!(
+        "css total: {:?}, per-iter: {:?}",
+        css_total,
+        css_total / iterations as u32
+    );
+    println!(
+        "style total: {:?}, per-iter: {:?}",
+        style_total,
+        style_total / iterations as u32
+    );
     println!(
         "layout total: {:?}, per-iter: {:?}",
         layout_total,

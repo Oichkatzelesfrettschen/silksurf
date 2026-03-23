@@ -1,7 +1,7 @@
 use silksurf_core::SilkArena;
 use silksurf_css::{compute_styles, parse_stylesheet};
 use silksurf_dom::Dom;
-use silksurf_layout::{build_layout_tree, LayoutBox, Rect};
+use silksurf_layout::{LayoutBox, Rect, build_layout_tree};
 
 fn find_box<'a>(
     layout: &'a LayoutBox<'a>,
@@ -24,7 +24,8 @@ fn find_box<'a>(
 
 #[test]
 fn lays_out_block_boxes_vertically() {
-    let stylesheet = parse_stylesheet("div { display: block; margin: 10px; padding: 5px; }").unwrap();
+    let stylesheet =
+        parse_stylesheet("div { display: block; margin: 10px; padding: 5px; }").unwrap();
 
     let mut dom = Dom::new();
     let doc = dom.create_document();

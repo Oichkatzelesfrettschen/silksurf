@@ -1,17 +1,30 @@
 //! DOM data structures and traversal APIs (cleanroom).
 
-use silksurf_core::{should_intern_identifier, Atom, SilkInterner, SmallString};
+use silksurf_core::{Atom, SilkInterner, SmallString, should_intern_identifier};
+use smallvec::SmallVec;
 use std::cell::RefCell;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct NodeId(usize);
+
+impl NodeId {
+    /// Create a NodeId from a raw index. Use only for testing or FFI.
+    pub fn from_raw(index: usize) -> Self {
+        NodeId(index)
+    }
+
+    /// Get the raw index.
+    pub fn raw(self) -> usize {
+        self.0
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Attribute {
     pub name: AttributeName,
     pub value: SmallString,
     pub value_atom: Option<Atom>,
-    pub value_atoms: Vec<Atom>,
+    pub value_atoms: SmallVec<[Atom; 4]>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -78,6 +91,7 @@ pub enum TagName {
 }
 
 impl TagName {
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(name: &str) -> Self {
         let lower = name.to_ascii_lowercase();
         match lower.as_str() {
@@ -209,6 +223,7 @@ pub enum AttributeName {
 }
 
 impl AttributeName {
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(name: &str) -> Self {
         let lower = name.to_ascii_lowercase();
         match lower.as_str() {
@@ -262,15 +277,19 @@ pub enum NodeKind {
         namespace: Namespace,
         attributes: Vec<Attribute>,
     },
-    Text { text: String },
-    Comment { data: String },
+    Text {
+        text: String,
+    },
+    Comment {
+        data: String,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Node {
     kind: NodeKind,
     parent: Option<NodeId>,
-    children: Vec<NodeId>,
+    children: SmallVec<[NodeId; 8]>,
 }
 
 #[derive(Default)]
@@ -355,6 +374,49 @@ impl Dom {
         Ok(())
     }
 
+    /// Remove a child node from its parent.
+    pub fn remove_child(&mut self, parent: NodeId, child: NodeId) -> Result<(), DomError> {
+        let parent_index = self.node_index(parent)?;
+        let child_index = self.node_index(child)?;
+        self.nodes[parent_index].children.retain(|id| *id != child);
+        self.nodes[child_index].parent = None;
+        self.mark_dirty(parent);
+        Ok(())
+    }
+
+    /// Insert a new child before a reference child.
+    pub fn insert_before(
+        &mut self,
+        parent: NodeId,
+        new_child: NodeId,
+        ref_child: NodeId,
+    ) -> Result<(), DomError> {
+        let parent_index = self.node_index(parent)?;
+        let new_index = self.node_index(new_child)?;
+        let _ = self.node_index(ref_child)?; // validate ref exists
+
+        // Detach new_child from old parent if needed
+        if let Some(old_parent) = self.nodes[new_index].parent {
+            let old_parent_index = self.node_index(old_parent)?;
+            self.nodes[old_parent_index]
+                .children
+                .retain(|id| *id != new_child);
+        }
+
+        self.nodes[new_index].parent = Some(parent);
+        let pos = self.nodes[parent_index]
+            .children
+            .iter()
+            .position(|id| *id == ref_child);
+        match pos {
+            Some(idx) => self.nodes[parent_index].children.insert(idx, new_child),
+            None => self.nodes[parent_index].children.push(new_child),
+        }
+        self.mark_dirty(parent);
+        self.mark_dirty(new_child);
+        Ok(())
+    }
+
     pub fn append_text(
         &mut self,
         parent: NodeId,
@@ -398,11 +460,11 @@ impl Dom {
                 } else {
                     Some(self.interner.borrow_mut().intern(value.as_str()))
                 };
-                (atom, Vec::new())
+                (atom, SmallVec::new())
             }
             AttributeName::Class => {
                 let atoms = if value.is_empty() {
-                    Vec::new()
+                    SmallVec::new()
                 } else {
                     let mut interner = self.interner.borrow_mut();
                     value
@@ -419,7 +481,7 @@ impl Dom {
                 } else {
                     Some(self.interner.borrow_mut().intern(value.as_str()))
                 };
-                (atom, Vec::new())
+                (atom, SmallVec::new())
             }
         };
         let index = self.node_index(id)?;
@@ -481,11 +543,9 @@ impl Dom {
         if self.dirty_batch.is_empty() {
             return;
         }
-        self.dirty_nodes.extend(self.dirty_batch.drain(..));
-        self.dirty_nodes
-            .sort_unstable_by_key(|id| id.0);
-        self.dirty_nodes
-            .dedup_by_key(|id| id.0);
+        self.dirty_nodes.append(&mut self.dirty_batch);
+        self.dirty_nodes.sort_unstable_by_key(|id| id.0);
+        self.dirty_nodes.dedup_by_key(|id| id.0);
     }
 
     pub fn attributes(&self, id: NodeId) -> Result<&[Attribute], DomError> {
@@ -543,7 +603,10 @@ impl Dom {
         let siblings = self.children(parent)?;
         for (idx, sibling) in siblings.iter().enumerate() {
             if *sibling == id {
-                return Ok(idx.checked_sub(1).and_then(|pos| siblings.get(pos)).copied());
+                return Ok(idx
+                    .checked_sub(1)
+                    .and_then(|pos| siblings.get(pos))
+                    .copied());
             }
         }
         Ok(None)
@@ -587,7 +650,7 @@ impl Dom {
         self.nodes.push(Node {
             kind,
             parent: None,
-            children: Vec::new(),
+            children: SmallVec::new(),
         });
         id
     }

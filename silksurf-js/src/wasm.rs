@@ -20,8 +20,8 @@ use wasm_bindgen::prelude::*;
 
 use crate::bytecode::Compiler;
 use crate::lexer::Lexer;
-use crate::parser::ast_arena::AstArena;
 use crate::parser::Parser;
+use crate::parser::ast_arena::AstArena;
 use crate::vm::Vm;
 
 /// JavaScript engine instance for WASM

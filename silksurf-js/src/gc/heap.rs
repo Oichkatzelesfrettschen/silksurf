@@ -55,7 +55,7 @@
 //! └────────────────────────────────────────┘
 //! ```
 
-use std::alloc::{alloc, dealloc, Layout};
+use std::alloc::{Layout, alloc, dealloc};
 use std::collections::HashMap;
 use std::ptr::NonNull;
 
@@ -275,7 +275,7 @@ impl GcRef {
     #[inline]
     #[must_use]
     pub unsafe fn payload<T>(&self) -> &T {
-        &*self.header().payload_ptr().cast::<T>()
+        unsafe { &*self.header().payload_ptr().cast::<T>() }
     }
 
     /// Get payload as mutable typed reference
@@ -284,7 +284,7 @@ impl GcRef {
     /// Caller must ensure T matches the actual payload type
     #[inline]
     pub unsafe fn payload_mut<T>(&mut self) -> &mut T {
-        &mut *self.header().payload_ptr().cast::<T>()
+        unsafe { &mut *self.header().payload_ptr().cast::<T>() }
     }
 }
 
@@ -334,8 +334,10 @@ impl FreeList {
     /// Block must be properly aligned and sized for this size class
     pub unsafe fn push(&mut self, block: NonNull<GcHeader>) {
         let header = block.as_ptr();
-        (*header).type_tag = TypeTag::Free as u8;
-        (*header).next_free = self.head.map_or(0, |p| p.as_ptr() as u64);
+        unsafe {
+            (*header).type_tag = TypeTag::Free as u8;
+            (*header).next_free = self.head.map_or(0, |p| p.as_ptr() as u64);
+        }
         self.head = Some(block);
         self.count += 1;
     }

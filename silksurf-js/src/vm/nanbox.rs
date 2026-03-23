@@ -376,11 +376,7 @@ impl NanBoxedValue {
         } else if self.is_smi() {
             self.as_smi().unwrap() as f64
         } else if self.is_boolean() {
-            if self.as_boolean().unwrap() {
-                1.0
-            } else {
-                0.0
-            }
+            if self.as_boolean().unwrap() { 1.0 } else { 0.0 }
         } else if self.is_null() {
             0.0
         } else {

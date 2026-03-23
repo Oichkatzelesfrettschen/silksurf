@@ -5,7 +5,7 @@ mod span;
 
 pub use arena::SilkArena;
 pub use error::{SilkError, SilkResult};
-pub use interner::{should_intern_identifier, Atom, SilkInterner};
+pub use interner::{Atom, SilkInterner, should_intern_identifier};
 pub use span::Span;
 
 pub type SmallString = smol_str::SmolStr;

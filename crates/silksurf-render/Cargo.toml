@@ -2,12 +2,13 @@
 name = "silksurf-render"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.94.0"
+rust-version = "1.96.0"
 publish = false
 
 [dependencies]
 silksurf-css = { path = "../silksurf-css" }
 silksurf-dom = { path = "../silksurf-dom" }
 silksurf-layout = { path = "../silksurf-layout" }
+rustc-hash = { workspace = true }
 [dev-dependencies]
 silksurf-core = { path = "../silksurf-core" }

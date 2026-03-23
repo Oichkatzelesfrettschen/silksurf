@@ -16,7 +16,7 @@ use memchr::{memchr2, memchr3};
 use super::bpe::BpeMatcher;
 use super::interner::Interner;
 use super::span::Span;
-use super::token::{keyword_lookup, Token, TokenKind};
+use super::token::{Token, TokenKind, keyword_lookup};
 
 /// Global BPE matcher - constructed once, reused across all lexers
 static BPE_MATCHER: OnceLock<BpeMatcher> = OnceLock::new();

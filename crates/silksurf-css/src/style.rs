@@ -1,26 +1,148 @@
-use crate::matching::{matches_selector, selector_specificity, Specificity};
+use crate::matching::{Specificity, matches_selector, selector_specificity};
 use crate::selector::{Selector, SelectorIdent, SelectorModifier, TypeSelector};
 use crate::{CssToken, Declaration, Rule, Stylesheet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use silksurf_dom::{AttributeName, Dom, NodeId, NodeKind, TagName};
-use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Display {
     Inline,
     Block,
+    Flex,
+    InlineFlex,
     None,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FlexDirection {
+    #[default]
+    Row,
+    RowReverse,
+    Column,
+    ColumnReverse,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FlexWrap {
+    #[default]
+    Nowrap,
+    Wrap,
+    WrapReverse,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum JustifyContent {
+    #[default]
+    FlexStart,
+    FlexEnd,
+    Center,
+    SpaceBetween,
+    SpaceAround,
+    SpaceEvenly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AlignItems {
+    #[default]
+    Stretch,
+    FlexStart,
+    FlexEnd,
+    Center,
+    Baseline,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlignSelf {
+    Auto,
+    FlexStart,
+    FlexEnd,
+    Center,
+    Stretch,
+    Baseline,
+}
+
+impl Default for AlignSelf {
+    fn default() -> Self {
+        AlignSelf::Auto
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct FlexItemStyle {
+    pub flex_grow: f32,
+    pub flex_shrink: f32,
+    pub flex_basis: FlexBasis,
+    pub align_self: AlignSelf,
+    pub order: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FlexBasis {
+    Auto,
+    Length(Length),
+}
+
+impl Default for FlexBasis {
+    fn default() -> Self {
+        FlexBasis::Auto
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct FlexContainerStyle {
+    pub direction: FlexDirection,
+    pub wrap: FlexWrap,
+    pub justify_content: JustifyContent,
+    pub align_items: AlignItems,
+    pub gap: f32,
+    pub row_gap: f32,
+    pub column_gap: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Position {
+    #[default]
+    Static,
+    Relative,
+    Absolute,
+    Fixed,
+    Sticky,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Overflow {
+    #[default]
+    Visible,
+    Hidden,
+    Scroll,
+    Auto,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Length {
     Px(f32),
+    Percent(f32),
 }
 
 impl Length {
     pub fn zero() -> Self {
         Length::Px(0.0)
     }
+
+    pub fn is_zero(&self) -> bool {
+        match self {
+            Length::Px(v) | Length::Percent(v) => *v == 0.0,
+        }
+    }
+}
+
+/// Optional length value (for top/right/bottom/left offsets).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum LengthOrAuto {
+    #[default]
+    Auto,
+    Length(Length),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,6 +203,22 @@ pub struct ComputedStyle {
     pub margin: Edges,
     pub padding: Edges,
     pub border: Edges,
+    // Flex container properties
+    pub flex_container: FlexContainerStyle,
+    // Flex item properties
+    pub flex_item: FlexItemStyle,
+    // Positioning
+    pub position: Position,
+    pub top: LengthOrAuto,
+    pub right: LengthOrAuto,
+    pub bottom: LengthOrAuto,
+    pub left: LengthOrAuto,
+    pub z_index: i32,
+    // Overflow
+    pub overflow_x: Overflow,
+    pub overflow_y: Overflow,
+    // Visual
+    pub opacity: f32,
 }
 
 impl Default for ComputedStyle {
@@ -95,6 +233,17 @@ impl Default for ComputedStyle {
             margin: Edges::all(Length::zero()),
             padding: Edges::all(Length::zero()),
             border: Edges::all(Length::zero()),
+            flex_container: FlexContainerStyle::default(),
+            flex_item: FlexItemStyle::default(),
+            position: Position::default(),
+            top: LengthOrAuto::Auto,
+            right: LengthOrAuto::Auto,
+            bottom: LengthOrAuto::Auto,
+            left: LengthOrAuto::Auto,
+            z_index: 0,
+            overflow_x: Overflow::default(),
+            overflow_y: Overflow::default(),
+            opacity: 1.0,
         }
     }
 }
@@ -130,6 +279,32 @@ struct CascadedStyle {
     margin: Option<ResolvedProperty<Edges>>,
     padding: Option<ResolvedProperty<Edges>>,
     border: Option<ResolvedProperty<Edges>>,
+    // Flex container
+    flex_direction: Option<ResolvedProperty<FlexDirection>>,
+    flex_wrap: Option<ResolvedProperty<FlexWrap>>,
+    justify_content: Option<ResolvedProperty<JustifyContent>>,
+    align_items: Option<ResolvedProperty<AlignItems>>,
+    gap: Option<ResolvedProperty<f32>>,
+    row_gap: Option<ResolvedProperty<f32>>,
+    column_gap: Option<ResolvedProperty<f32>>,
+    // Flex item
+    flex_grow: Option<ResolvedProperty<f32>>,
+    flex_shrink: Option<ResolvedProperty<f32>>,
+    flex_basis: Option<ResolvedProperty<FlexBasis>>,
+    align_self: Option<ResolvedProperty<AlignSelf>>,
+    order: Option<ResolvedProperty<i32>>,
+    // Positioning
+    position: Option<ResolvedProperty<Position>>,
+    top: Option<ResolvedProperty<LengthOrAuto>>,
+    right_offset: Option<ResolvedProperty<LengthOrAuto>>,
+    bottom: Option<ResolvedProperty<LengthOrAuto>>,
+    left_offset: Option<ResolvedProperty<LengthOrAuto>>,
+    z_index: Option<ResolvedProperty<i32>>,
+    // Overflow
+    overflow_x: Option<ResolvedProperty<Overflow>>,
+    overflow_y: Option<ResolvedProperty<Overflow>>,
+    // Visual
+    opacity: Option<ResolvedProperty<f32>>,
 }
 
 impl CascadedStyle {
@@ -177,6 +352,31 @@ impl CascadedStyle {
                 .border
                 .map(|entry| entry.value)
                 .unwrap_or(fallback.border),
+            flex_container: FlexContainerStyle {
+                direction: self.flex_direction.map(|e| e.value).unwrap_or_default(),
+                wrap: self.flex_wrap.map(|e| e.value).unwrap_or_default(),
+                justify_content: self.justify_content.map(|e| e.value).unwrap_or_default(),
+                align_items: self.align_items.map(|e| e.value).unwrap_or_default(),
+                gap: self.gap.map(|e| e.value).unwrap_or(0.0),
+                row_gap: self.row_gap.map(|e| e.value).unwrap_or(0.0),
+                column_gap: self.column_gap.map(|e| e.value).unwrap_or(0.0),
+            },
+            flex_item: FlexItemStyle {
+                flex_grow: self.flex_grow.map(|e| e.value).unwrap_or(0.0),
+                flex_shrink: self.flex_shrink.map(|e| e.value).unwrap_or(1.0),
+                flex_basis: self.flex_basis.map(|e| e.value).unwrap_or_default(),
+                align_self: self.align_self.map(|e| e.value).unwrap_or_default(),
+                order: self.order.map(|e| e.value).unwrap_or(0),
+            },
+            position: self.position.map(|e| e.value).unwrap_or_default(),
+            top: self.top.map(|e| e.value).unwrap_or_default(),
+            right: self.right_offset.map(|e| e.value).unwrap_or_default(),
+            bottom: self.bottom.map(|e| e.value).unwrap_or_default(),
+            left: self.left_offset.map(|e| e.value).unwrap_or_default(),
+            z_index: self.z_index.map(|e| e.value).unwrap_or(0),
+            overflow_x: self.overflow_x.map(|e| e.value).unwrap_or_default(),
+            overflow_y: self.overflow_y.map(|e| e.value).unwrap_or_default(),
+            opacity: self.opacity.map(|e| e.value).unwrap_or(1.0),
         }
     }
 }
@@ -214,18 +414,18 @@ struct IndexedSelector {
 }
 
 struct StyleIndex {
-    tag_rules: HashMap<TagName, Vec<IndexedSelector>>,
-    id_rules: HashMap<SelectorIdent, Vec<IndexedSelector>>,
-    class_rules: HashMap<SelectorIdent, Vec<IndexedSelector>>,
+    tag_rules: FxHashMap<TagName, Vec<IndexedSelector>>,
+    id_rules: FxHashMap<SelectorIdent, Vec<IndexedSelector>>,
+    class_rules: FxHashMap<SelectorIdent, Vec<IndexedSelector>>,
     universal_rules: Vec<IndexedSelector>,
 }
 
 impl StyleIndex {
     fn new(stylesheet: &Stylesheet) -> Self {
         let mut index = StyleIndex {
-            tag_rules: HashMap::new(),
-            id_rules: HashMap::new(),
-            class_rules: HashMap::new(),
+            tag_rules: FxHashMap::default(),
+            id_rules: FxHashMap::default(),
+            class_rules: FxHashMap::default(),
             universal_rules: Vec::new(),
         };
         for (rule_index, rule) in stylesheet.rules.iter().enumerate() {
@@ -341,9 +541,9 @@ pub fn compute_styles(
     dom: &Dom,
     root: NodeId,
     stylesheet: &Stylesheet,
-) -> HashMap<NodeId, ComputedStyle> {
+) -> FxHashMap<NodeId, ComputedStyle> {
     let index = StyleIndex::new(stylesheet);
-    let mut styles = HashMap::new();
+    let mut styles = FxHashMap::default();
     compute_styles_recursive(dom, root, stylesheet, &index, None, &mut styles);
     styles
 }
@@ -352,7 +552,7 @@ pub fn compute_styles(
 #[allow(dead_code)]
 pub struct StyleCache {
     generation: u64,
-    styles: Arc<HashMap<NodeId, ComputedStyle>>,
+    styles: Arc<FxHashMap<NodeId, ComputedStyle>>,
 }
 
 #[allow(dead_code)]
@@ -360,7 +560,7 @@ impl StyleCache {
     pub fn new() -> Self {
         Self {
             generation: 0,
-            styles: Arc::new(HashMap::new()),
+            styles: Arc::new(FxHashMap::default()),
         }
     }
 
@@ -368,11 +568,11 @@ impl StyleCache {
         self.generation
     }
 
-    pub fn styles(&self) -> &HashMap<NodeId, ComputedStyle> {
+    pub fn styles(&self) -> &FxHashMap<NodeId, ComputedStyle> {
         self.styles.as_ref()
     }
 
-    pub fn styles_arc(&self) -> Arc<HashMap<NodeId, ComputedStyle>> {
+    pub fn styles_arc(&self) -> Arc<FxHashMap<NodeId, ComputedStyle>> {
         Arc::clone(&self.styles)
     }
 
@@ -381,7 +581,7 @@ impl StyleCache {
         dom: &Dom,
         root: NodeId,
         stylesheet: &Stylesheet,
-    ) -> Arc<HashMap<NodeId, ComputedStyle>> {
+    ) -> Arc<FxHashMap<NodeId, ComputedStyle>> {
         self.generation = self.generation.wrapping_add(1);
         self.styles = Arc::new(compute_styles(dom, root, stylesheet));
         Arc::clone(&self.styles)
@@ -393,7 +593,7 @@ impl StyleCache {
         root: NodeId,
         stylesheet: &Stylesheet,
         dirty_nodes: &[NodeId],
-    ) -> Arc<HashMap<NodeId, ComputedStyle>> {
+    ) -> Arc<FxHashMap<NodeId, ComputedStyle>> {
         if dirty_nodes.is_empty() {
             if self.styles.is_empty() {
                 return self.compute(dom, root, stylesheet);
@@ -443,7 +643,7 @@ impl StyleCache {
         let index = StyleIndex::new(stylesheet);
         self.generation = self.generation.wrapping_add(1);
         let styles = Arc::make_mut(&mut self.styles);
-        let mut seen = HashSet::new();
+        let mut seen = FxHashSet::default();
         for node in &filtered {
             if !seen.insert(*node) {
                 continue;
@@ -496,7 +696,7 @@ fn compute_styles_recursive(
     stylesheet: &Stylesheet,
     index: &StyleIndex,
     parent: Option<&ComputedStyle>,
-    styles: &mut HashMap<NodeId, ComputedStyle>,
+    styles: &mut FxHashMap<NodeId, ComputedStyle>,
 ) {
     let style = compute_style_for_node_with_index(dom, node, stylesheet, index, parent);
     styles.insert(node, style.clone());
@@ -515,8 +715,7 @@ fn cascade_for_node(
 ) -> CascadedStyle {
     let mut cascaded = CascadedStyle::default();
     let mut order = 0usize;
-    let mut matched_by_rule: Vec<Option<Specificity>> =
-        vec![None; stylesheet.rules.len()];
+    let mut matched_by_rule: Vec<Option<Specificity>> = vec![None; stylesheet.rules.len()];
     let mut candidates: Vec<IndexedSelector> = Vec::new();
     if let Some(tag) = node_tag(dom, node) {
         if let Some(entries) = index.tag_rules.get(&tag) {
@@ -536,7 +735,7 @@ fn cascade_for_node(
     }
     candidates.extend(index.universal_rules.iter().cloned());
 
-    let mut seen = HashSet::new();
+    let mut seen = FxHashSet::default();
     for candidate in candidates {
         if !seen.insert((candidate.rule_index, candidate.selector_index)) {
             continue;
@@ -567,10 +766,7 @@ fn cascade_for_node(
     }
 
     for (rule_index, rule) in stylesheet.rules.iter().enumerate() {
-        let Some(specificity) = matched_by_rule
-            .get(rule_index)
-            .and_then(|spec| *spec)
-        else {
+        let Some(specificity) = matched_by_rule.get(rule_index).and_then(|spec| *spec) else {
             continue;
         };
         let Rule::Style(rule) = rule else {
@@ -690,6 +886,333 @@ fn apply_declaration(
                 );
             }
         }
+        // Flex container properties
+        "flex-direction" => {
+            if let Some(value) = parse_flex_direction(&declaration.value) {
+                apply_property(
+                    &mut cascaded.flex_direction,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        "flex-wrap" => {
+            if let Some(value) = parse_flex_wrap(&declaration.value) {
+                apply_property(
+                    &mut cascaded.flex_wrap,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        "flex-flow" => {
+            // Shorthand: flex-flow: <direction> <wrap>
+            if let Some(dir) = parse_flex_direction(&declaration.value) {
+                apply_property(
+                    &mut cascaded.flex_direction,
+                    dir,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+            if let Some(wrap) = parse_flex_wrap(&declaration.value) {
+                apply_property(
+                    &mut cascaded.flex_wrap,
+                    wrap,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        "justify-content" => {
+            if let Some(value) = parse_justify_content(&declaration.value) {
+                apply_property(
+                    &mut cascaded.justify_content,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        "align-items" => {
+            if let Some(value) = parse_align_items(&declaration.value) {
+                apply_property(
+                    &mut cascaded.align_items,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        "align-self" => {
+            if let Some(value) = parse_align_self(&declaration.value) {
+                apply_property(
+                    &mut cascaded.align_self,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        "gap" => {
+            if let Some(value) = parse_gap_value(&declaration.value) {
+                apply_property(
+                    &mut cascaded.gap,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+                apply_property(
+                    &mut cascaded.row_gap,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+                apply_property(
+                    &mut cascaded.column_gap,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        "row-gap" => {
+            if let Some(value) = parse_gap_value(&declaration.value) {
+                apply_property(
+                    &mut cascaded.row_gap,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        "column-gap" => {
+            if let Some(value) = parse_gap_value(&declaration.value) {
+                apply_property(
+                    &mut cascaded.column_gap,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        // Flex item properties
+        "flex-grow" => {
+            if let Some(value) = parse_number_value(&declaration.value) {
+                apply_property(
+                    &mut cascaded.flex_grow,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        "flex-shrink" => {
+            if let Some(value) = parse_number_value(&declaration.value) {
+                apply_property(
+                    &mut cascaded.flex_shrink,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        "flex-basis" => {
+            if let Some(value) = parse_flex_basis(&declaration.value) {
+                apply_property(
+                    &mut cascaded.flex_basis,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        "flex" => {
+            // Shorthand: flex: <grow> [<shrink>] [<basis>]
+            let nums: Vec<f32> = declaration
+                .value
+                .iter()
+                .filter_map(|t| match t {
+                    CssToken::Number(v) => v.parse::<f32>().ok(),
+                    _ => None,
+                })
+                .collect();
+            if !nums.is_empty() {
+                apply_property(
+                    &mut cascaded.flex_grow,
+                    nums[0],
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+                if nums.len() > 1 {
+                    apply_property(
+                        &mut cascaded.flex_shrink,
+                        nums[1],
+                        declaration.important,
+                        specificity,
+                        order,
+                    );
+                }
+            }
+            if let Some(basis) = parse_flex_basis(&declaration.value) {
+                apply_property(
+                    &mut cascaded.flex_basis,
+                    basis,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        "order" => {
+            if let Some(value) = parse_integer_value(&declaration.value) {
+                apply_property(
+                    &mut cascaded.order,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        // Positioning
+        "position" => {
+            if let Some(value) = parse_position(&declaration.value) {
+                apply_property(
+                    &mut cascaded.position,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        "top" => {
+            if let Some(value) = parse_length_or_auto(&declaration.value) {
+                apply_property(
+                    &mut cascaded.top,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        "right" => {
+            if let Some(value) = parse_length_or_auto(&declaration.value) {
+                apply_property(
+                    &mut cascaded.right_offset,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        "bottom" => {
+            if let Some(value) = parse_length_or_auto(&declaration.value) {
+                apply_property(
+                    &mut cascaded.bottom,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        "left" => {
+            if let Some(value) = parse_length_or_auto(&declaration.value) {
+                apply_property(
+                    &mut cascaded.left_offset,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        "z-index" => {
+            if let Some(value) = parse_integer_value(&declaration.value) {
+                apply_property(
+                    &mut cascaded.z_index,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        // Overflow
+        "overflow" => {
+            if let Some(value) = parse_overflow(&declaration.value) {
+                apply_property(
+                    &mut cascaded.overflow_x,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+                apply_property(
+                    &mut cascaded.overflow_y,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        "overflow-x" => {
+            if let Some(value) = parse_overflow(&declaration.value) {
+                apply_property(
+                    &mut cascaded.overflow_x,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        "overflow-y" => {
+            if let Some(value) = parse_overflow(&declaration.value) {
+                apply_property(
+                    &mut cascaded.overflow_y,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        // Visual
+        "opacity" => {
+            if let Some(value) = parse_opacity(&declaration.value) {
+                apply_property(
+                    &mut cascaded.opacity,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
         _ => {}
     }
 }
@@ -702,9 +1225,109 @@ fn parse_display(tokens: &[CssToken]) -> Option<Display> {
     match ident.to_ascii_lowercase().as_str() {
         "block" => Some(Display::Block),
         "inline" => Some(Display::Inline),
+        "flex" => Some(Display::Flex),
+        "inline-flex" => Some(Display::InlineFlex),
         "none" => Some(Display::None),
         _ => None,
     }
+}
+
+fn parse_flex_direction(tokens: &[CssToken]) -> Option<FlexDirection> {
+    let ident = first_ident(tokens)?;
+    match ident {
+        "row" => Some(FlexDirection::Row),
+        "row-reverse" => Some(FlexDirection::RowReverse),
+        "column" => Some(FlexDirection::Column),
+        "column-reverse" => Some(FlexDirection::ColumnReverse),
+        _ => None,
+    }
+}
+
+fn parse_flex_wrap(tokens: &[CssToken]) -> Option<FlexWrap> {
+    let ident = first_ident(tokens)?;
+    match ident {
+        "nowrap" => Some(FlexWrap::Nowrap),
+        "wrap" => Some(FlexWrap::Wrap),
+        "wrap-reverse" => Some(FlexWrap::WrapReverse),
+        _ => None,
+    }
+}
+
+fn parse_justify_content(tokens: &[CssToken]) -> Option<JustifyContent> {
+    let ident = first_ident(tokens)?;
+    match ident {
+        "flex-start" | "start" => Some(JustifyContent::FlexStart),
+        "flex-end" | "end" => Some(JustifyContent::FlexEnd),
+        "center" => Some(JustifyContent::Center),
+        "space-between" => Some(JustifyContent::SpaceBetween),
+        "space-around" => Some(JustifyContent::SpaceAround),
+        "space-evenly" => Some(JustifyContent::SpaceEvenly),
+        _ => None,
+    }
+}
+
+fn parse_align_items(tokens: &[CssToken]) -> Option<AlignItems> {
+    let ident = first_ident(tokens)?;
+    match ident {
+        "stretch" => Some(AlignItems::Stretch),
+        "flex-start" | "start" => Some(AlignItems::FlexStart),
+        "flex-end" | "end" => Some(AlignItems::FlexEnd),
+        "center" => Some(AlignItems::Center),
+        "baseline" => Some(AlignItems::Baseline),
+        _ => None,
+    }
+}
+
+fn parse_align_self(tokens: &[CssToken]) -> Option<AlignSelf> {
+    let ident = first_ident(tokens)?;
+    match ident {
+        "auto" => Some(AlignSelf::Auto),
+        "flex-start" | "start" => Some(AlignSelf::FlexStart),
+        "flex-end" | "end" => Some(AlignSelf::FlexEnd),
+        "center" => Some(AlignSelf::Center),
+        "stretch" => Some(AlignSelf::Stretch),
+        "baseline" => Some(AlignSelf::Baseline),
+        _ => None,
+    }
+}
+
+fn parse_flex_basis(tokens: &[CssToken]) -> Option<FlexBasis> {
+    let ident = first_ident(tokens);
+    if ident == Some("auto") {
+        return Some(FlexBasis::Auto);
+    }
+    parse_length(tokens).map(FlexBasis::Length)
+}
+
+fn parse_number_value(tokens: &[CssToken]) -> Option<f32> {
+    tokens.iter().find_map(|token| match token {
+        CssToken::Number(value) => value.parse::<f32>().ok(),
+        _ => None,
+    })
+}
+
+fn parse_integer_value(tokens: &[CssToken]) -> Option<i32> {
+    tokens.iter().find_map(|token| match token {
+        CssToken::Number(value) => value.parse::<i32>().ok(),
+        _ => None,
+    })
+}
+
+fn parse_gap_value(tokens: &[CssToken]) -> Option<f32> {
+    tokens.iter().find_map(|token| match token {
+        CssToken::Dimension { value, unit } if unit.eq_ignore_ascii_case("px") => {
+            value.parse::<f32>().ok()
+        }
+        CssToken::Number(value) if value == "0" => Some(0.0),
+        _ => None,
+    })
+}
+
+fn first_ident(tokens: &[CssToken]) -> Option<&str> {
+    tokens.iter().find_map(|token| match token {
+        CssToken::Ident(value) => Some(value.as_str()),
+        _ => None,
+    })
 }
 
 fn parse_length(tokens: &[CssToken]) -> Option<Length> {
@@ -716,9 +1339,45 @@ fn parse_length_token(token: &CssToken) -> Option<Length> {
         CssToken::Dimension { value, unit } if unit.eq_ignore_ascii_case("px") => {
             value.parse::<f32>().ok().map(Length::Px)
         }
+        CssToken::Percentage(value) => value.parse::<f32>().ok().map(Length::Percent),
         CssToken::Number(value) if value == "0" => Some(Length::zero()),
         _ => None,
     }
+}
+
+fn parse_position(tokens: &[CssToken]) -> Option<Position> {
+    match first_ident(tokens)? {
+        "static" => Some(Position::Static),
+        "relative" => Some(Position::Relative),
+        "absolute" => Some(Position::Absolute),
+        "fixed" => Some(Position::Fixed),
+        "sticky" => Some(Position::Sticky),
+        _ => None,
+    }
+}
+
+fn parse_overflow(tokens: &[CssToken]) -> Option<Overflow> {
+    match first_ident(tokens)? {
+        "visible" => Some(Overflow::Visible),
+        "hidden" => Some(Overflow::Hidden),
+        "scroll" => Some(Overflow::Scroll),
+        "auto" => Some(Overflow::Auto),
+        _ => None,
+    }
+}
+
+fn parse_length_or_auto(tokens: &[CssToken]) -> Option<LengthOrAuto> {
+    if first_ident(tokens) == Some("auto") {
+        return Some(LengthOrAuto::Auto);
+    }
+    parse_length(tokens).map(LengthOrAuto::Length)
+}
+
+fn parse_opacity(tokens: &[CssToken]) -> Option<f32> {
+    tokens.iter().find_map(|token| match token {
+        CssToken::Number(value) => value.parse::<f32>().ok().map(|v| v.clamp(0.0, 1.0)),
+        _ => None,
+    })
 }
 fn parse_length_list(tokens: &[CssToken]) -> Vec<Length> {
     let mut values = Vec::new();
@@ -783,7 +1442,9 @@ fn parse_font_family(tokens: &[CssToken]) -> Option<Vec<String>> {
     }
 }
 fn parse_color(tokens: &[CssToken]) -> Option<Color> {
-    let mut iter = tokens.iter().filter(|token| !matches!(token, CssToken::Whitespace));
+    let mut iter = tokens
+        .iter()
+        .filter(|token| !matches!(token, CssToken::Whitespace));
     match iter.next()? {
         CssToken::Ident(value) => parse_named_color(value),
         CssToken::Hash(value) => parse_hex_color(value),

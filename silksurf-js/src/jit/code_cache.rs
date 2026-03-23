@@ -4,8 +4,8 @@
 
 use std::collections::HashMap;
 
-use super::compiler::{CompiledFunction, JitError};
 use super::MAX_CACHED_FUNCTIONS;
+use super::compiler::{CompiledFunction, JitError};
 
 /// Cache for compiled native functions
 pub struct CodeCache {

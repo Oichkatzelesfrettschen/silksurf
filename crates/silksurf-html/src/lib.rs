@@ -1,11 +1,16 @@
 //! HTML5 tokenizer and parser (cleanroom).
+#![allow(
+    clippy::collapsible_if,
+    clippy::new_without_default,
+    clippy::manual_strip
+)]
 
 use memchr::{memchr, memchr2, memchr3};
 
 mod tree_builder;
 
-pub use tree_builder::TreeBuilder;
 pub use tree_builder::TreeBuildError;
+pub use tree_builder::TreeBuilder;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
@@ -179,7 +184,11 @@ impl Tokenizer {
         ))
     }
 
-    fn parse_doctype(&mut self, tokens: &mut Vec<Token>, start: usize) -> Result<bool, TokenizeError> {
+    fn parse_doctype(
+        &mut self,
+        tokens: &mut Vec<Token>,
+        start: usize,
+    ) -> Result<bool, TokenizeError> {
         let bytes = self.buffer.as_bytes();
         let mut cursor = start + 2 + "doctype".len();
         cursor = self.skip_whitespace(cursor);
@@ -275,7 +284,11 @@ impl Tokenizer {
         Ok(true)
     }
 
-    fn parse_end_tag(&mut self, tokens: &mut Vec<Token>, start: usize) -> Result<bool, TokenizeError> {
+    fn parse_end_tag(
+        &mut self,
+        tokens: &mut Vec<Token>,
+        start: usize,
+    ) -> Result<bool, TokenizeError> {
         let bytes = self.buffer.as_bytes();
         let mut cursor = start + 2;
         if cursor >= bytes.len() {
@@ -333,11 +346,7 @@ impl Tokenizer {
             .iter()
             .position(|&b| !is_tag_name_char(b))
         {
-            return Err(self.error(
-                State::TagName,
-                name_start + offset,
-                "invalid tag name",
-            ));
+            return Err(self.error(State::TagName, name_start + offset, "invalid tag name"));
         }
         cursor = name_end;
         let name = normalize_tag_name(&self.buffer[name_start..name_end]);
@@ -359,7 +368,11 @@ impl Tokenizer {
                         return Ok(false);
                     }
                     if bytes[cursor + 1] != b'>' {
-                        return Err(self.error(State::SelfClosingStartTag, cursor, "expected '/>'"));
+                        return Err(self.error(
+                            State::SelfClosingStartTag,
+                            cursor,
+                            "expected '/>'",
+                        ));
                     }
                     self_closing = true;
                     cursor += 2;
@@ -638,7 +651,10 @@ fn decode_character_references(input: &str) -> String {
 }
 
 fn parse_character_reference_at(input: &str) -> Option<(String, usize)> {
-    if let Some(rest) = input.strip_prefix("#x").or_else(|| input.strip_prefix("#X")) {
+    if let Some(rest) = input
+        .strip_prefix("#x")
+        .or_else(|| input.strip_prefix("#X"))
+    {
         return parse_numeric_reference(rest, 16, 2);
     }
     if let Some(rest) = input.strip_prefix('#') {

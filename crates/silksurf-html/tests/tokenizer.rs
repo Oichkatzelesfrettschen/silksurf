@@ -3,9 +3,7 @@ use silksurf_html::{Attribute, Token, Tokenizer};
 #[test]
 fn tokenizes_basic_tags_and_text() {
     let mut tokenizer = Tokenizer::new();
-    let mut tokens = tokenizer
-        .feed("<html><body>hi</body></html>")
-        .unwrap();
+    let mut tokens = tokenizer.feed("<html><body>hi</body></html>").unwrap();
     tokens.extend(tokenizer.finish().unwrap());
 
     let expected = vec![
@@ -20,8 +18,12 @@ fn tokenizes_basic_tags_and_text() {
             self_closing: false,
         },
         Token::Character { data: "hi".into() },
-        Token::EndTag { name: "body".into() },
-        Token::EndTag { name: "html".into() },
+        Token::EndTag {
+            name: "body".into(),
+        },
+        Token::EndTag {
+            name: "html".into(),
+        },
         Token::Eof,
     ];
 
@@ -68,7 +70,9 @@ fn tokenizes_doctype_and_comment() {
             system_id: None,
             force_quirks: false,
         },
-        Token::Comment { data: " ok ".into() },
+        Token::Comment {
+            data: " ok ".into(),
+        },
         Token::Eof,
     ];
 
@@ -152,9 +156,7 @@ fn tokenizes_script_raw_text() {
 #[test]
 fn tokenizes_style_raw_text() {
     let mut tokenizer = Tokenizer::new();
-    let mut tokens = tokenizer
-        .feed("<style>body{color:red}</style>")
-        .unwrap();
+    let mut tokens = tokenizer.feed("<style>body{color:red}</style>").unwrap();
     tokens.extend(tokenizer.finish().unwrap());
 
     let expected = vec![
@@ -187,7 +189,9 @@ fn decodes_numeric_character_reference_decimal() {
             attributes: vec![],
             self_closing: false,
         },
-        Token::Character { data: "<tag>".into() },
+        Token::Character {
+            data: "<tag>".into(),
+        },
         Token::EndTag { name: "p".into() },
         Token::Eof,
     ];

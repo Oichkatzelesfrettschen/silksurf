@@ -1,6 +1,7 @@
 use crate::CssToken;
-use silksurf_core::{should_intern_identifier, Atom, SilkInterner, SmallString};
+use silksurf_core::{Atom, SilkInterner, SmallString, should_intern_identifier};
 use silksurf_dom::{AttributeName, TagName};
+use smallvec::SmallVec;
 use std::hash::{Hash, Hasher};
 
 #[derive(Debug, Clone)]
@@ -81,12 +82,12 @@ impl From<SmallString> for SelectorIdent {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SelectorList {
-    pub selectors: Vec<Selector>,
+    pub selectors: SmallVec<[Selector; 2]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Selector {
-    pub steps: Vec<SelectorStep>,
+    pub steps: SmallVec<[SelectorStep; 4]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,7 +107,7 @@ pub enum Combinator {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompoundSelector {
     pub type_selector: Option<TypeSelector>,
-    pub modifiers: Vec<SelectorModifier>,
+    pub modifiers: SmallVec<[SelectorModifier; 4]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -211,7 +212,7 @@ impl<'a> SelectorParser<'a> {
         }
     }
     fn parse_selector_list(&mut self) -> SelectorList {
-        let mut selectors = Vec::new();
+        let mut selectors = SmallVec::new();
         self.consume_whitespace();
         while !self.is_eof() {
             if let Some(selector) = self.parse_selector() {
@@ -228,7 +229,7 @@ impl<'a> SelectorParser<'a> {
         SelectorList { selectors }
     }
     fn parse_selector(&mut self) -> Option<Selector> {
-        let mut steps = Vec::new();
+        let mut steps = SmallVec::new();
         let mut combinator = None;
         loop {
             let saw_whitespace = self.consume_whitespace();
@@ -243,7 +244,10 @@ impl<'a> SelectorParser<'a> {
                 Some(compound) => compound,
                 None => break,
             };
-            steps.push(SelectorStep { combinator, compound });
+            steps.push(SelectorStep {
+                combinator,
+                compound,
+            });
             combinator = None;
             if matches!(self.peek(), Some(CssToken::Comma | CssToken::Eof)) {
                 break;
@@ -268,7 +272,7 @@ impl<'a> SelectorParser<'a> {
             }
             _ => {}
         }
-        let mut modifiers = Vec::new();
+        let mut modifiers = SmallVec::new();
         while let Some(modifier) = self.parse_modifier() {
             modifiers.push(modifier);
         }

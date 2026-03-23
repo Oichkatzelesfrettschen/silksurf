@@ -193,8 +193,7 @@ impl TreeBuilder {
             self.ensure_body_element()?;
             self.insertion_mode = InsertionMode::InBody;
         }
-        let parent = if self.insertion_mode == InsertionMode::InBody
-            && self.should_foster_parent()
+        let parent = if self.insertion_mode == InsertionMode::InBody && self.should_foster_parent()
         {
             self.dom
                 .parent(self.current_node())
@@ -203,7 +202,9 @@ impl TreeBuilder {
         } else {
             self.current_node()
         };
-        self.dom.append_text(parent, data).map_err(TreeBuildError::Dom)?;
+        self.dom
+            .append_text(parent, data)
+            .map_err(TreeBuildError::Dom)?;
         Ok(())
     }
 
@@ -214,7 +215,9 @@ impl TreeBuilder {
         } else {
             self.current_node()
         };
-        self.dom.append_child(parent, comment).map_err(TreeBuildError::Dom)?;
+        self.dom
+            .append_child(parent, comment)
+            .map_err(TreeBuildError::Dom)?;
         Ok(())
     }
 
@@ -243,7 +246,9 @@ impl TreeBuilder {
         self_closing: bool,
     ) -> Result<NodeId, TreeBuildError> {
         let element = self.dom.create_element(name);
-        self.dom.append_child(parent, element).map_err(TreeBuildError::Dom)?;
+        self.dom
+            .append_child(parent, element)
+            .map_err(TreeBuildError::Dom)?;
         for attr in attributes {
             let value = attr.value.as_deref().unwrap_or("");
             self.dom
@@ -291,7 +296,9 @@ impl TreeBuilder {
         }
         let html = self.ensure_html_element()?;
         let element = self.dom.create_element("head");
-        self.dom.append_child(html, element).map_err(TreeBuildError::Dom)?;
+        self.dom
+            .append_child(html, element)
+            .map_err(TreeBuildError::Dom)?;
         for attr in attributes {
             let value = attr.value.as_deref().unwrap_or("");
             self.dom
@@ -315,7 +322,9 @@ impl TreeBuilder {
         }
         let html = self.ensure_html_element()?;
         let element = self.dom.create_element("body");
-        self.dom.append_child(html, element).map_err(TreeBuildError::Dom)?;
+        self.dom
+            .append_child(html, element)
+            .map_err(TreeBuildError::Dom)?;
         for attr in attributes {
             let value = attr.value.as_deref().unwrap_or("");
             self.dom
@@ -354,7 +363,10 @@ impl TreeBuilder {
         for idx in (0..self.open_elements.len()).rev() {
             let node_id = self.open_elements[idx];
             if let Ok(node) = self.dom.node(node_id) {
-                if let NodeKind::Element { name: node_name, .. } = node.kind() {
+                if let NodeKind::Element {
+                    name: node_name, ..
+                } = node.kind()
+                {
                     if node_name.as_str().eq_ignore_ascii_case(name) {
                         self.open_elements.truncate(idx);
                         return true;
@@ -371,10 +383,7 @@ impl TreeBuilder {
             return false;
         };
         if let NodeKind::Element { name, .. } = node.kind() {
-            matches!(
-                name.as_str(),
-                "table" | "tbody" | "thead" | "tfoot" | "tr"
-            )
+            matches!(name.as_str(), "table" | "tbody" | "thead" | "tfoot" | "tr")
         } else {
             false
         }

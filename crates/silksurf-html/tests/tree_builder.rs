@@ -14,9 +14,7 @@ fn find_child_element(dom: &Dom, parent: NodeId, tag: TagName) -> Option<NodeId>
 #[test]
 fn builds_dom_tree() {
     let mut tokenizer = Tokenizer::new();
-    let mut tokens = tokenizer
-        .feed("<html><body>hi</body></html>")
-        .unwrap();
+    let mut tokens = tokenizer.feed("<html><body>hi</body></html>").unwrap();
     tokens.extend(tokenizer.finish().unwrap());
 
     let mut builder = TreeBuilder::new();
@@ -145,14 +143,16 @@ fn inserts_doctype_and_comment_nodes() {
     let dom = builder.dom();
     let doc = builder.document_id();
     let children = dom.children(doc).unwrap();
-    assert!(children.iter().any(|node| matches!(
-        dom.node(*node).unwrap().kind(),
-        NodeKind::Doctype { .. }
-    )));
-    assert!(children.iter().any(|node| matches!(
-        dom.node(*node).unwrap().kind(),
-        NodeKind::Comment { .. }
-    )));
+    assert!(
+        children
+            .iter()
+            .any(|node| matches!(dom.node(*node).unwrap().kind(), NodeKind::Doctype { .. }))
+    );
+    assert!(
+        children
+            .iter()
+            .any(|node| matches!(dom.node(*node).unwrap().kind(), NodeKind::Comment { .. }))
+    );
 }
 
 #[test]
@@ -163,9 +163,7 @@ fn merges_adjacent_text_nodes() {
             attributes: vec![],
             self_closing: false,
         },
-        Token::Character {
-            data: "hi".into(),
-        },
+        Token::Character { data: "hi".into() },
         Token::Character {
             data: " there".into(),
         },

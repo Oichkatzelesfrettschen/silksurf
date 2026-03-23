@@ -1,5 +1,5 @@
 use silksurf_css::{
-    matches_selector, parse_selector_list, selector_specificity, CssTokenizer, Specificity,
+    CssTokenizer, Specificity, matches_selector, parse_selector_list, selector_specificity,
 };
 use silksurf_dom::Dom;
 
@@ -59,17 +59,30 @@ fn matches_attribute_operators() {
     let body = dom.create_element("body");
     dom.append_child(html, body).unwrap();
     let link = dom.create_element("a");
-    dom.set_attribute(link, "href", "https://example.com").unwrap();
+    dom.set_attribute(link, "href", "https://example.com")
+        .unwrap();
     dom.set_attribute(link, "rel", "hero nofollow").unwrap();
     dom.set_attribute(link, "lang", "en-us").unwrap();
     dom.set_attribute(link, "title", "superhero").unwrap();
     dom.set_attribute(link, "name", "userid").unwrap();
     dom.append_child(body, link).unwrap();
 
-    assert!(matches_selector(&dom, link, &selector_from("a[href^=https]")));
-    assert!(matches_selector(&dom, link, &selector_from("a[rel~=nofollow]")));
+    assert!(matches_selector(
+        &dom,
+        link,
+        &selector_from("a[href^=https]")
+    ));
+    assert!(matches_selector(
+        &dom,
+        link,
+        &selector_from("a[rel~=nofollow]")
+    ));
     assert!(matches_selector(&dom, link, &selector_from("a[lang|=en]")));
-    assert!(matches_selector(&dom, link, &selector_from("a[title*=hero]")));
+    assert!(matches_selector(
+        &dom,
+        link,
+        &selector_from("a[title*=hero]")
+    ));
     assert!(matches_selector(&dom, link, &selector_from("a[name$=id]")));
 }
 
@@ -93,8 +106,16 @@ fn matches_pseudo_classes() {
     dom.append_child(body, last).unwrap();
 
     assert!(matches_selector(&dom, html, &selector_from(":root")));
-    assert!(matches_selector(&dom, first, &selector_from(":first-child")));
+    assert!(matches_selector(
+        &dom,
+        first,
+        &selector_from(":first-child")
+    ));
     assert!(matches_selector(&dom, last, &selector_from(":last-child")));
-    assert!(matches_selector(&dom, only_child, &selector_from(":only-child")));
+    assert!(matches_selector(
+        &dom,
+        only_child,
+        &selector_from(":only-child")
+    ));
     assert!(matches_selector(&dom, empty, &selector_from(":empty")));
 }

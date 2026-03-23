@@ -1,5 +1,5 @@
-use bumpalo::Bump;
 use crate::ArenaVec;
+use bumpalo::Bump;
 
 pub struct SilkArena {
     bump: Bump,
@@ -24,5 +24,11 @@ impl SilkArena {
 
     pub fn reset(&mut self) {
         self.bump.reset();
+    }
+}
+
+impl Default for SilkArena {
+    fn default() -> Self {
+        Self::new()
     }
 }

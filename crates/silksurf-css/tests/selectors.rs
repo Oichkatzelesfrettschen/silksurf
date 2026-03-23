@@ -1,5 +1,6 @@
 use silksurf_css::{
-    parse_selector_list, AttributeOperator, Combinator, CssTokenizer, SelectorModifier, TypeSelector,
+    AttributeOperator, Combinator, CssTokenizer, SelectorModifier, TypeSelector,
+    parse_selector_list,
 };
 use silksurf_dom::{AttributeName, TagName};
 
@@ -67,7 +68,10 @@ fn parses_attribute_selector() {
 
     assert_eq!(attr.name, AttributeName::Type);
     assert_eq!(attr.operator, Some(AttributeOperator::Equals));
-    assert_eq!(attr.value.as_ref().map(|value| value.as_str()), Some("text"));
+    assert_eq!(
+        attr.value.as_ref().map(|value| value.as_str()),
+        Some("text")
+    );
 }
 
 #[test]

@@ -1,4 +1,4 @@
-use silksurf_css::{compute_styles, parse_stylesheet, Color, Display, Length};
+use silksurf_css::{Color, Display, Length, compute_styles, parse_stylesheet};
 use silksurf_dom::Dom;
 
 #[test]
@@ -25,7 +25,15 @@ fn cascades_and_inherits() {
     let span_style = styles.get(&span).expect("span style");
 
     assert_eq!(div_style.display, Display::Block);
-    assert_eq!(div_style.color, Color { r: 0, g: 0, b: 255, a: 255 });
+    assert_eq!(
+        div_style.color,
+        Color {
+            r: 0,
+            g: 0,
+            b: 255,
+            a: 255
+        }
+    );
     assert_eq!(
         div_style.margin,
         silksurf_css::Edges {
@@ -36,13 +44,20 @@ fn cascades_and_inherits() {
         }
     );
     assert_eq!(span_style.display, Display::Inline);
-    assert_eq!(span_style.color, Color { r: 0, g: 128, b: 0, a: 255 });
+    assert_eq!(
+        span_style.color,
+        Color {
+            r: 0,
+            g: 128,
+            b: 0,
+            a: 255
+        }
+    );
 }
 
 #[test]
 fn cascades_line_height_and_border() {
-    let stylesheet =
-        parse_stylesheet("p { line-height: 18px; border: 2px 4px; }").unwrap();
+    let stylesheet = parse_stylesheet("p { line-height: 18px; border: 2px 4px; }").unwrap();
 
     let mut dom = Dom::new();
     let doc = dom.create_document();

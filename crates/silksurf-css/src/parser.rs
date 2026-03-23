@@ -1,4 +1,4 @@
-use crate::selector::{parse_selector_list, SelectorList};
+use crate::selector::{SelectorList, parse_selector_list};
 use crate::{CssError, CssToken, CssTokenizer};
 use silksurf_core::SilkInterner;
 
@@ -84,16 +84,28 @@ impl CssParser {
             match self.peek() {
                 Some(CssToken::Semicolon) => {
                     self.next();
-                    return Some(Rule::At(AtRule { name, prelude, block: None }));
+                    return Some(Rule::At(AtRule {
+                        name,
+                        prelude,
+                        block: None,
+                    }));
                 }
                 Some(CssToken::CurlyOpen) => {
                     self.next();
                     let block_tokens = self.consume_block();
                     let block = Some(parse_at_rule_block(block_tokens));
-                    return Some(Rule::At(AtRule { name, prelude, block }));
+                    return Some(Rule::At(AtRule {
+                        name,
+                        prelude,
+                        block,
+                    }));
                 }
                 Some(CssToken::Eof) | None => {
-                    return Some(Rule::At(AtRule { name, prelude, block: None }));
+                    return Some(Rule::At(AtRule {
+                        name,
+                        prelude,
+                        block: None,
+                    }));
                 }
                 _ => {
                     prelude.push(self.next().unwrap());
@@ -110,7 +122,10 @@ impl CssParser {
                     let block_tokens = self.consume_block();
                     let declarations = parse_declarations(block_tokens);
                     let selectors = parse_selector_list(selector_tokens);
-                    return Some(Rule::Style(StyleRule { selectors, declarations }));
+                    return Some(Rule::Style(StyleRule {
+                        selectors,
+                        declarations,
+                    }));
                 }
                 Some(CssToken::Eof) | None => return None,
                 _ => {
@@ -143,7 +158,10 @@ impl CssParser {
     }
 
     fn consume_ignorable(&mut self) {
-        while matches!(self.peek(), Some(CssToken::Whitespace | CssToken::Cdo | CssToken::Cdc)) {
+        while matches!(
+            self.peek(),
+            Some(CssToken::Whitespace | CssToken::Cdo | CssToken::Cdc)
+        ) {
             self.next();
         }
     }
@@ -160,7 +178,7 @@ impl CssParser {
     }
 
     fn is_eof(&self) -> bool {
-        matches!(self.peek(), Some(CssToken::Eof))
+        matches!(self.peek(), Some(CssToken::Eof) | None)
     }
 }
 
@@ -176,11 +194,39 @@ pub fn parse_stylesheet_with_interner(
     input: &str,
     interner: &mut SilkInterner,
 ) -> Result<Stylesheet, CssError> {
+    // Limit CSS input to 512KB to prevent OOM on very large stylesheets.
+    // ChatGPT serves 1.4MB of CSS; we parse the first 512KB which covers
+    // the critical layout rules. Full support needs a streaming parser.
+    const MAX_CSS_BYTES: usize = 128 * 1024;
+    let truncated = if input.len() > MAX_CSS_BYTES {
+        // Find a safe truncation point (end of a rule block)
+        let safe_end = input[..MAX_CSS_BYTES]
+            .rfind('}')
+            .map(|pos| pos + 1)
+            .unwrap_or(MAX_CSS_BYTES);
+        &input[..safe_end]
+    } else {
+        input
+    };
+
+    let t0 = std::time::Instant::now();
     let mut tokenizer = CssTokenizer::new();
-    let mut tokens = tokenizer.feed(input)?;
+    let mut tokens = tokenizer.feed(truncated)?;
     tokens.extend(tokenizer.finish()?);
+    eprintln!(
+        "[CSS] Tokenized {} bytes -> {} tokens in {:?}",
+        truncated.len(),
+        tokens.len(),
+        t0.elapsed()
+    );
+    let t1 = std::time::Instant::now();
     let mut parser = CssParser::new(tokens);
     let mut sheet = parser.parse_stylesheet();
+    eprintln!(
+        "[CSS] Parsed {} rules in {:?}",
+        sheet.rules.len(),
+        t1.elapsed()
+    );
     intern_rules(&mut sheet.rules, interner);
     Ok(sheet)
 }
@@ -217,8 +263,7 @@ fn looks_like_declarations(tokens: &[CssToken]) -> bool {
             CssToken::CurlyClose => depth = depth.saturating_sub(1),
             CssToken::Ident(_) if depth == 0 => {
                 let mut lookahead = index + 1;
-                while lookahead < tokens.len()
-                    && matches!(tokens[lookahead], CssToken::Whitespace)
+                while lookahead < tokens.len() && matches!(tokens[lookahead], CssToken::Whitespace)
                 {
                     lookahead += 1;
                 }
