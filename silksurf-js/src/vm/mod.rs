@@ -1208,6 +1208,88 @@ fn op_get_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
          * Number.isNaN/isFinite perform type-safe checks without coercion.
          * These are required by modern JS code including React internals.
          */
+        /*
+         * Symbol static properties: well-known symbols and Symbol.for().
+         *
+         * WHY: React uses Symbol.iterator for iterables, Symbol.asyncIterator
+         * for async iteration, Symbol.toPrimitive for coercion, Symbol.hasInstance
+         * for instanceof overrides, and Symbol.for() for cross-realm symbols
+         * (e.g. react-is uses Symbol.for('react.element')).
+         *
+         * Each well-known symbol is a fixed unique string "@@symbol_N_name"
+         * generated at first access via make_symbol_value. They're stored as
+         * thread_local statics so the same string is returned on every access.
+         *
+         * Symbol.for(key): global registry -- same key returns same symbol.
+         * Symbol.keyFor(sym): reverse lookup in the registry.
+         */
+        Value::NativeFunction(f) if f.name == "Symbol" => {
+            use builtins::map_set::make_symbol_value;
+            match prop_name.as_str() {
+                "iterator" => {
+                    thread_local! {
+                        static SYM_ITER: std::cell::OnceCell<String> = const { std::cell::OnceCell::new() };
+                    }
+                    SYM_ITER.with(|c| {
+                        value::Value::string_owned(
+                            c.get_or_init(|| "@@symbol_wk_iterator".to_string()).clone(),
+                        )
+                    })
+                }
+                "asyncIterator" => {
+                    thread_local! {
+                        static SYM_ASYNC: std::cell::OnceCell<String> = const { std::cell::OnceCell::new() };
+                    }
+                    SYM_ASYNC.with(|c| {
+                        value::Value::string_owned(
+                            c.get_or_init(|| "@@symbol_wk_asyncIterator".to_string()).clone(),
+                        )
+                    })
+                }
+                "toPrimitive" => value::Value::string("@@symbol_wk_toPrimitive"),
+                "toStringTag"  => value::Value::string("@@symbol_wk_toStringTag"),
+                "hasInstance"  => value::Value::string("@@symbol_wk_hasInstance"),
+                "species"      => value::Value::string("@@symbol_wk_species"),
+                "isConcatSpreadable" => value::Value::string("@@symbol_wk_isConcatSpreadable"),
+                "for" => Value::NativeFunction(Rc::new(value::NativeFunction::new(
+                    "Symbol.for",
+                    |args| {
+                        let key = args.first()
+                            .map(|v| { let s = v.to_js_string(); s.as_str().unwrap_or("").to_string() })
+                            .unwrap_or_default();
+                        // Registry lookup/insert
+                        thread_local! {
+                            static REGISTRY: RefCell<Vec<(String, String)>> =
+                                const { RefCell::new(Vec::new()) };
+                        }
+                        REGISTRY.with(|reg| {
+                            let mut r = reg.borrow_mut();
+                            if let Some((_, sym)) = r.iter().find(|(k, _)| k == &key) {
+                                return value::Value::string_owned(sym.clone());
+                            }
+                            let sym = format!("@@symbol_for_{key}");
+                            r.push((key, sym.clone()));
+                            value::Value::string_owned(sym)
+                        })
+                    },
+                ))),
+                "keyFor" => Value::NativeFunction(Rc::new(value::NativeFunction::new(
+                    "Symbol.keyFor",
+                    |args| {
+                        let sym = args.first()
+                            .map(|v| { let s = v.to_js_string(); s.as_str().unwrap_or("").to_string() })
+                            .unwrap_or_default();
+                        // Extract key from "@@symbol_for_KEY" format
+                        if let Some(key) = sym.strip_prefix("@@symbol_for_") {
+                            value::Value::string_owned(key.to_string())
+                        } else {
+                            value::Value::Undefined
+                        }
+                    },
+                ))),
+                _ => make_symbol_value(&prop_name),
+            }
+        }
         Value::NativeFunction(f) if f.name == "Number" => {
             match prop_name.as_str() {
                 "isInteger" => Value::NativeFunction(Rc::new(value::NativeFunction::new(
