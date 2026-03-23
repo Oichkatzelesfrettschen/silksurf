@@ -209,6 +209,21 @@ impl HostObject for DocumentHost {
                     },
                 )))
             }
+            /*
+             * addEventListener / removeEventListener / dispatchEvent stubs.
+             *
+             * WHY: Scripts call document.addEventListener('DOMContentLoaded', fn)
+             * at init time. The handlers never fire in our headless VM, but
+             * absorbing the registration prevents TypeError on the call.
+             */
+            "addEventListener" | "removeEventListener" => {
+                Value::NativeFunction(Rc::new(NativeFunction::new(name, |_| Value::Undefined)))
+            }
+            "dispatchEvent" => {
+                Value::NativeFunction(Rc::new(NativeFunction::new("dispatchEvent", |_| {
+                    Value::Boolean(true)
+                })))
+            }
             _ => Value::Undefined,
         }
     }
