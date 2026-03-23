@@ -253,12 +253,20 @@ fn main() {
                     let vm_id = vm.strings.intern(s.clone());
                     str_map.insert(*compiler_id, vm_id);
                 }
-                // Add child chunks (function bodies) first so their indices are stable
+                // Add child chunks (function bodies) first so their indices are stable.
+                // CRITICAL: remap string IDs in child chunks too!
                 let child_base = vm.chunks_len();
-                for child in child_chunks {
+                for mut child in child_chunks {
+                    for constant in child.constants_mut() {
+                        if let silksurf_js::bytecode::Constant::String(str_id) = constant {
+                            if let Some(&vm_id) = str_map.get(str_id) {
+                                *str_id = vm_id;
+                            }
+                        }
+                    }
                     vm.add_chunk(child);
                 }
-                // Patch constants: remap string IDs and function chunk indices
+                // Patch main chunk constants: remap string IDs and function chunk indices
                 let mut main_chunk = chunk;
                 for constant in main_chunk.constants_mut() {
                     match constant {

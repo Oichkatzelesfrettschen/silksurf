@@ -20,6 +20,37 @@ pub fn install(global: &mut Object) {
     // undefined is already the default register value
     global.set_by_str("undefined", Value::Undefined);
     global.set_by_str("null", Value::Null);
+
+    // Date object (minimal: just Date.now())
+    let date_obj = super::make_object_with_methods(vec![
+        ("now", native_fn("Date.now", |_args| {
+            let ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as f64)
+                .unwrap_or(0.0);
+            Value::Number(ms)
+        })),
+    ]);
+    global.set_by_str("Date", date_obj);
+
+    // ReadableStream stub (ChatGPT script 3 uses it)
+    global.set_by_str("ReadableStream", native_fn("ReadableStream", |_args| {
+        // Return a stub object with a start() method
+        let obj = Object::new();
+        let obj_rc = std::rc::Rc::new(std::cell::RefCell::new(obj));
+        {
+            let mut o = obj_rc.borrow_mut();
+            o.set_by_str("pipeThrough", Value::NativeFunction(std::rc::Rc::new(
+                crate::vm::value::NativeFunction::new("pipeThrough", |_| Value::Undefined),
+            )));
+        }
+        Value::Object(obj_rc)
+    }));
+
+    // TextEncoderStream stub
+    global.set_by_str("TextEncoderStream", native_fn("TextEncoderStream", |_args| {
+        Value::Undefined
+    }));
 }
 
 fn parse_int(args: &[Value]) -> Value {
