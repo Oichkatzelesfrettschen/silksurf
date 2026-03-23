@@ -128,20 +128,20 @@ impl HostObject for DocumentHost {
                 Value::NativeFunction(Rc::new(NativeFunction::new(
                     "document.querySelector",
                     move |args| {
-                        let _selector = args
+                        let selector_str = args
                             .first()
                             .map(|v| {
                                 let s = v.to_js_string();
                                 s.as_str().unwrap_or("").to_string()
                             })
                             .unwrap_or_default();
-                        // Simplified: for now, just return first child element
-                        // Full impl would parse the selector and use silksurf-css matching
+                        // Tokenize + parse selector using the DOM's shared interner.
+                        let selector = parse_selector(&dom, &selector_str);
+                        let Some(selector) = selector else {
+                            return Value::Null;
+                        };
                         let dom_borrow = dom.borrow();
-                        let result = dom_borrow
-                            .children(doc_node)
-                            .ok()
-                            .and_then(|children| children.first().copied());
+                        let result = find_first_matching(&dom_borrow, doc_node, &selector);
                         drop(dom_borrow);
                         result
                             .map(|n| node_to_js_value(&dom, n))
@@ -189,18 +189,56 @@ impl HostObject for DocumentHost {
                 )))
             }
             /*
-             * querySelectorAll -- simplified: same as getElementsByTagName("*")
-             * for now. Full CSS selector parsing is deferred.
+             * getElementsByClassName -- collect all elements with matching class.
+             * Accepts a space-separated list of class names (all must be present).
              */
+            "getElementsByClassName" => {
+                let dom = Rc::clone(dom_ref);
+                let doc_node = self.document_node;
+                Value::NativeFunction(Rc::new(NativeFunction::new(
+                    "document.getElementsByClassName",
+                    move |args| {
+                        let class_str = args
+                            .first()
+                            .map(|v| {
+                                let s = v.to_js_string();
+                                s.as_str().unwrap_or("").to_string()
+                            })
+                            .unwrap_or_default();
+                        let classes: Vec<&str> = class_str.split_whitespace().collect();
+                        let dom_borrow = dom.borrow();
+                        let mut found = Vec::new();
+                        collect_by_class(&dom_borrow, doc_node, &classes, &mut found);
+                        drop(dom_borrow);
+                        use crate::vm::builtins::array::create_array;
+                        let values: Vec<_> =
+                            found.iter().map(|&n| node_to_js_value(&dom, n)).collect();
+                        create_array(values)
+                    },
+                )))
+            }
             "querySelectorAll" => {
                 let dom = Rc::clone(dom_ref);
                 let doc_node = self.document_node;
                 Value::NativeFunction(Rc::new(NativeFunction::new(
                     "document.querySelectorAll",
-                    move |_args| {
+                    move |args| {
+                        let selector_str = args
+                            .first()
+                            .map(|v| {
+                                let s = v.to_js_string();
+                                s.as_str().unwrap_or("*").to_string()
+                            })
+                            .unwrap_or_else(|| "*".to_string());
+                        let selector = parse_selector(&dom, &selector_str);
+                        // Fall back to all elements if selector parse fails
                         let dom_borrow = dom.borrow();
                         let mut found = Vec::new();
-                        collect_by_tag(&dom_borrow, doc_node, "*", &mut found);
+                        if let Some(sel) = selector {
+                            collect_matching(&dom_borrow, doc_node, &sel, &mut found);
+                        } else {
+                            collect_by_tag(&dom_borrow, doc_node, "*", &mut found);
+                        }
                         drop(dom_borrow);
                         use crate::vm::builtins::array::create_array;
                         let values: Vec<_> =
@@ -279,6 +317,119 @@ fn collect_by_tag(
     if let Ok(children) = dom.children(node) {
         for &child in children {
             collect_by_tag(dom, child, target, out);
+        }
+    }
+}
+
+/*
+ * parse_selector -- tokenize + parse a CSS selector string.
+ *
+ * WHY: querySelector/querySelectorAll receive selector strings from JS.
+ * silksurf-css requires pre-tokenized Vec<CssToken>. This helper tokenizes
+ * the string and parses it using the DOM's shared interner for atom reuse.
+ * Returns None if tokenization fails (e.g. empty or malformed selector).
+ *
+ * See: silksurf_css::CssTokenizer for tokenization
+ * See: silksurf_css::parse_selector_list_with_interner for parsing
+ */
+/// Collect elements whose class attribute contains ALL of the given class names.
+fn collect_by_class(
+    dom: &silksurf_dom::Dom,
+    node: NodeId,
+    classes: &[&str],
+    out: &mut Vec<NodeId>,
+) {
+    if let Ok(attrs) = dom.attributes(node) {
+        let has_all = attrs.iter().any(|attr| {
+            if attr.name == silksurf_dom::AttributeName::Class {
+                let val = attr.value.as_str();
+                classes.iter().all(|c| {
+                    val.split_whitespace().any(|token| token == *c)
+                })
+            } else {
+                false
+            }
+        });
+        if has_all && !classes.is_empty() {
+            out.push(node);
+        }
+    }
+    if let Ok(children) = dom.children(node) {
+        for &child in children {
+            collect_by_class(dom, child, classes, out);
+        }
+    }
+}
+
+fn parse_selector(dom: &super::SharedDom, selector: &str) -> Option<silksurf_css::SelectorList> {
+    let mut tokenizer = silksurf_css::CssTokenizer::new();
+    let mut tokens = tokenizer.feed(selector).ok()?;
+    tokens.extend(tokenizer.finish().ok()?);
+    let sel = dom
+        .borrow()
+        .with_interner_mut(|interner| {
+            silksurf_css::parse_selector_list_with_interner(tokens, Some(interner))
+        });
+    if sel.selectors.is_empty() {
+        None
+    } else {
+        Some(sel)
+    }
+}
+
+/*
+ * find_first_matching -- DFS search for first node matching a CSS selector list.
+ *
+ * WHY: querySelector() must return the first matching node in tree order.
+ * Uses silksurf_css::matches_selector_list which implements full CSS
+ * selector matching (tag, class, id, attribute, pseudo-classes).
+ *
+ * Complexity: O(N * S) where N=nodes, S=selector complexity
+ * See: silksurf_css::matches_selector_list (matching.rs)
+ */
+fn find_first_matching(
+    dom: &silksurf_dom::Dom,
+    node: NodeId,
+    selector: &silksurf_css::SelectorList,
+) -> Option<NodeId> {
+    if dom.element_name(node).ok().flatten().is_some()
+        && silksurf_css::matches_selector_list(dom, node, selector)
+    {
+        return Some(node);
+    }
+    if let Ok(children) = dom.children(node) {
+        for &child in children {
+            if let Some(found) = find_first_matching(dom, child, selector) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+/*
+ * collect_matching -- DFS collection of all nodes matching a CSS selector list.
+ *
+ * WHY: querySelectorAll() returns all matching nodes in tree order.
+ * Descends the entire subtree and pushes matching element nodes.
+ *
+ * Complexity: O(N * S) where N=nodes, S=selector complexity
+ * See: find_first_matching for single-match variant
+ */
+fn collect_matching(
+    dom: &silksurf_dom::Dom,
+    node: NodeId,
+    selector: &silksurf_css::SelectorList,
+    out: &mut Vec<NodeId>,
+) {
+    if dom.element_name(node).ok().flatten().is_some()
+        && silksurf_css::matches_selector_list(dom, node, selector)
+    {
+        out.push(node);
+    }
+    if let Ok(children) = dom.children(node) {
+        for &child in children {
+            collect_matching(dom, child, selector, out);
         }
     }
 }
