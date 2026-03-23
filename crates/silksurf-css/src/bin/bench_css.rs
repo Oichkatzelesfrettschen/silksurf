@@ -1,3 +1,6 @@
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use silksurf_css::parse_stylesheet;
 use std::time::Instant;
 

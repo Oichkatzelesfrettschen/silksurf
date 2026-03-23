@@ -151,7 +151,7 @@ mod tests {
     #[test]
     fn test_custom_property_set_get() {
         let mut map = CustomPropertyMap::new();
-        map.set("--color", vec![CssToken::Ident("red".to_string())]);
+        map.set("--color", vec![CssToken::Ident("red".into())]);
         assert!(map.get("--color").is_some());
         assert!(map.get("--other").is_none());
     }
@@ -167,15 +167,15 @@ mod tests {
     #[test]
     fn test_resolve_var_simple() {
         let mut props = CustomPropertyMap::new();
-        props.set("--primary", vec![CssToken::Ident("blue".to_string())]);
+        props.set("--primary", vec![CssToken::Ident("blue".into())]);
 
         let tokens = vec![
-            CssToken::Function("var".to_string()),
-            CssToken::Ident("--primary".to_string()),
+            CssToken::Function("var".into()),
+            CssToken::Ident("--primary".into()),
             CssToken::ParenClose,
         ];
         let resolved = resolve_var_references(&tokens, &props);
-        assert_eq!(resolved, vec![CssToken::Ident("blue".to_string())]);
+        assert_eq!(resolved, vec![CssToken::Ident("blue".into())]);
     }
 
     #[test]
@@ -183,22 +183,22 @@ mod tests {
         let props = CustomPropertyMap::new(); // empty -- no --missing
 
         let tokens = vec![
-            CssToken::Function("var".to_string()),
-            CssToken::Ident("--missing".to_string()),
+            CssToken::Function("var".into()),
+            CssToken::Ident("--missing".into()),
             CssToken::Comma,
-            CssToken::Ident("green".to_string()),
+            CssToken::Ident("green".into()),
             CssToken::ParenClose,
         ];
         let resolved = resolve_var_references(&tokens, &props);
-        assert_eq!(resolved, vec![CssToken::Ident("green".to_string())]);
+        assert_eq!(resolved, vec![CssToken::Ident("green".into())]);
     }
 
     #[test]
     fn test_resolve_var_missing_no_fallback() {
         let props = CustomPropertyMap::new();
         let tokens = vec![
-            CssToken::Function("var".to_string()),
-            CssToken::Ident("--missing".to_string()),
+            CssToken::Function("var".into()),
+            CssToken::Ident("--missing".into()),
             CssToken::ParenClose,
         ];
         let resolved = resolve_var_references(&tokens, &props);
@@ -208,10 +208,10 @@ mod tests {
     #[test]
     fn test_inherit() {
         let mut parent = CustomPropertyMap::new();
-        parent.set("--from-parent", vec![CssToken::Number("42".to_string())]);
+        parent.set("--from-parent", vec![CssToken::Number("42".into())]);
 
         let mut child = CustomPropertyMap::new();
-        child.set("--from-child", vec![CssToken::Ident("own".to_string())]);
+        child.set("--from-child", vec![CssToken::Ident("own".into())]);
         child.inherit_from(&parent);
 
         assert!(child.get("--from-parent").is_some());

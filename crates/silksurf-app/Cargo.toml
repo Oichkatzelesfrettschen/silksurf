@@ -16,3 +16,4 @@ silksurf-render = { path = "../silksurf-render", features = ["parallel"] }
 silksurf-js = { path = "../../silksurf-js" }
 silksurf-core = { path = "../silksurf-core" }
 url = { workspace = true }
+mimalloc = { workspace = true }

@@ -1,6 +1,7 @@
 use crate::selector::{SelectorList, parse_selector_list};
 use crate::{CssError, CssToken, CssTokenizer};
 use silksurf_core::SilkInterner;
+use smol_str::SmolStr;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Stylesheet {
@@ -21,7 +22,7 @@ pub struct StyleRule {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AtRule {
-    pub name: String,
+    pub name: SmolStr,
     pub prelude: Vec<CssToken>,
     pub block: Option<AtRuleBlock>,
 }
@@ -34,7 +35,7 @@ pub enum AtRuleBlock {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Declaration {
-    pub name: String,
+    pub name: SmolStr,
     pub value: Vec<CssToken>,
     pub important: bool,
     /// Pre-computed property ID for O(1) cascade dispatch.

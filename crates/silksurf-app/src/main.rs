@@ -6,6 +6,18 @@
 //! Usage: silksurf-app [URL]
 //! Default URL: https://example.com
 
+/*
+ * mimalloc global allocator.
+ *
+ * WHY: The CSS tokenizer and cascade produce many small heap allocations
+ * (one SmolStr per identifier > 22 bytes, Vec<CssToken> per declaration).
+ * mimalloc uses thread-local free lists and page segregation to service
+ * small allocs in ~5ns vs ~20ns for system malloc. 2-4x throughput on
+ * allocation-heavy workloads. Zero code changes outside this declaration.
+ */
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use std::cell::RefCell;
 use std::rc::Rc;
 

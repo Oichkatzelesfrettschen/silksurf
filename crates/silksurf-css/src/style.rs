@@ -1637,7 +1637,10 @@ fn parse_font_family(tokens: &[CssToken]) -> Option<Vec<String>> {
     let mut current = Vec::new();
     for token in tokens {
         match token {
-            CssToken::Ident(value) | CssToken::String(value) => {
+            CssToken::Ident(value) => {
+                current.push(value.to_string());
+            }
+            CssToken::String(value) => {
                 current.push(value.clone());
             }
             CssToken::Comma => {

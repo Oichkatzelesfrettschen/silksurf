@@ -166,18 +166,18 @@ mod tests {
                     }
                     if let Some(&'%') = chars.peek() {
                         chars.next();
-                        tokens.push(CssToken::Percentage(num));
+                        tokens.push(CssToken::Percentage(num.as_str().into()));
                     } else if let Some(&'p') = chars.peek() {
                         chars.next();
                         if let Some(&'x') = chars.peek() {
                             chars.next();
                         }
                         tokens.push(CssToken::Dimension {
-                            value: num,
-                            unit: "px".to_string(),
+                            value: num.as_str().into(),
+                            unit: "px".into(),
                         });
                     } else {
-                        tokens.push(CssToken::Number(num));
+                        tokens.push(CssToken::Number(num.as_str().into()));
                     }
                 }
                 _ => {
