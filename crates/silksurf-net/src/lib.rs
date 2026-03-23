@@ -1,13 +1,12 @@
 /*
- * net/lib.rs -- pure Rust HTTP/1.1 client (no async runtime, no libcurl).
+ * net/lib.rs -- pure Rust HTTP client (HTTP/1.1 + HTTP/2).
  *
  * WHY: SilkSurf needs to fetch web pages, CSS, and JS resources. This
  * client uses only synchronous std::net::TcpStream + rustls for TLS,
  * with httparse for zero-copy header parsing. No tokio/hyper/reqwest --
  * minimal dependency footprint and zero async runtime overhead.
  *
- * Architecture:
- *   BasicClient::fetch(request) -> Result<HttpResponse, NetError>
+ * HTTP/1.1 path (BasicClient::fetch):
  *   1. Parse URL via url crate (WHATWG compliant)
  *   2. TCP connect to host:port
  *   3. TLS handshake via rustls StreamOwned (HTTPS only)
@@ -16,19 +15,27 @@
  *   6. Parse headers via httparse (zero-copy)
  *   7. Follow redirects (301/302/303/307/308, max 5)
  *
+ * HTTP/2 path (BasicClient::fetch_parallel):
+ *   - Groups same-HTTPS-host requests and tries h2 via ALPN
+ *   - On h2 success: all requests multiplexed over one TLS connection
+ *   - On h2 failure: falls back to sequential HTTP/1.1 per request
+ *   - Internal tokio current_thread runtime (no extra OS threads)
+ *
  * TLS: system certs (rustls-native-certs) + Mozilla bundle (webpki-roots).
  * --insecure flag available for environments with broken cert chains.
  *
  * DONE(perf): Response caching (Phase 4.3) -- see silksurf-engine/src/speculative.rs
- * TODO(perf): Connection pooling, HTTP/2 upgrade
+ * DONE(perf): HTTP/2 parallel fetch (Phase D) -- see h2_client.rs
  *
  * See: silksurf-tls for TLS configuration and cert loading
+ * See: h2_client.rs for HTTP/2 multiplexed fetch implementation
  * See: builtins/fetch_builtin.rs for JS fetch() API binding
  * See: silksurf-app/src/main.rs for webview usage
  */
 #![allow(clippy::collapsible_if)]
 
 pub mod cache;
+pub mod h2_client;
 
 use rustls::StreamOwned;
 use silksurf_tls::{RustlsProvider, TlsProvider};
@@ -216,6 +223,109 @@ impl NetClient for BasicClient {
             return Ok(response);
         }
     }
+}
+
+impl BasicClient {
+    /*
+     * fetch_parallel -- fetch multiple URLs, using HTTP/2 if all share an HTTPS host.
+     *
+     * WHY: chatgpt.com CSS subresources are currently fetched sequentially (one
+     * TCP+TLS per request). HTTP/2 multiplexes all over one connection, saving
+     * ~50ms per subresource. Three stylesheets: ~100ms savings on first render.
+     *
+     * Algorithm:
+     *   1. If all requests are HTTPS with the same host+port: try h2_client
+     *   2. On h2 success: return responses directly (all parallel over one conn)
+     *   3. On h2 failure (server doesn't support h2, or any error): fall back to
+     *      sequential HTTP/1.1 -- same as calling fetch() N times in a loop
+     *   4. Mixed hosts or HTTP: always sequential HTTP/1.1 (no h2 benefit)
+     *
+     * INVARIANT: responses are returned in the same order as requests.
+     *
+     * Complexity: O(1) TLS handshakes on h2 path; O(N) on HTTP/1.1 fallback
+     * See: h2_client.rs for the H2 implementation
+     * See: SpeculativeRenderer::fetch_all_or_speculate for cache integration
+     */
+    pub fn fetch_parallel(
+        &self,
+        requests: &[HttpRequest],
+    ) -> Vec<Result<HttpResponse, NetError>> {
+        if requests.is_empty() {
+            return vec![];
+        }
+
+        // Try the HTTP/2 multiplexed path for same-HTTPS-host requests.
+        if let Some((host, port)) = same_https_host(requests) {
+            let h2_config = self.tls.h2_config();
+            let h2_reqs: Vec<h2_client::H2Request> = requests
+                .iter()
+                .map(|r| {
+                    let parsed = url::Url::parse(&r.url).unwrap_or_else(|_| {
+                        url::Url::parse("https://localhost/").unwrap()
+                    });
+                    h2_client::H2Request {
+                        path: parsed.path().to_string(),
+                        query: parsed.query().map(|q| q.to_string()),
+                        extra_headers: r.headers.clone(),
+                    }
+                })
+                .collect();
+
+            match h2_client::fetch_h2_parallel(h2_config, &host, port, &h2_reqs) {
+                Ok(responses) => {
+                    return responses
+                        .into_iter()
+                        .map(|r| {
+                            Ok(HttpResponse {
+                                status: r.status,
+                                headers: r.headers,
+                                body: r.body,
+                            })
+                        })
+                        .collect();
+                }
+                Err(e) => {
+                    eprintln!("[SilkSurf] h2 fetch failed ({e}), falling back to HTTP/1.1");
+                }
+            }
+        }
+
+        // HTTP/1.1 sequential fallback (different hosts, HTTP, or h2 failure).
+        requests.iter().map(|req| self.fetch(req)).collect()
+    }
+}
+
+/*
+ * same_https_host -- return (host, port) if all requests target the same HTTPS host.
+ *
+ * WHY: HTTP/2 multiplexing only benefits requests to the same server over one
+ * connection. Mixed hosts or HTTP requests go through sequential HTTP/1.1.
+ *
+ * Returns None if: requests is empty, any URL is HTTP, or hosts differ.
+ */
+fn same_https_host(requests: &[HttpRequest]) -> Option<(String, u16)> {
+    if requests.is_empty() {
+        return None;
+    }
+    let first = url::Url::parse(&requests[0].url).ok()?;
+    if first.scheme() != "https" {
+        return None;
+    }
+    let host = first.host_str()?.to_string();
+    let port = first.port().unwrap_or(443);
+    for req in requests.iter().skip(1) {
+        let parsed = url::Url::parse(&req.url).ok()?;
+        if parsed.scheme() != "https" {
+            return None;
+        }
+        if parsed.host_str() != Some(host.as_str()) {
+            return None;
+        }
+        if parsed.port().unwrap_or(443) != port {
+            return None;
+        }
+    }
+    Some((host, port))
 }
 
 /// Read the full HTTP response from a stream.

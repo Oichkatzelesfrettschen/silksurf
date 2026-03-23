@@ -34,6 +34,28 @@ impl TlsConfig {
         }
     }
 
+    /// Create TLS config with ALPN ["h2", "http/1.1"] for HTTP/2 negotiation.
+    ///
+    /// WHY: The default config has no ALPN, so servers always fall back to HTTP/1.1.
+    /// This variant advertises h2 support; servers that support HTTP/2 will negotiate it.
+    /// Used only by the h2 parallel-fetch path in silksurf-net; single-URL fetches
+    /// via BasicClient::fetch continue to use the default (HTTP/1.1) config.
+    pub fn new_h2() -> Self {
+        let mut roots = RootCertStore::empty();
+        roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        let result = rustls_native_certs::load_native_certs();
+        for cert in result.certs {
+            let _ = roots.add(cert);
+        }
+        let mut config = ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+        Self {
+            inner: Arc::new(config),
+        }
+    }
+
     /// Create TLS config that accepts any certificate (INSECURE -- for debugging only).
     pub fn new_insecure() -> Self {
         let config = ClientConfig::builder()
@@ -84,11 +106,29 @@ impl Default for RustlsProvider {
 
 pub trait TlsProvider {
     fn config(&self) -> Arc<ClientConfig>;
+
+    /*
+     * h2_config -- return a ClientConfig with ALPN ["h2", "http/1.1"].
+     *
+     * WHY: The default config() has no ALPN, so servers always fall back to
+     * HTTP/1.1. The h2 parallel-fetch path needs a config that advertises h2
+     * support so the server negotiates it. Default impl: same as config()
+     * (no h2, for providers that don't support it).
+     *
+     * See: h2_client.rs fetch_h2_parallel -- uses this config for ALPN
+     */
+    fn h2_config(&self) -> Arc<ClientConfig> {
+        self.config()
+    }
 }
 
 impl TlsProvider for RustlsProvider {
     fn config(&self) -> Arc<ClientConfig> {
         self.config.inner()
+    }
+
+    fn h2_config(&self) -> Arc<ClientConfig> {
+        TlsConfig::new_h2().inner()
     }
 }
 
