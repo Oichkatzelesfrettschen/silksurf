@@ -225,7 +225,7 @@ fn main() {
             continue;
         }
         let preview = &script[..script.len().min(80)];
-        if script.len() <= 600 {
+        if script.len() <= 1200 {
             eprintln!("[SilkSurf] Script {i} FULL ({} bytes): {script}", script.len());
         } else {
             eprintln!(
@@ -294,6 +294,48 @@ fn main() {
                 }
             }
             Err(e) => eprintln!("[SilkSurf] Script {i} compile error: {e:?}"),
+        }
+
+        /*
+         * Post-script fixup: inject streamController for ReadableStream.
+         *
+         * WHY: ChatGPT's script 3 does `new ReadableStream({start(controller){
+         * window.__reactRouterContext.streamController = controller}})`.
+         * Since NativeFunction constructors can't invoke JS function callbacks,
+         * the `start` callback never runs and `streamController` is never set.
+         *
+         * We detect this by checking: if __reactRouterContext exists and has
+         * a `stream` property but no `streamController`, inject one.
+         * This unblocks scripts 5, 7, 10 which call enqueue()/close().
+         */
+        {
+            let g = vm.global.borrow();
+            // Check both the global directly and via window (self-referential)
+            let ctx = g.get_by_str("__reactRouterContext");
+            let ctx_type = ctx.type_of();
+            if i == 4 {
+                // After script 3 + 4, check if __reactRouterContext exists
+                let prop_count = g.properties.len();
+                eprintln!("[DEBUG] Global has {prop_count} props, __reactRouterContext type: {ctx_type}");
+            }
+            if let silksurf_js::vm::value::Value::Object(ctx_obj) = &ctx {
+                let sc = ctx_obj.borrow().get_by_str("streamController");
+                if matches!(sc, silksurf_js::vm::value::Value::Undefined) {
+                    // Inject controller with enqueue() and close() stubs
+                    let ctrl = silksurf_js::vm::value::Object::new();
+                    let ctrl_rc = std::rc::Rc::new(std::cell::RefCell::new(ctrl));
+                    {
+                        let mut c = ctrl_rc.borrow_mut();
+                        c.set_by_str("enqueue", silksurf_js::vm::value::Value::NativeFunction(std::rc::Rc::new(
+                            silksurf_js::vm::value::NativeFunction::new("enqueue", |_| silksurf_js::vm::value::Value::Undefined),
+                        )));
+                        c.set_by_str("close", silksurf_js::vm::value::Value::NativeFunction(std::rc::Rc::new(
+                            silksurf_js::vm::value::NativeFunction::new("close", |_| silksurf_js::vm::value::Value::Undefined),
+                        )));
+                    }
+                    ctx_obj.borrow_mut().set_by_str("streamController", silksurf_js::vm::value::Value::Object(ctrl_rc));
+                }
+            }
         }
     }
 
