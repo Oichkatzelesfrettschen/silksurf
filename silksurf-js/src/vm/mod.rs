@@ -1188,6 +1188,199 @@ fn op_get_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
          * Array.isArray: returns true for array-like Objects.
          * Array.from: build an array from an iterable (array or string).
          */
+        /*
+         * Object static methods: keys, values, entries, assign, freeze, create, fromEntries.
+         *
+         * WHY: React and modern JS heavily use Object.keys/values/entries for
+         * iterating over object properties, Object.assign for shallow merge,
+         * Object.freeze for immutable objects, and Object.create for prototypal
+         * inheritance. These patterns appear throughout React Router context setup.
+         *
+         * Dispatched by NativeFunction.name == "Object" to avoid changing the
+         * global Object value from NativeFunction to Object (which would break
+         * `new Object()` and `Object(x)` call sites).
+         */
+        Value::NativeFunction(f) if f.name == "Object" => {
+            match prop_name.as_str() {
+                "keys" => Value::NativeFunction(Rc::new(value::NativeFunction::new(
+                    "Object.keys",
+                    |args| {
+                        if let Some(value::Value::Object(o)) = args.first() {
+                            let o_borrow = o.borrow();
+                            let keys: Vec<value::Value> = o_borrow
+                                .properties
+                                .keys()
+                                .filter_map(|k| match k {
+                                    value::PropertyKey::String(s) => {
+                                        Some(value::Value::String(Rc::clone(s)))
+                                    }
+                                    value::PropertyKey::Index(i) => {
+                                        Some(value::Value::string_owned(i.to_string()))
+                                    }
+                                })
+                                .collect();
+                            builtins::array::create_array(keys)
+                        } else {
+                            builtins::array::create_array(vec![])
+                        }
+                    },
+                ))),
+                "values" => Value::NativeFunction(Rc::new(value::NativeFunction::new(
+                    "Object.values",
+                    |args| {
+                        if let Some(value::Value::Object(o)) = args.first() {
+                            let o_borrow = o.borrow();
+                            let vals: Vec<value::Value> =
+                                o_borrow.properties.values().cloned().collect();
+                            builtins::array::create_array(vals)
+                        } else {
+                            builtins::array::create_array(vec![])
+                        }
+                    },
+                ))),
+                "entries" => Value::NativeFunction(Rc::new(value::NativeFunction::new(
+                    "Object.entries",
+                    |args| {
+                        if let Some(value::Value::Object(o)) = args.first() {
+                            let o_borrow = o.borrow();
+                            let entries: Vec<value::Value> = o_borrow
+                                .properties
+                                .iter()
+                                .map(|(k, v)| {
+                                    let key_val = match k {
+                                        value::PropertyKey::String(s) => {
+                                            value::Value::String(Rc::clone(s))
+                                        }
+                                        value::PropertyKey::Index(i) => {
+                                            value::Value::string_owned(i.to_string())
+                                        }
+                                    };
+                                    builtins::array::create_array(vec![key_val, v.clone()])
+                                })
+                                .collect();
+                            builtins::array::create_array(entries)
+                        } else {
+                            builtins::array::create_array(vec![])
+                        }
+                    },
+                ))),
+                "assign" => Value::NativeFunction(Rc::new(value::NativeFunction::new(
+                    "Object.assign",
+                    |args| {
+                        let Some(value::Value::Object(target)) = args.first() else {
+                            return value::Value::Undefined;
+                        };
+                        for src in args.iter().skip(1) {
+                            if let value::Value::Object(src_obj) = src {
+                                let pairs: Vec<(value::PropertyKey, value::Value)> = src_obj
+                                    .borrow()
+                                    .properties
+                                    .iter()
+                                    .map(|(k, v)| (k.clone(), v.clone()))
+                                    .collect();
+                                for (k, v) in pairs {
+                                    target.borrow_mut().set_by_key(k, v);
+                                }
+                            }
+                        }
+                        value::Value::Object(Rc::clone(target))
+                    },
+                ))),
+                "freeze" => Value::NativeFunction(Rc::new(value::NativeFunction::new(
+                    "Object.freeze",
+                    // Simplified: freeze is a no-op (we have no frozen flag).
+                    // Return the object as-is -- mutation will still work but
+                    // scripts that freeze then try to mutate will silently succeed,
+                    // which is acceptable for a rendering engine.
+                    |args| args.first().cloned().unwrap_or(value::Value::Undefined),
+                ))),
+                "create" => Value::NativeFunction(Rc::new(value::NativeFunction::new(
+                    "Object.create",
+                    |args| {
+                        use std::cell::RefCell;
+                        let mut obj = value::Object::new();
+                        // Set prototype from first arg if it's an Object
+                        if let Some(value::Value::Object(proto)) = args.first() {
+                            obj.prototype = Some(Rc::clone(proto));
+                        }
+                        value::Value::Object(Rc::new(RefCell::new(obj)))
+                    },
+                ))),
+                "fromEntries" => Value::NativeFunction(Rc::new(value::NativeFunction::new(
+                    "Object.fromEntries",
+                    |args| {
+                        use std::cell::RefCell;
+                        let obj = value::Object::new();
+                        let obj_rc = Rc::new(RefCell::new(obj));
+                        if let Some(value::Value::Object(arr)) = args.first() {
+                            let entries =
+                                builtins::array::collect_elements_pub(&arr.borrow());
+                            for entry in entries {
+                                if let value::Value::Object(pair) = entry {
+                                    let k = pair.borrow().get_by_key(
+                                        &value::PropertyKey::Index(0),
+                                    );
+                                    let v = pair.borrow().get_by_key(
+                                        &value::PropertyKey::Index(1),
+                                    );
+                                    let key_str = k.to_js_string();
+                                    let key_s = key_str.as_str().unwrap_or("");
+                                    obj_rc
+                                        .borrow_mut()
+                                        .set_by_key(value::PropertyKey::from_str(key_s), v);
+                                }
+                            }
+                        }
+                        value::Value::Object(obj_rc)
+                    },
+                ))),
+                "getOwnPropertyNames" | "getOwnPropertySymbols" => {
+                    Value::NativeFunction(Rc::new(value::NativeFunction::new(
+                        "Object.getOwnPropertyNames",
+                        |args| {
+                            if let Some(value::Value::Object(o)) = args.first() {
+                                let keys: Vec<value::Value> = o
+                                    .borrow()
+                                    .properties
+                                    .keys()
+                                    .filter_map(|k| match k {
+                                        value::PropertyKey::String(s) => {
+                                            Some(value::Value::String(Rc::clone(s)))
+                                        }
+                                        value::PropertyKey::Index(i) => {
+                                            Some(value::Value::string_owned(i.to_string()))
+                                        }
+                                    })
+                                    .collect();
+                                builtins::array::create_array(keys)
+                            } else {
+                                builtins::array::create_array(vec![])
+                            }
+                        },
+                    )))
+                }
+                "defineProperty" | "defineProperties" | "seal" | "preventExtensions"
+                | "isFrozen" | "isSealed" | "isExtensible" => {
+                    // Stubs: return first arg unchanged or true/false as appropriate
+                    let is_predicate = matches!(
+                        prop_name.as_str(),
+                        "isFrozen" | "isSealed" | "isExtensible"
+                    );
+                    let name = prop_name.clone();
+                    Value::NativeFunction(Rc::new(value::NativeFunction::new(
+                        name,
+                        move |args| {
+                            if is_predicate {
+                                value::Value::Boolean(false)
+                            } else {
+                                args.first().cloned().unwrap_or(value::Value::Undefined)
+                            }
+                        },
+                    )))
+                }
+                _ => Value::Undefined,
+            }
+        }
         Value::NativeFunction(f) if f.name == "String" => {
             match prop_name.as_str() {
                 "fromCharCode" => {
