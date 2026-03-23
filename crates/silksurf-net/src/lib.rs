@@ -1,6 +1,31 @@
-//! Networking, fetch pipeline, and caching (cleanroom).
+/*
+ * net/lib.rs -- pure Rust HTTP/1.1 client (no async runtime, no libcurl).
+ *
+ * WHY: SilkSurf needs to fetch web pages, CSS, and JS resources. This
+ * client uses only synchronous std::net::TcpStream + rustls for TLS,
+ * with httparse for zero-copy header parsing. No tokio/hyper/reqwest --
+ * minimal dependency footprint and zero async runtime overhead.
+ *
+ * Architecture:
+ *   BasicClient::fetch(request) -> Result<HttpResponse, NetError>
+ *   1. Parse URL via url crate (WHATWG compliant)
+ *   2. TCP connect to host:port
+ *   3. TLS handshake via rustls StreamOwned (HTTPS only)
+ *   4. Send HTTP/1.1 request with headers
+ *   5. Read response (16MB limit, 30s timeout)
+ *   6. Parse headers via httparse (zero-copy)
+ *   7. Follow redirects (301/302/303/307/308, max 5)
+ *
+ * TLS: system certs (rustls-native-certs) + Mozilla bundle (webpki-roots).
+ * --insecure flag available for environments with broken cert chains.
+ *
+ * TODO(perf): Connection pooling, HTTP/2 upgrade, response caching (Phase 4.3)
+ *
+ * See: silksurf-tls for TLS configuration and cert loading
+ * See: builtins/fetch_builtin.rs for JS fetch() API binding
+ * See: silksurf-app/src/main.rs for webview usage
+ */
 #![allow(clippy::collapsible_if)]
-//!
 //! Pure Rust HTTP/1.1 client using:
 //! - rustls for TLS (no OpenSSL)
 //! - httparse for zero-copy header parsing

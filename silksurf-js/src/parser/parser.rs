@@ -1,12 +1,37 @@
-//! Recursive descent parser with Pratt precedence climbing
-//!
-//! Architecture:
-//! - Zero-copy: AST references source via Span
-//! - Single pass: No backtracking required
-//! - Error recovery: Panic mode with synchronization
-//!
-//! Expression parsing uses Pratt parsing (precedence climbing).
-//! Statement parsing uses standard recursive descent.
+/*
+ * parser.rs -- JavaScript parser (recursive descent + Pratt precedence climbing).
+ *
+ * WHY: Transforms a token stream into an AST (Abstract Syntax Tree).
+ * Two-phase architecture:
+ *   1. Statements: recursive descent (if/while/for/var/function/class/etc.)
+ *   2. Expressions: Pratt parsing (precedence climbing) for operator handling
+ *
+ * Pratt parsing key insight: each operator has a (left, right) binding power.
+ * The core loop in parse_expression_bp(min_bp) continues consuming infix
+ * operators while their left_bp >= min_bp, then recurses with right_bp.
+ * This naturally handles precedence, associativity, and grouping.
+ *
+ * CRITICAL BUG FIX (2026-03-22): parse_assignment_expression used
+ * BindingPower::COMMA (1) as min_bp. Since comma operator has left_bp=1,
+ * the condition `1 < 1 = false` caused commas inside object literal values
+ * to be consumed as comma operators, creating infinite parse loops on
+ * `{"a": 1, "b": 2}`. Fixed by using COMMA+1 as min_bp.
+ * See: parse_assignment_expression(), BindingPower::COMMA (precedence.rs:18)
+ *
+ * Architecture:
+ *   - Zero-copy: AST nodes reference source via Span (no string copies)
+ *   - Arena-allocated: all AST nodes in bumpalo arena (see: ast_arena.rs)
+ *   - Single pass: no backtracking (each token consumed exactly once)
+ *   - Error recovery: panic mode with synchronization at statement boundaries
+ *
+ * Complexity: O(n) where n = token count (each token consumed once)
+ * Memory: O(ast_size) in arena; temporary Vec allocations for property lists
+ *
+ * See: precedence.rs for binding power tables and operator mappings
+ * See: ast.rs for all AST node type definitions
+ * See: ast_arena.rs for arena allocation (AstArena, AstVecBuilder)
+ * See: lexer/ for token production
+ */
 
 use crate::lexer::{Interner, Lexer, Span, Token, TokenKind};
 use crate::parser::ast::{
@@ -1081,13 +1106,55 @@ impl<'src, 'arena> Parser<'src, 'arena> {
     }
 
     /// Parse assignment expression (excludes comma)
+    /*
+     * parse_assignment_expression -- parse one expression, stopping before commas.
+     *
+     * WHY: In JavaScript, the comma operator (a, b) has the lowest precedence.
+     * Inside object literals, function arguments, and array elements, commas
+     * separate items -- they're NOT the comma operator. Using COMMA+1 as the
+     * minimum binding power ensures the Pratt parser stops before consuming
+     * commas, allowing the caller to handle them as delimiters.
+     *
+     * CRITICAL: Using COMMA (value 1) instead of COMMA+1 caused the parser
+     * to consume commas in object literals as comma operators, creating
+     * infinite loops on `{"a": 1, "b": 2}`. This was the root cause of
+     * the ChatGPT __reactRouterContext parse hang.
+     *
+     * See: parse_expression_bp() for the Pratt core loop
+     * See: parse_object_literal() which calls this for property values
+     * See: precedence.rs COMMA = BindingPower(1)
+     */
     fn parse_assignment_expression(&mut self) -> ParseResult<Expression<'src, 'arena>> {
-        // Use COMMA + 1 to stop before consuming comma as the comma operator.
-        // This ensures {a: 1, b: 2} parses as two properties, not a comma expression.
         self.parse_expression_bp(BindingPower(BindingPower::COMMA.0 + 1))
     }
 
-    /// Parse expression with binding power (Pratt core)
+    /*
+     * parse_expression_bp -- Pratt parsing core (precedence climbing).
+     *
+     * WHY: The heart of expression parsing. Handles all operator precedence
+     * and associativity without explicit precedence tables or recursive
+     * grammar rules. Instead, each operator has a numeric binding power.
+     *
+     * Algorithm:
+     *   1. Parse prefix/primary expression (literal, identifier, unary, etc.)
+     *   2. Loop: check if current token is a postfix or infix operator
+     *      - If postfix (++, --, ., [], (), ?.): handle and continue
+     *      - If infix (+ - * / = == && || etc.): check left_bp >= min_bp
+     *        - Yes: consume operator, recurse with right_bp, build AST node
+     *        - No: break (caller handles this operator at their level)
+     *      - Neither: break (end of expression)
+     *
+     * Right-associativity: assignment operators use right_bp < left_bp,
+     * so `a = b = c` parses as `a = (b = c)`.
+     *
+     * Complexity: O(n) where n = tokens in the expression
+     *
+     * See: prefix_binding_power() in precedence.rs for unary operators
+     * See: infix_binding_power() in precedence.rs for binary operators
+     * See: postfix_binding_power() in precedence.rs for member/call
+     * See: parse_infix_expression() for assignment/ternary/logical/binary
+     * See: parse_postfix_expression() for member access/call/computed
+     */
     fn parse_expression_bp(
         &mut self,
         min_bp: BindingPower,
@@ -1719,6 +1786,28 @@ impl<'src, 'arena> Parser<'src, 'arena> {
     }
 
     /// Parse object literal
+    /*
+     * parse_object_literal -- parse { key: value, ... } expressions.
+     *
+     * WHY: Object literals are the most common compound expression in JS.
+     * ChatGPT's React Router context uses deeply nested objects like:
+     *   window.__reactRouterContext = {"basename":"/","future":{"a":true}}
+     *
+     * Handles three forms per property:
+     *   1. Regular: { key: value }  (key is ident, string, or number)
+     *   2. Shorthand: { x }  (equivalent to { x: x })
+     *   3. Method: { fn() {} }  (equivalent to { fn: function() {} })
+     *   4. Spread: { ...other }
+     *
+     * Property values are parsed via parse_assignment_expression() which
+     * uses COMMA+1 as min_bp to avoid consuming commas between properties.
+     *
+     * INVARIANT: after parsing each property, current token is either
+     * `,` (more properties follow) or `}` (end of object).
+     *
+     * See: parse_property_key() for key parsing (ident/string/number/computed)
+     * See: parse_assignment_expression() for value parsing (stops at comma)
+     */
     fn parse_object_literal(&mut self) -> ParseResult<Expression<'src, 'arena>> {
         let start = self.current.span.start;
         self.expect(&TokenKind::LeftBrace, "{")?;
