@@ -11,18 +11,16 @@ use std::rc::Rc;
 
 use silksurf_engine::fused_pipeline::fused_style_layout_paint;
 use silksurf_engine::parse_html;
+use silksurf_engine::speculative::{FetchOrigin, SpeculativeRenderer};
 use silksurf_js::vm::Vm;
 use silksurf_js::vm::dom_bridge;
 use silksurf_layout::Rect;
-use silksurf_net::{BasicClient, HttpMethod, HttpRequest, NetClient};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let insecure = args.iter().any(|a| a == "--insecure" || a == "-k");
-    let use_cache = args.iter().any(|a| a == "--cached" || a == "-c");
+    let speculative = args.iter().any(|a| a == "--speculative" || a == "-s");
 
-    // Initialize response cache for speculative pre-rendering
-    let mut response_cache = silksurf_net::cache::ResponseCache::new();
     let url = args
         .iter()
         .skip(1)
@@ -33,64 +31,61 @@ fn main() {
     if insecure {
         eprintln!("[SilkSurf] WARNING: TLS certificate verification disabled (--insecure)");
     }
+
+    /*
+     * SpeculativeRenderer: cache-first HTTP client.
+     *
+     * fetch_or_speculate() returns a cached response immediately (0ms) if
+     * the URL was fetched before in this session, or performs a live fetch
+     * and caches the result for subsequent calls.
+     *
+     * See: speculative.rs SpeculativeRenderer::fetch_or_speculate()
+     */
+    let mut renderer = if insecure {
+        SpeculativeRenderer::with_insecure()
+    } else {
+        SpeculativeRenderer::new()
+    };
+
     eprintln!("[SilkSurf] Fetching: {url}");
 
-    // 1. Fetch the page
-    let client = if insecure {
-        use silksurf_net::BasicClient as BC;
-        use silksurf_tls::RustlsProvider;
-        BC::with_tls(std::sync::Arc::new(RustlsProvider::new_insecure()))
-    } else {
-        BasicClient::new()
-    };
-    let request = HttpRequest {
-        method: HttpMethod::Get,
-        url: url.clone(),
-        headers: vec![
-            ("Accept".to_string(), "text/html,*/*".to_string()),
-            (
-                "User-Agent".to_string(),
-                "SilkSurf/0.1 (X11; Linux x86_64)".to_string(),
-            ),
-        ],
-        body: Vec::new(),
-    };
-
-    // Check cache first for speculative pre-render
-    let cache_start = std::time::Instant::now();
-    let response = if use_cache {
-        if let Some(cached) = response_cache.get(&url) {
-            eprintln!("[SilkSurf] CACHE HIT: {} bytes in {:?}", cached.body.len(), cache_start.elapsed());
-            silksurf_net::HttpResponse {
-                status: cached.status,
-                headers: cached.headers.clone(),
-                body: cached.body.clone(),
-            }
-        } else {
-            match client.fetch(&request) {
-                Ok(r) => {
-                    response_cache.put(url.clone(), &r);
-                    eprintln!("[SilkSurf] Cached response ({} bytes)", r.body.len());
-                    r
-                }
-                Err(e) => {
-                    eprintln!("[SilkSurf] Fetch error: {}", e.message);
-                    return;
-                }
-            }
-        }
-    } else {
-        match client.fetch(&request) {
-            Ok(r) => {
-                // Always cache for future --cached runs
-                response_cache.put(url.clone(), &r);
-                r
-            }
+    // 1. Fetch the page (cache-first)
+    let (response, fetch_origin, fetch_elapsed) =
+        match renderer.fetch_or_speculate(&url, &[]) {
+            Ok(r) => r,
             Err(e) => {
                 eprintln!("[SilkSurf] Fetch error: {}", e.message);
                 return;
             }
-        }
+        };
+
+    match fetch_origin {
+        FetchOrigin::Cache => eprintln!(
+            "[SilkSurf] CACHE HIT: {} bytes in {:?}",
+            response.body.len(),
+            fetch_elapsed
+        ),
+        FetchOrigin::Fresh => eprintln!(
+            "[SilkSurf] FETCHED: {} bytes in {:?} (now cached)",
+            response.body.len(),
+            fetch_elapsed
+        ),
+    }
+
+    /*
+     * Background revalidation on cache hit:
+     *
+     * Spawn a conditional GET (If-None-Match / If-Modified-Since) in a
+     * background thread so the render pipeline can proceed without waiting.
+     * After rendering, join the thread to report whether content changed.
+     *
+     * See: speculative.rs spawn_revalidation() for thread model
+     */
+    let revalidation_handle = if fetch_origin == FetchOrigin::Cache && speculative {
+        eprintln!("[SilkSurf] Spawning background revalidation for {url}");
+        Some(renderer.spawn_revalidation(&url))
+    } else {
+        None
     };
 
     eprintln!(
@@ -121,24 +116,24 @@ fn main() {
         css_text.len()
     );
 
-    // Fetch external <link rel="stylesheet"> resources
+    // Fetch external <link rel="stylesheet"> resources (cache-first via SpeculativeRenderer)
     let stylesheet_urls = extract_stylesheet_urls(&dom, doc_node, &url);
     for sheet_url in &stylesheet_urls {
         eprintln!("[SilkSurf] Fetching stylesheet: {sheet_url}");
-        let sheet_req = HttpRequest {
-            method: HttpMethod::Get,
-            url: sheet_url.clone(),
-            headers: vec![("Accept".to_string(), "text/css,*/*".to_string())],
-            body: Vec::new(),
-        };
-        match client.fetch(&sheet_req) {
-            Ok(resp) if resp.status == 200 => {
-                eprintln!("[SilkSurf] Fetched {} bytes of CSS", resp.body.len());
+        let css_headers = [("Accept".to_string(), "text/css,*/*".to_string())];
+        match renderer.fetch_or_speculate(sheet_url, &css_headers) {
+            Ok((resp, origin, elapsed)) if resp.status == 200 => {
+                eprintln!(
+                    "[SilkSurf] Stylesheet {} bytes ({:?} {:?})",
+                    resp.body.len(),
+                    origin,
+                    elapsed
+                );
                 let sheet_css = String::from_utf8_lossy(&resp.body);
                 css_text.push_str(&sheet_css);
                 css_text.push('\n');
             }
-            Ok(resp) => eprintln!("[SilkSurf] Stylesheet HTTP {}", resp.status),
+            Ok((resp, _, _)) => eprintln!("[SilkSurf] Stylesheet HTTP {}", resp.status),
             Err(e) => eprintln!("[SilkSurf] Stylesheet fetch error: {}", e.message),
         }
     }
@@ -331,13 +326,15 @@ fn main() {
     let fused_start = std::time::Instant::now();
     let fused = fused_style_layout_paint(&shared_dom.borrow(), &stylesheet, doc_node, viewport);
     let fused_elapsed = fused_start.elapsed();
+    let styled_count = fused.styles.iter().filter(|s| s.is_some()).count();
     eprintln!(
         "[SilkSurf] Fused style+layout+paint: {} items, {} styled nodes in {:?}",
         fused.display_items.len(),
-        fused.styles.len(),
+        styled_count,
         fused_elapsed
     );
-    if let Some(root_rect) = fused.node_rects.get(&doc_node) {
+    if let Some(&bfs_idx) = fused.table.node_to_bfs_idx.get(&doc_node) {
+        let root_rect = &fused.node_rects[bfs_idx as usize];
         eprintln!(
             "[SilkSurf] Root: {}x{} at ({}, {})",
             root_rect.width, root_rect.height, root_rect.x, root_rect.y
@@ -364,6 +361,43 @@ fn main() {
     eprintln!("============================================\n");
 
     eprintln!("[SilkSurf] Pipeline complete for {url}");
+
+    /*
+     * Background revalidation result: join here after the render is done.
+     *
+     * The revalidation ran in parallel with HTML parse, CSS cascade, layout,
+     * and rasterization. By the time we reach here, the result is likely
+     * already available (try_recv first to avoid blocking).
+     *
+     * See: speculative.rs RevalidationHandle for thread model
+     */
+    if let Some(handle) = revalidation_handle {
+        let result = match handle.wait() {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("[SilkSurf] Revalidation error: {}", e.message);
+                return;
+            }
+        };
+        if result.changed {
+            eprintln!(
+                "[SilkSurf] Revalidation: CONTENT CHANGED (200) in {:?} -- re-render needed",
+                result.rtt
+            );
+            if let Some(new_resp) = result.response {
+                renderer.update_cache(&url, &new_resp);
+                eprintln!(
+                    "[SilkSurf] Cache updated ({} bytes)",
+                    renderer.cache_bytes()
+                );
+            }
+        } else {
+            eprintln!(
+                "[SilkSurf] Revalidation: 304 NOT MODIFIED in {:?} -- cached render is current",
+                result.rtt
+            );
+        }
+    }
 }
 
 /// Extract text content from <style> tags.

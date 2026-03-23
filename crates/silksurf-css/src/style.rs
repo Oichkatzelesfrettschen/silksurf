@@ -585,6 +585,60 @@ fn node_id_class_keys(dom: &Dom, node: NodeId) -> (Option<SelectorIdent>, Vec<Se
 }
 
 /*
+ * CascadeWorkspace -- reusable scratch buffers for cascade_for_node.
+ *
+ * WHY: cascade_for_node previously allocated three heap objects per call:
+ *   matched_by_rule: Vec<Option<Specificity>>  (len = rules count)
+ *   candidates: Vec<IndexedSelector>           (capacity grows to peak)
+ *   seen: FxHashSet<(usize, usize)>            (capacity grows to peak)
+ *
+ * For N nodes that is 3*N allocations. With a shared workspace passed
+ * through the traversal, all post-first-call allocations are eliminated:
+ * prepare() zero-fills matched_by_rule in-place (O(rules)), candidates
+ * and seen are cleared (O(1) capacity retained, no heap traffic).
+ *
+ * High-water-mark growth: the workspace capacity grows to the largest
+ * rule count / candidate count seen and never shrinks. After the first
+ * stylesheet pass, no further allocations occur in the hot loop.
+ *
+ * Usage: create once per stylesheet, thread as &mut through cascade loop.
+ * See: cascade_for_node() for usage
+ * See: compute_styles() for where workspace is created
+ */
+pub struct CascadeWorkspace {
+    matched_by_rule: Vec<Option<Specificity>>,
+    candidates: Vec<IndexedSelector>,
+    seen: FxHashSet<(usize, usize)>,
+}
+
+impl CascadeWorkspace {
+    pub fn new(rules_len: usize) -> Self {
+        Self {
+            matched_by_rule: vec![None; rules_len],
+            candidates: Vec::with_capacity(32),
+            seen: FxHashSet::default(),
+        }
+    }
+
+    /*
+     * prepare -- reset scratch buffers for the next node, no allocation.
+     *
+     * Zero-fills only matched_by_rule[..rules_len] (not the full Vec if
+     * it has grown beyond rules_len from a previous larger stylesheet).
+     * candidates and seen are cleared with O(1) capacity-preserving clear().
+     */
+    fn prepare(&mut self, rules_len: usize) {
+        if self.matched_by_rule.len() < rules_len {
+            self.matched_by_rule.resize(rules_len, None);
+        } else {
+            self.matched_by_rule[..rules_len].fill(None);
+        }
+        self.candidates.clear();
+        self.seen.clear();
+    }
+}
+
+/*
  * compute_styles -- compute CSS styles for all nodes in a DOM subtree.
  *
  * WHY: Entry point for the style pipeline. Builds a StyleIndex from the
@@ -607,8 +661,9 @@ pub fn compute_styles(
     stylesheet: &Stylesheet,
 ) -> FxHashMap<NodeId, ComputedStyle> {
     let index = StyleIndex::new(stylesheet);
+    let mut workspace = CascadeWorkspace::new(stylesheet.rules.len());
     let mut styles = FxHashMap::default();
-    compute_styles_recursive(dom, root, stylesheet, &index, None, &mut styles);
+    compute_styles_recursive(dom, root, stylesheet, &index, None, &mut styles, &mut workspace);
     styles
 }
 
@@ -705,6 +760,7 @@ impl StyleCache {
         }
 
         let index = StyleIndex::new(stylesheet);
+        let mut workspace = CascadeWorkspace::new(stylesheet.rules.len());
         self.generation = self.generation.wrapping_add(1);
         let styles = Arc::make_mut(&mut self.styles);
         let mut seen = FxHashSet::default();
@@ -724,6 +780,7 @@ impl StyleCache {
                 &index,
                 parent_style.as_ref(),
                 styles,
+                &mut workspace,
             );
         }
 
@@ -738,7 +795,8 @@ pub fn compute_style_for_node(
     parent: Option<&ComputedStyle>,
 ) -> ComputedStyle {
     let index = StyleIndex::new(stylesheet);
-    compute_style_for_node_with_index(dom, node, stylesheet, &index, parent)
+    let mut workspace = CascadeWorkspace::new(stylesheet.rules.len());
+    compute_style_for_node_with_workspace(dom, node, stylesheet, &index, parent, &mut workspace)
 }
 
 pub fn compute_style_for_node_with_index(
@@ -748,10 +806,33 @@ pub fn compute_style_for_node_with_index(
     index: &StyleIndex,
     parent: Option<&ComputedStyle>,
 ) -> ComputedStyle {
+    let mut workspace = CascadeWorkspace::new(stylesheet.rules.len());
+    compute_style_for_node_with_workspace(dom, node, stylesheet, index, parent, &mut workspace)
+}
+
+/*
+ * compute_style_for_node_with_workspace -- cascade for one node, workspace reused.
+ *
+ * WHY: The fused pipeline calls this once per node in BFS order. With a
+ * shared CascadeWorkspace, the three per-node allocations (matched_by_rule,
+ * candidates, seen) are eliminated after the first call. Pass the same
+ * workspace from fused_style_layout_paint's BFS loop for zero alloc overhead.
+ *
+ * See: CascadeWorkspace for scratch buffer lifecycle
+ * See: fused_pipeline.rs fused_style_layout_paint() for call site
+ */
+pub fn compute_style_for_node_with_workspace(
+    dom: &Dom,
+    node: NodeId,
+    stylesheet: &Stylesheet,
+    index: &StyleIndex,
+    parent: Option<&ComputedStyle>,
+    workspace: &mut CascadeWorkspace,
+) -> ComputedStyle {
     if dom.element_name(node).ok().flatten().is_none() {
         return parent.cloned().unwrap_or_default();
     }
-    cascade_for_node(dom, node, stylesheet, index).resolve(parent)
+    cascade_for_node(dom, node, stylesheet, index, workspace).resolve(parent)
 }
 
 fn compute_styles_recursive(
@@ -761,12 +842,22 @@ fn compute_styles_recursive(
     index: &StyleIndex,
     parent: Option<&ComputedStyle>,
     styles: &mut FxHashMap<NodeId, ComputedStyle>,
+    workspace: &mut CascadeWorkspace,
 ) {
-    let style = compute_style_for_node_with_index(dom, node, stylesheet, index, parent);
+    let style =
+        compute_style_for_node_with_workspace(dom, node, stylesheet, index, parent, workspace);
     styles.insert(node, style.clone());
     if let Ok(children) = dom.children(node) {
         for child in children {
-            compute_styles_recursive(dom, *child, stylesheet, index, Some(&style), styles);
+            compute_styles_recursive(
+                dom,
+                *child,
+                stylesheet,
+                index,
+                Some(&style),
+                styles,
+                workspace,
+            );
         }
     }
 }
@@ -804,31 +895,47 @@ fn cascade_for_node(
     node: NodeId,
     stylesheet: &Stylesheet,
     index: &StyleIndex,
+    workspace: &mut CascadeWorkspace,
 ) -> CascadedStyle {
+    /*
+     * Prepare workspace: zero-fill matched_by_rule, clear candidates/seen.
+     * No heap allocation after the first call (capacity retained).
+     * See: CascadeWorkspace::prepare() for invariant details.
+     */
+    workspace.prepare(stylesheet.rules.len());
+
     let mut cascaded = CascadedStyle::default();
     let mut order = 0usize;
-    let mut matched_by_rule: Vec<Option<Specificity>> = vec![None; stylesheet.rules.len()];
-    let mut candidates: Vec<IndexedSelector> = Vec::new();
+
     if let Some(tag) = node_tag(dom, node) {
         if let Some(entries) = index.tag_rules.get(&tag) {
-            candidates.extend(entries.iter().cloned());
+            workspace.candidates.extend_from_slice(entries);
         }
     }
     let (id_key, class_keys) = node_id_class_keys(dom, node);
     if let Some(id_key) = id_key {
         if let Some(entries) = index.id_rules.get(&id_key) {
-            candidates.extend(entries.iter().cloned());
+            workspace.candidates.extend_from_slice(entries);
         }
     }
     for class_key in class_keys {
         if let Some(entries) = index.class_rules.get(&class_key) {
-            candidates.extend(entries.iter().cloned());
+            workspace.candidates.extend_from_slice(entries);
         }
     }
-    candidates.extend(index.universal_rules.iter().cloned());
+    workspace.candidates.extend_from_slice(&index.universal_rules);
 
-    let mut seen = FxHashSet::default();
-    for candidate in candidates {
+    /*
+     * Take candidates and seen out of workspace so we can mutate
+     * workspace.matched_by_rule inside the loop without borrow conflicts.
+     * mem::take leaves empty Vecs/HashSets behind (zero allocation -- the
+     * original allocation is now owned by `candidates` / `seen` locals).
+     * We return them to the workspace after the loop for reuse next call.
+     */
+    let mut candidates = std::mem::take(&mut workspace.candidates);
+    let mut seen = std::mem::take(&mut workspace.seen);
+
+    for candidate in candidates.drain(..) {
         if !seen.insert((candidate.rule_index, candidate.selector_index)) {
             continue;
         }
@@ -842,7 +949,7 @@ fn cascade_for_node(
             continue;
         };
         if matches_selector(dom, node, selector) {
-            if let Some(slot) = matched_by_rule.get_mut(candidate.rule_index) {
+            if let Some(slot) = workspace.matched_by_rule.get_mut(candidate.rule_index) {
                 match slot {
                     Some(existing) => {
                         if candidate.specificity > *existing {
@@ -857,8 +964,13 @@ fn cascade_for_node(
         }
     }
 
+    // Return scratch buffers to workspace (retain allocations for next call)
+    workspace.candidates = candidates;
+    workspace.seen = seen;
+
     for (rule_index, rule) in stylesheet.rules.iter().enumerate() {
-        let Some(specificity) = matched_by_rule.get(rule_index).and_then(|spec| *spec) else {
+        let Some(specificity) = workspace.matched_by_rule.get(rule_index).and_then(|spec| *spec)
+        else {
             continue;
         };
         let Rule::Style(rule) = rule else {

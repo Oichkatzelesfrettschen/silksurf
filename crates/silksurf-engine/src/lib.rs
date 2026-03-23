@@ -5,6 +5,8 @@
 //! in staged migration phases per the cleanroom plan.
 
 pub mod fused_pipeline;
+#[cfg(feature = "net")]
+pub mod speculative;
 mod js;
 
 use rustc_hash::FxHashMap;

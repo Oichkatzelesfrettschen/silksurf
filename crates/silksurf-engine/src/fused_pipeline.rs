@@ -32,19 +32,32 @@
  */
 
 use silksurf_css::{
-    ComputedStyle, Display, StyleIndex, Stylesheet, compute_style_for_node_with_index,
+    CascadeWorkspace, ComputedStyle, Display, StyleIndex, Stylesheet,
+    compute_style_for_node_with_workspace,
 };
 use silksurf_dom::{Dom, NodeId, NodeKind};
 use silksurf_layout::neighbor_table::LayoutNeighborTable;
 use silksurf_layout::Rect;
 use silksurf_render::DisplayItem;
-use rustc_hash::FxHashMap;
 
-/// Result of the fused pipeline: styles + display list in one pass.
+/*
+ * FusedResult -- output of the single-pass pipeline.
+ *
+ * All per-node arrays are indexed by BFS order (same as table.bfs_order[i]).
+ * To look up a specific node by NodeId, use table.node_to_bfs_idx[&node_id].
+ *
+ * WHY Vec over FxHashMap: O(1) array index vs O(1)-amortised hash with higher
+ * constant -- no hashing, no collision chains, contiguous cache lines.
+ * For 50 nodes this is ~3x faster in the parent lookup hot path.
+ */
 pub struct FusedResult {
-    pub styles: FxHashMap<NodeId, ComputedStyle>,
+    /// Style per node in BFS order. None for display:none or skipped nodes.
+    pub styles: Vec<Option<ComputedStyle>>,
     pub display_items: Vec<DisplayItem>,
-    pub node_rects: FxHashMap<NodeId, Rect>,
+    /// Content rect per node in BFS order.
+    pub node_rects: Vec<Rect>,
+    /// BFS traversal table; use node_to_bfs_idx for NodeId -> index mapping.
+    pub table: LayoutNeighborTable,
 }
 
 /*
@@ -68,105 +81,118 @@ pub fn fused_style_layout_paint(
      *
      * WHY: compute_style_for_node rebuilds StyleIndex on every call (O(rules)).
      * For 401 nodes that is 401 redundant index constructions. Building once
-     * here and passing to compute_style_for_node_with_index saves ~400 allocs.
+     * and passing via compute_style_for_node_with_workspace saves ~400 allocs.
      * See: style.rs StyleIndex::new() for construction cost.
      */
     let style_index = StyleIndex::new(stylesheet);
+    /*
+     * Shared CascadeWorkspace: allocated once, reused for every node in the
+     * BFS traversal. Eliminates 3 heap allocations per node (matched_by_rule
+     * Vec, candidates Vec, seen FxHashSet) -- ~150 allocs for a 50-node page.
+     * See: silksurf_css::CascadeWorkspace for lifecycle details.
+     */
+    let mut cascade_ws = CascadeWorkspace::new(stylesheet.rules.len());
     let table = LayoutNeighborTable::build(dom, root);
-    let mut styles: FxHashMap<NodeId, ComputedStyle> = FxHashMap::default();
+    let n = table.len();
+
+    /*
+     * Pre-allocate BFS-indexed Vecs -- one slot per node, indexed by flat BFS index.
+     *
+     * WHY: The original implementation used FxHashMap<NodeId, T> for styles,
+     * node_rects, and block_cursors. Each parent lookup in the hot loop required
+     * a hash + equality check (~10-15 cycles). With Vecs, parent lookup is
+     * table.parent_idx[i] (one array read) + Vec index (~2 cycles).
+     * For 50 nodes at 1000 iterations: ~3x reduction in lookup cost.
+     *
+     * parent_idx[i] == u32::MAX means root (no parent); handled explicitly.
+     * See: neighbor_table.rs LayoutNeighborTable::build() for index construction.
+     */
+    let mut styles: Vec<Option<ComputedStyle>> = vec![None; n];
+    let mut node_rects: Vec<Rect> = vec![viewport; n];
+    let mut block_cursors: Vec<f32> = vec![viewport.y; n];
     let mut display_items: Vec<DisplayItem> = Vec::new();
-    let mut node_rects: FxHashMap<NodeId, Rect> = FxHashMap::default();
 
-    // Track cursor positions per parent for block flow
-    let mut block_cursors: FxHashMap<NodeId, f32> = FxHashMap::default();
-    block_cursors.insert(root, viewport.y);
+    for (i, &node) in table.bfs_order.iter().enumerate() {
+        let pidx = table.parent_idx[i];
 
-    for level in &table.levels {
-        for &node in level {
-            // 1. CASCADE: compute style for this node (reuses pre-built index)
-            let parent_style = dom
-                .parent(node)
-                .ok()
-                .flatten()
-                .and_then(|p| styles.get(&p));
-            let style =
-                compute_style_for_node_with_index(dom, node, stylesheet, &style_index, parent_style);
+        // O(1) parent data -- no HashMap lookup
+        let (parent_style, parent_rect, cursor) = if pidx == u32::MAX {
+            (None, viewport, viewport.y)
+        } else {
+            let p = pidx as usize;
+            (styles[p].as_ref(), node_rects[p], block_cursors[p])
+        };
 
-            // Skip display:none
-            if style.display == Display::None {
-                styles.insert(node, style);
-                continue;
-            }
+        // 1. CASCADE: reuses pre-built index and shared workspace (zero alloc after first node)
+        let style = compute_style_for_node_with_workspace(
+            dom, node, stylesheet, &style_index, parent_style, &mut cascade_ws,
+        );
 
-            // 2. LAYOUT: compute position (simplified block flow)
-            let parent_rect = dom
-                .parent(node)
-                .ok()
-                .flatten()
-                .and_then(|p| node_rects.get(&p))
-                .copied()
-                .unwrap_or(viewport);
+        // Skip display:none; still store style for child inheritance
+        if style.display == Display::None {
+            styles[i] = Some(style);
+            continue;
+        }
 
-            let margin_top = length_px(style.margin.top);
-            let padding_top = length_px(style.padding.top);
-            let border_top = length_px(style.border.top);
+        // 2. LAYOUT: compute position (simplified block flow)
+        let margin_top = length_px(style.margin.top);
+        let padding_top = length_px(style.padding.top);
+        let border_top = length_px(style.border.top);
 
-            let cursor = block_cursors
-                .get(&dom.parent(node).ok().flatten().unwrap_or(root))
-                .copied()
-                .unwrap_or(parent_rect.y);
+        let x = parent_rect.x
+            + length_px(style.margin.left)
+            + length_px(style.padding.left)
+            + length_px(style.border.left);
+        let y = cursor + margin_top + padding_top + border_top;
+        let width = parent_rect.width
+            - length_px(style.margin.left) - length_px(style.margin.right)
+            - length_px(style.padding.left) - length_px(style.padding.right)
+            - length_px(style.border.left) - length_px(style.border.right);
 
-            let x = parent_rect.x + length_px(style.margin.left)
-                + length_px(style.padding.left) + length_px(style.border.left);
-            let y = cursor + margin_top + padding_top + border_top;
-            let width = parent_rect.width
-                - length_px(style.margin.left) - length_px(style.margin.right)
-                - length_px(style.padding.left) - length_px(style.padding.right)
-                - length_px(style.border.left) - length_px(style.border.right);
+        // Estimate height from line-height
+        let height = length_px(style.line_height);
 
-            // Estimate height from line-height
-            let height = length_px(style.line_height);
+        let content_rect = Rect { x, y, width, height };
+        node_rects[i] = content_rect;
 
-            let content_rect = Rect { x, y, width, height };
-            node_rects.insert(node, content_rect);
-
-            // Update parent's block cursor
-            let parent_id = dom.parent(node).ok().flatten().unwrap_or(root);
-            let new_cursor = y + height
-                + length_px(style.padding.bottom) + length_px(style.border.bottom)
+        // Advance parent's block cursor past this node
+        if pidx != u32::MAX {
+            block_cursors[pidx as usize] = y
+                + height
+                + length_px(style.padding.bottom)
+                + length_px(style.border.bottom)
                 + length_px(style.margin.bottom);
-            block_cursors.insert(parent_id, new_cursor);
+        }
+        // Seed this node's cursor for its own children
+        block_cursors[i] = y;
 
-            // Initialize this node's cursor for its children
-            block_cursors.entry(node).or_insert(y);
+        // 3. PAINT: emit display items
+        if style.background_color.a > 0 {
+            display_items.push(DisplayItem::SolidColor {
+                rect: content_rect,
+                color: style.background_color,
+            });
+        }
 
-            // 3. PAINT: emit display items
-            if style.background_color.a > 0 {
-                display_items.push(DisplayItem::SolidColor {
+        if let Ok(dom_node) = dom.node(node) {
+            if let NodeKind::Text { text } = dom_node.kind() {
+                display_items.push(DisplayItem::Text {
                     rect: content_rect,
-                    color: style.background_color,
+                    node,
+                    text_len: text.len() as u32,
+                    color: style.color,
                 });
             }
-
-            if let Ok(n) = dom.node(node) {
-                if let NodeKind::Text { text } = n.kind() {
-                    display_items.push(DisplayItem::Text {
-                        rect: content_rect,
-                        node,
-                        text_len: text.len() as u32,
-                        color: style.color,
-                    });
-                }
-            }
-
-            styles.insert(node, style);
         }
+
+        styles[i] = Some(style);
     }
 
     FusedResult {
         styles,
         display_items,
         node_rects,
+        table,
     }
 }
 
@@ -189,6 +215,8 @@ mod tests {
         let viewport = Rect { x: 0.0, y: 0.0, width: 1280.0, height: 800.0 };
 
         let result = fused_style_layout_paint(&dom, &stylesheet, root, viewport);
-        assert!(result.styles.contains_key(&root));
+        // BFS index 0 is always the root node; its style must be computed.
+        assert_eq!(result.table.bfs_order[0], root);
+        assert!(result.styles[0].is_some());
     }
 }

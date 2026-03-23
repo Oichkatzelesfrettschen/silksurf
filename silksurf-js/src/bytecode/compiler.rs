@@ -623,10 +623,30 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 if let Some(ref id) = func.id {
                     let mut child =
                         Compiler::new_with_pool(self.string_pool.clone(), self.next_string_id);
+                    /*
+                     * Two-pass parameter binding to support destructuring.
+                     *
+                     * Pass 1: allocate one register slot per param in positional
+                     *         order so the VM's call convention (args[i] -> reg[i])
+                     *         lands correctly. Identifier params get a named slot;
+                     *         pattern params get an anonymous slot (alloc_register).
+                     * Pass 2: emit GetProp/GetElem/SetLocal instructions that
+                     *         destructure each anonymous slot into the named bindings.
+                     *
+                     * See: compile_pattern_binding for the recursive binding helper
+                     * See: vm/mod.rs call frame setup for arg->register mapping
+                     */
+                    let mut destructuring_params = Vec::new();
                     for param in func.params {
                         if let crate::parser::Pattern::Identifier(pid) = param {
                             child.declare_var(pid.name, VariableKind::Let, true);
+                        } else {
+                            let slot = child.alloc_register();
+                            destructuring_params.push((slot.0, param));
                         }
+                    }
+                    for &(slot, pattern) in &destructuring_params {
+                        child.compile_pattern_binding(pattern, Register(slot), VariableKind::Let)?;
                     }
                     child.collect_declarations(func.body.body);
                     for stmt in func.body.body {
@@ -905,6 +925,122 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
         Ok(())
     }
 
+    /*
+     * compile_pattern_binding -- bind `value_reg` to a destructuring pattern.
+     *
+     * WHY: `const { a, b } = obj` and `const [x, y] = arr` use Pattern nodes
+     * instead of plain Identifier nodes. This helper handles all pattern kinds:
+     *   Identifier: SetLocal/SetCapture/SetGlobal on the named slot
+     *   Object: for each property, GetProp from value_reg, then recurse
+     *   Array: for each element, GetElem[i] from value_reg, then recurse
+     *   Assignment: check if value is undefined, use default if so
+     *
+     * kind: the VariableKind to use when declaring new identifiers.
+     *
+     * See: compile_var_declaration for how this is called
+     * See: Statement::ForOf for loop variable binding (same pattern)
+     */
+    fn compile_pattern_binding(
+        &mut self,
+        pattern: &crate::parser::Pattern<'src, 'arena>,
+        value_reg: Register,
+        kind: VariableKind,
+    ) -> CompileResult<()> {
+        use crate::parser::{ObjectPatternProperty, Pattern, PropertyKey};
+        match pattern {
+            Pattern::Identifier(id) => {
+                if kind != VariableKind::Var {
+                    self.declare_var(id.name, kind, true);
+                }
+                if let Some((depth, slot)) = self.lookup_var(id.name) {
+                    if depth == 0 {
+                        self.emit(Instruction::new_rr(Opcode::SetLocal, slot, value_reg.0));
+                    } else {
+                        self.emit(Instruction::new_rrr(Opcode::SetCapture, depth, slot, value_reg.0));
+                    }
+                } else {
+                    let str_id = self.intern_string(id.raw);
+                    let const_idx = self.chunk.add_constant(Constant::String(str_id));
+                    self.emit(Instruction::new_ri(Opcode::SetGlobal, value_reg.0, const_idx));
+                }
+            }
+            Pattern::Object(obj_pat) => {
+                for prop in obj_pat.properties {
+                    match prop {
+                        ObjectPatternProperty::Property { key, value, computed, .. } => {
+                            let prop_reg = self.alloc_register();
+                            if *computed {
+                                let key_reg = match key {
+                                    PropertyKey::Computed(expr) => self.compile_expression(expr)?,
+                                    _ => {
+                                        let r = self.alloc_register();
+                                        self.emit(Instruction::new_r(Opcode::LoadUndefined, r.0));
+                                        r
+                                    }
+                                };
+                                self.emit(Instruction::new_rrr(
+                                    Opcode::GetElem, prop_reg.0, value_reg.0, key_reg.0,
+                                ));
+                            } else {
+                                let prop_name = match key {
+                                    PropertyKey::Identifier(id) => id.raw,
+                                    PropertyKey::Literal(crate::parser::Literal::String(s)) => s.value,
+                                    _ => "",
+                                };
+                                let str_id = self.intern_string(prop_name);
+                                let const_idx = self.chunk.add_constant(Constant::String(str_id));
+                                self.emit(Instruction::new_rrr(
+                                    Opcode::GetProp, prop_reg.0, value_reg.0, const_idx as u8,
+                                ));
+                            }
+                            self.compile_pattern_binding(value, prop_reg, kind)?;
+                        }
+                        ObjectPatternProperty::Rest(rest) => {
+                            // Rest element: bind rest of object -- simplified as the whole object
+                            self.compile_pattern_binding(rest.argument, value_reg, kind)?;
+                        }
+                    }
+                }
+            }
+            Pattern::Array(arr_pat) => {
+                for (i, elem) in arr_pat.elements.iter().enumerate() {
+                    if let Some(pat) = elem {
+                        let elem_reg = self.alloc_register();
+                        let idx_reg = self.alloc_register();
+                        self.emit(Instruction::new_ri(Opcode::LoadSmi, idx_reg.0, i as u16));
+                        self.emit(Instruction::new_rrr(
+                            Opcode::GetElem, elem_reg.0, value_reg.0, idx_reg.0,
+                        ));
+                        self.compile_pattern_binding(pat, elem_reg, kind)?;
+                    }
+                }
+            }
+            Pattern::Assignment(assign_pat) => {
+                // `{ a = 5 }` -- use default if value is undefined
+                // Emit: if value_reg === undefined, load default, else use value_reg
+                let default_reg = self.compile_expression(assign_pat.right)?;
+                let final_reg = self.alloc_register();
+                // JmpNotNullish: if value_reg is not null/undefined, skip default
+                let skip_default = self.emit(Instruction::new_r_offset(
+                    Opcode::JmpNotNullish, value_reg.0, 0,
+                ));
+                // Use default
+                self.emit(Instruction::new_rr(Opcode::Mov, final_reg.0, default_reg.0));
+                let skip_original = self.emit(Instruction::new_offset(Opcode::Jmp, 0));
+                self.patch_jump(skip_default);
+                // Use value_reg
+                self.emit(Instruction::new_rr(Opcode::Mov, final_reg.0, value_reg.0));
+                self.patch_jump(skip_original);
+                self.compile_pattern_binding(assign_pat.left, final_reg, kind)?;
+            }
+            Pattern::Rest(rest) => {
+                // Rest element: simplified -- bind the whole value
+                self.compile_pattern_binding(rest.argument, value_reg, kind)?;
+            }
+        }
+        Ok(())
+    }
+
     fn compile_var_declaration(
         &mut self,
         decl: &VariableDeclaration<'src, 'arena>,
@@ -945,6 +1081,11 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                         }
                     }
                 }
+            } else if declarator.init.is_some() {
+                // Destructuring pattern -- compile the RHS and bind via pattern
+                let init = declarator.init.as_ref().unwrap();
+                let value_reg = self.compile_expression(init)?;
+                self.compile_pattern_binding(&declarator.id, value_reg, decl.kind)?;
             }
         }
         Ok(())
@@ -1023,11 +1164,18 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 let result_reg = self.alloc_register();
                 let mut child =
                     Compiler::new_with_pool(self.string_pool.clone(), self.next_string_id);
-                // Declare parameters in child scope
+                // Declare parameters in child scope (two-pass; see FunctionDeclaration)
+                let mut destructuring_params = Vec::new();
                 for param in func.params {
                     if let crate::parser::Pattern::Identifier(id) = param {
                         child.declare_var(id.name, VariableKind::Let, true);
+                    } else {
+                        let slot = child.alloc_register();
+                        destructuring_params.push((slot.0, param));
                     }
+                }
+                for &(slot, pattern) in &destructuring_params {
+                    child.compile_pattern_binding(pattern, Register(slot), VariableKind::Let)?;
                 }
                 // Hoist var declarations and function declarations in the body
                 child.collect_declarations(func.body.body);
@@ -1068,10 +1216,18 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 let result_reg = self.alloc_register();
                 let mut child =
                     Compiler::new_with_pool(self.string_pool.clone(), self.next_string_id);
+                // Two-pass parameter binding -- same as FunctionDeclaration/Expression
+                let mut destructuring_params = Vec::new();
                 for param in arrow.params {
                     if let crate::parser::Pattern::Identifier(id) = param {
                         child.declare_var(id.name, VariableKind::Let, true);
+                    } else {
+                        let slot = child.alloc_register();
+                        destructuring_params.push((slot.0, param));
                     }
+                }
+                for &(slot, pattern) in &destructuring_params {
+                    child.compile_pattern_binding(pattern, Register(slot), VariableKind::Let)?;
                 }
                 match &arrow.body {
                     crate::parser::ArrowBody::Expression(expr) => {
