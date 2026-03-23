@@ -35,7 +35,7 @@ pub enum Namespace {
     Other(String),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum TagName {
     Html,
     Head,
@@ -206,7 +206,7 @@ impl TagName {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum AttributeName {
     Id,
     Class,

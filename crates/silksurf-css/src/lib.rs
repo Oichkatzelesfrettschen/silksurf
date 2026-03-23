@@ -52,7 +52,7 @@ pub use style::{
  * All other string variants use SmolStr -- inline if <=22 bytes.
  * See: parse_name() / parse_number() for production sites.
  */
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum CssToken {
     AtKeyword(SmolStr),
     Ident(SmolStr),

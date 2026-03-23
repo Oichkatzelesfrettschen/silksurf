@@ -8,3 +8,4 @@ publish = false
 [dependencies]
 silksurf-core = { path = "../silksurf-core" }
 smallvec = { workspace = true }
+serde = { workspace = true }

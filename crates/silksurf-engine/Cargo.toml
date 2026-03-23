@@ -14,6 +14,8 @@ silksurf-layout = { path = "../silksurf-layout" }
 silksurf-render = { path = "../silksurf-render", features = ["parallel"] }
 rustc-hash = { workspace = true }
 mimalloc = { workspace = true }
+bincode = { workspace = true }
+serde = { workspace = true }
 silksurf-gui = { path = "../silksurf-gui", optional = true }
 silksurf-net = { path = "../silksurf-net", optional = true }
 silksurf-tls = { path = "../silksurf-tls", optional = true }
