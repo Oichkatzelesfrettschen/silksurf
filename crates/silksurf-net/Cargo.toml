@@ -10,6 +10,7 @@ silksurf-tls = { path = "../silksurf-tls" }
 url = { workspace = true }
 httparse = "1.10"
 rustls = { workspace = true }
+rustc-hash = { workspace = true }
 flume = { workspace = true, optional = true }
 memmap2 = { version = "0.9", optional = true }
 
