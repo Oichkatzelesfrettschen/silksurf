@@ -2,23 +2,32 @@
 //!
 //! Provides: appendChild, removeChild, insertBefore, setAttribute,
 //! getAttribute, className, classList, textContent, children, parentNode,
-//! tagName, id, style, nextSibling, childNodes.
+//! tagName, id, style, dataset, data, nodeValue, nextSibling, childNodes.
 
 use std::any::Any;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use silksurf_dom::{AttributeName, Dom, NodeId, NodeKind};
 
 use super::{SharedDom, node_to_js_value};
 use crate::vm::builtins::array::create_array;
-use crate::vm::host::HostObject;
+use crate::vm::host::{make_host_object, HostObject, HostObjectRef};
 use crate::vm::value::{NativeFunction, Value};
 
 /// JS Element object backed by a NodeId + shared Dom reference.
 pub struct ElementHost {
     dom: SharedDom,
     node_id: NodeId,
+    /*
+     * style and dataset are cached HostObjectRef so that repeated accesses
+     * to element.style or element.dataset return the same object.
+     * Without caching, element.style.display = "none" would set a property
+     * on a freshly-allocated StyleHost that is immediately discarded.
+     */
+    style: HostObjectRef,
+    dataset: HostObjectRef,
 }
 
 impl std::fmt::Debug for ElementHost {
@@ -29,7 +38,13 @@ impl std::fmt::Debug for ElementHost {
 
 impl ElementHost {
     pub fn new(dom: SharedDom, node_id: NodeId) -> Self {
-        Self { dom, node_id }
+        let dataset_dom = Rc::clone(&dom);
+        Self {
+            dom,
+            node_id,
+            style: make_host_object(StyleHost::default()),
+            dataset: make_host_object(DatasetHost::new(dataset_dom, node_id)),
+        }
     }
 
     pub fn node_id(&self) -> NodeId {
@@ -231,6 +246,30 @@ impl HostObject for ElementHost {
                 let node = nid;
                 make_class_list(dom, node)
             }
+            /*
+             * data / nodeValue -- raw text content of Text and Comment nodes.
+             * In the W3C DOM, Text.data and Text.nodeValue both return the
+             * character data string. Element.nodeValue is null.
+             */
+            "data" | "nodeValue" => {
+                let dom = dom_ref.borrow();
+                match dom.node(nid).ok().map(|n| n.kind()) {
+                    Some(NodeKind::Text { text }) => Value::string_owned(text.clone()),
+                    Some(NodeKind::Comment { data }) => Value::string_owned(data.clone()),
+                    _ => Value::Null,
+                }
+            }
+            /*
+             * style -- inline CSS style proxy.
+             * Returns a cached StyleHost so that `element.style.display = "none"`
+             * persists across repeated accesses.
+             */
+            "style" => Value::HostObject(Rc::clone(&self.style)),
+            /*
+             * dataset -- data-* attribute proxy.
+             * element.dataset.fooBar maps to attribute data-foo-bar.
+             */
+            "dataset" => Value::HostObject(Rc::clone(&self.dataset)),
             _ => Value::Undefined,
         }
     }
@@ -269,6 +308,11 @@ impl HostObject for ElementHost {
                     .dom
                     .borrow_mut()
                     .set_attribute(self.node_id, "id", id_str);
+                true
+            }
+            "data" | "nodeValue" => {
+                // Accept but ignore: Dom has no node_mut() API.
+                // Scripts can set .data on text nodes without throwing.
                 true
             }
             _ => false,
@@ -324,6 +368,118 @@ fn collect_text(dom: &Dom, node: NodeId, result: &mut String) {
             collect_text(dom, child, result);
         }
     }
+}
+
+/*
+ * StyleHost -- inline CSS property storage for element.style.X access.
+ *
+ * Stores CSS property values set via JS (e.g. element.style.display = "none")
+ * in a HashMap. The cascade engine reads inline styles separately; this host
+ * stores them so scripts can read them back without error.
+ *
+ * Note: CSS property names are stored as-is (camelCase from JS side).
+ */
+#[derive(Debug, Default)]
+struct StyleHost {
+    props: HashMap<String, String>,
+}
+
+impl HostObject for StyleHost {
+    fn get_property(&self, name: &str) -> Value {
+        self.props
+            .get(name)
+            .map(|v| Value::string_owned(v.clone()))
+            .unwrap_or_else(|| Value::string(""))
+    }
+
+    fn set_property(&mut self, name: &str, value: Value) -> bool {
+        let v = value.to_js_string();
+        let v_str = v.as_str().unwrap_or("").to_string();
+        self.props.insert(name.to_string(), v_str);
+        true
+    }
+
+    fn class_name(&self) -> &str {
+        "CSSStyleDeclaration"
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+/*
+ * DatasetHost -- data-* attribute proxy for element.dataset.X access.
+ *
+ * Maps camelCase property names to kebab-case data-* attributes:
+ *   element.dataset.fooBar  <->  data-foo-bar attribute
+ *
+ * See: https://html.spec.whatwg.org/multipage/dom.html#dom-dataset
+ */
+struct DatasetHost {
+    dom: SharedDom,
+    node: NodeId,
+}
+
+impl std::fmt::Debug for DatasetHost {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "DatasetHost(node={:?})", self.node)
+    }
+}
+
+impl DatasetHost {
+    fn new(dom: SharedDom, node: NodeId) -> Self {
+        Self { dom, node }
+    }
+}
+
+impl HostObject for DatasetHost {
+    fn get_property(&self, name: &str) -> Value {
+        let attr_name = format!("data-{}", camel_to_kebab(name));
+        let dom = self.dom.borrow();
+        get_attribute_value(&dom, self.node, &attr_name)
+            .map(Value::string_owned)
+            .unwrap_or(Value::Undefined)
+    }
+
+    fn set_property(&mut self, name: &str, value: Value) -> bool {
+        let attr_name = format!("data-{}", camel_to_kebab(name));
+        let v = value.to_js_string();
+        let v_str = v.as_str().unwrap_or("").to_string();
+        let _ = self.dom.borrow_mut().set_attribute(self.node, attr_name, v_str);
+        true
+    }
+
+    fn class_name(&self) -> &str {
+        "DOMStringMap"
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+/// Convert camelCase dataset key to kebab-case for data-* attribute names.
+/// "fooBar" -> "foo-bar", "myDataValue" -> "my-data-value"
+fn camel_to_kebab(s: &str) -> String {
+    let mut result = String::with_capacity(s.len() + 4);
+    for ch in s.chars() {
+        if ch.is_ascii_uppercase() {
+            result.push('-');
+            result.push(ch.to_ascii_lowercase());
+        } else {
+            result.push(ch);
+        }
+    }
+    result
 }
 
 /// Create a classList object with add/remove/toggle/contains methods.

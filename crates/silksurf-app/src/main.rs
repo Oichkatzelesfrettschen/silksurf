@@ -254,14 +254,24 @@ fn main() {
                     str_map.insert(*compiler_id, vm_id);
                 }
                 // Add child chunks (function bodies) first so their indices are stable.
-                // CRITICAL: remap string IDs in child chunks too!
+                // CRITICAL: remap both String IDs and Function chunk indices in child chunks.
+                // String IDs: child uses parent string pool (new_with_pool), so str_map covers
+                //   all strings including those added by child/nested compilers.
+                // Function indices: compiler stores indices relative to child_chunks[0].
+                //   After adding to VM at child_base, all Function(idx) -> Function(idx+child_base).
                 let child_base = vm.chunks_len();
                 for mut child in child_chunks {
                     for constant in child.constants_mut() {
-                        if let silksurf_js::bytecode::Constant::String(str_id) = constant {
-                            if let Some(&vm_id) = str_map.get(str_id) {
-                                *str_id = vm_id;
+                        match constant {
+                            silksurf_js::bytecode::Constant::String(str_id) => {
+                                if let Some(&vm_id) = str_map.get(str_id) {
+                                    *str_id = vm_id;
+                                }
                             }
+                            silksurf_js::bytecode::Constant::Function(idx) => {
+                                *idx += child_base as u32;
+                            }
+                            _ => {}
                         }
                     }
                     vm.add_chunk(child);

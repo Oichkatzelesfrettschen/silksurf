@@ -98,13 +98,33 @@ pub struct Compiler<'src, 'arena> {
 impl<'src, 'arena> Compiler<'src, 'arena> {
     #[must_use]
     pub fn new() -> Self {
-        let scopes = vec![Scope::new(None, 0)];
+        Self::new_with_pool(HashMap::new(), 0)
+    }
 
+    /*
+     * new_with_pool -- create a child compiler that shares the parent's string pool.
+     *
+     * WHY: Each function expression body is compiled by a fresh Compiler.
+     * Without sharing the string pool, the child's string constants use IDs
+     * from a separate pool (0, 1, 2...) that collide with parent IDs.
+     * When main.rs remaps the parent's strings to VM IDs, the child's
+     * constants get the WRONG VM string (parent's string 0 != child's string 0).
+     *
+     * By starting the child with a copy of the parent's pool and the parent's
+     * next_string_id, new strings the child interns get fresh IDs that don't
+     * overlap with any existing strings. After compilation, the caller merges
+     * the child's pool back via into_parts().
+     *
+     * See: Expression::Function for where this is used
+     * See: compile_with_children for how the unified pool is returned
+     */
+    fn new_with_pool(pool: HashMap<String, u32>, next_id: u32) -> Self {
+        let scopes = vec![Scope::new(None, 0)];
         Self {
             chunk: Chunk::new(),
             child_chunks: Vec::new(),
-            string_pool: HashMap::new(),
-            next_string_id: 0,
+            string_pool: pool,
+            next_string_id: next_id,
             scopes,
             current_scope: 0,
             next_register: 0,
@@ -180,6 +200,23 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
     }
 
     /*
+     * into_parts -- consume the compiler, returning the chunk AND all child
+     * chunks plus the merged string pool.
+     *
+     * WHY: into_chunk() dropped child_chunks (nested function bodies) and the
+     * string pool. Callers that use new_with_pool() need both to:
+     *   1. Propagate nested function chunks up to the parent's child_chunks list
+     *   2. Merge string additions back to the parent's pool so subsequent
+     *      interning continues from the right ID.
+     *
+     * Returns: (main_chunk, nested_chunks, string_pool, next_string_id)
+     */
+    fn into_parts(mut self) -> (Chunk, Vec<Chunk>, HashMap<String, u32>, u32) {
+        self.chunk.register_count = self.max_register + 1;
+        (self.chunk, self.child_chunks, self.string_pool, self.next_string_id)
+    }
+
+    /*
      * intern_string -- intern a property/variable name, returning its u32 ID.
      *
      * WHY: Every property access (obj.prop), global lookup (GetGlobal),
@@ -221,14 +258,26 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
 
     fn collect_declarations(&mut self, stmts: &[Statement<'src, 'arena>]) {
         for stmt in stmts {
-            if let Statement::VariableDeclaration(decl) = stmt {
-                if decl.kind == VariableKind::Var {
-                    for declarator in decl.declarations {
-                        if let crate::parser::Pattern::Identifier(id) = &declarator.id {
+            match stmt {
+                Statement::VariableDeclaration(decl) => {
+                    if decl.kind == VariableKind::Var {
+                        for declarator in decl.declarations {
+                            if let crate::parser::Pattern::Identifier(id) = &declarator.id {
+                                self.declare_var(id.name, VariableKind::Var, false);
+                            }
+                        }
+                    }
+                }
+                // Hoist function declarations: pre-allocate their slots so the
+                // function is available before its textual position.
+                Statement::FunctionDeclaration(func) => {
+                    if let Some(ref id) = func.id {
+                        if self.lookup_var(id.name).is_none() {
                             self.declare_var(id.name, VariableKind::Var, false);
                         }
                     }
                 }
+                _ => {}
             }
         }
     }
@@ -434,6 +483,93 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
 
                 self.exit_scope();
             }
+            /*
+             * do { body } while (condition);
+             *
+             * Bytecode: body -> test -> JmpTrue(body_start)
+             * The body always executes at least once.
+             */
+            Statement::DoWhile(dw) => {
+                let loop_start = self.current_offset();
+                self.loop_stack.push(LoopContext {
+                    break_targets: Vec::new(),
+                    continue_targets: Vec::new(),
+                });
+
+                self.compile_statement(dw.body)?;
+
+                let continue_target = self.current_offset();
+                let cond_reg = self.compile_expression(dw.test)?;
+                let back_offset = (loop_start as i32) - (self.current_offset() as i32) - 1;
+                self.emit(Instruction::new_r_offset(
+                    Opcode::JmpTrue,
+                    cond_reg.0,
+                    back_offset as i16,
+                ));
+
+                let loop_ctx = self.loop_stack.pop().unwrap();
+                for brk in loop_ctx.break_targets {
+                    self.patch_jump(brk.offset);
+                }
+                for cont in loop_ctx.continue_targets {
+                    let rel = (continue_target as i32) - (cont.offset as i32) - 1;
+                    self.chunk.instructions[cont.offset] =
+                        Instruction::new_offset(Opcode::Jmp, rel);
+                }
+            }
+            /*
+             * try { body } catch (e) { handler } finally { cleanup }
+             *
+             * Uses EnterTry/LeaveTry/EnterCatch opcodes.
+             * Exception value placed in register 0 for catch block.
+             */
+            Statement::Try(try_stmt) => {
+                // Emit EnterTry with offset to catch block
+                let enter_try = self.emit(Instruction::new_ri(
+                    Opcode::EnterTry,
+                    0,
+                    0, // patch later
+                ));
+
+                // Compile try body
+                for stmt in try_stmt.block.body {
+                    self.compile_statement(stmt)?;
+                }
+                self.emit(Instruction::new(Opcode::LeaveTry));
+
+                // Jump over catch block
+                let skip_catch = self.emit(Instruction::new_offset(Opcode::Jmp, 0));
+
+                // Patch EnterTry to point here (catch start)
+                let catch_offset = self.current_offset() - enter_try - 1;
+                self.chunk.instructions[enter_try] = Instruction::new_ri(
+                    Opcode::EnterTry,
+                    0,
+                    catch_offset as u16,
+                );
+                self.emit(Instruction::new(Opcode::EnterCatch));
+
+                // Compile catch body (if present)
+                if let Some(ref handler) = try_stmt.handler {
+                    // Exception is in r0; bind to catch variable
+                    if let Some(crate::parser::Pattern::Identifier(ref id)) = handler.param {
+                        self.declare_var(id.name, VariableKind::Let, true);
+                    }
+                    for stmt in handler.body.body {
+                        self.compile_statement(stmt)?;
+                    }
+                }
+
+                // Patch skip_catch jump
+                self.patch_jump(skip_catch);
+
+                // Compile finally block (if present)
+                if let Some(ref finalizer) = try_stmt.finalizer {
+                    for stmt in finalizer.body {
+                        self.compile_statement(stmt)?;
+                    }
+                }
+            }
             Statement::Return(ret) => {
                 if let Some(arg) = ret.argument.as_ref() {
                     let reg = self.compile_expression(arg)?;
@@ -467,12 +603,67 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
             Statement::Debugger(span) => {
                 self.emit_at(Instruction::new(Opcode::Debugger), *span);
             }
+            /*
+             * FunctionDeclaration -- compile the body into a child chunk and
+             * store the resulting Value::Function in the declared slot.
+             *
+             * WHY: Previously used Constant::Function(0) (always chunk 0 --
+             * completely wrong) and mismatched the temp register with the
+             * declared slot. This caused all function declarations to produce
+             * garbage function values or undefined.
+             *
+             * Now mirrors Expression::Function: compile body with shared string
+             * pool, flatten nested chunks, and emit NewFunction into the
+             * pre-hoisted slot from collect_declarations.
+             *
+             * See: Expression::Function for the same shared-pool pattern
+             * See: collect_declarations for the slot pre-allocation
+             */
             Statement::FunctionDeclaration(func) => {
-                let const_idx = self.chunk.add_constant(Constant::Function(0));
                 if let Some(ref id) = func.id {
-                    let reg = self.alloc_register();
-                    self.emit(Instruction::new_ri(Opcode::NewFunction, reg.0, const_idx));
-                    self.declare_var(id.name, VariableKind::Var, true);
+                    let mut child =
+                        Compiler::new_with_pool(self.string_pool.clone(), self.next_string_id);
+                    for param in func.params {
+                        if let crate::parser::Pattern::Identifier(pid) = param {
+                            child.declare_var(pid.name, VariableKind::Let, true);
+                        }
+                    }
+                    child.collect_declarations(func.body.body);
+                    for stmt in func.body.body {
+                        child.compile_statement(stmt)?;
+                    }
+                    child.chunk.emit(Instruction::new(Opcode::RetUndefined));
+                    let (mut child_chunk, nested, merged_pool, merged_next) = child.into_parts();
+                    self.string_pool = merged_pool;
+                    self.next_string_id = merged_next;
+                    let base_offset = self.child_chunks.len() as u32;
+                    let n_nested = nested.len() as u32;
+                    for nc in nested {
+                        self.child_chunks.push(nc);
+                    }
+                    for constant in child_chunk.constants_mut() {
+                        if let Constant::Function(idx) = constant {
+                            *idx += base_offset;
+                        }
+                    }
+                    let func_idx = base_offset + n_nested;
+                    self.child_chunks.push(child_chunk);
+                    let const_idx = self.chunk.add_constant(Constant::Function(func_idx));
+                    let tmp = self.alloc_register();
+                    self.emit(Instruction::new_ri(Opcode::NewFunction, tmp.0, const_idx));
+                    // Store into the pre-hoisted slot
+                    if let Some((depth, slot)) = self.lookup_var(id.name) {
+                        if depth == 0 {
+                            self.emit(Instruction::new_rr(Opcode::SetLocal, slot, tmp.0));
+                        } else {
+                            self.emit(Instruction::new_rrr(
+                                Opcode::SetCapture,
+                                depth,
+                                slot,
+                                tmp.0,
+                            ));
+                        }
+                    }
                 }
             }
             _ => {}
@@ -574,40 +765,107 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
              * See: op_new_function (vm/mod.rs) for runtime Function creation
              * See: op_call (vm/mod.rs) for function invocation
              */
+            /*
+             * Expression::Function -- compile function expression with shared string pool.
+             *
+             * WHY: Creating a fresh Compiler::new() gives the child its own
+             * string pool starting at ID 0. These child string IDs collide with
+             * the parent's IDs when main.rs builds str_map from the parent pool
+             * alone. Using new_with_pool() seeds the child with the parent's
+             * existing pool, so new strings get unique IDs that are valid in
+             * the parent context.
+             *
+             * After compilation, into_parts() returns the child's chunk,
+             * any nested function chunks, and the merged pool. We merge the pool
+             * back into self so future intern calls produce consistent IDs.
+             * Nested function chunks (grandchildren) are added to self.child_chunks
+             * before the child chunk itself; their Function constants are offset
+             * by base_offset to be parent-relative.
+             *
+             * See: new_with_pool for the shared pool constructor
+             * See: into_parts for the chunk+pool extraction
+             */
             Expression::Function(func) => {
                 let result_reg = self.alloc_register();
-                let mut child = Compiler::new();
-                // Compile function body into child chunk
+                let mut child =
+                    Compiler::new_with_pool(self.string_pool.clone(), self.next_string_id);
+                // Declare parameters in child scope
+                for param in func.params {
+                    if let crate::parser::Pattern::Identifier(id) = param {
+                        child.declare_var(id.name, VariableKind::Let, true);
+                    }
+                }
+                // Hoist var declarations and function declarations in the body
+                child.collect_declarations(func.body.body);
                 for stmt in func.body.body {
                     child.compile_statement(stmt)?;
                 }
-                // Ensure the child chunk has a RetUndefined at the end
                 child.chunk.emit(Instruction::new(Opcode::RetUndefined));
-                let child_chunk = child.into_chunk();
-                // Store child chunk as a constant and emit NewFunction
-                let func_idx = self.child_chunks.len() as u32;
+                let (mut child_chunk, nested, merged_pool, merged_next) = child.into_parts();
+                // Merge child string pool additions back into parent
+                self.string_pool = merged_pool;
+                self.next_string_id = merged_next;
+                // Flatten nested function chunks into parent's child_chunks.
+                // base_offset is where nested[0] will sit in self.child_chunks.
+                let base_offset = self.child_chunks.len() as u32;
+                let n_nested = nested.len() as u32;
+                for nc in nested {
+                    self.child_chunks.push(nc);
+                }
+                // Remap Function constants in child_chunk from child-local indices
+                // (0..n_nested) to parent-local indices (base_offset..base_offset+n_nested).
+                for constant in child_chunk.constants_mut() {
+                    if let Constant::Function(idx) = constant {
+                        *idx += base_offset;
+                    }
+                }
+                let func_idx = base_offset + n_nested;
                 self.child_chunks.push(child_chunk);
                 let const_idx = self.chunk.add_constant(Constant::Function(func_idx));
                 self.emit(Instruction::new_ri(Opcode::NewFunction, result_reg.0, const_idx));
                 Ok(result_reg)
             }
+            /*
+             * Expression::Arrow -- same shared-pool fix as Expression::Function.
+             * Arrow functions capture lexical `this` but otherwise compile the
+             * same way for our purposes (ChatGPT scripts don't use `this`).
+             */
             Expression::Arrow(arrow) => {
                 let result_reg = self.alloc_register();
-                let mut child = Compiler::new();
+                let mut child =
+                    Compiler::new_with_pool(self.string_pool.clone(), self.next_string_id);
+                for param in arrow.params {
+                    if let crate::parser::Pattern::Identifier(id) = param {
+                        child.declare_var(id.name, VariableKind::Let, true);
+                    }
+                }
                 match &arrow.body {
                     crate::parser::ArrowBody::Expression(expr) => {
                         let val_reg = child.compile_expression(expr)?;
                         child.chunk.emit(Instruction::new_r(Opcode::Ret, val_reg.0));
                     }
                     crate::parser::ArrowBody::Block(block) => {
+                        child.collect_declarations(block.body);
                         for stmt in block.body {
                             child.compile_statement(stmt)?;
                         }
                         child.chunk.emit(Instruction::new(Opcode::RetUndefined));
                     }
                 }
-                let child_chunk = child.into_chunk();
-                let func_idx = self.child_chunks.len() as u32;
+                let (mut child_chunk, nested, merged_pool, merged_next) = child.into_parts();
+                self.string_pool = merged_pool;
+                self.next_string_id = merged_next;
+                let base_offset = self.child_chunks.len() as u32;
+                let n_nested = nested.len() as u32;
+                for nc in nested {
+                    self.child_chunks.push(nc);
+                }
+                for constant in child_chunk.constants_mut() {
+                    if let Constant::Function(idx) = constant {
+                        *idx += base_offset;
+                    }
+                }
+                let func_idx = base_offset + n_nested;
                 self.child_chunks.push(child_chunk);
                 let const_idx = self.chunk.add_constant(Constant::Function(func_idx));
                 self.emit(Instruction::new_ri(Opcode::NewFunction, result_reg.0, const_idx));
