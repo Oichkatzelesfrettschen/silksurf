@@ -21,6 +21,11 @@ fn array_length(obj: &Object) -> usize {
     }
 }
 
+/// Collect array elements into a Vec<Value> (pub for use from vm/mod.rs static dispatch).
+pub fn collect_elements_pub(obj: &Object) -> Vec<Value> {
+    collect_elements(obj)
+}
+
 /// Collect array elements into a Vec<Value>.
 fn collect_elements(obj: &Object) -> Vec<Value> {
     let len = array_length(obj);

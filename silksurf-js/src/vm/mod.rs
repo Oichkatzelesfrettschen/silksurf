@@ -1176,6 +1176,134 @@ fn op_get_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
                 }
             })))
         }
+        /*
+         * Static method dispatch for constructor NativeFunctions.
+         *
+         * WHY: Array.isArray(), Array.from(), String.fromCharCode() are
+         * accessed as properties on the constructor function itself.
+         * NativeFunction has no property map, so we dispatch by name here
+         * rather than making the global objects (which would break `new`/call).
+         *
+         * String.fromCharCode: convert code points to a string.
+         * Array.isArray: returns true for array-like Objects.
+         * Array.from: build an array from an iterable (array or string).
+         */
+        Value::NativeFunction(f) if f.name == "String" => {
+            match prop_name.as_str() {
+                "fromCharCode" => {
+                    Value::NativeFunction(Rc::new(value::NativeFunction::new(
+                        "String.fromCharCode",
+                        |args| {
+                            let s: String = args
+                                .iter()
+                                .filter_map(|v| {
+                                    let code = v.to_number() as u32;
+                                    char::from_u32(code)
+                                })
+                                .collect();
+                            value::Value::string_owned(s)
+                        },
+                    )))
+                }
+                "raw" => {
+                    // String.raw`...` -- simplified: join strings without escape processing
+                    Value::NativeFunction(Rc::new(value::NativeFunction::new(
+                        "String.raw",
+                        |args| {
+                            // args[0] = template object with .raw array
+                            // args[1..] = substitution values
+                            if let Some(value::Value::Object(tmpl)) = args.first() {
+                                let raw = tmpl.borrow().get_by_str("raw");
+                                if let value::Value::Object(raw_arr) = raw {
+                                    let parts = builtins::array::collect_elements_pub(
+                                        &raw_arr.borrow(),
+                                    );
+                                    let subs = &args[1..];
+                                    let mut result = String::new();
+                                    for (i, part) in parts.iter().enumerate() {
+                                        let s = part.to_js_string();
+                                        result.push_str(s.as_str().unwrap_or(""));
+                                        if i < subs.len() {
+                                            let sub = subs[i].to_js_string();
+                                            result.push_str(sub.as_str().unwrap_or(""));
+                                        }
+                                    }
+                                    return value::Value::string_owned(result);
+                                }
+                            }
+                            value::Value::string("")
+                        },
+                    )))
+                }
+                _ => Value::Undefined,
+            }
+        }
+        Value::NativeFunction(f) if f.name == "Array" => {
+            match prop_name.as_str() {
+                "isArray" => {
+                    Value::NativeFunction(Rc::new(value::NativeFunction::new(
+                        "Array.isArray",
+                        |args| {
+                            let result = args.first().is_some_and(|v| {
+                                if let value::Value::Object(o) = v {
+                                    builtins::array::is_array_like(&o.borrow())
+                                } else {
+                                    false
+                                }
+                            });
+                            value::Value::Boolean(result)
+                        },
+                    )))
+                }
+                "from" => {
+                    Value::NativeFunction(Rc::new(value::NativeFunction::new(
+                        "Array.from",
+                        |args| {
+                            use builtins::array::{collect_elements_pub, create_array, is_array_like};
+                            let source = args.first().cloned().unwrap_or(value::Value::Undefined);
+                            let map_fn = args.get(1).cloned();
+                            let elements: Vec<value::Value> = match &source {
+                                value::Value::Object(o) => {
+                                    let o_borrow = o.borrow();
+                                    if is_array_like(&o_borrow) {
+                                        collect_elements_pub(&o_borrow)
+                                    } else {
+                                        vec![]
+                                    }
+                                }
+                                value::Value::String(s) => {
+                                    // Array.from("abc") -> ["a","b","c"]
+                                    let text = s.as_str().unwrap_or("").to_string();
+                                    text.chars()
+                                        .map(|c| value::Value::string_owned(c.to_string()))
+                                        .collect()
+                                }
+                                _ => vec![],
+                            };
+                            if let Some(value::Value::NativeFunction(f)) = map_fn {
+                                let mapped: Vec<value::Value> = elements
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(i, el)| {
+                                        f.call(&[el.clone(), value::Value::Number(i as f64)])
+                                    })
+                                    .collect();
+                                create_array(mapped)
+                            } else {
+                                create_array(elements)
+                            }
+                        },
+                    )))
+                }
+                "of" => {
+                    Value::NativeFunction(Rc::new(value::NativeFunction::new(
+                        "Array.of",
+                        |args| builtins::array::create_array(args.to_vec()),
+                    )))
+                }
+                _ => Value::Undefined,
+            }
+        }
         _ => Value::Undefined,
     };
     vm.set_reg(instr.dst(), value);
