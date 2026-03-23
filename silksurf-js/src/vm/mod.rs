@@ -330,6 +330,8 @@ static DISPATCH_TABLE: [OpHandler; 256] = {
     // Scope
     table[Opcode::GetLocal as usize] = op_get_local;
     table[Opcode::SetLocal as usize] = op_set_local;
+    table[Opcode::GetCapture as usize] = op_get_capture;
+    table[Opcode::SetCapture as usize] = op_set_capture;
     table[Opcode::GetGlobal as usize] = op_get_global;
     table[Opcode::SetGlobal as usize] = op_set_global;
 
@@ -499,6 +501,60 @@ impl Vm {
                         }
                     } else {
                         return Err(VmError::Exception(value));
+                    }
+                }
+                /*
+                 * JS-level errors (TypeError, ReferenceError) ARE catchable by
+                 * try/catch. Convert them to Exception(value) and re-dispatch
+                 * through the try handler mechanism.
+                 *
+                 * WHY: op_call returns VmError::TypeError("not a function") when
+                 * the callee isn't callable. Without this conversion, try{...}catch(e){}
+                 * around the call does NOT catch the error -- it propagates past the
+                 * handler because only VmError::Exception is checked above.
+                 *
+                 * This was the cause of scripts 0 and 1 failing despite having
+                 * a try/catch: the TypeError leaked through the Exception handler.
+                 *
+                 * Internal VM errors (OutOfBounds, StackOverflow, InvalidOpcode)
+                 * are NOT converted -- those are unrecoverable engine faults.
+                 */
+                Err(VmError::TypeError(msg)) => {
+                    let exc_val = Value::string_owned(format!("TypeError: {msg}"));
+                    if let Some(try_handler) = self.try_handlers.pop() {
+                        while self.call_stack.len() > try_handler.stack_depth {
+                            self.call_stack.pop();
+                        }
+                        if try_handler.catch_pc > 0 {
+                            if let Some(frame) = self.call_stack.last_mut() {
+                                frame.pc = try_handler.catch_pc;
+                                frame.chunk_idx = try_handler.chunk_idx;
+                            }
+                            self.set_reg(0, exc_val);
+                        } else {
+                            return Err(VmError::TypeError(msg));
+                        }
+                    } else {
+                        return Err(VmError::TypeError(msg));
+                    }
+                }
+                Err(VmError::ReferenceError(msg)) => {
+                    let exc_val = Value::string_owned(format!("ReferenceError: {msg}"));
+                    if let Some(try_handler) = self.try_handlers.pop() {
+                        while self.call_stack.len() > try_handler.stack_depth {
+                            self.call_stack.pop();
+                        }
+                        if try_handler.catch_pc > 0 {
+                            if let Some(frame) = self.call_stack.last_mut() {
+                                frame.pc = try_handler.catch_pc;
+                                frame.chunk_idx = try_handler.chunk_idx;
+                            }
+                            self.set_reg(0, exc_val);
+                        } else {
+                            return Err(VmError::ReferenceError(msg));
+                        }
+                    } else {
+                        return Err(VmError::ReferenceError(msg));
                     }
                 }
                 Err(e) => return Err(e),
@@ -1238,6 +1294,41 @@ fn op_get_local(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
 fn op_set_local(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     let value = vm.get_reg(instr.src1()).clone();
     vm.set_reg(instr.dst(), value);
+    Ok(())
+}
+
+/*
+ * op_get_capture / op_set_capture -- closure variable access.
+ *
+ * WHY: When an inner function references a variable from an outer scope,
+ * the compiler emits GetCapture(dst, depth, slot) where `slot` is the
+ * register index of the captured variable in the outer function's frame.
+ *
+ * In our flat register VM all CallFrames share vm.registers[]. The outer
+ * function's variables remain in vm.registers[slot] for the lifetime of
+ * the outer call. We simply read/write the slot directly (depth is ignored
+ * in this flat model -- it encodes scope nesting for future closure objects).
+ *
+ * INVARIANT: The outer function's registers are not reused by the inner
+ * function because the compiler allocates inner function registers starting
+ * from 0 within the child chunk. As long as the inner function uses fewer
+ * registers than `slot`, the outer value is safe.
+ *
+ * Encoding:
+ *   GetCapture: dst=target_reg, src1=depth, src2=outer_slot
+ *   SetCapture: dst=depth, src1=outer_slot, src2=value_reg
+ */
+fn op_get_capture(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
+    let slot = instr.src2(); // outer scope register index
+    let value = vm.get_reg(slot).clone();
+    vm.set_reg(instr.dst(), value);
+    Ok(())
+}
+
+fn op_set_capture(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
+    let slot = instr.src1(); // outer scope register index
+    let value = vm.get_reg(instr.src2()).clone();
+    vm.set_reg(slot, value);
     Ok(())
 }
 

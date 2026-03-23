@@ -159,6 +159,56 @@ impl HostObject for DocumentHost {
                     },
                 )))
             }
+            /*
+             * getElementsByTagName -- collect all elements with matching tag.
+             * Returns a live-ish array (snapshotted at call time).
+             * "*" matches all elements per the HTML spec.
+             */
+            "getElementsByTagName" => {
+                let dom = Rc::clone(dom_ref);
+                let doc_node = self.document_node;
+                Value::NativeFunction(Rc::new(NativeFunction::new(
+                    "document.getElementsByTagName",
+                    move |args| {
+                        let tag = args
+                            .first()
+                            .map(|v| {
+                                let s = v.to_js_string();
+                                s.as_str().unwrap_or("*").to_lowercase()
+                            })
+                            .unwrap_or_else(|| "*".to_string());
+                        let dom_borrow = dom.borrow();
+                        let mut found = Vec::new();
+                        collect_by_tag(&dom_borrow, doc_node, &tag, &mut found);
+                        drop(dom_borrow);
+                        use crate::vm::builtins::array::create_array;
+                        let values: Vec<_> =
+                            found.iter().map(|&n| node_to_js_value(&dom, n)).collect();
+                        create_array(values)
+                    },
+                )))
+            }
+            /*
+             * querySelectorAll -- simplified: same as getElementsByTagName("*")
+             * for now. Full CSS selector parsing is deferred.
+             */
+            "querySelectorAll" => {
+                let dom = Rc::clone(dom_ref);
+                let doc_node = self.document_node;
+                Value::NativeFunction(Rc::new(NativeFunction::new(
+                    "document.querySelectorAll",
+                    move |_args| {
+                        let dom_borrow = dom.borrow();
+                        let mut found = Vec::new();
+                        collect_by_tag(&dom_borrow, doc_node, "*", &mut found);
+                        drop(dom_borrow);
+                        use crate::vm::builtins::array::create_array;
+                        let values: Vec<_> =
+                            found.iter().map(|&n| node_to_js_value(&dom, n)).collect();
+                        create_array(values)
+                    },
+                )))
+            }
             _ => Value::Undefined,
         }
     }
@@ -197,6 +247,25 @@ fn find_tag_recursive(dom: &silksurf_dom::Dom, node: NodeId, target_tag: &str) -
         }
     }
     None
+}
+
+/// Collect all elements whose tag name matches `target` (or all if `target == "*"`).
+fn collect_by_tag(
+    dom: &silksurf_dom::Dom,
+    node: NodeId,
+    target: &str,
+    out: &mut Vec<NodeId>,
+) {
+    if let Ok(Some(name)) = dom.element_name(node) {
+        if target == "*" || name.eq_ignore_ascii_case(target) {
+            out.push(node);
+        }
+    }
+    if let Ok(children) = dom.children(node) {
+        for &child in children {
+            collect_by_tag(dom, child, target, out);
+        }
+    }
 }
 
 /// Recursively find an element by id attribute.

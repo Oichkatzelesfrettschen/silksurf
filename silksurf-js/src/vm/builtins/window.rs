@@ -46,6 +46,64 @@ pub fn install(global: &mut Object) {
     }
     global.set_by_str("location", location);
 
+    /*
+     * matchMedia -- returns a MediaQueryList for the given CSS media query.
+     *
+     * WHY: ChatGPT scripts check window.matchMedia('(prefers-color-scheme: dark)')
+     * and similar queries to adapt to system preferences. Without this stub,
+     * the property access returns undefined and subsequent .matches access throws.
+     *
+     * Implementation: always returns matches=false (no display to evaluate against).
+     * addEventListener/addListener no-ops to absorb change listener registration.
+     */
+    let mql_factory = native_fn("matchMedia", |args| {
+        let query = args
+            .first()
+            .map(|v| {
+                let s = v.to_js_string();
+                s.as_str().unwrap_or("").to_string()
+            })
+            .unwrap_or_default();
+
+        use crate::vm::value::Object;
+        let mql = Rc::new(RefCell::new(Object::new()));
+        {
+            let mut o = mql.borrow_mut();
+            o.set_by_str("matches", Value::Boolean(false));
+            o.set_by_str("media", Value::string_owned(query));
+            o.set_by_str("onchange", Value::Null);
+            o.set_by_str(
+                "addEventListener",
+                crate::vm::value::Value::NativeFunction(Rc::new(
+                    crate::vm::value::NativeFunction::new("addEventListener", |_| Value::Undefined),
+                )),
+            );
+            o.set_by_str(
+                "removeEventListener",
+                crate::vm::value::Value::NativeFunction(Rc::new(
+                    crate::vm::value::NativeFunction::new("removeEventListener", |_| {
+                        Value::Undefined
+                    }),
+                )),
+            );
+            // Legacy addListener/removeListener (deprecated but used by some scripts)
+            o.set_by_str(
+                "addListener",
+                crate::vm::value::Value::NativeFunction(Rc::new(
+                    crate::vm::value::NativeFunction::new("addListener", |_| Value::Undefined),
+                )),
+            );
+            o.set_by_str(
+                "removeListener",
+                crate::vm::value::Value::NativeFunction(Rc::new(
+                    crate::vm::value::NativeFunction::new("removeListener", |_| Value::Undefined),
+                )),
+            );
+        }
+        Value::Object(mql)
+    });
+    global.set_by_str("matchMedia", mql_factory);
+
     // self = window = globalThis (all point to global)
     // These are set after global construction since they're self-referential.
     // The caller (install_builtins) handles this.
