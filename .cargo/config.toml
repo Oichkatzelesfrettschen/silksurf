@@ -1,0 +1,23 @@
+[build]
+# Use a shared target directory to prevent per-project bloat,
+# but localized to the workspace for isolation.
+# For sub-millisecond workflows, we recommend /tmp (RAM disk) 
+# for temporary builds, but for persistence, we use a relative path.
+target-dir = "target"
+
+[profile.dev]
+# Reduce debug info to save disk space and improve link times.
+# "1" = line tables only, "0" = no debug info.
+debug = 1
+# Incremental is good for speed but uses more disk. 
+# We keep it on but manage it with periodic GC.
+incremental = true
+
+[profile.release]
+# Strip symbols in release to keep binary sizes minimal (SilkSurf Goal).
+strip = "symbols"
+lto = "thin"
+
+[unstable]
+# Enable native Cargo GC (available in your nightly 1.96)
+gc = true

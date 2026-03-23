@@ -76,6 +76,19 @@ This is a separate infrastructure issue, not a CSS cascade problem.
    - Status: Implemented (ua_default_for_property returns CSS_OK)
    - Allows cascade to proceed but uses libcss's cascade algorithm
 
+### Phase 2.4: Infrastructure & Workspace Optimization - NEW 🚀
+
+**Status**: Implementing high-performance Cargo orchestration.
+
+**TODO**:
+- [x] Debug Cargo `target/` directory bloat (27GB detected)
+- [x] Configure workspace-level `.cargo/config.toml` for optimized builds
+- [x] Implement `scripts/cargo_orchestrator.sh` for proactive GC
+- [x] Redirect ephemeral builds to `/tmp` (RAM disk) where available
+- [x] Reduce debug info overhead in `dev` profile (`debug = 1`)
+- [ ] Monitor cache growth over 7-day period
+- [ ] Integrate orchestrator into CI/CD pipeline
+
 ---
 
 ## Discoveries & Lessons
