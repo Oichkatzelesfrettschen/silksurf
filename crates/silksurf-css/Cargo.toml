@@ -11,3 +11,9 @@ silksurf-dom = { path = "../silksurf-dom" }
 rustc-hash = { workspace = true }
 smallvec = { workspace = true }
 memchr = { workspace = true }
+dashmap = { workspace = true, optional = true }
+rayon = { workspace = true, optional = true }
+
+[features]
+default = []
+parallel = ["rayon", "dashmap"]
