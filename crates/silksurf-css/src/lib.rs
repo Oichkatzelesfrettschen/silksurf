@@ -12,6 +12,7 @@ pub mod calc;
 pub mod custom_properties;
 mod matching;
 mod parser;
+pub mod property_id;
 mod selector;
 mod style;
 

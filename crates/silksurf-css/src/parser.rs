@@ -37,6 +37,9 @@ pub struct Declaration {
     pub name: String,
     pub value: Vec<CssToken>,
     pub important: bool,
+    /// Pre-computed property ID for O(1) cascade dispatch.
+    /// Computed once during parsing; eliminates string matching in cascade.
+    pub property_id: crate::property_id::PropertyId,
 }
 
 pub struct CssParser {
@@ -321,10 +324,12 @@ fn parse_declarations(tokens: Vec<CssToken>) -> Vec<Declaration> {
         }
         let important = consume_important(&mut value);
         trim_whitespace(&mut value);
+        let property_id = crate::property_id::lookup_property_id(&name);
         declarations.push(Declaration {
             name,
             value,
             important,
+            property_id,
         });
     }
     declarations

@@ -526,7 +526,7 @@ fn selector_key(selector: &Selector) -> SelectorKey {
             SelectorModifier::Class(name) if class_key.is_none() => {
                 class_key = Some(name.clone());
             }
-            _ => {}
+            _=> {}
         }
     }
     if let Some(id) = id_key {
@@ -871,15 +871,31 @@ fn cascade_for_node(
     }
     cascaded
 }
+/*
+ * apply_declaration -- apply a single CSS declaration to the cascaded style.
+ *
+ * WHY: This is the innermost hot loop of the CSS cascade. Called once per
+ * declaration per matching rule per node. For ChatGPT: ~20,000 calls.
+ *
+ * OPTIMIZATION: Uses pre-computed PropertyId (u16 enum) instead of
+ * string matching. PropertyId is computed once during CSS parsing
+ * (see: property_id.rs lookup_property_id). This eliminates:
+ *   - to_ascii_lowercase() heap allocation per call
+ *   - 30+ string comparisons per call
+ * Replaced with a single match on a u16 enum discriminant.
+ *
+ * See: property_id.rs for the ID table
+ * See: parser.rs parse_declarations() for where IDs are assigned
+ */
 fn apply_declaration(
     cascaded: &mut CascadedStyle,
     declaration: &Declaration,
     specificity: Specificity,
     order: usize,
 ) {
-    let name = declaration.name.to_ascii_lowercase();
-    match name.as_str() {
-        "display" => {
+    use crate::property_id::PropertyId;
+    match declaration.property_id {
+        PropertyId::Display => {
             if let Some(value) = parse_display(&declaration.value) {
                 apply_property(
                     &mut cascaded.display,
@@ -890,7 +906,7 @@ fn apply_declaration(
                 );
             }
         }
-        "color" => {
+        PropertyId::Color => {
             if let Some(value) = parse_color(&declaration.value) {
                 apply_property(
                     &mut cascaded.color,
@@ -901,7 +917,7 @@ fn apply_declaration(
                 );
             }
         }
-        "background-color" => {
+        PropertyId::BackgroundColor => {
             if let Some(value) = parse_color(&declaration.value) {
                 apply_property(
                     &mut cascaded.background_color,
@@ -912,7 +928,7 @@ fn apply_declaration(
                 );
             }
         }
-        "font-size" => {
+        PropertyId::FontSize => {
             if let Some(value) = parse_length(&declaration.value) {
                 apply_property(
                     &mut cascaded.font_size,
@@ -923,7 +939,7 @@ fn apply_declaration(
                 );
             }
         }
-        "line-height" => {
+        PropertyId::LineHeight => {
             if let Some(value) = parse_length(&declaration.value) {
                 apply_property(
                     &mut cascaded.line_height,
@@ -934,7 +950,7 @@ fn apply_declaration(
                 );
             }
         }
-        "font-family" => {
+        PropertyId::FontFamily => {
             if let Some(value) = parse_font_family(&declaration.value) {
                 apply_property(
                     &mut cascaded.font_family,
@@ -945,7 +961,7 @@ fn apply_declaration(
                 );
             }
         }
-        "margin" => {
+        PropertyId::Margin => {
             if let Some(value) = parse_edges(&declaration.value) {
                 apply_property(
                     &mut cascaded.margin,
@@ -956,7 +972,7 @@ fn apply_declaration(
                 );
             }
         }
-        "padding" => {
+        PropertyId::Padding => {
             if let Some(value) = parse_edges(&declaration.value) {
                 apply_property(
                     &mut cascaded.padding,
@@ -967,7 +983,7 @@ fn apply_declaration(
                 );
             }
         }
-        "border" | "border-width" => {
+        PropertyId::Border | PropertyId::BorderWidth => {
             if let Some(value) = parse_edges(&declaration.value) {
                 apply_property(
                     &mut cascaded.border,
@@ -979,7 +995,7 @@ fn apply_declaration(
             }
         }
         // Flex container properties
-        "flex-direction" => {
+        PropertyId::FlexDirection => {
             if let Some(value) = parse_flex_direction(&declaration.value) {
                 apply_property(
                     &mut cascaded.flex_direction,
@@ -990,7 +1006,7 @@ fn apply_declaration(
                 );
             }
         }
-        "flex-wrap" => {
+        PropertyId::FlexWrap => {
             if let Some(value) = parse_flex_wrap(&declaration.value) {
                 apply_property(
                     &mut cascaded.flex_wrap,
@@ -1001,7 +1017,7 @@ fn apply_declaration(
                 );
             }
         }
-        "flex-flow" => {
+        PropertyId::FlexFlow => {
             // Shorthand: flex-flow: <direction> <wrap>
             if let Some(dir) = parse_flex_direction(&declaration.value) {
                 apply_property(
@@ -1022,7 +1038,7 @@ fn apply_declaration(
                 );
             }
         }
-        "justify-content" => {
+        PropertyId::JustifyContent => {
             if let Some(value) = parse_justify_content(&declaration.value) {
                 apply_property(
                     &mut cascaded.justify_content,
@@ -1033,7 +1049,7 @@ fn apply_declaration(
                 );
             }
         }
-        "align-items" => {
+        PropertyId::AlignItems => {
             if let Some(value) = parse_align_items(&declaration.value) {
                 apply_property(
                     &mut cascaded.align_items,
@@ -1044,7 +1060,7 @@ fn apply_declaration(
                 );
             }
         }
-        "align-self" => {
+        PropertyId::AlignSelf => {
             if let Some(value) = parse_align_self(&declaration.value) {
                 apply_property(
                     &mut cascaded.align_self,
@@ -1055,7 +1071,7 @@ fn apply_declaration(
                 );
             }
         }
-        "gap" => {
+        PropertyId::Gap => {
             if let Some(value) = parse_gap_value(&declaration.value) {
                 apply_property(
                     &mut cascaded.gap,
@@ -1080,7 +1096,7 @@ fn apply_declaration(
                 );
             }
         }
-        "row-gap" => {
+        PropertyId::RowGap => {
             if let Some(value) = parse_gap_value(&declaration.value) {
                 apply_property(
                     &mut cascaded.row_gap,
@@ -1091,7 +1107,7 @@ fn apply_declaration(
                 );
             }
         }
-        "column-gap" => {
+        PropertyId::ColumnGap => {
             if let Some(value) = parse_gap_value(&declaration.value) {
                 apply_property(
                     &mut cascaded.column_gap,
@@ -1103,7 +1119,7 @@ fn apply_declaration(
             }
         }
         // Flex item properties
-        "flex-grow" => {
+        PropertyId::FlexGrow => {
             if let Some(value) = parse_number_value(&declaration.value) {
                 apply_property(
                     &mut cascaded.flex_grow,
@@ -1114,7 +1130,7 @@ fn apply_declaration(
                 );
             }
         }
-        "flex-shrink" => {
+        PropertyId::FlexShrink => {
             if let Some(value) = parse_number_value(&declaration.value) {
                 apply_property(
                     &mut cascaded.flex_shrink,
@@ -1125,7 +1141,7 @@ fn apply_declaration(
                 );
             }
         }
-        "flex-basis" => {
+        PropertyId::FlexBasis => {
             if let Some(value) = parse_flex_basis(&declaration.value) {
                 apply_property(
                     &mut cascaded.flex_basis,
@@ -1136,7 +1152,7 @@ fn apply_declaration(
                 );
             }
         }
-        "flex" => {
+        PropertyId::Flex => {
             // Shorthand: flex: <grow> [<shrink>] [<basis>]
             let nums: Vec<f32> = declaration
                 .value
@@ -1174,7 +1190,7 @@ fn apply_declaration(
                 );
             }
         }
-        "order" => {
+        PropertyId::Order => {
             if let Some(value) = parse_integer_value(&declaration.value) {
                 apply_property(
                     &mut cascaded.order,
@@ -1186,7 +1202,7 @@ fn apply_declaration(
             }
         }
         // Positioning
-        "position" => {
+        PropertyId::Position => {
             if let Some(value) = parse_position(&declaration.value) {
                 apply_property(
                     &mut cascaded.position,
@@ -1197,7 +1213,7 @@ fn apply_declaration(
                 );
             }
         }
-        "top" => {
+        PropertyId::Top => {
             if let Some(value) = parse_length_or_auto(&declaration.value) {
                 apply_property(
                     &mut cascaded.top,
@@ -1208,7 +1224,7 @@ fn apply_declaration(
                 );
             }
         }
-        "right" => {
+        PropertyId::Right => {
             if let Some(value) = parse_length_or_auto(&declaration.value) {
                 apply_property(
                     &mut cascaded.right_offset,
@@ -1219,7 +1235,7 @@ fn apply_declaration(
                 );
             }
         }
-        "bottom" => {
+        PropertyId::Bottom => {
             if let Some(value) = parse_length_or_auto(&declaration.value) {
                 apply_property(
                     &mut cascaded.bottom,
@@ -1230,7 +1246,7 @@ fn apply_declaration(
                 );
             }
         }
-        "left" => {
+        PropertyId::Left => {
             if let Some(value) = parse_length_or_auto(&declaration.value) {
                 apply_property(
                     &mut cascaded.left_offset,
@@ -1241,7 +1257,7 @@ fn apply_declaration(
                 );
             }
         }
-        "z-index" => {
+        PropertyId::ZIndex => {
             if let Some(value) = parse_integer_value(&declaration.value) {
                 apply_property(
                     &mut cascaded.z_index,
@@ -1253,7 +1269,7 @@ fn apply_declaration(
             }
         }
         // Overflow
-        "overflow" => {
+        PropertyId::Overflow => {
             if let Some(value) = parse_overflow(&declaration.value) {
                 apply_property(
                     &mut cascaded.overflow_x,
@@ -1271,7 +1287,7 @@ fn apply_declaration(
                 );
             }
         }
-        "overflow-x" => {
+        PropertyId::OverflowX => {
             if let Some(value) = parse_overflow(&declaration.value) {
                 apply_property(
                     &mut cascaded.overflow_x,
@@ -1282,7 +1298,7 @@ fn apply_declaration(
                 );
             }
         }
-        "overflow-y" => {
+        PropertyId::OverflowY => {
             if let Some(value) = parse_overflow(&declaration.value) {
                 apply_property(
                     &mut cascaded.overflow_y,
@@ -1294,7 +1310,7 @@ fn apply_declaration(
             }
         }
         // Visual
-        "opacity" => {
+        PropertyId::Opacity => {
             if let Some(value) = parse_opacity(&declaration.value) {
                 apply_property(
                     &mut cascaded.opacity,
@@ -1305,7 +1321,7 @@ fn apply_declaration(
                 );
             }
         }
-        _ => {}
+        PropertyId::Unknown => {}
     }
 }
 
