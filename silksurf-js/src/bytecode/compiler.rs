@@ -14,8 +14,8 @@ use super::opcode::Opcode;
 use crate::lexer::{Span, Symbol};
 use crate::parser::{
     Argument, ArrayElement, AssignmentOperator, AssignmentTarget, BinaryOperator, Expression,
-    ForInit, Identifier, Literal, LogicalOperator, ObjectProperty, Program, PropertyKey, Statement,
-    UnaryOperator, UpdateOperator, VariableDeclaration, VariableKind,
+    ForInit, ForInLeft, Identifier, Literal, LogicalOperator, ObjectProperty, Program, PropertyKey,
+    Statement, UnaryOperator, UpdateOperator, VariableDeclaration, VariableKind,
 };
 
 /// Compilation error
@@ -665,6 +665,240 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                         }
                     }
                 }
+            }
+            /*
+             * for (x of iterable) { body }
+             *
+             * WHY: for...of is widely used in modern JS for iterating arrays,
+             * strings, Maps, and Sets. Without compilation, the loop body is
+             * silently skipped.
+             *
+             * Bytecode sequence:
+             *   iter_src = compile(right)
+             *   iter      = GetIterator(iter_src)
+             *   loop:
+             *     result  = IterNext(iter)
+             *     done    = IterDone(result)
+             *     JmpTrue done -> exit
+             *     value   = IterValue(result)
+             *     SetLocal(loop_var, value)  -- or SetGlobal if undeclared
+             *     compile(body)
+             *     Jmp -> loop
+             *   exit:
+             *     IterClose(iter)
+             *
+             * See: vm/mod.rs op_get_iterator / op_iter_next for runtime semantics
+             */
+            Statement::ForOf(for_of) => {
+                self.enter_scope();
+
+                // Compile the iterable expression
+                let iter_src = self.compile_expression(for_of.right)?;
+                let checkpoint = self.next_register;
+
+                // Allocate scratch registers that persist for the loop duration
+                let iter_reg = self.alloc_register();
+                let result_reg = self.alloc_register();
+                let done_reg = self.alloc_register();
+                let val_reg = self.alloc_register();
+
+                self.emit(Instruction::new_rr(Opcode::GetIterator, iter_reg.0, iter_src.0));
+
+                let loop_start = self.current_offset();
+                self.loop_stack.push(LoopContext {
+                    break_targets: Vec::new(),
+                    continue_targets: Vec::new(),
+                });
+
+                // result = iter.next()
+                self.emit(Instruction::new_rr(Opcode::IterNext, result_reg.0, iter_reg.0));
+                // done = result.done
+                self.emit(Instruction::new_rr(Opcode::IterDone, done_reg.0, result_reg.0));
+                // if done: exit
+                let exit_jump = self.emit(Instruction::new_r_offset(Opcode::JmpTrue, done_reg.0, 0));
+                // value = result.value
+                self.emit(Instruction::new_rr(Opcode::IterValue, val_reg.0, result_reg.0));
+
+                // Bind loop variable
+                match &for_of.left {
+                    ForInLeft::VariableDeclaration(decl) => {
+                        for declarator in decl.declarations {
+                            if let crate::parser::Pattern::Identifier(id) = &declarator.id {
+                                self.declare_var(id.name, decl.kind, true);
+                                if let Some((depth, slot)) = self.lookup_var(id.name) {
+                                    if depth == 0 {
+                                        self.emit(Instruction::new_rr(
+                                            Opcode::SetLocal, slot, val_reg.0,
+                                        ));
+                                    } else {
+                                        self.emit(Instruction::new_rrr(
+                                            Opcode::SetCapture, depth, slot, val_reg.0,
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    ForInLeft::Pattern(crate::parser::Pattern::Identifier(id)) => {
+                        if let Some((depth, slot)) = self.lookup_var(id.name) {
+                            if depth == 0 {
+                                self.emit(Instruction::new_rr(
+                                    Opcode::SetLocal, slot, val_reg.0,
+                                ));
+                            } else {
+                                self.emit(Instruction::new_rrr(
+                                    Opcode::SetCapture, depth, slot, val_reg.0,
+                                ));
+                            }
+                        } else {
+                            // Fall back to global assignment
+                            let str_id = self.intern_string(id.raw);
+                            let const_idx = self.chunk.add_constant(Constant::String(str_id));
+                            self.emit(Instruction::new_ri(
+                                Opcode::SetGlobal, val_reg.0, const_idx,
+                            ));
+                        }
+                    }
+                    _ => {}
+                }
+
+                // Compile body
+                let continue_target = self.current_offset();
+                self.compile_statement(for_of.body)?;
+
+                // Jump back to loop head
+                let back_offset = (loop_start as i32) - (self.current_offset() as i32) - 1;
+                self.emit(Instruction::new_offset(Opcode::Jmp, back_offset));
+
+                // Patch exit jump
+                self.patch_jump(exit_jump);
+
+                // Close iterator
+                self.emit(Instruction::new_r(Opcode::IterClose, iter_reg.0));
+
+                let loop_ctx = self.loop_stack.pop().unwrap();
+                for brk in loop_ctx.break_targets {
+                    self.patch_jump(brk.offset);
+                }
+                for cont in loop_ctx.continue_targets {
+                    let rel = (continue_target as i32) - (cont.offset as i32) - 1;
+                    self.chunk.instructions[cont.offset] =
+                        Instruction::new_offset(Opcode::Jmp, rel);
+                }
+
+                self.free_registers_to(checkpoint);
+                self.exit_scope();
+            }
+            /*
+             * for (k in obj) { body }
+             *
+             * WHY: for...in iterates enumerable string keys of an object.
+             * Compiled as: collect Object.keys(obj) into array, then indexed
+             * iteration. Reuses GetIterator over the keys array.
+             *
+             * Implementation: synthesise `Object.keys(right)` at compile time
+             * by emitting GetProp("keys") on the Object global then Call,
+             * then use the same GetIterator loop as for...of.
+             * Simplified: emit code equivalent to for (k of Object.keys(obj)).
+             */
+            Statement::ForIn(for_in) => {
+                self.enter_scope();
+
+                // Compute the object
+                let obj_reg = self.compile_expression(for_in.right)?;
+                let checkpoint = self.next_register;
+
+                // keys_arr = Object.keys(obj)
+                let obj_global_reg = self.alloc_register();
+                let keys_fn_reg = self.alloc_register();
+                let keys_arr_reg = self.alloc_register();
+
+                let obj_str_id = self.intern_string("Object");
+                let obj_const_idx = self.chunk.add_constant(Constant::String(obj_str_id));
+                self.emit(Instruction::new_ri(Opcode::GetGlobal, obj_global_reg.0, obj_const_idx));
+
+                let keys_str_id = self.intern_string("keys");
+                let keys_const_idx = self.chunk.add_constant(Constant::String(keys_str_id));
+                self.emit(Instruction::new_rrr(
+                    Opcode::GetProp, keys_fn_reg.0, obj_global_reg.0, keys_const_idx as u8,
+                ));
+                // Call keys_fn(obj) -> emit Call: dst=keys_arr, fn=keys_fn, argc=1, argv=obj_reg
+                // Call encoding: dst=r[keys_arr], src1=r[keys_fn], src2=argc(1)
+                // Args are in consecutive registers starting at keys_fn+1, so mov obj_reg there
+                let arg_reg = self.alloc_register();
+                self.emit(Instruction::new_rr(Opcode::Mov, arg_reg.0, obj_reg.0));
+                self.emit(Instruction::new_rrr(Opcode::Call, keys_arr_reg.0, keys_fn_reg.0, 1));
+
+                // Now use GetIterator over keys_arr
+                let iter_reg = self.alloc_register();
+                let result_reg = self.alloc_register();
+                let done_reg = self.alloc_register();
+                let val_reg = self.alloc_register();
+
+                self.emit(Instruction::new_rr(Opcode::GetIterator, iter_reg.0, keys_arr_reg.0));
+
+                let loop_start = self.current_offset();
+                self.loop_stack.push(LoopContext {
+                    break_targets: Vec::new(),
+                    continue_targets: Vec::new(),
+                });
+
+                self.emit(Instruction::new_rr(Opcode::IterNext, result_reg.0, iter_reg.0));
+                self.emit(Instruction::new_rr(Opcode::IterDone, done_reg.0, result_reg.0));
+                let exit_jump = self.emit(Instruction::new_r_offset(Opcode::JmpTrue, done_reg.0, 0));
+                self.emit(Instruction::new_rr(Opcode::IterValue, val_reg.0, result_reg.0));
+
+                match &for_in.left {
+                    ForInLeft::VariableDeclaration(decl) => {
+                        for declarator in decl.declarations {
+                            if let crate::parser::Pattern::Identifier(id) = &declarator.id {
+                                self.declare_var(id.name, decl.kind, true);
+                                if let Some((depth, slot)) = self.lookup_var(id.name) {
+                                    if depth == 0 {
+                                        self.emit(Instruction::new_rr(Opcode::SetLocal, slot, val_reg.0));
+                                    } else {
+                                        self.emit(Instruction::new_rrr(Opcode::SetCapture, depth, slot, val_reg.0));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    ForInLeft::Pattern(crate::parser::Pattern::Identifier(id)) => {
+                        if let Some((depth, slot)) = self.lookup_var(id.name) {
+                            if depth == 0 {
+                                self.emit(Instruction::new_rr(Opcode::SetLocal, slot, val_reg.0));
+                            } else {
+                                self.emit(Instruction::new_rrr(Opcode::SetCapture, depth, slot, val_reg.0));
+                            }
+                        } else {
+                            let str_id = self.intern_string(id.raw);
+                            let const_idx = self.chunk.add_constant(Constant::String(str_id));
+                            self.emit(Instruction::new_ri(Opcode::SetGlobal, val_reg.0, const_idx));
+                        }
+                    }
+                    _ => {}
+                }
+
+                let continue_target = self.current_offset();
+                self.compile_statement(for_in.body)?;
+
+                let back_offset = (loop_start as i32) - (self.current_offset() as i32) - 1;
+                self.emit(Instruction::new_offset(Opcode::Jmp, back_offset));
+                self.patch_jump(exit_jump);
+                self.emit(Instruction::new_r(Opcode::IterClose, iter_reg.0));
+
+                let loop_ctx = self.loop_stack.pop().unwrap();
+                for brk in loop_ctx.break_targets {
+                    self.patch_jump(brk.offset);
+                }
+                for cont in loop_ctx.continue_targets {
+                    let rel = (continue_target as i32) - (cont.offset as i32) - 1;
+                    self.chunk.instructions[cont.offset] =
+                        Instruction::new_offset(Opcode::Jmp, rel);
+                }
+
+                self.free_registers_to(checkpoint);
+                self.exit_scope();
             }
             _ => {}
         }
