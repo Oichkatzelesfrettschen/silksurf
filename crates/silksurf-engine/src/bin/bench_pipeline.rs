@@ -23,7 +23,7 @@ use silksurf_engine::fused_pipeline::fused_style_layout_paint;
 use silksurf_engine::parse_html;
 use silksurf_layout::Rect;
 use silksurf_layout::{LayoutTree, build_layout_tree};
-use silksurf_render::{build_display_list, rasterize_parallel};
+use silksurf_render::{build_display_list, rasterize_parallel, rasterize_parallel_into};
 use std::time::Duration;
 use std::time::Instant;
 
@@ -144,7 +144,7 @@ fn main() {
     println!("  TOTAL:        {:>8?}  per-iter  ({} display items)", old_per, old_items);
     println!();
 
-    // ---- NEW PATH: fused single BFS pass (style + layout + paint) + Rayon rasterize ----
+    // ---- NEW PATH: fused single BFS pass + Rayon rasterize (fresh buffer each iter) ----
     let mut fused_total = Duration::ZERO;
     let mut raster_total = Duration::ZERO;
     let mut fused_items = 0usize;
@@ -173,7 +173,7 @@ fn main() {
 
     println!("--- fused pipeline (style+layout+paint in 1 BFS pass) ---");
     println!("  fused pass:   {:>8?}  per-iter", fused_per);
-    println!("  rasterize:    {:>8?}  per-iter", raster_per);
+    println!("  rasterize:    {:>8?}  per-iter  (fresh alloc each frame)", raster_per);
     println!("  TOTAL:        {:>8?}  per-iter  ({} display items)", fused_per + raster_per, fused_items);
     println!();
 
@@ -181,6 +181,39 @@ fn main() {
     let speedup = old_per.as_nanos() as f64 / fused_per.as_nanos() as f64;
     println!("=== Speedup (fused pass vs 3-pass cascade+layout+display) ===");
     println!("  {:.2}x  ({:?} -> {:?} per iter)", speedup, old_per, fused_per);
+    println!();
+
+    // ---- REUSE PATH: rasterize_parallel_into with pre-allocated buffer ----
+    // WHY: In an interactive browser, the raster buffer persists across frames.
+    // This measures the amortized cost of rasterization after the first frame,
+    // which is the relevant number for cached re-render latency.
+    let mut raster_reuse_total = Duration::ZERO;
+    let mut reuse_buf: Vec<u8> = Vec::new();
+    // Pre-warm: first iter allocates the buffer, subsequent iters reuse it.
+    for i in 0..ITERATIONS {
+        let doc = parse_html(BENCH_HTML).expect("parse html");
+        let result = fused_style_layout_paint(&doc.dom, &stylesheet, doc.document, VIEWPORT);
+        let dl = silksurf_render::DisplayList {
+            items: result.display_items,
+            tiles: None,
+        }
+        .with_tiles(1280, 800, 64);
+
+        let t = Instant::now();
+        rasterize_parallel_into(&dl, 1280, 800, 64, &mut reuse_buf);
+        let elapsed = t.elapsed();
+        // Skip iter 0 (cold allocation) to measure steady-state cost
+        if i > 0 {
+            raster_reuse_total += elapsed;
+        }
+    }
+    let raster_reuse_per = raster_reuse_total / (ITERATIONS - 1);
+
+    println!("=== Buffer reuse (steady-state, pre-allocated 4MB buffer) ===");
+    println!("  rasterize:    {:>8?}  per-iter  (buffer reused, zero alloc)", raster_reuse_per);
+    println!("  fused+raster: {:>8?}  per-iter  (target: <500us cached re-render)", fused_per + raster_reuse_per);
+    let alloc_overhead = raster_per.saturating_sub(raster_reuse_per);
+    println!("  alloc savings:{:>8?}  per-frame  (eliminated by buffer reuse)", alloc_overhead);
 }
 
 /// Approximate node count for display (parse once outside any timing section).

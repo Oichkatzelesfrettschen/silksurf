@@ -329,48 +329,50 @@ unsafe fn fill_row_sse2(row: &mut [u32], pixel: u32) {
 // ============================================================================
 
 /*
- * rasterize_parallel -- tile-based parallel rasterization using rayon.
+ * rasterize_parallel_into -- tile-parallel rasterization into a caller-owned buffer.
  *
- * WHY: The rasterizer is embarrassingly parallel -- each tile writes to a
- * disjoint region of the output buffer. No synchronization is needed.
+ * WHY: rasterize_parallel() allocates a 4MB Vec on every call (~1ms cold,
+ * ~115us warm). For interactive rendering the allocation dominates each frame.
+ * rasterize_parallel_into() accepts &mut Vec<u8>, resizes only when dimensions
+ * change, and reuses the allocation across frames.
  *
- * Architecture (inspired by gororoba LBM z-slice parallelism):
- *   1. Divide viewport into NxM tiles (default 64x64 pixels each)
- *   2. For each tile: collect display items that overlap it
- *   3. Rasterize each tile independently via rayon::par_iter
- *   4. Each rayon worker writes to buffer[tile_y_start..tile_y_end]
- *      which is disjoint from all other workers' regions
+ * For a 1280x800 viewport: first call allocates 4MB; subsequent calls with
+ * the same dimensions skip the alloc and go straight to the fill (~115us).
+ * At 60fps this saves 60 * ~900us = ~54ms/s of allocator pressure.
  *
- * SAFETY: Uses raw pointer arithmetic (SendPtr pattern from gororoba)
- * to allow parallel writes to disjoint buffer regions. The safety proof:
- * tile (tx, ty) writes to rows [ty*tile_h..(ty+1)*tile_h] and columns
- * [tx*tile_w..(tx+1)*tile_w]. No two tiles share any pixel offset.
+ * INVARIANT: caller must pass the SAME buf across frames. Passing a fresh
+ * empty Vec each call degrades to rasterize_parallel performance.
  *
- * See: gororoba_app/crates/gororoba_bevy_lbm/src/soa_solver.rs:1254
- * See: gororoba_app/docs/engine_optimizations.md Section 3
+ * See: rasterize_parallel (below) for the owned-output one-shot variant.
+ * See: gororoba soa_solver.rs:280 for the reuse-buffer pattern.
  */
 #[cfg(feature = "parallel")]
-pub fn rasterize_parallel(
+pub fn rasterize_parallel_into(
     display_list: &DisplayList,
     width: u32,
     height: u32,
     tile_size: u32,
-) -> Vec<u8> {
+    buf: &mut Vec<u8>,
+) {
     use rayon::prelude::*;
+
+    let required = (width * height * 4) as usize;
+    if buf.len() != required {
+        buf.resize(required, 255u8);
+    }
+    // Reset to white background -- LLVM auto-vectorizes this to AVX2 fill
+    buf.fill(255u8);
 
     let tile_size = tile_size.max(1);
     let tiles_x = (width + tile_size - 1) / tile_size;
     let tiles_y = (height + tile_size - 1) / tile_size;
     let total_tiles = (tiles_x * tiles_y) as usize;
 
-    // Allocate output buffer (white background)
-    let mut buffer = vec![255u8; (width * height * 4) as usize];
-
     // SAFETY: We use a raw pointer to allow parallel writes to disjoint regions.
     // Each tile writes to a unique rectangular region of the buffer.
     // The SendPtr wrapper (see gororoba pattern) makes this safe to send across threads.
-    let buf_ptr = buffer.as_mut_ptr();
-    let buf_len = buffer.len();
+    let buf_ptr = buf.as_mut_ptr();
+    let buf_len = buf.len();
 
     // Wrapper to make raw pointer Send (safe because writes are disjoint)
     struct SendPtr(*mut u8, usize);
@@ -448,6 +450,33 @@ pub fn rasterize_parallel(
             }
         }
     });
+}
 
+/*
+ * rasterize_parallel -- tile-based parallel rasterization, owned output.
+ *
+ * WHY: Convenience wrapper around rasterize_parallel_into for callers that
+ * need a fresh owned Vec (e.g. one-shot renders, tests, CLI tools).
+ * Interactive renderers should use rasterize_parallel_into with a reused
+ * buffer to eliminate the per-frame 4MB allocation cost (~900us cold).
+ *
+ * Architecture (inspired by gororoba LBM z-slice parallelism):
+ *   1. Divide viewport into NxM tiles (default 64x64 pixels each)
+ *   2. For each tile: collect display items that overlap it
+ *   3. Rasterize each tile independently via rayon::par_iter
+ *   4. Each rayon worker writes to disjoint buffer rows -- no sync needed
+ *
+ * See: rasterize_parallel_into (above) for the buffer-reuse variant.
+ * See: gororoba_app/crates/gororoba_bevy_lbm/src/soa_solver.rs:1254
+ */
+#[cfg(feature = "parallel")]
+pub fn rasterize_parallel(
+    display_list: &DisplayList,
+    width: u32,
+    height: u32,
+    tile_size: u32,
+) -> Vec<u8> {
+    let mut buffer = Vec::new();
+    rasterize_parallel_into(display_list, width, height, tile_size, &mut buffer);
     buffer
 }

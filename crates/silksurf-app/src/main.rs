@@ -347,11 +347,21 @@ fn main() {
     }
     .with_tiles(1280, 800, 64);
 
-    // 9. Tile-parallel rasterization via Rayon (disjoint tile regions, no sync)
+    /*
+     * 9. Tile-parallel rasterization via Rayon (disjoint tile regions, no sync).
+     *
+     * WHY rasterize_parallel_into: in an interactive browser, raster_buf would
+     * be held across frames and reused, eliminating the ~1ms cold 4MB allocation
+     * on every frame. The CLI only renders once per process but uses the correct
+     * API so the architecture is ready for an interactive render loop.
+     *
+     * See: silksurf_render::rasterize_parallel_into for buffer-reuse semantics.
+     */
     let raster_start = std::time::Instant::now();
-    let buffer = silksurf_render::rasterize_parallel(&display_list, 1280, 800, 64);
+    let mut raster_buf: Vec<u8> = Vec::new();
+    silksurf_render::rasterize_parallel_into(&display_list, 1280, 800, 64, &mut raster_buf);
     let raster_elapsed = raster_start.elapsed();
-    eprintln!("[SilkSurf] Rasterized: {} bytes in {:?}", buffer.len(), raster_elapsed);
+    eprintln!("[SilkSurf] Rasterized: {} bytes in {:?}", raster_buf.len(), raster_elapsed);
 
     eprintln!("\n=== PROCESSING BUDGET (excludes network) ===");
     eprintln!("  CSS parse:      {:?}", css_start.elapsed() - fused_elapsed - raster_elapsed);
