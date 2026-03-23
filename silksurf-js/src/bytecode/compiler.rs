@@ -1492,24 +1492,80 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
         let result_reg = self.alloc_register();
         let callee_reg = self.compile_expression(call.callee)?;
 
-        let arg_base = self.next_register;
-        for arg in call.arguments {
-            match arg {
-                Argument::Expression(expr) => {
-                    let _ = self.compile_expression(expr)?;
-                }
-                Argument::Spread(_) => {
-                    // TODO: Handle spread
+        let has_spread = call.arguments.iter().any(|a| matches!(a, Argument::Spread(_)));
+
+        if has_spread {
+            /*
+             * Spread call: f(a, b, ...rest) or f(...arr)
+             *
+             * WHY: argc is unknown at compile time when spread args are present.
+             * Strategy: build a single args array containing all arguments
+             * (spreading the spread arguments inline), then emit SpreadCall.
+             *
+             * Pattern:
+             *   args_arr = []          (NewArray)
+             *   push(args_arr, a)      (for each normal arg)
+             *   concat(args_arr, rest) (for each spread arg -- args_arr = args_arr.concat(rest))
+             *   SpreadCall(result, callee, args_arr)
+             */
+            let args_reg = self.alloc_register();
+            self.emit(Instruction::new_r(Opcode::NewArray, args_reg.0));
+            // Seed length = 0
+            let zero_reg = self.alloc_register();
+            self.emit(Instruction::new(Opcode::LoadZero));
+            self.emit(Instruction::new_rr(Opcode::Mov, zero_reg.0, 0));
+
+            for arg in call.arguments {
+                match arg {
+                    Argument::Expression(expr) => {
+                        // args_arr.push(val)
+                        let val_reg = self.compile_expression(expr)?;
+                        let push_fn_reg = self.alloc_register();
+                        let push_str_id = self.intern_string("push");
+                        let push_const = self.chunk.add_constant(Constant::String(push_str_id));
+                        self.emit(Instruction::new_rrr(
+                            Opcode::GetProp, push_fn_reg.0, args_reg.0, push_const as u8,
+                        ));
+                        // Call push: callee=push_fn, arg1=val (laid out after push_fn_reg)
+                        let arg_slot = self.alloc_register();
+                        self.emit(Instruction::new_rr(Opcode::Mov, arg_slot.0, val_reg.0));
+                        self.emit(Instruction::new_rrr(Opcode::Call, zero_reg.0, push_fn_reg.0, 1));
+                    }
+                    Argument::Spread(spread_elem) => {
+                        // args_arr = args_arr.concat(spread_val)
+                        let spread_reg = self.compile_expression(spread_elem.argument)?;
+                        let concat_fn_reg = self.alloc_register();
+                        let concat_str_id = self.intern_string("concat");
+                        let concat_const = self.chunk.add_constant(Constant::String(concat_str_id));
+                        self.emit(Instruction::new_rrr(
+                            Opcode::GetProp, concat_fn_reg.0, args_reg.0, concat_const as u8,
+                        ));
+                        let arg_slot = self.alloc_register();
+                        self.emit(Instruction::new_rr(Opcode::Mov, arg_slot.0, spread_reg.0));
+                        self.emit(Instruction::new_rrr(Opcode::Call, args_reg.0, concat_fn_reg.0, 1));
+                    }
                 }
             }
-        }
-        let argc = call.arguments.len() as u8;
 
-        self.emit_at(
-            Instruction::new_rrr(Opcode::Call, result_reg.0, callee_reg.0, argc),
-            call.span,
-        );
-        self.free_registers_to(arg_base);
+            self.emit_at(
+                Instruction::new_rrr(Opcode::SpreadCall, result_reg.0, callee_reg.0, args_reg.0),
+                call.span,
+            );
+            self.free_registers_to(self.next_register);
+        } else {
+            let arg_base = self.next_register;
+            for arg in call.arguments {
+                if let Argument::Expression(expr) = arg {
+                    let _ = self.compile_expression(expr)?;
+                }
+            }
+            let argc = call.arguments.len() as u8;
+            self.emit_at(
+                Instruction::new_rrr(Opcode::Call, result_reg.0, callee_reg.0, argc),
+                call.span,
+            );
+            self.free_registers_to(arg_base);
+        }
 
         Ok(result_reg)
     }

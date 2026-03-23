@@ -340,6 +340,9 @@ static DISPATCH_TABLE: [OpHandler; 256] = {
     table[Opcode::Halt as usize] = op_halt;
     table[Opcode::Debugger as usize] = op_debugger;
 
+    // Spread
+    table[Opcode::SpreadCall as usize] = op_spread_call;
+
     // Iterators (for...of / for...in)
     table[Opcode::GetIterator as usize] = op_get_iterator;
     table[Opcode::GetAsyncIterator as usize] = op_get_iterator; // same semantics for sync fallback
@@ -1120,6 +1123,71 @@ fn op_enter_finally(_vm: &mut Vm, _instr: Instruction) -> VmResult<()> {
  * See: builtins/array.rs get_array_method() for array method lookup
  * See: builtins/string_proto.rs get_string_method() for string methods
  */
+/*
+ * op_spread_call -- call a function with arguments from an array.
+ *
+ * WHY: `f(...arr)` and `f(a, b, ...rest)` compile with SpreadCall so the
+ * argument count can be determined at runtime. Regular Call encodes argc
+ * as a compile-time constant (src2 byte); SpreadCall encodes the array
+ * holding the actual args.
+ *
+ * Instruction encoding: SpreadCall dst, callee, args_array  (new_rrr)
+ *   dst        = result register
+ *   src1       = callee register
+ *   src2       = args array register (Value::Object array-like)
+ *
+ * See: compiler.rs compile_call -- emits SpreadCall when any arg is Spread
+ * See: op_call for the fixed-argc variant
+ */
+fn op_spread_call(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
+    let callee = vm.get_reg(instr.src1()).clone();
+    let args_val = vm.get_reg(instr.src2()).clone();
+    let args: Vec<Value> = match &args_val {
+        Value::Object(o) => {
+            let o_borrow = o.borrow();
+            if builtins::array::is_array_like(&o_borrow) {
+                builtins::array::collect_elements_pub(&o_borrow)
+            } else {
+                vec![]
+            }
+        }
+        _ => vec![],
+    };
+
+    match callee {
+        Value::NativeFunction(func) => {
+            let result = func.call(&args);
+            vm.set_reg(instr.dst(), result);
+            Ok(())
+        }
+        Value::Function(func) => {
+            // For interpreted functions: lay args into registers then call normally.
+            // Args go at callee_reg+1 .. callee_reg+1+argc (same layout as op_call).
+            let base_reg = instr.src1() as usize + 1;
+            for (i, arg) in args.iter().enumerate() {
+                if base_reg + i < vm.registers.len() {
+                    vm.registers[base_reg + i] = arg.clone();
+                }
+            }
+            let chunk_idx = func.chunk_idx as usize;
+            if chunk_idx >= vm.chunks.len() {
+                return Err(VmError::OutOfBounds);
+            }
+            if vm.call_stack.len() >= vm.max_stack_depth {
+                return Err(VmError::StackOverflow);
+            }
+            vm.call_stack.push(CallFrame {
+                chunk_idx,
+                pc: 0,
+                base: 0,
+                return_reg: instr.dst(),
+            });
+            Ok(())
+        }
+        _ => Err(VmError::TypeError("not a function".to_string())),
+    }
+}
+
 /*
  * op_get_iterator -- create an iterator object from an iterable Value.
  *
