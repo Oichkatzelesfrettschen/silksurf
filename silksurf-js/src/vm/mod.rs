@@ -1032,8 +1032,13 @@ fn op_enter_finally(_vm: &mut Vm, _instr: Instruction) -> VmResult<()> {
  */
 fn op_get_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     let obj = vm.get_reg(instr.src1()).clone();
-    let key_idx = u32::from(instr.src2());
-    let prop_name = vm.strings.get(key_idx).unwrap_or("").to_string();
+    // src2 is a constant pool index; resolve to string table ID via constant
+    let const_idx = u16::from(instr.src2());
+    let str_id = match vm.current_chunk().get_constant(const_idx) {
+        Some(Constant::String(id)) => *id,
+        _ => u32::from(instr.src2()),
+    };
+    let prop_name = vm.strings.get(str_id).unwrap_or("").to_string();
     let value = match &obj {
         Value::HostObject(host) => host.borrow().get_property(&prop_name),
         Value::Object(o) => {
@@ -1054,8 +1059,12 @@ fn op_get_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
 }
 
 fn op_set_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
-    let key_idx = u32::from(instr.src1());
-    let prop_name = vm.strings.get(key_idx).unwrap_or("").to_string();
+    let const_idx = u16::from(instr.src1());
+    let str_id = match vm.current_chunk().get_constant(const_idx) {
+        Some(Constant::String(id)) => *id,
+        _ => u32::from(instr.src1()),
+    };
+    let prop_name = vm.strings.get(str_id).unwrap_or("").to_string();
     let value = vm.get_reg(instr.src2()).clone();
     let obj = vm.get_reg(instr.dst());
     match obj {
@@ -1170,13 +1179,29 @@ fn op_set_local(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
  * See: builtins/mod.rs install_builtins() for what's on the global
  * See: dom_bridge/mod.rs install_document() for document global
  */
+/*
+ * op_get_global / op_set_global -- resolve global variables via constant pool.
+ *
+ * CRITICAL FIX: The instruction's const_idx is an index into the CONSTANT POOL,
+ * not the string table. The constant at that index is Constant::String(str_id)
+ * where str_id is the string table index. We must resolve through the constant
+ * pool first, just like op_new_function resolves Constant::Function.
+ *
+ * Previous bug: treated const_idx directly as string table index, which only
+ * worked when const_idx happened to equal the string table ID (true for the
+ * first few constants, false for scripts with many constants).
+ */
 fn op_get_global(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
-    let key_idx = u32::from(instr.const_idx());
-    // Resolve the constant index to a property name via string table
-    let name = vm.strings.get(key_idx).unwrap_or("").to_string();
+    let const_idx = instr.const_idx();
+    let chunk = vm.current_chunk();
+    // Resolve constant pool entry to string table ID
+    let str_id = match chunk.get_constant(const_idx) {
+        Some(Constant::String(id)) => *id,
+        _ => u32::from(const_idx), // Fallback
+    };
+    let name = vm.strings.get(str_id).unwrap_or("").to_string();
     let value = if name.is_empty() {
-        // Fallback to numeric index for backward compat
-        vm.global.borrow().get(key_idx)
+        vm.global.borrow().get(str_id)
     } else {
         vm.global.borrow().get_by_str(&name)
     };
@@ -1185,11 +1210,16 @@ fn op_get_global(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
 }
 
 fn op_set_global(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
-    let key_idx = u32::from(instr.const_idx());
+    let const_idx = instr.const_idx();
+    let chunk = vm.current_chunk();
+    let str_id = match chunk.get_constant(const_idx) {
+        Some(Constant::String(id)) => *id,
+        _ => u32::from(const_idx),
+    };
     let value = vm.get_reg(instr.dst()).clone();
-    let name = vm.strings.get(key_idx).unwrap_or("").to_string();
+    let name = vm.strings.get(str_id).unwrap_or("").to_string();
     if name.is_empty() {
-        vm.global.borrow_mut().set(key_idx, value);
+        vm.global.borrow_mut().set(str_id, value);
     } else {
         vm.global.borrow_mut().set_by_str(&name, value);
     }
