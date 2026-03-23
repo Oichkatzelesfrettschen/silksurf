@@ -340,6 +340,14 @@ static DISPATCH_TABLE: [OpHandler; 256] = {
     table[Opcode::Halt as usize] = op_halt;
     table[Opcode::Debugger as usize] = op_debugger;
 
+    // Iterators (for...of / for...in)
+    table[Opcode::GetIterator as usize] = op_get_iterator;
+    table[Opcode::GetAsyncIterator as usize] = op_get_iterator; // same semantics for sync fallback
+    table[Opcode::IterNext as usize] = op_iter_next;
+    table[Opcode::IterDone as usize] = op_iter_done;
+    table[Opcode::IterValue as usize] = op_iter_value;
+    table[Opcode::IterClose as usize] = op_iter_close;
+
     // Exception handling
     table[Opcode::EnterTry as usize] = op_enter_try;
     table[Opcode::LeaveTry as usize] = op_leave_try;
@@ -1112,6 +1120,185 @@ fn op_enter_finally(_vm: &mut Vm, _instr: Instruction) -> VmResult<()> {
  * See: builtins/array.rs get_array_method() for array method lookup
  * See: builtins/string_proto.rs get_string_method() for string methods
  */
+/*
+ * op_get_iterator -- create an iterator object from an iterable Value.
+ *
+ * WHY: for...of requires an iterator (object with .next() method).
+ * For array-like Objects and Strings we construct a simple counter-based
+ * iterator. For other objects we try obj[Symbol.iterator]() -- but since
+ * our Symbol.iterator is a fixed string "@@symbol_wk_iterator", most
+ * user objects won't have it. In that case we fall back to treating the
+ * value as an empty iterable (safe, silent skip).
+ *
+ * Iterator shape: {__data: [v0, v1, ...], __idx: 0}
+ * IterNext/IterDone/IterValue read these private fields.
+ *
+ * Instruction encoding: GetIterator dst, src  (new_rr)
+ *   dst = register to store iterator object
+ *   src = register holding the iterable
+ *
+ * See: op_iter_next for the stepping logic
+ * See: compiler.rs Statement::ForOf for the loop bytecode pattern
+ */
+fn op_get_iterator(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
+    let src = vm.get_reg(instr.src1()).clone();
+    let iter = make_iterator_for(src);
+    vm.set_reg(instr.dst(), iter);
+    Ok(())
+}
+
+/*
+ * make_iterator_for -- build an iterator Object for a given Value.
+ *
+ * Array-like Objects: snapshot elements into __data Vec.
+ * Strings: split into chars, store as __data Vec.
+ * Others: empty iterator (done=true from the start).
+ *
+ * The iterator holds:
+ *   __data: internal Vec<Value> (stored as a NativeFunction returning a pointer --
+ *           actually stored as a plain array Value under key "__data")
+ *   __idx:  current position (stored as Value::Number under "__idx")
+ */
+fn make_iterator_for(iterable: Value) -> Value {
+    let elements: Vec<Value> = match &iterable {
+        Value::Object(o) => {
+            let o_borrow = o.borrow();
+            if builtins::array::is_array_like(&o_borrow) {
+                builtins::array::collect_elements_pub(&o_borrow)
+            } else {
+                vec![]
+            }
+        }
+        Value::String(s) => {
+            s.as_str()
+                .unwrap_or("")
+                .chars()
+                .map(|c| value::Value::string_owned(c.to_string()))
+                .collect()
+        }
+        _ => vec![],
+    };
+
+    let data = Rc::new(RefCell::new(elements));
+    let idx = Rc::new(RefCell::new(0usize));
+
+    let iter_obj = Rc::new(RefCell::new(value::Object::new()));
+    {
+        // next() method: returns {value, done}
+        let data_ref = Rc::clone(&data);
+        let idx_ref = Rc::clone(&idx);
+        let next_fn = Value::NativeFunction(Rc::new(value::NativeFunction::new(
+            "__iter_next__",
+            move |_| {
+                let i = *idx_ref.borrow();
+                let data = data_ref.borrow();
+                let done = i >= data.len();
+                let value = if done {
+                    Value::Undefined
+                } else {
+                    data[i].clone()
+                };
+                drop(data);
+                *idx_ref.borrow_mut() = i + 1;
+                // Return {value, done}
+                let result = Rc::new(RefCell::new(value::Object::new()));
+                result.borrow_mut().set_by_str("value", value);
+                result.borrow_mut().set_by_str("done", Value::Boolean(done));
+                Value::Object(result)
+            },
+        )));
+        iter_obj.borrow_mut().set_by_str("next", next_fn);
+        // Also store done state as a flag for fast IterDone check
+        iter_obj.borrow_mut().set_by_str("__done__", Value::Boolean(false));
+    }
+
+    Value::Object(iter_obj)
+}
+
+/*
+ * op_iter_next -- call iter.next() and store the result object.
+ *
+ * Instruction encoding: IterNext dst, iter  (new_rr)
+ *   dst  = register to store the {value, done} result object
+ *   iter = register holding the iterator
+ */
+fn op_iter_next(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
+    let iter = vm.get_reg(instr.src1()).clone();
+    let result = match &iter {
+        Value::Object(o) => {
+            let next_fn = o.borrow().get_by_str("next");
+            match next_fn {
+                Value::NativeFunction(f) => f.call(&[]),
+                _ => {
+                    // No next function: return done=true
+                    let r = Rc::new(RefCell::new(value::Object::new()));
+                    r.borrow_mut().set_by_str("done", Value::Boolean(true));
+                    r.borrow_mut().set_by_str("value", Value::Undefined);
+                    Value::Object(r)
+                }
+            }
+        }
+        _ => {
+            let r = Rc::new(RefCell::new(value::Object::new()));
+            r.borrow_mut().set_by_str("done", Value::Boolean(true));
+            r.borrow_mut().set_by_str("value", Value::Undefined);
+            Value::Object(r)
+        }
+    };
+    vm.set_reg(instr.dst(), result);
+    Ok(())
+}
+
+/*
+ * op_iter_done -- extract the `done` flag from an iterator result object.
+ *
+ * Instruction encoding: IterDone dst, result  (new_rr)
+ *   dst    = register to store done (Value::Boolean)
+ *   result = register holding the {value, done} object from IterNext
+ */
+fn op_iter_done(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
+    let result = vm.get_reg(instr.src1()).clone();
+    let done = match &result {
+        Value::Object(o) => o.borrow().get_by_str("done"),
+        _ => Value::Boolean(true),
+    };
+    vm.set_reg(instr.dst(), done);
+    Ok(())
+}
+
+/*
+ * op_iter_value -- extract the `value` from an iterator result object.
+ *
+ * Instruction encoding: IterValue dst, result  (new_rr)
+ *   dst    = register to store the iteration value
+ *   result = register holding the {value, done} object from IterNext
+ */
+fn op_iter_value(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
+    let result = vm.get_reg(instr.src1()).clone();
+    let val = match &result {
+        Value::Object(o) => o.borrow().get_by_str("value"),
+        _ => Value::Undefined,
+    };
+    vm.set_reg(instr.dst(), val);
+    Ok(())
+}
+
+/*
+ * op_iter_close -- clean up the iterator after a for...of loop.
+ *
+ * WHY: Some iterators need explicit cleanup (generators, file iterators).
+ * For our simple array iterators, no cleanup is needed. For generators,
+ * we'd call iter.return() here. Since we have no generators yet, this
+ * is a no-op.
+ *
+ * Instruction encoding: IterClose iter  (new_r)
+ */
+fn op_iter_close(_vm: &mut Vm, _instr: Instruction) -> VmResult<()> {
+    // No-op: array iterators hold no external resources.
+    // When generator support is added, call iter.return() here.
+    Ok(())
+}
+
 fn op_get_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     let obj = vm.get_reg(instr.src1()).clone();
     // src2 is a constant pool index; resolve to string table ID via constant
