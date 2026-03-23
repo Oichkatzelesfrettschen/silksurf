@@ -188,10 +188,14 @@ fn main() {
             continue;
         }
         let preview = &script[..script.len().min(80)];
-        eprintln!(
-            "[SilkSurf] Executing script {i} ({} bytes): {preview}...",
-            script.len()
-        );
+        if script.len() <= 600 {
+            eprintln!("[SilkSurf] Script {i} FULL ({} bytes): {script}", script.len());
+        } else {
+            eprintln!(
+                "[SilkSurf] Executing script {i} ({} bytes): {preview}...",
+                script.len()
+            );
+        }
         let script_start = std::time::Instant::now();
         // No skip patterns needed -- parser handles ??=, class extends, ?. etc.
         // Compile and execute
@@ -204,17 +208,32 @@ fn main() {
         }
         let compiler = silksurf_js::bytecode::Compiler::new();
         match compiler.compile_with_children(&ast) {
-            Ok((chunk, child_chunks)) => {
+            Ok((chunk, child_chunks, string_pool)) => {
+                // Load compiler's string pool into VM's StringTable.
+                // Build a mapping from compiler IDs to VM IDs.
+                let mut str_map = std::collections::HashMap::new();
+                for (compiler_id, s) in &string_pool {
+                    let vm_id = vm.strings.intern(s.clone());
+                    str_map.insert(*compiler_id, vm_id);
+                }
                 // Add child chunks (function bodies) first so their indices are stable
                 let child_base = vm.chunks_len();
                 for child in child_chunks {
                     vm.add_chunk(child);
                 }
-                // Patch function constants to use absolute chunk indices
+                // Patch constants: remap string IDs and function chunk indices
                 let mut main_chunk = chunk;
                 for constant in main_chunk.constants_mut() {
-                    if let silksurf_js::bytecode::Constant::Function(idx) = constant {
-                        *idx += child_base as u32;
+                    match constant {
+                        silksurf_js::bytecode::Constant::Function(idx) => {
+                            *idx += child_base as u32;
+                        }
+                        silksurf_js::bytecode::Constant::String(str_id) => {
+                            if let Some(&vm_id) = str_map.get(str_id) {
+                                *str_id = vm_id;
+                            }
+                        }
+                        _ => {}
                     }
                 }
                 let chunk_idx = vm.add_chunk(main_chunk);

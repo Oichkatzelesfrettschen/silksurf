@@ -81,6 +81,10 @@ pub struct Compiler<'src, 'arena> {
     chunk: Chunk,
     /// Child chunks for nested function expressions / arrow functions
     child_chunks: Vec<Chunk>,
+    /// String intern table for property names and identifiers.
+    /// Maps string content -> u32 index in the VM's StringTable.
+    string_pool: HashMap<String, u32>,
+    next_string_id: u32,
     scopes: Vec<Scope>,
     current_scope: usize,
     next_register: u8,
@@ -99,6 +103,8 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
         Self {
             chunk: Chunk::new(),
             child_chunks: Vec::new(),
+            string_pool: HashMap::new(),
+            next_string_id: 0,
             scopes,
             current_scope: 0,
             next_register: 0,
@@ -143,10 +149,11 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
     /// Get child chunks (function bodies) produced during compilation.
     /// Must be called after compile() on a second Compiler instance,
     /// or via compile_with_children().
+    /// Compile and return (main_chunk, child_chunks, string_pool).
     pub fn compile_with_children(
         mut self,
         program: &Program<'src, 'arena>,
-    ) -> CompileResult<(Chunk, Vec<Chunk>)> {
+    ) -> CompileResult<(Chunk, Vec<Chunk>, Vec<(u32, String)>)> {
         self.check_strict_directive(program);
         self.collect_declarations(program.body);
 
@@ -162,13 +169,44 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
             return Err(self.errors.remove(0));
         }
 
-        Ok((self.chunk, self.child_chunks))
+        let pool = self.get_string_pool();
+        Ok((self.chunk, self.child_chunks, pool))
     }
 
     /// Convert this compiler into its chunk (for child function compilation).
     fn into_chunk(mut self) -> Chunk {
         self.chunk.register_count = self.max_register + 1;
         self.chunk
+    }
+
+    /*
+     * intern_string -- intern a property/variable name, returning its u32 ID.
+     *
+     * WHY: Every property access (obj.prop), global lookup (GetGlobal),
+     * and property set (obj.prop = val) needs the property name as a u32
+     * string index. The VM's StringTable resolves these at runtime.
+     *
+     * Previously ALL property names used Constant::String(0) -- a hardcoded
+     * index that resolved to whatever string was first interned. This broke
+     * all property access since every property name was the same.
+     *
+     * Now each unique string gets a distinct ID. The string pool is passed
+     * to the VM after compilation via get_string_pool().
+     */
+    fn intern_string(&mut self, name: &str) -> u32 {
+        if let Some(&id) = self.string_pool.get(name) {
+            id
+        } else {
+            let id = self.next_string_id;
+            self.next_string_id += 1;
+            self.string_pool.insert(name.to_string(), id);
+            id
+        }
+    }
+
+    /// Get the string pool for loading into the VM's StringTable.
+    pub fn get_string_pool(&self) -> Vec<(u32, String)> {
+        self.string_pool.iter().map(|(s, &id)| (id, s.clone())).collect()
     }
 
     fn check_strict_directive(&mut self, program: &Program<'src, 'arena>) {
@@ -628,7 +666,8 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 }
             }
             Literal::String(s) => {
-                let idx = self.chunk.add_constant(Constant::String(0));
+                let str_id = self.intern_string(s.value);
+                let idx = self.chunk.add_constant(Constant::String(str_id));
                 self.emit_at(Instruction::new_ri(Opcode::LoadConst, reg.0, idx), s.span);
             }
             Literal::RegExp(r) => {
@@ -656,7 +695,8 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 self.emit_at(Instruction::new_rrr(Opcode::GetCapture, reg.0, depth, slot), id.span);
             }
         } else {
-            let name_idx = self.chunk.add_constant(Constant::String(0));
+            let str_id = self.intern_string(id.raw);
+            let name_idx = self.chunk.add_constant(Constant::String(str_id));
             self.emit_at(Instruction::new_ri(Opcode::GetGlobal, reg.0, name_idx), id.span);
         }
         Ok(reg)
@@ -847,7 +887,8 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                         ));
                     }
                 } else {
-                    let name_idx = self.chunk.add_constant(Constant::String(0));
+                    let str_id = self.intern_string(id.raw);
+                    let name_idx = self.chunk.add_constant(Constant::String(str_id));
                     self.emit(Instruction::new_ri(Opcode::SetGlobal, final_value.0, name_idx));
                 }
             }
@@ -862,7 +903,12 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                         final_value.0,
                     ));
                 } else {
-                    let name_idx = self.chunk.add_constant(Constant::String(0));
+                    let prop_name = match member.property {
+                        Expression::Identifier(id) => id.raw,
+                        _ => "",
+                    };
+                    let str_id = self.intern_string(prop_name);
+                    let name_idx = self.chunk.add_constant(Constant::String(str_id));
                     self.emit(Instruction::new_rrr(
                         Opcode::SetProp,
                         obj_reg.0,
@@ -960,7 +1006,13 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 member.span,
             );
         } else {
-            let name_idx = self.chunk.add_constant(Constant::String(0));
+            // Extract property name from the AST identifier
+            let prop_name = match member.property {
+                Expression::Identifier(id) => id.raw,
+                _ => "",
+            };
+            let str_id = self.intern_string(prop_name);
+            let name_idx = self.chunk.add_constant(Constant::String(str_id));
             self.emit_at(
                 Instruction::new_rrr(Opcode::GetProp, result_reg.0, obj_reg.0, name_idx as u8),
                 member.span,
@@ -1014,8 +1066,9 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                     let val_reg = self.compile_expression(p.value)?;
 
                     match &p.key {
-                        PropertyKey::Identifier(_id) => {
-                            let name_idx = self.chunk.add_constant(Constant::String(0));
+                        PropertyKey::Identifier(id) => {
+                            let str_id = self.intern_string(id.raw);
+                            let name_idx = self.chunk.add_constant(Constant::String(str_id));
                             self.emit(Instruction::new_rrr(
                                 Opcode::SetProp,
                                 result_reg.0,
@@ -1024,8 +1077,9 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                             ));
                         }
                         PropertyKey::Literal(lit) => {
-                            if let Literal::String(_) = lit {
-                                let name_idx = self.chunk.add_constant(Constant::String(0));
+                            if let Literal::String(s) = lit {
+                                let str_id = self.intern_string(s.value);
+                                let name_idx = self.chunk.add_constant(Constant::String(str_id));
                                 self.emit(Instruction::new_rrr(
                                     Opcode::SetProp,
                                     result_reg.0,
