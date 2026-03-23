@@ -366,6 +366,92 @@ impl SpeculativeRenderer {
     }
 
     /*
+     * fetch_all_or_speculate -- cache-first parallel fetch for multiple URLs.
+     *
+     * WHY: CSS subresources for a page (e.g. chatgpt.com's 2 stylesheets) are
+     * currently fetched sequentially. This method:
+     *   1. Returns cached responses immediately for URLs already in the cache
+     *   2. Groups uncached URLs and fetches them via BasicClient::fetch_parallel,
+     *      which uses HTTP/2 multiplexing when all URLs share an HTTPS host
+     *   3. Stores new responses in the cache
+     *
+     * Result order matches the input order (same-index correspondence).
+     *
+     * INVARIANT: each (url, extra_headers) pair in `requests` produces exactly
+     * one result in the returned Vec at the same index.
+     *
+     * Complexity: O(cached) = O(1) lookups; O(uncached) = O(1) TLS + O(N) frames
+     * See: BasicClient::fetch_parallel for h2 implementation
+     * See: silksurf-app/src/main.rs for call site
+     */
+    pub fn fetch_all_or_speculate(
+        &mut self,
+        requests: &[(&str, &[(String, String)])],
+    ) -> Vec<Result<(HttpResponse, FetchOrigin, std::time::Duration), NetError>> {
+        let t0 = Instant::now();
+        let n = requests.len();
+        let mut results: Vec<Option<Result<(HttpResponse, FetchOrigin, std::time::Duration), NetError>>> =
+            vec![None; n];
+
+        // Phase 1: serve cached URLs immediately.
+        let mut uncached_indices: Vec<usize> = Vec::new();
+        for (i, &(url, _)) in requests.iter().enumerate() {
+            if let Some(cached) = self.cache.get(url) {
+                results[i] = Some(Ok((
+                    HttpResponse {
+                        status: cached.status,
+                        headers: cached.headers.clone(),
+                        body: cached.body.clone(),
+                    },
+                    FetchOrigin::Cache,
+                    t0.elapsed(),
+                )));
+            } else {
+                uncached_indices.push(i);
+            }
+        }
+
+        // Phase 2: fetch uncached in parallel via BasicClient::fetch_parallel.
+        if !uncached_indices.is_empty() {
+            let http_requests: Vec<HttpRequest> = uncached_indices
+                .iter()
+                .map(|&i| {
+                    let (url, extra_headers) = requests[i];
+                    let mut headers = extra_headers.to_vec();
+                    headers.push(("Accept".to_string(), "text/html,text/css,*/*".to_string()));
+                    headers.push((
+                        "User-Agent".to_string(),
+                        "SilkSurf/0.1 (X11; Linux x86_64)".to_string(),
+                    ));
+                    HttpRequest {
+                        method: HttpMethod::Get,
+                        url: url.to_string(),
+                        headers,
+                        body: Vec::new(),
+                    }
+                })
+                .collect();
+
+            let responses = self.client.fetch_parallel(&http_requests);
+
+            for (j, &idx) in uncached_indices.iter().enumerate() {
+                let url = requests[idx].0;
+                match &responses[j] {
+                    Ok(resp) => {
+                        self.cache.put(url.to_string(), resp);
+                        results[idx] = Some(Ok((resp.clone(), FetchOrigin::Fresh, t0.elapsed())));
+                    }
+                    Err(e) => {
+                        results[idx] = Some(Err(e.clone()));
+                    }
+                }
+            }
+        }
+
+        results.into_iter().map(|r| r.unwrap()).collect()
+    }
+
+    /*
      * spawn_revalidation -- start a background conditional GET.
      *
      * Reads the ETag / Last-Modified from the cache entry for `url`, builds

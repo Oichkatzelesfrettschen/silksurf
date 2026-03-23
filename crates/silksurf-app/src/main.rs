@@ -128,15 +128,33 @@ fn main() {
         css_text.len()
     );
 
-    // Fetch external <link rel="stylesheet"> resources (cache-first via SpeculativeRenderer)
+    /*
+     * Fetch external <link rel="stylesheet"> resources in parallel (HTTP/2).
+     *
+     * WHY: CSS subresources (e.g. chatgpt.com's 2 stylesheets at ~680ms total
+     * over sequential HTTP/1.1) can be parallelized via HTTP/2 multiplexing.
+     * fetch_all_or_speculate groups same-host HTTPS URLs and sends them over
+     * a single TLS connection, reducing total CSS fetch time to max(RTTs).
+     *
+     * Cache hit: returns immediately from ResponseCache (0ms network).
+     * Cache miss + h2: all URLs fetched in parallel over one TLS connection.
+     * Cache miss + no h2: sequential HTTP/1.1 fallback (same as before).
+     *
+     * See: SpeculativeRenderer::fetch_all_or_speculate for implementation
+     */
     let stylesheet_urls = extract_stylesheet_urls(&dom, doc_node, &url);
-    for sheet_url in &stylesheet_urls {
-        eprintln!("[SilkSurf] Fetching stylesheet: {sheet_url}");
-        let css_headers = [("Accept".to_string(), "text/css,*/*".to_string())];
-        match renderer.fetch_or_speculate(sheet_url, &css_headers) {
+    let css_accept_header = [("Accept".to_string(), "text/css,*/*".to_string())];
+    let sheet_requests: Vec<(&str, &[(String, String)])> = stylesheet_urls
+        .iter()
+        .map(|u| (u.as_str(), css_accept_header.as_slice()))
+        .collect();
+
+    let sheet_results = renderer.fetch_all_or_speculate(&sheet_requests);
+    for (result, sheet_url) in sheet_results.into_iter().zip(stylesheet_urls.iter()) {
+        match result {
             Ok((resp, origin, elapsed)) if resp.status == 200 => {
                 eprintln!(
-                    "[SilkSurf] Stylesheet {} bytes ({:?} {:?})",
+                    "[SilkSurf] Stylesheet {sheet_url}: {} bytes ({:?} {:?})",
                     resp.body.len(),
                     origin,
                     elapsed
@@ -145,8 +163,10 @@ fn main() {
                 css_text.push_str(&sheet_css);
                 css_text.push('\n');
             }
-            Ok((resp, _, _)) => eprintln!("[SilkSurf] Stylesheet HTTP {}", resp.status),
-            Err(e) => eprintln!("[SilkSurf] Stylesheet fetch error: {}", e.message),
+            Ok((resp, _, _)) => {
+                eprintln!("[SilkSurf] Stylesheet {sheet_url}: HTTP {}", resp.status)
+            }
+            Err(e) => eprintln!("[SilkSurf] Stylesheet {sheet_url}: fetch error: {}", e.message),
         }
     }
 
