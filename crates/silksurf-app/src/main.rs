@@ -203,9 +203,21 @@ fn main() {
             continue;
         }
         let compiler = silksurf_js::bytecode::Compiler::new();
-        match compiler.compile(&ast) {
-            Ok(chunk) => {
-                let chunk_idx = vm.add_chunk(chunk);
+        match compiler.compile_with_children(&ast) {
+            Ok((chunk, child_chunks)) => {
+                // Add child chunks (function bodies) first so their indices are stable
+                let child_base = vm.chunks_len();
+                for child in child_chunks {
+                    vm.add_chunk(child);
+                }
+                // Patch function constants to use absolute chunk indices
+                let mut main_chunk = chunk;
+                for constant in main_chunk.constants_mut() {
+                    if let silksurf_js::bytecode::Constant::Function(idx) = constant {
+                        *idx += child_base as u32;
+                    }
+                }
+                let chunk_idx = vm.add_chunk(main_chunk);
                 match vm.execute(chunk_idx) {
                     Ok(_) => eprintln!(
                         "[SilkSurf] Script {i} executed OK ({:?})",

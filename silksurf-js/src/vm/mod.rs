@@ -373,6 +373,11 @@ impl Vm {
         idx
     }
 
+    /// Number of chunks currently registered.
+    pub fn chunks_len(&self) -> usize {
+        self.chunks.len()
+    }
+
     /*
      * execute -- main bytecode interpretation loop.
      *
@@ -1108,8 +1113,26 @@ fn op_new_array(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     Ok(())
 }
 
+/*
+ * op_new_function -- create a Function value from a compiled chunk.
+ *
+ * WHY: Function expressions (`function(){}`, arrow functions) compile
+ * their body into a separate Chunk. The constant pool entry at const_idx
+ * holds Constant::Function(chunk_idx) pointing to that chunk.
+ *
+ * The chunk_idx is an absolute index into vm.chunks (patched by the
+ * caller after compile_with_children() adds child chunks).
+ *
+ * See: compile_expression Expression::Function for compilation
+ * See: op_call for function invocation
+ */
 fn op_new_function(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
-    let chunk_idx = u32::from(instr.const_idx());
+    let const_idx = instr.const_idx();
+    let chunk = vm.current_chunk();
+    let chunk_idx = match chunk.get_constant(const_idx) {
+        Some(Constant::Function(idx)) => *idx,
+        _ => u32::from(const_idx), // Fallback: treat const_idx as chunk_idx
+    };
     let func = Rc::new(JsFunction::new(chunk_idx));
     vm.set_reg(instr.dst(), Value::Function(func));
     Ok(())
