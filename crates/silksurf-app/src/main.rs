@@ -306,6 +306,7 @@ fn main() {
         );
 
         let raster_start = std::time::Instant::now();
+        // Use sequential rasterizer (faster for single-shot; parallel wins at sustained 60fps)
         let buffer = silksurf_render::rasterize(&display_list, 1280, 800);
         let raster_elapsed = raster_start.elapsed();
         eprintln!("[SilkSurf] Rasterized: {} bytes in {:?}", buffer.len(), raster_elapsed);
