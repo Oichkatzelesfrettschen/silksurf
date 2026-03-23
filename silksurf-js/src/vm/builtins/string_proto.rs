@@ -121,10 +121,10 @@ pub fn get_string_method(s: &Rc<JsString>, name: &str) -> Option<Value> {
             };
             Value::string(&text[start..end])
         })),
-        "toLowerCase" => {
+        "toLowerCase" | "toLocaleLowerCase" => {
             Some(Box::new(move |_args: &[Value]| Value::string_owned(text.to_lowercase())))
         }
-        "toUpperCase" => {
+        "toUpperCase" | "toLocaleUpperCase" => {
             Some(Box::new(move |_args: &[Value]| Value::string_owned(text.to_uppercase())))
         }
         "trim" => Some(Box::new(move |_args: &[Value]| Value::string(text.trim()))),
@@ -246,6 +246,49 @@ pub fn get_string_method(s: &Rc<JsString>, name: &str) -> Option<Value> {
             let needed = target_len - text.len();
             let padding: String = pad.chars().cycle().take(needed).collect();
             Value::string_owned(format!("{text}{padding}"))
+        })),
+        "at" => Some(Box::new(move |args: &[Value]| {
+            let idx = args.first().map_or(0, |v| v.to_number() as i64);
+            let chars: Vec<char> = text.chars().collect();
+            let len = chars.len() as i64;
+            let real_idx = if idx < 0 { len + idx } else { idx };
+            if real_idx < 0 || real_idx >= len {
+                return Value::Undefined;
+            }
+            Value::string_owned(chars[real_idx as usize].to_string())
+        })),
+        "codePointAt" => Some(Box::new(move |args: &[Value]| {
+            let idx = args.first().map_or(0, |v| v.to_number() as usize);
+            text.chars()
+                .nth(idx)
+                .map(|c| Value::Number(c as u32 as f64))
+                .unwrap_or(Value::Undefined)
+        })),
+        "concat" => Some(Box::new(move |args: &[Value]| {
+            let mut result = text.clone();
+            for arg in args {
+                let s = arg.to_js_string();
+                result.push_str(s.as_str().unwrap_or(""));
+            }
+            Value::string_owned(result)
+        })),
+        "match" => Some(Box::new(move |_args: &[Value]| {
+            // Simplified: return null (no regex engine yet)
+            Value::Null
+        })),
+        "search" => Some(Box::new(move |_args: &[Value]| {
+            Value::Number(-1.0)
+        })),
+        "localeCompare" => Some(Box::new(move |args: &[Value]| {
+            let other = args.first()
+                .map(|v| { let s = v.to_js_string(); s.as_str().unwrap_or("").to_string() })
+                .unwrap_or_default();
+            let cmp = text.cmp(&other);
+            Value::Number(match cmp {
+                std::cmp::Ordering::Less => -1.0,
+                std::cmp::Ordering::Equal => 0.0,
+                std::cmp::Ordering::Greater => 1.0,
+            })
         })),
         "toString" | "valueOf" => {
             let s_clone = Rc::clone(s);
