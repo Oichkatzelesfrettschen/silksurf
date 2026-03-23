@@ -1105,6 +1105,110 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 self.emit(Instruction::new_ri(Opcode::NewFunction, result_reg.0, const_idx));
                 Ok(result_reg)
             }
+            /*
+             * Expression::TemplateLiteral -- `` `hello ${name}` ``
+             *
+             * WHY: Template literals are pervasive in modern JS for string
+             * interpolation. Without compilation they evaluate to Undefined,
+             * breaking any code that uses them.
+             *
+             * Compile as a chain of Add operations:
+             *   result = quasi[0] + expr[0] + quasi[1] + expr[1] + ... + quasi[n]
+             *
+             * Since Add(string, anything) = string concat in our VM, this
+             * correctly converts each interpolated value via JS ToString rules.
+             * Empty quasi strings are elided to reduce Add instructions.
+             */
+            Expression::TemplateLiteral(tmpl) => {
+                let result_reg = self.alloc_register();
+                let mut acc_reg = result_reg;
+                let mut initialized = false;
+
+                let n_quasis = tmpl.quasis.len();
+                let n_exprs = tmpl.expressions.len();
+
+                for i in 0..n_quasis {
+                    let quasi = &tmpl.quasis[i];
+                    let cooked = quasi.cooked.unwrap_or(quasi.raw);
+
+                    // Load the quasi string (may be empty)
+                    if !cooked.is_empty() || !initialized {
+                        let str_id = self.intern_string(cooked);
+                        let const_idx = self.chunk.add_constant(Constant::String(str_id));
+                        let quasi_reg = self.alloc_register();
+                        self.emit(Instruction::new_ri(Opcode::LoadConst, quasi_reg.0, const_idx));
+                        if !initialized {
+                            // First piece: just move to result
+                            self.emit(Instruction::new_rr(Opcode::Mov, acc_reg.0, quasi_reg.0));
+                            initialized = true;
+                        } else {
+                            // Concat: acc = acc + quasi
+                            let new_reg = self.alloc_register();
+                            self.emit(Instruction::new_rrr(Opcode::Add, new_reg.0, acc_reg.0, quasi_reg.0));
+                            acc_reg = new_reg;
+                        }
+                    }
+
+                    // Add the interpolated expression if present
+                    if i < n_exprs {
+                        let expr_reg = self.compile_expression(&tmpl.expressions[i])?;
+                        if !initialized {
+                            self.emit(Instruction::new_rr(Opcode::Mov, acc_reg.0, expr_reg.0));
+                            initialized = true;
+                        } else {
+                            let new_reg = self.alloc_register();
+                            self.emit(Instruction::new_rrr(Opcode::Add, new_reg.0, acc_reg.0, expr_reg.0));
+                            acc_reg = new_reg;
+                        }
+                    }
+                }
+
+                if !initialized {
+                    // Empty template literal ``
+                    let str_id = self.intern_string("");
+                    let const_idx = self.chunk.add_constant(Constant::String(str_id));
+                    self.emit(Instruction::new_ri(Opcode::LoadConst, acc_reg.0, const_idx));
+                } else if acc_reg != result_reg {
+                    self.emit(Instruction::new_rr(Opcode::Mov, result_reg.0, acc_reg.0));
+                }
+                Ok(result_reg)
+            }
+            /*
+             * Expression::TaggedTemplate -- fn`template`
+             *
+             * WHY: Tagged templates call a tag function with (strings_array, ...values).
+             * Simplified: compile the quasi strings as an array, then call the tag function.
+             * Used by some libraries (e.g. graphql tag, styled-components, etc.).
+             */
+            Expression::TaggedTemplate(tagged) => {
+                let result_reg = self.alloc_register();
+                let tag_reg = self.compile_expression(tagged.tag)?;
+
+                // Build the strings array from quasis
+                let strings_reg = self.alloc_register();
+                self.emit(Instruction::new_r(Opcode::NewArray, strings_reg.0));
+                for (i, quasi) in tagged.quasi.quasis.iter().enumerate() {
+                    let cooked = quasi.cooked.unwrap_or(quasi.raw);
+                    let str_id = self.intern_string(cooked);
+                    let const_idx = self.chunk.add_constant(Constant::String(str_id));
+                    let str_reg = self.alloc_register();
+                    self.emit(Instruction::new_ri(Opcode::LoadConst, str_reg.0, const_idx));
+                    let idx_reg = self.alloc_register();
+                    self.emit(Instruction::new_ri(Opcode::LoadSmi, idx_reg.0, i as u16));
+                    self.emit(Instruction::new_rrr(Opcode::SetElem, strings_reg.0, idx_reg.0, str_reg.0));
+                }
+
+                // Compile the interpolated values as additional args after strings_reg
+                for expr in tagged.quasi.expressions {
+                    let _ = self.compile_expression(expr)?;
+                }
+                let argc = 1 + tagged.quasi.expressions.len() as u8;
+                self.emit_at(
+                    Instruction::new_rrr(Opcode::Call, result_reg.0, tag_reg.0, argc),
+                    tagged.span,
+                );
+                Ok(result_reg)
+            }
             Expression::Class(_) => {
                 let reg = self.alloc_register();
                 self.emit(Instruction::new_r(Opcode::NewObject, reg.0));
