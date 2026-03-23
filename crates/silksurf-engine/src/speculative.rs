@@ -25,8 +25,12 @@
  * See: silksurf-app/src/main.rs for integration point
  */
 
+use rustc_hash::FxHashMap;
+use silksurf_css::{Stylesheet, intern_rules, parse_stylesheet_with_interner, strip_selector_atoms};
+use silksurf_core::SilkInterner;
 use silksurf_net::cache::ResponseCache;
 use silksurf_net::{BasicClient, HttpMethod, HttpRequest, HttpResponse, NetClient, NetError};
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::Instant;
@@ -109,6 +113,42 @@ impl RevalidationHandle {
 }
 
 /*
+ * StylesheetCache -- maps CSS text hash -> parsed-but-uninternalized Stylesheet.
+ *
+ * WHY: Parsing 128KB of ChatGPT CSS costs 2.5ms per render even when the
+ * bytes are identical to the previous render. This cache stores the parsed
+ * Stylesheet (with SmallString selectors, atom=None) and avoids re-parsing.
+ *
+ * On cache HIT:  clone Arc<Stylesheet> + call intern_rules (~100-200us)
+ * On cache MISS: full parse (2.5ms) + strip_selector_atoms + store Arc
+ *
+ * KEY INVARIANT: stored Stylesheets have atom=None in all SelectorIdents.
+ * Interning is done per-render against the current DOM's interner, so each
+ * render gets atoms valid for its own interner without cross-contamination.
+ *
+ * Complexity: O(1) FxHashMap lookup on hit + O(N_selectors) intern_rules
+ * See: intern_rules, strip_selector_atoms in silksurf-css/src/selector.rs
+ * See: SelectorIdent.clear_atom, SelectorIdent.intern_with in selector.rs
+ */
+struct StylesheetCache {
+    entries: FxHashMap<u64, Arc<Stylesheet>>,
+}
+
+impl StylesheetCache {
+    fn new() -> Self {
+        Self {
+            entries: FxHashMap::default(),
+        }
+    }
+}
+
+fn hash_css_text(css: &str) -> u64 {
+    let mut h = rustc_hash::FxHasher::default();
+    css.as_bytes().hash(&mut h);
+    h.finish()
+}
+
+/*
  * SpeculativeRenderer -- cache-first HTTP client with background revalidation.
  *
  * On first fetch: goes to the network, stores response in ResponseCache.
@@ -125,6 +165,7 @@ impl RevalidationHandle {
 pub struct SpeculativeRenderer {
     pub cache: ResponseCache,
     client: Arc<BasicClient>,
+    stylesheet_cache: StylesheetCache,
 }
 
 impl SpeculativeRenderer {
@@ -132,6 +173,7 @@ impl SpeculativeRenderer {
         Self {
             cache: ResponseCache::new(),
             client: Arc::new(BasicClient::new()),
+            stylesheet_cache: StylesheetCache::new(),
         }
     }
 
@@ -149,7 +191,55 @@ impl SpeculativeRenderer {
             client: Arc::new(BasicClient::with_tls(Arc::new(
                 RustlsProvider::new_insecure(),
             ))),
+            stylesheet_cache: StylesheetCache::new(),
         }
+    }
+
+    /*
+     * get_or_parse_stylesheet -- CSS parse with in-process result caching.
+     *
+     * WHY: Calling parse_stylesheet_with_interner on every render costs 2.5ms
+     * for ChatGPT's 128KB CSS even when the bytes have not changed. This method
+     * caches the Stylesheet keyed by FxHash(css_text) so subsequent renders pay
+     * only ~100-200us for intern_rules rather than the full tokenize+parse cost.
+     *
+     * Algorithm:
+     *   1. Hash css_text in O(N_bytes) -- ~2us for 128KB
+     *   2. On HIT: clone Arc<Stylesheet> + call intern_rules -- ~100-200us
+     *   3. On MISS: full parse -- ~2.5ms; strip atoms; store Arc; return
+     *
+     * INVARIANT: the returned Stylesheet has atom=Some for all selector idents
+     * that pass should_intern_identifier(). Atoms are valid for `interner`.
+     *
+     * See: StylesheetCache invariant above for why we strip atoms before caching.
+     * See: intern_rules, strip_selector_atoms in silksurf-css/src/selector.rs
+     *
+     * Complexity: O(N_bytes) hash + O(N_selectors) intern on hit;
+     *             O(N_tokens) parse + O(N_selectors) strip on miss.
+     */
+    pub fn get_or_parse_stylesheet(
+        &mut self,
+        css_text: &str,
+        interner: &mut SilkInterner,
+    ) -> Option<Stylesheet> {
+        let key = hash_css_text(css_text);
+
+        if let Some(cached) = self.stylesheet_cache.entries.get(&key) {
+            // Cache hit: clone the uninternalized stylesheet and re-intern.
+            let mut sheet = (**cached).clone();
+            intern_rules(&mut sheet.rules, interner);
+            return Some(sheet);
+        }
+
+        // Cache miss: full parse with interning.
+        let sheet = parse_stylesheet_with_interner(css_text, interner).ok()?;
+
+        // Strip atoms for storage (SmallStrings retained for equality fallback).
+        let mut uninit = sheet.clone();
+        strip_selector_atoms(&mut uninit.rules);
+        self.stylesheet_cache.entries.insert(key, Arc::new(uninit));
+
+        Some(sheet)
     }
 
     /*

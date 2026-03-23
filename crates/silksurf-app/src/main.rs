@@ -152,21 +152,19 @@ fn main() {
 
     eprintln!("[SilkSurf] Total CSS to parse: {} bytes", css_text.len());
 
-    // 4. Parse CSS
+    // 4. Parse CSS -- cache-first via StylesheetCache in SpeculativeRenderer.
+    // On first render: full tokenize+parse (~2.5ms for ChatGPT's 128KB CSS).
+    // On subsequent renders with same CSS bytes: clone Arc + intern_rules (~200us).
     let css_start = std::time::Instant::now();
-    let stylesheet = match dom.with_interner_mut(|interner| {
-        silksurf_css::parse_stylesheet_with_interner(&css_text, interner)
-    }) {
-        Ok(ss) => ss,
-        Err(e) => {
-            eprintln!("[SilkSurf] CSS parse error: {e:?}");
+    let stylesheet = dom
+        .with_interner_mut(|interner| renderer.get_or_parse_stylesheet(&css_text, interner))
+        .unwrap_or_else(|| {
             silksurf_css::parse_stylesheet_with_interner(
                 "",
                 &mut silksurf_core::SilkInterner::new(),
             )
             .unwrap()
-        }
-    };
+        });
     eprintln!("[SilkSurf] CSS parsed in {:?}", css_start.elapsed());
 
     // Viewport dimensions used by fused pipeline and rasterizer
