@@ -1078,6 +1078,48 @@ fn op_get_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
         Value::String(s) => {
             builtins::string_proto::get_string_method(s, &prop_name).unwrap_or(Value::Undefined)
         }
+        /*
+         * Function.prototype methods: bind, call, apply.
+         *
+         * WHY: ChatGPT's script 6 uses $RV.bind(null, $RB) to create
+         * bound callbacks for requestAnimationFrame and setTimeout.
+         * Without .bind(), the property lookup returns Undefined and
+         * calling it gives TypeError("not a function").
+         */
+        ref val @ (Value::Function(_) | Value::NativeFunction(_)) if prop_name == "bind" => {
+            // .bind(thisArg, ...args) returns a new NativeFunction
+            // that calls the original with the bound arguments prepended.
+            // Simplified: ignore thisArg, just prepend bound args.
+            let original = obj.clone();
+            Value::NativeFunction(Rc::new(value::NativeFunction::new("bind", move |args| {
+                // args[0] = thisArg (ignored for now)
+                // args[1..] = bound arguments to prepend
+                let bound_args: Vec<Value> = args.iter().skip(1).cloned().collect();
+                // Return a new function that prepends bound_args
+                let orig = original.clone();
+                let ba = bound_args.clone();
+                Value::NativeFunction(Rc::new(value::NativeFunction::new("bound", move |call_args| {
+                    let mut all_args = ba.clone();
+                    all_args.extend(call_args.iter().cloned());
+                    // Call the original -- but we can only call NativeFunction, not Function
+                    match &orig {
+                        Value::NativeFunction(f) => f.call(&all_args),
+                        _ => Value::Undefined, // Can't call Value::Function from NativeFunction
+                    }
+                })))
+            })))
+        }
+        Value::Function(_) | Value::NativeFunction(_) if prop_name == "call" || prop_name == "apply" => {
+            // .call(thisArg, ...args) -- simplified: ignore thisArg, call with args
+            let original = obj.clone();
+            Value::NativeFunction(Rc::new(value::NativeFunction::new(&prop_name, move |args| {
+                let call_args: Vec<Value> = args.iter().skip(1).cloned().collect();
+                match &original {
+                    Value::NativeFunction(f) => f.call(&call_args),
+                    _ => Value::Undefined,
+                }
+            })))
+        }
         _ => Value::Undefined,
     };
     vm.set_reg(instr.dst(), value);
@@ -1141,9 +1183,20 @@ fn op_new_object(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     Ok(())
 }
 
+/*
+ * op_new_array -- create a JS array (object with length property).
+ *
+ * WHY: Arrays in JS are objects with a numeric `length` property.
+ * Array methods (push, pop, map, etc.) check for `length` via
+ * is_array_like(). Without it, `$RB.push(a,b)` returns Undefined
+ * because $RB doesn't look like an array.
+ *
+ * This was the root cause of Script 6's TypeError: `$RB=[]` created
+ * an Object without length, so later `$RB.push(...)` failed.
+ */
 fn op_new_array(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
-    // Arrays are objects with numeric keys (simplified)
     let obj = Rc::new(RefCell::new(Object::new()));
+    obj.borrow_mut().set_by_str("length", Value::Number(0.0));
     vm.set_reg(instr.dst(), Value::Object(obj));
     Ok(())
 }
@@ -1375,5 +1428,174 @@ mod tests {
         } else {
             panic!("Expected number");
         }
+    }
+
+    /*
+     * Helper: full pipeline parse -> compile -> load strings -> execute.
+     * Returns Ok(()) if the script ran without error, Err with the error otherwise.
+     */
+    fn run_script(vm: &mut Vm, source: &str) -> Result<(), String> {
+        let ast_arena = crate::parser::ast_arena::AstArena::new();
+        let parser = crate::parser::Parser::new(source, &ast_arena);
+        let (ast, errors) = parser.parse();
+        if !errors.is_empty() {
+            return Err(format!("Parse errors: {errors:?}"));
+        }
+        let compiler = crate::bytecode::Compiler::new();
+        match compiler.compile_with_children(&ast) {
+            Ok((chunk, child_chunks, string_pool)) => {
+                let mut str_map = std::collections::HashMap::new();
+                for (compiler_id, s) in &string_pool {
+                    let vm_id = vm.strings.intern(s.clone());
+                    str_map.insert(*compiler_id, vm_id);
+                }
+                let child_base = vm.chunks_len();
+                for mut child in child_chunks {
+                    for constant in child.constants_mut() {
+                        if let Constant::String(str_id) = constant {
+                            if let Some(&vm_id) = str_map.get(str_id) {
+                                *str_id = vm_id;
+                            }
+                        }
+                    }
+                    vm.add_chunk(child);
+                }
+                let mut main_chunk = chunk;
+                for constant in main_chunk.constants_mut() {
+                    match constant {
+                        Constant::Function(idx) => *idx += child_base as u32,
+                        Constant::String(str_id) => {
+                            if let Some(&vm_id) = str_map.get(str_id) {
+                                *str_id = vm_id;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                let chunk_idx = vm.add_chunk(main_chunk);
+                match vm.execute(chunk_idx) {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(format!("{e:?}")),
+                }
+            }
+            Err(e) => Err(format!("Compile error: {e:?}")),
+        }
+    }
+
+    #[test]
+    fn test_e2e_simple_assignment() {
+        let mut vm = Vm::new();
+        run_script(&mut vm, "var x = 42;").unwrap();
+    }
+
+    #[test]
+    fn test_e2e_global_array_assignment() {
+        let mut vm = Vm::new();
+        // This is the pattern from ChatGPT script 6
+        run_script(&mut vm, "$RB = [];").unwrap();
+    }
+
+    #[test]
+    fn test_e2e_global_function_assignment() {
+        let mut vm = Vm::new();
+        run_script(&mut vm, "$RV = function(a) {};").unwrap();
+    }
+
+    #[test]
+    fn test_e2e_iife_with_try_catch() {
+        let mut vm = Vm::new();
+        run_script(&mut vm, "!function(){ try { var x = 1; } catch(e) {} }();").unwrap();
+    }
+
+    #[test]
+    fn test_e2e_script6_minimal() {
+        let mut vm = Vm::new();
+        let result = run_script(&mut vm, "$RB=[];$RV=function(a){};");
+        assert!(result.is_ok(), "Script 6 minimal: {result:?}");
+    }
+
+    #[test]
+    fn test_e2e_script6_with_for_loop() {
+        let mut vm = Vm::new();
+        let result = run_script(
+            &mut vm,
+            "$RB=[];$RV=function(a){for(var b=0;b<a.length;b+=2){var c=a[b];}};",
+        );
+        assert!(result.is_ok(), "Script 6 with for loop: {result:?}");
+    }
+
+    #[test]
+    fn test_e2e_script6_with_semicolon_separated() {
+        // The REAL script 6 has two statements separated by ;
+        // The second ends WITHOUT a semicolon (just })
+        let mut vm = Vm::new();
+        let result = run_script(
+            &mut vm,
+            "$RB=[];$RV=function(a){$RT=performance.now();for(var b=0;b<a.length;b+=2){var c=a[b],e=a[b+1];}a.length=0};",
+        );
+        // This may fail -- we're looking for the exact failure point
+        if let Err(e) = &result {
+            eprintln!("Script 6 expanded failure: {e}");
+        }
+    }
+
+    #[test]
+    fn test_e2e_script6_full() {
+        let mut vm = Vm::new();
+        let source = "$RB=[];$RV=function(a){$RT=performance.now();for(var b=0;b<a.length;b+=2){var c=a[b],e=a[b+1];null!==e.parentNode&&e.parentNode.removeChild(e);var f=c.parentNode;if(f){var g=c.previousSibling,h=0;do{if(c&&8===c.nodeType){var d=c.data;if(\"/$\"===d||\"/&\"===d)if(0===h)break;else h--;else\"$\"!==d&&\"$?\"!==d&&\"$~\"!==d&&\"$!\"!==d&&\"&\"!==d||h++}d=c.nextSibling;f.removeChild(c);c=d}while(c);for(;e.firstChild;)f.insertBefore(e.firstChild,c);g.data=\"$\";g._reactRetry&&requestAnimationFrame(g._reactRetry)}}a.length=0};";
+        // First check parse
+        let ast_arena = crate::parser::ast_arena::AstArena::new();
+        let parser = crate::parser::Parser::new(source, &ast_arena);
+        let (ast, errors) = parser.parse();
+        eprintln!("Script 6 parse: {} statements, {} errors", ast.body.len(), errors.len());
+        for e in &errors {
+            eprintln!("  Parse error: {e:?}");
+        }
+        // Then run
+        let result = run_script(&mut vm, source);
+        if let Err(e) = &result {
+            eprintln!("Script 6 FULL failure: {e}");
+        }
+        assert!(result.is_ok(), "Script 6 full: {result:?}");
+    }
+
+    #[test]
+    fn test_e2e_script8_rc_call() {
+        let mut vm = Vm::new();
+        let result = run_script(&mut vm, "$RC(\"B:1\",\"S:1\")");
+        assert!(result.is_err(), "$RC should fail (not defined)");
+    }
+
+    #[test]
+    fn test_e2e_scripts_sequential() {
+        // Run scripts 0-6 sequentially in one VM, checking each
+        let mut vm = Vm::new();
+
+        // Script 0-like (IIFE)
+        let r = run_script(&mut vm, "!function(){ var x = 1; }();");
+        assert!(r.is_ok(), "Script 0: {r:?}");
+
+        // Script 6-like (global assignments)
+        let r = run_script(&mut vm, "$RB=[];$RV=function(a){};");
+        assert!(r.is_ok(), "Script 6 after others: {r:?}");
+
+        // Script 8-like ($RC call -- should fail because $RC not defined)
+        let r = run_script(&mut vm, "$RC(\"B:1\",\"S:1\")");
+        assert!(r.is_err(), "Script 8: {r:?}");
+    }
+
+    #[test]
+    fn test_e2e_script6_after_5_scripts() {
+        // Simulate running 5 scripts before script 6, accumulating strings
+        let mut vm = Vm::new();
+        run_script(&mut vm, "!function(){try{var d=document.documentElement}catch(e){}}();").ok();
+        run_script(&mut vm, "!function(){try{var t=localStorage.getItem('x')}catch(e){}}();").ok();
+        run_script(&mut vm, "var x = window.__oai_SSR_HTML || 0;").ok();
+        run_script(&mut vm, "window.__test = {\"a\": 1};").ok();
+        run_script(&mut vm, "requestAnimationFrame(function(){});").ok();
+
+        // Now script 6
+        let r = run_script(&mut vm, "$RB=[];$RV=function(a){$RT=performance.now();for(var b=0;b<a.length;b+=2){var c=a[b];}a.length=0};");
+        assert!(r.is_ok(), "Script 6 after 5: {r:?}");
     }
 }

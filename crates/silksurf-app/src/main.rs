@@ -287,10 +287,17 @@ fn main() {
                         "[SilkSurf] Script {i} executed OK ({:?})",
                         script_start.elapsed()
                     ),
-                    Err(e) => eprintln!(
-                        "[SilkSurf] Script {i} runtime error: {e:?} ({:?})",
-                        script_start.elapsed()
-                    ),
+                    Err(e) => {
+                        eprintln!(
+                            "[SilkSurf] Script {i} runtime error: {e:?} ({:?})",
+                            script_start.elapsed()
+                        );
+                        // Save failing script to /tmp for analysis
+                        if i == 6 {
+                            std::fs::write("/tmp/chatgpt_script6.js", script).ok();
+                            eprintln!("[SilkSurf] Saved script 6 to /tmp/chatgpt_script6.js");
+                        }
+                    }
                 }
             }
             Err(e) => eprintln!("[SilkSurf] Script {i} compile error: {e:?}"),
