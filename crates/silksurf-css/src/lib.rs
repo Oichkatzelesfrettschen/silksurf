@@ -28,10 +28,10 @@ pub use selector::{
     parse_selector_list_with_interner,
 };
 pub use style::{
-    AlignItems, AlignSelf, Color, ComputedStyle, Display, Edges, FlexBasis, FlexContainerStyle,
-    FlexDirection, FlexItemStyle, FlexWrap, JustifyContent, Length, LengthOrAuto, Overflow,
-    Position, StyleCache, StyleIndex, compute_style_for_node, compute_style_for_node_with_index,
-    compute_styles,
+    AlignItems, AlignSelf, CascadeWorkspace, Color, ComputedStyle, Display, Edges, FlexBasis,
+    FlexContainerStyle, FlexDirection, FlexItemStyle, FlexWrap, JustifyContent, Length,
+    LengthOrAuto, Overflow, Position, StyleCache, StyleIndex, compute_style_for_node,
+    compute_style_for_node_with_index, compute_style_for_node_with_workspace, compute_styles,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]

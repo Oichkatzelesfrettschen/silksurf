@@ -34,6 +34,9 @@ pub struct LayoutNeighborTable {
     pub bfs_order: Vec<NodeId>,
     /// Number of children per node (by flat BFS index).
     pub child_count: Vec<u16>,
+    /// Reverse map: NodeId -> flat BFS index.
+    /// Enables O(1) node lookup for callers that hold a NodeId.
+    pub node_to_bfs_idx: rustc_hash::FxHashMap<NodeId, u32>,
 }
 
 impl LayoutNeighborTable {
@@ -49,8 +52,8 @@ impl LayoutNeighborTable {
         let mut parent_idx: Vec<u32> = Vec::new();
         let mut child_count: Vec<u16> = Vec::new();
 
-        // BFS index lookup: NodeId -> flat index
-        let mut node_to_idx = rustc_hash::FxHashMap::default();
+        // BFS index lookup: NodeId -> flat index (exposed as node_to_bfs_idx)
+        let mut node_to_idx: rustc_hash::FxHashMap<NodeId, u32> = rustc_hash::FxHashMap::default();
 
         // Seed BFS with root
         let mut current_level = vec![root];
@@ -89,6 +92,7 @@ impl LayoutNeighborTable {
             parent_idx,
             bfs_order,
             child_count,
+            node_to_bfs_idx: node_to_idx,
         }
     }
 

@@ -212,24 +212,25 @@ pub fn parse_stylesheet_with_interner(
         input
     };
 
-    let t0 = std::time::Instant::now();
     let mut tokenizer = CssTokenizer::new();
     let mut tokens = tokenizer.feed(truncated)?;
     tokens.extend(tokenizer.finish()?);
-    eprintln!(
-        "[CSS] Tokenized {} bytes -> {} tokens in {:?}",
-        truncated.len(),
-        tokens.len(),
-        t0.elapsed()
-    );
-    let t1 = std::time::Instant::now();
+    #[cfg(debug_assertions)]
+    {
+        let t0 = std::time::Instant::now();
+        eprintln!(
+            "[CSS] Tokenized {} bytes -> {} tokens in {:?}",
+            truncated.len(),
+            tokens.len(),
+            t0.elapsed()
+        );
+    }
     let mut parser = CssParser::new(tokens);
     let mut sheet = parser.parse_stylesheet();
-    eprintln!(
-        "[CSS] Parsed {} rules in {:?}",
-        sheet.rules.len(),
-        t1.elapsed()
-    );
+    #[cfg(debug_assertions)]
+    {
+        eprintln!("[CSS] Parsed {} rules", sheet.rules.len());
+    }
     intern_rules(&mut sheet.rules, interner);
     Ok(sheet)
 }

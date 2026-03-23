@@ -1,0 +1,317 @@
+/*
+ * speculative.rs -- speculative pre-render orchestrator.
+ *
+ * WHY: Sub-millisecond re-navigation requires zero network latency.
+ * This module implements cache-first fetching with background revalidation:
+ *   1. On first visit: fetch live, store in ResponseCache
+ *   2. On re-visit: serve from cache immediately (0ms network time)
+ *   3. Spawn background thread with conditional GET (If-None-Match / If-Modified-Since)
+ *   4. If 304 Not Modified: cached render stays valid, no work needed
+ *   5. If 200: new content, caller re-renders the delta
+ *
+ * Analogy to LBM perturbation (gororoba): the cached response is the
+ * equilibrium f_eq; the delta from a 200 revalidation is the perturbation h.
+ * We only reprocess h when it is nonzero (i.e., content changed).
+ *
+ * Thread model: SpeculativeRenderer is !Send (ResponseCache uses FxHashMap).
+ * The background revalidation thread gets its own Arc<BasicClient> and a
+ * clone of the conditional headers; it sends the result via std::sync::mpsc.
+ *
+ * Complexity: O(1) cache lookup, O(network) on first fetch and revalidation
+ * Memory: O(responses) in ResponseCache -- one entry per URL
+ *
+ * See: silksurf-net/src/cache.rs ResponseCache for entry format
+ * See: silksurf-net/src/lib.rs BasicClient for HTTP/1.1 + TLS client
+ * See: silksurf-app/src/main.rs for integration point
+ */
+
+use silksurf_net::cache::ResponseCache;
+use silksurf_net::{BasicClient, HttpMethod, HttpRequest, HttpResponse, NetClient, NetError};
+use std::sync::Arc;
+use std::sync::mpsc;
+use std::time::Instant;
+
+/*
+ * FetchOrigin -- tracks whether a response came from the cache or the network.
+ *
+ * WHY: Callers need to know whether they are rendering a speculative (cached)
+ * frame or a fresh one, so they can decide whether to start background
+ * revalidation and whether to show a "stale" indicator.
+ */
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FetchOrigin {
+    /// Response was fetched live from the server and is now cached.
+    Fresh,
+    /// Response was served from the local cache without a network round-trip.
+    Cache,
+}
+
+/*
+ * RevalidationResult -- outcome of a background conditional GET.
+ *
+ * changed=false means the server returned 304 Not Modified; the cached
+ * render is still valid and no re-render is needed.
+ *
+ * changed=true means the server returned 200 with new content. The caller
+ * should re-render using response.unwrap() and update the cache.
+ */
+pub struct RevalidationResult {
+    /// True if the server returned 200 (content changed since last cache).
+    pub changed: bool,
+    /// The new response body, present only when changed=true.
+    pub response: Option<HttpResponse>,
+    /// Round-trip time for the background revalidation request.
+    pub rtt: std::time::Duration,
+}
+
+/*
+ * RevalidationHandle -- non-blocking handle to a background revalidation.
+ *
+ * WHY: The background thread runs a full HTTP round-trip. The handle lets the
+ * caller continue with rendering the cached page while the network request is
+ * in flight. Call wait() after rendering to apply any delta.
+ */
+pub struct RevalidationHandle {
+    rx: mpsc::Receiver<Result<RevalidationResult, NetError>>,
+    url: String,
+}
+
+impl RevalidationHandle {
+    /*
+     * wait -- block until the revalidation completes.
+     *
+     * Returns Err if the background thread panicked or the network failed.
+     * Returns Ok(result) with result.changed indicating whether a re-render
+     * is needed.
+     */
+    pub fn wait(self) -> Result<RevalidationResult, NetError> {
+        self.rx.recv().unwrap_or_else(|_| {
+            Err(NetError {
+                message: "revalidation thread panicked".to_string(),
+            })
+        })
+    }
+
+    /*
+     * try_recv -- non-blocking poll: return Some if done, None if still in flight.
+     *
+     * WHY: Lets the caller render from cache and check for an update only when
+     * the revalidation has already completed (zero additional latency).
+     */
+    pub fn try_recv(&self) -> Option<Result<RevalidationResult, NetError>> {
+        self.rx.try_recv().ok()
+    }
+
+    /// The URL being revalidated.
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+}
+
+/*
+ * SpeculativeRenderer -- cache-first HTTP client with background revalidation.
+ *
+ * On first fetch: goes to the network, stores response in ResponseCache.
+ * On subsequent fetches: returns cached response immediately, and the caller
+ * can optionally spawn a background conditional GET to check for updates.
+ *
+ * INVARIANT: cache always reflects the most recent 200 response for each URL.
+ * A 304 revalidation does NOT update the cache (content unchanged).
+ *
+ * WHY Arc<BasicClient>: the background revalidation thread needs a client.
+ * BasicClient is Send+Sync (its only non-trivial field is Arc<dyn TlsProvider
+ * + Send+Sync>), so it is safe to share across threads via Arc.
+ */
+pub struct SpeculativeRenderer {
+    pub cache: ResponseCache,
+    client: Arc<BasicClient>,
+}
+
+impl SpeculativeRenderer {
+    pub fn new() -> Self {
+        Self {
+            cache: ResponseCache::new(),
+            client: Arc::new(BasicClient::new()),
+        }
+    }
+
+    /*
+     * with_insecure -- constructor that disables TLS certificate verification.
+     *
+     * WHY: Some development environments have broken cert chains. This allows
+     * testing with self-signed certs without changing the production code path.
+     * NEVER use in production.
+     */
+    pub fn with_insecure() -> Self {
+        use silksurf_tls::RustlsProvider;
+        Self {
+            cache: ResponseCache::new(),
+            client: Arc::new(BasicClient::with_tls(Arc::new(
+                RustlsProvider::new_insecure(),
+            ))),
+        }
+    }
+
+    /*
+     * fetch_or_speculate -- cache-first fetch.
+     *
+     * Returns the cached response immediately if available (FetchOrigin::Cache),
+     * otherwise performs a live fetch, caches the result, and returns it
+     * (FetchOrigin::Fresh).
+     *
+     * The extra_headers slice is appended to both live and cached responses
+     * (for the live path only -- cached responses were stored with their
+     * original headers).
+     *
+     * Complexity: O(1) cache lookup + O(network) on first fetch
+     */
+    pub fn fetch_or_speculate(
+        &mut self,
+        url: &str,
+        extra_headers: &[(String, String)],
+    ) -> Result<(HttpResponse, FetchOrigin, std::time::Duration), NetError> {
+        let t0 = Instant::now();
+
+        // Cache hit: return immediately without any network I/O
+        if let Some(cached) = self.cache.get(url) {
+            let response = HttpResponse {
+                status: cached.status,
+                headers: cached.headers.clone(),
+                body: cached.body.clone(),
+            };
+            return Ok((response, FetchOrigin::Cache, t0.elapsed()));
+        }
+
+        // Cache miss: fetch live, store in cache
+        let mut headers = extra_headers.to_vec();
+        headers.push(("Accept".to_string(), "text/html,*/*".to_string()));
+        headers.push((
+            "User-Agent".to_string(),
+            "SilkSurf/0.1 (X11; Linux x86_64)".to_string(),
+        ));
+
+        let request = HttpRequest {
+            method: HttpMethod::Get,
+            url: url.to_string(),
+            headers,
+            body: Vec::new(),
+        };
+
+        let response = self.client.fetch(&request)?;
+        self.cache.put(url.to_string(), &response);
+        Ok((response, FetchOrigin::Fresh, t0.elapsed()))
+    }
+
+    /*
+     * spawn_revalidation -- start a background conditional GET.
+     *
+     * Reads the ETag / Last-Modified from the cache entry for `url`, builds
+     * If-None-Match / If-Modified-Since headers, and spawns a std::thread to
+     * perform the conditional fetch. Returns a RevalidationHandle immediately.
+     *
+     * The caller renders from cache while the thread is in flight, then calls
+     * handle.wait() (or handle.try_recv()) to apply any delta.
+     *
+     * WHY separate thread (not async): the app is single-threaded synchronous;
+     * adding an async runtime just for this one use-case would increase
+     * complexity more than it reduces latency. A single thread + mpsc gives
+     * the same overlap at zero additional deps.
+     *
+     * INVARIANT: only call this after a successful fetch_or_speculate that
+     * returned FetchOrigin::Cache. Calling on an uncached URL sends an
+     * unconditional GET (no validation headers), which is wasteful.
+     */
+    pub fn spawn_revalidation(&self, url: &str) -> RevalidationHandle {
+        /*
+         * Clone conditional headers before spawning: ResponseCache is !Send
+         * (FxHashMap is not Sync), so we cannot move the cache into the thread.
+         * Instead we extract just the validation headers we need and clone them.
+         */
+        let cond_headers = self.cache.conditional_headers(url);
+        let url_owned = url.to_string();
+        let client = Arc::clone(&self.client);
+        let (tx, rx) = mpsc::channel();
+
+        std::thread::spawn(move || {
+            let t0 = Instant::now();
+            let mut headers = cond_headers;
+            headers.push(("Accept".to_string(), "text/html,*/*".to_string()));
+            headers.push((
+                "User-Agent".to_string(),
+                "SilkSurf/0.1 (X11; Linux x86_64)".to_string(),
+            ));
+
+            let request = HttpRequest {
+                method: HttpMethod::Get,
+                url: url_owned.clone(),
+                headers,
+                body: Vec::new(),
+            };
+
+            let result = client.fetch(&request).map(|response| {
+                let rtt = t0.elapsed();
+                if response.status == 304 {
+                    // 304 Not Modified: cached content still valid
+                    RevalidationResult {
+                        changed: false,
+                        response: None,
+                        rtt,
+                    }
+                } else {
+                    // 200 (or other): new content received
+                    RevalidationResult {
+                        changed: true,
+                        response: Some(response),
+                        rtt,
+                    }
+                }
+            });
+
+            let _ = tx.send(result);
+        });
+
+        RevalidationHandle {
+            rx,
+            url: url.to_string(),
+        }
+    }
+
+    /*
+     * update_cache -- store a revalidation 200 response back into the cache.
+     *
+     * Call this after handle.wait() returns RevalidationResult { changed: true }.
+     * Keeps the cache consistent with the latest server content.
+     */
+    pub fn update_cache(&mut self, url: &str, response: &HttpResponse) {
+        self.cache.put(url.to_string(), response);
+    }
+
+    /// Total bytes held in cache across all URLs.
+    pub fn cache_bytes(&self) -> usize {
+        self.cache.total_bytes()
+    }
+}
+
+impl Default for SpeculativeRenderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_fetch_origin_debug() {
+        assert_eq!(format!("{:?}", FetchOrigin::Fresh), "Fresh");
+        assert_eq!(format!("{:?}", FetchOrigin::Cache), "Cache");
+    }
+
+    #[test]
+    fn test_cache_empty_on_new() {
+        let renderer = SpeculativeRenderer::new();
+        assert_eq!(renderer.cache.len(), 0);
+        assert_eq!(renderer.cache_bytes(), 0);
+    }
+}

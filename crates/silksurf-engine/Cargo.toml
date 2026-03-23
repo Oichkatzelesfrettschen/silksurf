@@ -11,7 +11,7 @@ silksurf-html = { path = "../silksurf-html" }
 silksurf-css = { path = "../silksurf-css" }
 silksurf-dom = { path = "../silksurf-dom" }
 silksurf-layout = { path = "../silksurf-layout" }
-silksurf-render = { path = "../silksurf-render" }
+silksurf-render = { path = "../silksurf-render", features = ["parallel"] }
 rustc-hash = { workspace = true }
 silksurf-gui = { path = "../silksurf-gui", optional = true }
 silksurf-net = { path = "../silksurf-net", optional = true }
@@ -23,5 +23,5 @@ default = []
 full = ["gui", "js", "net", "tls"]
 gui = ["dep:silksurf-gui"]
 js = ["dep:silksurf-js"]
-net = ["dep:silksurf-net"]
+net = ["dep:silksurf-net", "dep:silksurf-tls"]
 tls = ["dep:silksurf-tls"]

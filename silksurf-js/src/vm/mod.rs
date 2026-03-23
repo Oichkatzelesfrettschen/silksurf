@@ -406,12 +406,18 @@ impl Vm {
         if chunk_idx >= self.chunks.len() {
             return Err(VmError::OutOfBounds);
         }
-        // Store args in registers starting at base_reg
-        let base_reg = 1u8; // r0 reserved for return, args start at r1
+        /*
+         * Place args at registers 0, 1, ... matching the execute() frame's
+         * base=0. With frame-relative addressing, the callee's param slot 0
+         * maps to absolute register 0+0=0, slot 1 to register 1, etc.
+         *
+         * WHY: Previously args were placed at register 1 (r0 "reserved") but
+         * the callee's params were compiled to slots 0, 1, ..., causing a
+         * one-off mismatch. With frame-relative, base=0 means slot N = register N.
+         */
         for (i, arg) in args.iter().enumerate() {
-            let reg = base_reg as usize + i;
-            if reg < self.registers.len() {
-                self.registers[reg] = arg.clone();
+            if i < self.registers.len() {
+                self.registers[i] = arg.clone();
             }
         }
         self.execute(chunk_idx)
@@ -573,23 +579,33 @@ impl Vm {
         }
     }
 
-    /// Get register value
+    /// Get register value (frame-relative: adds current call frame's base).
+    ///
+    /// WHY: The VM uses a flat register array shared across all call frames.
+    /// Each CallFrame.base is the absolute index where its register window begins.
+    /// Callers place args immediately after the callee register; the callee's
+    /// params (slots 0, 1, ...) map to base+0, base+1, ... which are the arg
+    /// positions. Top-level code has base=0 so the behavior is unchanged.
+    ///
+    /// See: op_call Value::Function -- computes new_base = current_base + callee + 1
+    /// See: CallFrame.base for the per-frame window start
     #[inline(always)]
     fn get_reg(&self, idx: u8) -> &Value {
-        let idx = idx as usize;
-        debug_assert!(idx < self.registers.len());
-        // SAFETY: register indices are validated by the compiler/VM invariants.
-        unsafe { self.registers.get_unchecked(idx) }
+        let base = self.call_stack.last().map(|f| f.base).unwrap_or(0);
+        let abs_idx = base + idx as usize;
+        // Safe: op_call grows registers to new_base+256 before pushing each frame,
+        // so abs_idx < registers.len() for all valid frame-relative indices (0-255).
+        self.registers.get(abs_idx).unwrap_or(&Value::Undefined)
     }
 
-    /// Set register value
+    /// Set register value (frame-relative: adds current call frame's base).
+    /// See: get_reg for the WHY of frame-relative addressing.
     #[inline(always)]
     fn set_reg(&mut self, idx: u8, value: Value) {
-        let idx = idx as usize;
-        debug_assert!(idx < self.registers.len());
-        // SAFETY: register indices are validated by the compiler/VM invariants.
-        unsafe {
-            *self.registers.get_unchecked_mut(idx) = value;
+        let base = self.call_stack.last().map(|f| f.base).unwrap_or(0);
+        let abs_idx = base + idx as usize;
+        if abs_idx < self.registers.len() {
+            self.registers[abs_idx] = value;
         }
     }
 
@@ -981,20 +997,44 @@ fn op_call(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
             if vm.call_stack.len() >= vm.max_stack_depth {
                 return Err(VmError::StackOverflow);
             }
+            /*
+             * Compute the callee's register window base.
+             *
+             * WHY: The caller places args immediately after the callee register
+             * (at callee_reg+1, callee_reg+2, ...). The callee expects its
+             * params at its own slots 0, 1, .... With frame-relative addressing,
+             * callee_slot_N = vm.registers[new_base + N]. So new_base must point
+             * to where the first arg lives: current_base + src1 + 1.
+             *
+             * See: compile_call -- args allocated at next_register after callee
+             * See: get_reg for the frame-relative addressing scheme
+             */
+            let current_base = vm.call_stack.last().map(|f| f.base).unwrap_or(0);
+            let new_base = current_base + instr.src1() as usize + 1;
+            // Grow the register array if this frame's window would overflow.
+            // Each function uses at most 256 registers (u8 index limit).
+            let needed = new_base + 256;
+            if needed > vm.registers.len() {
+                vm.registers.resize(needed, Value::Undefined);
+            }
             vm.call_stack.push(CallFrame {
                 chunk_idx,
                 pc: 0,
-                base: 0,
+                base: new_base,
                 return_reg: instr.dst(),
             });
             Ok(())
         }
         Value::NativeFunction(func) => {
-            // Collect arguments from registers (simplified: src2 = arg count)
+            /*
+             * Collect args from registers immediately after the callee register.
+             * With frame-relative addressing, the absolute position of the
+             * first arg is current_base + src1 + 1.
+             */
             let argc = instr.src2() as usize;
             let mut args = Vec::with_capacity(argc);
-            // Arguments start after the callee register
-            let base_reg = instr.src1() as usize + 1;
+            let current_base = vm.call_stack.last().map(|f| f.base).unwrap_or(0);
+            let base_reg = current_base + instr.src1() as usize + 1;
             for i in 0..argc {
                 if base_reg + i < vm.registers.len() {
                     args.push(vm.registers[base_reg + i].clone());
@@ -1009,27 +1049,49 @@ fn op_call(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
 }
 
 fn op_ret(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
+    /*
+     * Return a value from the current function.
+     *
+     * WHY: return_reg is stored in the CALLEE's CallFrame (pushed by op_call
+     * with instr.dst() from the caller's Call instruction). We must read it
+     * BEFORE popping the callee frame; after pop the top of the stack is the
+     * caller, whose return_reg records where THE CALLER's result should go
+     * (one level higher) -- the wrong destination.
+     *
+     * After pop, set_reg(return_reg, value) uses the caller's base (frame-
+     * relative), so return_reg -- which is a register index in the caller's
+     * compiled bytecode -- lands at the correct absolute slot. ✓
+     *
+     * See: op_call -- stores instr.dst() as return_reg when pushing callee frame
+     * See: execute() -- pushes top-level frame with return_reg=0; on Halted,
+     *      returns vm.registers[0] to the Rust caller.
+     */
     let value = vm.get_reg(instr.dst()).clone();
+    let return_reg = vm.call_stack.last().map(|f| f.return_reg).unwrap_or(0);
     vm.call_stack.pop();
     if vm.call_stack.is_empty() {
-        // Returning from top-level - store in r0 for caller
-        vm.set_reg(0, value);
+        // Returning from top-level execute() frame -- store in absolute r0.
+        if !vm.registers.is_empty() {
+            vm.registers[0] = value;
+        }
         Err(VmError::Halted)
     } else {
-        // Store result in caller's return register
-        let return_reg = vm.call_stack.last().unwrap().return_reg;
+        // Write to the caller's frame at the register the Call instruction
+        // specified as destination (frame-relative in the now-current frame).
         vm.set_reg(return_reg, value);
         Ok(())
     }
 }
 
 fn op_ret_undefined(vm: &mut Vm, _instr: Instruction) -> VmResult<()> {
+    /*
+     * Return undefined. See op_ret for the return_reg-before-pop invariant.
+     */
+    let return_reg = vm.call_stack.last().map(|f| f.return_reg).unwrap_or(0);
     vm.call_stack.pop();
     if vm.call_stack.is_empty() {
-        vm.set_reg(0, Value::Undefined);
         Err(VmError::Halted)
     } else {
-        let return_reg = vm.call_stack.last().unwrap().return_reg;
         vm.set_reg(return_reg, Value::Undefined);
         Ok(())
     }
@@ -1161,14 +1223,28 @@ fn op_spread_call(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
             Ok(())
         }
         Value::Function(func) => {
-            // For interpreted functions: lay args into registers then call normally.
-            // Args go at callee_reg+1 .. callee_reg+1+argc (same layout as op_call).
-            let base_reg = instr.src1() as usize + 1;
-            for (i, arg) in args.iter().enumerate() {
-                if base_reg + i < vm.registers.len() {
-                    vm.registers[base_reg + i] = arg.clone();
-                }
+            /*
+             * SpreadCall for interpreted functions: write args into the arg
+             * registers then push a call frame with the correct base.
+             *
+             * WHY: op_spread_call collects args into a Vec from the args_array
+             * Object. We then write them to the registers starting at
+             * current_base + src1 + 1 so they land where the callee's param
+             * slots 0, 1, ... will map to with frame-relative addressing.
+             *
+             * See: op_call Value::Function for the identical base computation
+             */
+            let current_base = vm.call_stack.last().map(|f| f.base).unwrap_or(0);
+            let arg_reg_base = current_base + instr.src1() as usize + 1;
+            // Grow register array if needed before writing args or pushing frame.
+            let needed = arg_reg_base + args.len().max(256);
+            if needed > vm.registers.len() {
+                vm.registers.resize(needed, Value::Undefined);
             }
+            for (i, arg) in args.iter().enumerate() {
+                vm.registers[arg_reg_base + i] = arg.clone();
+            }
+            let new_base = arg_reg_base;
             let chunk_idx = func.chunk_idx as usize;
             if chunk_idx >= vm.chunks.len() {
                 return Err(VmError::OutOfBounds);
@@ -1179,7 +1255,7 @@ fn op_spread_call(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
             vm.call_stack.push(CallFrame {
                 chunk_idx,
                 pc: 0,
-                base: 0,
+                base: new_base,
                 return_reg: instr.dst(),
             });
             Ok(())
@@ -2071,14 +2147,36 @@ fn op_set_local(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
  *   SetCapture: dst=depth, src1=outer_slot, src2=value_reg
  */
 fn op_get_capture(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
-    let slot = instr.src2(); // outer scope register index
+    /*
+     * Read a captured variable from an enclosing block scope within the
+     * SAME function frame.
+     *
+     * WHY: The compiler's child Compiler starts with no parent-scope linkage
+     * (new_with_pool creates scopes = [Scope::new(None, 0)]), so lookup_var
+     * CANNOT cross function boundaries. GetCapture(depth > 0) is only ever
+     * emitted for multi-level block-scope access within the same function,
+     * e.g. a variable declared in an outer block and read from an inner block.
+     *
+     * The `slot` field is therefore a FRAME-RELATIVE register index, not an
+     * absolute one. With frame-relative addressing (base != 0 for nested
+     * calls), we must use get_reg so the base is applied correctly.
+     *
+     * See: op_set_capture for the symmetric write path
+     * See: lookup_var in compiler.rs for how depth/slot are computed
+     */
+    let slot = instr.src2(); // frame-relative register index within current function
     let value = vm.get_reg(slot).clone();
     vm.set_reg(instr.dst(), value);
     Ok(())
 }
 
 fn op_set_capture(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
-    let slot = instr.src1(); // outer scope register index
+    /*
+     * Write a captured variable in an enclosing block scope within the
+     * SAME function frame.
+     * See: op_get_capture for the WHY of frame-relative addressing.
+     */
+    let slot = instr.src1(); // frame-relative register index within current function
     let value = vm.get_reg(instr.src2()).clone();
     vm.set_reg(slot, value);
     Ok(())
@@ -2440,5 +2538,92 @@ mod tests {
         // Now script 6
         let r = run_script(&mut vm, "$RB=[];$RV=function(a){$RT=performance.now();for(var b=0;b<a.length;b+=2){var c=a[b];}a.length=0};");
         assert!(r.is_ok(), "Script 6 after 5: {r:?}");
+    }
+
+    /*
+     * Destructuring parameter tests.
+     *
+     * WHY: compile_pattern_binding was added to support object/array/default
+     * destructuring in function parameters. These tests verify that the
+     * two-pass param compilation (slot allocation + pattern binding) produces
+     * correct results for the common cases encountered in real-world scripts.
+     *
+     * The tests run a script that stores the call result in the global `result`,
+     * then inspect vm.global after execution (main chunk always returns Undefined
+     * via RetUndefined, so we cannot check execute()'s return value).
+     *
+     * See: compiler.rs compile_pattern_binding
+     * See: compiler.rs Expression::Function / Arrow param loop
+     */
+
+    /*
+     * run_and_get_result -- run a script that sets `window.result` and return it.
+     *
+     * WHY: Top-level `var x` compiles to SetLocal (register), not SetGlobal.
+     * `vm.global` (the JS global object) only receives values via SetProp on
+     * the window object or SetGlobal for undeclared assignments. Since `window`
+     * is the global object itself (install_window_self wires them up), assigning
+     * `window.result = expr` is the reliable way to inspect a computed value.
+     *
+     * See: vm/builtins/window.rs install_window_self()
+     * See: op_set_prop for how window property writes land on vm.global
+     */
+    fn run_and_get_result(source: &str) -> Result<Value, String> {
+        let mut vm = Vm::new();
+        run_script(&mut vm, source)?;
+        Ok(vm.global.borrow().get_by_str("result").clone())
+    }
+
+    #[test]
+    fn test_run_and_get_result_basic() {
+        // Sanity check: run_and_get_result works for a plain function call
+        let v = run_and_get_result(
+            "function add(x, y) { return x + y; } window.result = add(3, 4);",
+        )
+        .expect("script failed");
+        assert!(matches!(v, Value::Number(n) if n == 7.0), "expected 7, got {v:?}");
+    }
+
+    #[test]
+    fn test_destruct_object_param() {
+        let v = run_and_get_result(
+            "function add({x, y}) { return x + y; } window.result = add({x: 3, y: 4});",
+        )
+        .expect("script failed");
+        assert!(matches!(v, Value::Number(n) if n == 7.0), "expected 7, got {v:?}");
+    }
+
+    #[test]
+    fn test_destruct_array_param() {
+        let v = run_and_get_result(
+            "function sum([a, b]) { return a + b; } window.result = sum([10, 20]);",
+        )
+        .expect("script failed");
+        assert!(matches!(v, Value::Number(n) if n == 30.0), "expected 30, got {v:?}");
+    }
+
+    #[test]
+    fn test_destruct_default_param() {
+        // {role = "user"} should use the default when the property is absent
+        let v = run_and_get_result(
+            "function label({name, role = \"user\"}) { return name + \":\" + role; }\
+             window.result = label({name: \"Bob\"});",
+        )
+        .expect("script failed");
+        if let Value::String(s) = &v {
+            assert_eq!(s.as_str().unwrap_or(""), "Bob:user");
+        } else {
+            panic!("expected string, got {v:?}");
+        }
+    }
+
+    #[test]
+    fn test_destruct_mixed_params() {
+        // Mix of identifier and destructured params
+        let v = run_and_get_result(
+            "function f(n, {a, b}) { return n + a + b; } window.result = f(1, {a: 2, b: 3});",
+        )
+        .expect("script failed");
+        assert!(matches!(v, Value::Number(n) if n == 6.0), "expected 6, got {v:?}");
     }
 }
