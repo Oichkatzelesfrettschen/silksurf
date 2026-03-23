@@ -264,7 +264,14 @@ impl<'src> Lexer<'src> {
                         40 => TokenKind::NotEqual,
                         41 => TokenKind::LessEqual,
                         42 => TokenKind::GreaterEqual,
-                        43 => TokenKind::QuestionQuestion,
+                        43 => {
+                            /* BPE matched '??' but we need to check for '??=' */
+                            if self.advance_if(b'=') {
+                                TokenKind::QuestionQuestionAssign
+                            } else {
+                                TokenKind::QuestionQuestion
+                            }
+                        }
                         44 => TokenKind::QuestionDot,
                         45 => TokenKind::Ellipsis,
                         _ => unreachable!(),

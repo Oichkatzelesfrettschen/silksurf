@@ -2336,4 +2336,48 @@ mod tests {
         assert!(errors.is_empty(), "Two string-key properties: {errors:?}");
         assert!(elapsed.as_secs() < 2, "Two properties should not hang");
     }
+
+    #[test]
+    fn test_nullish_coalescing_assignment() {
+        let arena = AstArena::new();
+        let (_program, errors) = Parser::new("x ??= 42;", &arena).parse();
+        assert!(errors.is_empty(), "??= should parse: {errors:?}");
+    }
+
+    #[test]
+    fn test_optional_chaining() {
+        let arena = AstArena::new();
+        let (_program, errors) = Parser::new("x?.y;", &arena).parse();
+        assert!(errors.is_empty(), "?. should parse: {errors:?}");
+    }
+
+    #[test]
+    fn test_optional_chaining_call() {
+        let arena = AstArena::new();
+        let (_program, errors) = Parser::new("x?.();", &arena).parse();
+        assert!(errors.is_empty(), "?.() should parse: {errors:?}");
+    }
+
+    #[test]
+    fn test_class_extends_expression() {
+        let arena = AstArena::new();
+        let (_program, errors) =
+            Parser::new("var E = class MyError extends Error {};", &arena).parse();
+        assert!(errors.is_empty(), "class extends expression should parse: {errors:?}");
+    }
+
+    #[test]
+    fn test_nullish_assign_with_class() {
+        // Exact ChatGPT pattern
+        let arena = AstArena::new();
+        let (program, errors) = Parser::new(
+            "window.ReactQueryError ??= class ReactQueryError extends Error {};",
+            &arena,
+        )
+        .parse();
+        // May have errors if class in expression position has issues,
+        // but should NOT hang
+        let _ = program;
+        let _ = errors;
+    }
 }
