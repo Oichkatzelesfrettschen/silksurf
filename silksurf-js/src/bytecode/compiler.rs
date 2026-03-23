@@ -614,10 +614,40 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 Ok(result_reg)
             }
             Expression::Class(_) => {
-                // Class expressions compile to an object (simplified)
                 let reg = self.alloc_register();
                 self.emit(Instruction::new_r(Opcode::NewObject, reg.0));
                 Ok(reg)
+            }
+            /*
+             * Expression::New -- `new Constructor(args)`.
+             *
+             * For NativeFunction constructors (ReadableStream, Error, etc.),
+             * this compiles as a regular Call. The constructor NativeFunction
+             * returns the constructed object.
+             *
+             * TODO: For JS function constructors, should create a new object,
+             * set its prototype, call the constructor with `this` bound to
+             * the new object, and return the object.
+             */
+            Expression::New(new_expr) => {
+                let result_reg = self.alloc_register();
+                let callee_reg = self.compile_expression(new_expr.callee)?;
+                let arg_base = self.next_register;
+                for arg in new_expr.arguments {
+                    match arg {
+                        Argument::Expression(expr) => {
+                            let _ = self.compile_expression(expr)?;
+                        }
+                        Argument::Spread(_) => {}
+                    }
+                }
+                let argc = new_expr.arguments.len() as u8;
+                self.emit_at(
+                    Instruction::new_rrr(Opcode::Call, result_reg.0, callee_reg.0, argc),
+                    new_expr.span,
+                );
+                self.free_registers_to(arg_base);
+                Ok(result_reg)
             }
             _ => {
                 let reg = self.alloc_register();
