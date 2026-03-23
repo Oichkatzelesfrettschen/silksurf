@@ -3,37 +3,37 @@ use crate::{CssError, CssToken, CssTokenizer};
 use silksurf_core::SilkInterner;
 use smol_str::SmolStr;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Stylesheet {
     pub rules: Vec<Rule>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Rule {
     Style(StyleRule),
     At(AtRule),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct StyleRule {
     pub selectors: SelectorList,
     pub declarations: Vec<Declaration>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AtRule {
     pub name: SmolStr,
     pub prelude: Vec<CssToken>,
     pub block: Option<AtRuleBlock>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum AtRuleBlock {
     Rules(Vec<Rule>),
     Declarations(Vec<Declaration>),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Declaration {
     pub name: SmolStr,
     pub value: Vec<CssToken>,

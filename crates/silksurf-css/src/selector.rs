@@ -4,9 +4,17 @@ use silksurf_dom::{AttributeName, TagName};
 use smallvec::SmallVec;
 use std::hash::{Hash, Hasher};
 
-#[derive(Debug, Clone)]
+/*
+ * SelectorIdent -- internable CSS identifier with SmallString + optional Atom.
+ *
+ * Serialization: only `value` is stored; `atom` is always None after
+ * deserialization and repopulated by intern_rules() at render time.
+ * This keeps the serialized form interner-agnostic.
+ */
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SelectorIdent {
     value: SmallString,
+    #[serde(skip)]
     atom: Option<Atom>,
 }
 
@@ -87,23 +95,23 @@ impl From<SmallString> for SelectorIdent {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SelectorList {
     pub selectors: SmallVec<[Selector; 2]>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Selector {
     pub steps: SmallVec<[SelectorStep; 4]>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SelectorStep {
     pub combinator: Option<Combinator>,
     pub compound: CompoundSelector,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Combinator {
     Descendant,
     Child,
@@ -111,19 +119,19 @@ pub enum Combinator {
     SubsequentSibling,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CompoundSelector {
     pub type_selector: Option<TypeSelector>,
     pub modifiers: SmallVec<[SelectorModifier; 4]>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum TypeSelector {
     Any,
     Tag(TagName),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum SelectorModifier {
     Class(SelectorIdent),
     Id(SelectorIdent),
@@ -131,14 +139,14 @@ pub enum SelectorModifier {
     PseudoClass(SelectorIdent),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AttributeSelector {
     pub name: AttributeName,
     pub operator: Option<AttributeOperator>,
     pub value: Option<SelectorIdent>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum AttributeOperator {
     Equals,
     Includes,

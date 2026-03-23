@@ -17,7 +17,7 @@
 
 /// CSS property identifier for O(1) cascade dispatch.
 /// Assigned during CSS parsing; used in cascade to avoid string matching.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[repr(u16)]
 pub enum PropertyId {
     Display = 0,

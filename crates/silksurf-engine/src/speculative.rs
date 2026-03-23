@@ -31,6 +31,7 @@ use silksurf_core::SilkInterner;
 use silksurf_net::cache::ResponseCache;
 use silksurf_net::{BasicClient, HttpMethod, HttpRequest, HttpResponse, NetClient, NetError};
 use std::hash::{Hash, Hasher};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::Instant;
@@ -149,6 +150,56 @@ fn hash_css_text(css: &str) -> u64 {
 }
 
 /*
+ * disk_cache_path -- return the file path for a stylesheet disk cache entry.
+ *
+ * WHY: The in-memory StylesheetCache is lost on process exit. The disk cache
+ * persists across process restarts so cold starts pay only ~200us for
+ * intern_rules instead of ~2.5ms for a full CSS parse.
+ *
+ * Format: {tmpdir}/silksurf_css_cache/{key:016x}.bin
+ * Key:    FxHash(css_text) -- 64-bit, 16 hex chars, collision probability ~1e-9
+ *
+ * See: load_stylesheet_from_disk, save_stylesheet_to_disk below
+ */
+fn disk_cache_path(key: u64) -> PathBuf {
+    let mut p = std::env::temp_dir();
+    p.push("silksurf_css_cache");
+    p.push(format!("{key:016x}.bin"));
+    p
+}
+
+/*
+ * load_stylesheet_from_disk -- try to deserialize a cached Stylesheet.
+ *
+ * Returns None on any error (file not found, corrupt bytes, format version
+ * mismatch). Callers fall through to full parse on None.
+ *
+ * WHY graceful fallback: bincode format changes between releases would
+ * otherwise cause panics. By catching errors here, we silently re-parse
+ * and overwrite stale caches.
+ */
+fn load_stylesheet_from_disk(path: &PathBuf) -> Option<Stylesheet> {
+    let bytes = std::fs::read(path).ok()?;
+    bincode::deserialize::<Stylesheet>(&bytes).ok()
+}
+
+/*
+ * save_stylesheet_to_disk -- serialize an uninternalized Stylesheet to disk.
+ *
+ * WHY: called once per cache miss so subsequent process restarts pay only
+ * ~200us (disk read + intern_rules) instead of ~2.5ms (full parse).
+ * Errors are silently ignored -- the in-memory cache still works.
+ */
+fn save_stylesheet_to_disk(path: &PathBuf, sheet: &Stylesheet) {
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Ok(bytes) = bincode::serialize(sheet) {
+        let _ = std::fs::write(path, bytes);
+    }
+}
+
+/*
  * SpeculativeRenderer -- cache-first HTTP client with background revalidation.
  *
  * On first fetch: goes to the network, stores response in ResponseCache.
@@ -231,12 +282,34 @@ impl SpeculativeRenderer {
             return Some(sheet);
         }
 
-        // Cache miss: full parse with interning.
+        // Cache miss: try disk cache before full parse.
+        //
+        // WHY: full parse costs ~2.5ms; disk read + bincode::deserialize + intern_rules
+        // costs ~200us. On cold process start the in-memory cache is empty but the disk
+        // cache may have a valid serialized Stylesheet from a previous run.
+        //
+        // INVARIANT: deserialized Stylesheets have atom=None (#[serde(skip)]).
+        // We populate atoms by running intern_rules before returning.
+        let path = disk_cache_path(key);
+        if let Some(mut disk_sheet) = load_stylesheet_from_disk(&path) {
+            intern_rules(&mut disk_sheet.rules, interner);
+            // Populate in-memory cache so subsequent renders skip disk I/O entirely.
+            let mut uninit = disk_sheet.clone();
+            strip_selector_atoms(&mut uninit.rules);
+            self.stylesheet_cache.entries.insert(key, Arc::new(uninit));
+            return Some(disk_sheet);
+        }
+
+        // Full parse (both in-memory and disk caches missed).
         let sheet = parse_stylesheet_with_interner(css_text, interner).ok()?;
 
         // Strip atoms for storage (SmallStrings retained for equality fallback).
         let mut uninit = sheet.clone();
         strip_selector_atoms(&mut uninit.rules);
+
+        // Persist to disk so subsequent process restarts pay only ~200us.
+        save_stylesheet_to_disk(&path, &uninit);
+
         self.stylesheet_cache.entries.insert(key, Arc::new(uninit));
 
         Some(sheet)
