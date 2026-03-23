@@ -10,5 +10,11 @@ silksurf-css = { path = "../silksurf-css" }
 silksurf-dom = { path = "../silksurf-dom" }
 silksurf-layout = { path = "../silksurf-layout" }
 rustc-hash = { workspace = true }
+wide = { workspace = true }
+rayon = { workspace = true, optional = true }
+
+[features]
+default = []
+parallel = ["rayon"]
 [dev-dependencies]
 silksurf-core = { path = "../silksurf-core" }
