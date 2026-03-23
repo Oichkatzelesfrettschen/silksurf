@@ -2166,6 +2166,7 @@ dependencies = [
  "flume",
  "httparse",
  "memmap2",
+ "rustc-hash",
  "rustls",
  "silksurf-tls",
  "url",

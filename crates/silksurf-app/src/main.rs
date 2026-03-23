@@ -20,6 +20,10 @@ use silksurf_net::{BasicClient, HttpMethod, HttpRequest, NetClient};
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let insecure = args.iter().any(|a| a == "--insecure" || a == "-k");
+    let use_cache = args.iter().any(|a| a == "--cached" || a == "-c");
+
+    // Initialize response cache for speculative pre-rendering
+    let mut response_cache = silksurf_net::cache::ResponseCache::new();
     let url = args
         .iter()
         .skip(1)
@@ -53,11 +57,40 @@ fn main() {
         body: Vec::new(),
     };
 
-    let response = match client.fetch(&request) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("[SilkSurf] Fetch error: {}", e.message);
-            return;
+    // Check cache first for speculative pre-render
+    let cache_start = std::time::Instant::now();
+    let response = if use_cache {
+        if let Some(cached) = response_cache.get(&url) {
+            eprintln!("[SilkSurf] CACHE HIT: {} bytes in {:?}", cached.body.len(), cache_start.elapsed());
+            silksurf_net::HttpResponse {
+                status: cached.status,
+                headers: cached.headers.clone(),
+                body: cached.body.clone(),
+            }
+        } else {
+            match client.fetch(&request) {
+                Ok(r) => {
+                    response_cache.put(url.clone(), &r);
+                    eprintln!("[SilkSurf] Cached response ({} bytes)", r.body.len());
+                    r
+                }
+                Err(e) => {
+                    eprintln!("[SilkSurf] Fetch error: {}", e.message);
+                    return;
+                }
+            }
+        }
+    } else {
+        match client.fetch(&request) {
+            Ok(r) => {
+                // Always cache for future --cached runs
+                response_cache.put(url.clone(), &r);
+                r
+            }
+            Err(e) => {
+                eprintln!("[SilkSurf] Fetch error: {}", e.message);
+                return;
+            }
         }
     };
 

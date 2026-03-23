@@ -26,11 +26,8 @@
  * See: silksurf-app/src/main.rs for webview usage
  */
 #![allow(clippy::collapsible_if)]
-//! Pure Rust HTTP/1.1 client using:
-//! - rustls for TLS (no OpenSSL)
-//! - httparse for zero-copy header parsing
-//! - url for WHATWG URL parsing
-//! - std::net::TcpStream for synchronous TCP (no async runtime)
+
+pub mod cache;
 
 use rustls::StreamOwned;
 use silksurf_tls::{RustlsProvider, TlsProvider};
