@@ -2032,6 +2032,7 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 name = "silksurf-app"
 version = "0.1.0"
 dependencies = [
+ "mimalloc",
  "silksurf-core",
  "silksurf-css",
  "silksurf-dom",
@@ -2060,11 +2061,13 @@ version = "0.1.0"
 dependencies = [
  "dashmap",
  "memchr",
+ "mimalloc",
  "rayon",
  "rustc-hash",
  "silksurf-core",
  "silksurf-dom",
  "smallvec",
+ "smol_str",
 ]
 
 [[package]]
@@ -2079,6 +2082,7 @@ dependencies = [
 name = "silksurf-engine"
 version = "0.1.0"
 dependencies = [
+ "mimalloc",
  "rustc-hash",
  "silksurf-core",
  "silksurf-css",

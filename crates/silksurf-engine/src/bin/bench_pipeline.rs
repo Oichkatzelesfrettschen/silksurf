@@ -17,6 +17,14 @@
  * See: neighbor_table.rs for BFS-level decomposition
  */
 
+/*
+ * mimalloc -- global allocator for bench_pipeline.
+ * WHY: CSS tokenizer and SmolStr allocations are small and frequent.
+ * mimalloc thread-local free lists reduce per-alloc cost by 2-4x.
+ */
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use silksurf_core::SilkArena;
 use silksurf_css::{compute_styles, parse_stylesheet_with_interner};
 use silksurf_engine::fused_pipeline::fused_style_layout_paint;
