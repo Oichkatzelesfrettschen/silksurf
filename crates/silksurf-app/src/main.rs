@@ -179,10 +179,12 @@ fn main() {
     let scripts = extract_inline_scripts(&shared_dom.borrow(), doc_node);
     eprintln!("[SilkSurf] Found {} inline script(s)", scripts.len());
     for (i, script) in scripts.iter().enumerate() {
-        // Skip large scripts for now (bundled React app, etc.)
-        if script.len() > 1_000 {
+        // Skip only very large bundled JS (React, webpack output, etc.).
+        // Inline init scripts are usually <4KB; anything >256KB is a bundle.
+        const MAX_INLINE_SCRIPT: usize = 256 * 1024;
+        if script.len() > MAX_INLINE_SCRIPT {
             eprintln!(
-                "[SilkSurf] Script {i}: {} bytes (skipping -- too large for interpreter)",
+                "[SilkSurf] Script {i}: {} bytes (skipping -- bundle too large)",
                 script.len()
             );
             continue;
