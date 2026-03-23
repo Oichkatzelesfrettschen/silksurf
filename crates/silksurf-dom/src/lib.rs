@@ -1,5 +1,7 @@
 //! DOM data structures and traversal APIs (cleanroom).
 
+pub mod diff;
+
 use silksurf_core::{Atom, SilkInterner, SmallString, should_intern_identifier};
 use smallvec::SmallVec;
 use std::cell::RefCell;

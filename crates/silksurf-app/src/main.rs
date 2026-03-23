@@ -411,6 +411,20 @@ fn main() {
      *
      * See: speculative.rs RevalidationHandle for thread model
      */
+    /*
+     * Background revalidation result: join here after the render is done.
+     *
+     * On 304 Not Modified: diff is empty by definition (same bytes = same DOM).
+     * No re-render needed. This is the primary Phase E benefit for chatgpt.com:
+     * the revalidation path skips all DOM parsing, CSS cascade, layout, and
+     * rasterization when the server confirms the page hasn't changed.
+     *
+     * On 200 with new content: diff the cached DOM against the new DOM to
+     * quantify the change set. The diff result is logged here; Phase E.2
+     * (incremental re-render) will use it to only re-process changed nodes.
+     *
+     * See: silksurf-dom/src/diff.rs for DomDiff and diff_doms
+     */
     if let Some(handle) = revalidation_handle {
         let result = match handle.wait() {
             Ok(r) => r,
@@ -421,7 +435,7 @@ fn main() {
         };
         if result.changed {
             eprintln!(
-                "[SilkSurf] Revalidation: CONTENT CHANGED (200) in {:?} -- re-render needed",
+                "[SilkSurf] Revalidation: CONTENT CHANGED (200) in {:?}",
                 result.rtt
             );
             if let Some(new_resp) = result.response {
@@ -430,10 +444,37 @@ fn main() {
                     "[SilkSurf] Cache updated ({} bytes)",
                     renderer.cache_bytes()
                 );
+
+                // DOM diff: compare cached parse against the new HTML.
+                let new_html = String::from_utf8_lossy(&renderer.cache.get(&url)
+                    .map(|e| e.body.clone())
+                    .unwrap_or_default())
+                    .to_string();
+                if let Ok(new_doc) = silksurf_engine::parse_html(&new_html) {
+                    let diff = silksurf_dom::diff::diff_doms(
+                        &shared_dom.borrow(),
+                        doc_node,
+                        &new_doc.dom,
+                        new_doc.document,
+                    );
+                    if diff.is_empty() {
+                        eprintln!("[SilkSurf] DOM diff: no structural changes (cached render valid)");
+                    } else {
+                        eprintln!(
+                            "[SilkSurf] DOM diff: {} changed, {} added, {} removed nodes -- re-render needed",
+                            diff.changed.len(),
+                            diff.added.len(),
+                            diff.removed.len(),
+                        );
+                        // Phase E.2 (TODO): run fused_style_layout_paint only for
+                        // nodes in diff.changed + their ancestors up to the nearest
+                        // layout boundary. For now, full re-render is a correct fallback.
+                    }
+                }
             }
         } else {
             eprintln!(
-                "[SilkSurf] Revalidation: 304 NOT MODIFIED in {:?} -- cached render is current",
+                "[SilkSurf] Revalidation: 304 NOT MODIFIED in {:?} -- cached render is current, no re-render",
                 result.rtt
             );
         }
