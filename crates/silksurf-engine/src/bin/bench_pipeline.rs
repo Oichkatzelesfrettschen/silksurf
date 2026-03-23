@@ -107,6 +107,22 @@ fn main() {
     println!("Page: {} DOM nodes, {} CSS rules", count_hint(), stylesheet.rules.len());
     println!();
 
+    // ---- HTML PARSE cost (needed for full cached-re-render budget) ----
+    // WHY: The speculative pre-render scenario fetches from HTTP cache (0ms)
+    // but still re-parses the HTML body each render. This measures the parse
+    // cost so we know whether DOM caching is needed to hit the <500us target.
+    let mut parse_total = Duration::ZERO;
+    for _ in 0..ITERATIONS {
+        let html_bytes = BENCH_HTML.as_bytes();
+        let t = Instant::now();
+        let _doc = parse_html(std::str::from_utf8(html_bytes).unwrap()).expect("parse html");
+        parse_total += t.elapsed();
+    }
+    let parse_per = parse_total / ITERATIONS;
+    println!("--- HTML parse cost (input to cached re-render) ---");
+    println!("  html parse:   {:>8?}  per-iter  ({} bytes)", parse_per, BENCH_HTML.len());
+    println!();
+
     // ---- OLD PATH: 3-pass (compute_styles + build_layout_tree + build_display_list) ----
     let mut style_total = Duration::ZERO;
     let mut layout_total = Duration::ZERO;
