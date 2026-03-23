@@ -33,6 +33,7 @@ mod error;
 mod fetch_builtin;
 mod globals;
 pub mod json;
+pub mod map_set;
 mod math;
 mod promise_builtin;
 mod storage;
@@ -58,6 +59,7 @@ pub fn install_builtins(global: &Rc<RefCell<Object>>) {
     fetch_builtin::install(&mut g);
     storage::install(&mut g);
     window::install(&mut g);
+    map_set::install(&mut g);
     drop(g);
     window::install_window_self(global);
 }
