@@ -12,7 +12,7 @@ silksurf-tls = { path = "../silksurf-tls" }
 silksurf-dom = { path = "../silksurf-dom" }
 silksurf-css = { path = "../silksurf-css" }
 silksurf-layout = { path = "../silksurf-layout" }
-silksurf-render = { path = "../silksurf-render" }
+silksurf-render = { path = "../silksurf-render", features = ["parallel"] }
 silksurf-js = { path = "../../silksurf-js" }
 silksurf-core = { path = "../silksurf-core" }
 url = { workspace = true }
