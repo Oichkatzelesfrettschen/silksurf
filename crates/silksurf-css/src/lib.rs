@@ -24,8 +24,8 @@ pub use parser::{
 };
 pub use selector::{
     AttributeOperator, AttributeSelector, Combinator, CompoundSelector, Selector, SelectorIdent,
-    SelectorList, SelectorModifier, SelectorStep, TypeSelector, parse_selector_list,
-    parse_selector_list_with_interner,
+    SelectorList, SelectorModifier, SelectorStep, TypeSelector, intern_rules, parse_selector_list,
+    parse_selector_list_with_interner, strip_selector_atoms,
 };
 use smol_str::SmolStr;
 

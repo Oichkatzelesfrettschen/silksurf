@@ -41,6 +41,13 @@ impl SelectorIdent {
         }
     }
 
+    /// Clear the interned atom so this SelectorIdent can be stored in the
+    /// stylesheet cache without holding a reference to a specific interner.
+    /// The `value` SmallString is retained for string-equality fallback.
+    pub fn clear_atom(&mut self) {
+        self.atom = None;
+    }
+
     pub fn as_str(&self) -> &str {
         self.value.as_str()
     }
@@ -147,6 +154,12 @@ impl SelectorList {
             selector.intern_with(interner);
         }
     }
+
+    fn strip_atoms(&mut self) {
+        for selector in &mut self.selectors {
+            selector.strip_atoms();
+        }
+    }
 }
 
 impl Selector {
@@ -155,11 +168,21 @@ impl Selector {
             step.intern_with(interner);
         }
     }
+
+    fn strip_atoms(&mut self) {
+        for step in &mut self.steps {
+            step.strip_atoms();
+        }
+    }
 }
 
 impl SelectorStep {
     fn intern_with(&mut self, interner: &mut SilkInterner) {
         self.compound.intern_with(interner);
+    }
+
+    fn strip_atoms(&mut self) {
+        self.compound.strip_atoms();
     }
 }
 
@@ -167,6 +190,12 @@ impl CompoundSelector {
     fn intern_with(&mut self, interner: &mut SilkInterner) {
         for modifier in &mut self.modifiers {
             modifier.intern_with(interner);
+        }
+    }
+
+    fn strip_atoms(&mut self) {
+        for modifier in &mut self.modifiers {
+            modifier.strip_atoms();
         }
     }
 }
@@ -178,6 +207,19 @@ impl SelectorModifier {
             | SelectorModifier::Id(name)
             | SelectorModifier::PseudoClass(name) => name.intern_with(interner),
             SelectorModifier::Attribute(_) => {}
+        }
+    }
+
+    fn strip_atoms(&mut self) {
+        match self {
+            SelectorModifier::Class(name)
+            | SelectorModifier::Id(name)
+            | SelectorModifier::PseudoClass(name) => name.clear_atom(),
+            SelectorModifier::Attribute(attr) => {
+                if let Some(ref mut v) = attr.value {
+                    v.clear_atom();
+                }
+            }
         }
     }
 }
@@ -192,6 +234,55 @@ pub fn parse_selector_list_with_interner(
 ) -> SelectorList {
     let mut parser = SelectorParser::new(tokens, interner);
     parser.parse_selector_list()
+}
+
+/*
+ * intern_rules -- populate Atom fields in all StyleRule selectors.
+ *
+ * WHY: Called after cloning a cached Stylesheet (which has atom=None).
+ * Re-interning is O(N_selectors) interner lookups -- ~100-200us for ChatGPT
+ * scale CSS, vs 2.5ms for a full re-parse. This is the core of Phase B.
+ *
+ * INVARIANT: after intern_rules, all SelectorIdents that pass
+ * should_intern_identifier() have atom=Some. AtRule prelude tokens
+ * do not contain SelectorIdents and are unchanged.
+ *
+ * See: StylesheetCache.get_or_parse_stylesheet in speculative.rs
+ */
+pub fn intern_rules(rules: &mut Vec<crate::Rule>, interner: &mut SilkInterner) {
+    for rule in rules {
+        match rule {
+            crate::Rule::Style(sr) => sr.selectors.intern_with(interner),
+            crate::Rule::At(ar) => {
+                if let Some(crate::AtRuleBlock::Rules(nested)) = &mut ar.block {
+                    intern_rules(nested, interner);
+                }
+            }
+        }
+    }
+}
+
+/*
+ * strip_selector_atoms -- clear all interned Atom fields in selector lists.
+ *
+ * WHY: Before storing a Stylesheet in the StylesheetCache, we strip atoms
+ * so the cached copy has no interner-specific state. The SmallString values
+ * are preserved for equality fallback. On cache hit, intern_rules repopulates
+ * atoms against the current DOM's interner.
+ *
+ * See: StylesheetCache.get_or_parse_stylesheet in speculative.rs
+ */
+pub fn strip_selector_atoms(rules: &mut Vec<crate::Rule>) {
+    for rule in rules {
+        match rule {
+            crate::Rule::Style(sr) => sr.selectors.strip_atoms(),
+            crate::Rule::At(ar) => {
+                if let Some(crate::AtRuleBlock::Rules(nested)) = &mut ar.block {
+                    strip_selector_atoms(nested);
+                }
+            }
+        }
+    }
 }
 
 struct SelectorParser<'a> {
