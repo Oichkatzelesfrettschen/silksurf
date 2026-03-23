@@ -460,7 +460,7 @@ struct IndexedSelector {
  * See: cascade_for_node() for how the index is queried per node
  * See: selector_key() for rightmost-selector extraction
  */
-struct StyleIndex {
+pub struct StyleIndex {
     tag_rules: FxHashMap<TagName, Vec<IndexedSelector>>,
     id_rules: FxHashMap<SelectorIdent, Vec<IndexedSelector>>,
     class_rules: FxHashMap<SelectorIdent, Vec<IndexedSelector>>,
@@ -468,7 +468,7 @@ struct StyleIndex {
 }
 
 impl StyleIndex {
-    fn new(stylesheet: &Stylesheet) -> Self {
+    pub fn new(stylesheet: &Stylesheet) -> Self {
         let mut index = StyleIndex {
             tag_rules: FxHashMap::default(),
             id_rules: FxHashMap::default(),
@@ -741,7 +741,7 @@ pub fn compute_style_for_node(
     compute_style_for_node_with_index(dom, node, stylesheet, &index, parent)
 }
 
-fn compute_style_for_node_with_index(
+pub fn compute_style_for_node_with_index(
     dom: &Dom,
     node: NodeId,
     stylesheet: &Stylesheet,

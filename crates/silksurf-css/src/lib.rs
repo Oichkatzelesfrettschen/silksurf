@@ -30,7 +30,8 @@ pub use selector::{
 pub use style::{
     AlignItems, AlignSelf, Color, ComputedStyle, Display, Edges, FlexBasis, FlexContainerStyle,
     FlexDirection, FlexItemStyle, FlexWrap, JustifyContent, Length, LengthOrAuto, Overflow,
-    Position, StyleCache, compute_style_for_node, compute_styles,
+    Position, StyleCache, StyleIndex, compute_style_for_node, compute_style_for_node_with_index,
+    compute_styles,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
