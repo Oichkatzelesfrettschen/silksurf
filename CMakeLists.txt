@@ -425,6 +425,37 @@ if(ENABLE_FUZZING AND AFL_CC)
     )
 endif()
 
+# WebView: fetch a URL and render through SilkSurf's pipeline
+find_package(CURL)
+if(CURL_FOUND)
+    add_executable(silksurf-webview
+        src/webview.c
+        src/layout/box_model.c
+        ${SOURCES}
+    )
+
+    target_include_directories(silksurf-webview PRIVATE ${CURL_INCLUDE_DIRS})
+    target_link_libraries(silksurf-webview
+        silksurf_js
+        dl
+        pthread
+        ${CURL_LIBRARIES}
+        ${DOCUMENT_LINK_LIBS}
+    )
+
+    if(XCB_SHM_FOUND)
+        target_link_libraries(silksurf-webview ${XCB_SHM_LIBRARIES})
+    endif()
+    if(PIXMAN_FOUND)
+        target_link_libraries(silksurf-webview ${PIXMAN_LIBRARIES})
+    endif()
+
+    install(TARGETS silksurf-webview DESTINATION bin)
+    message(STATUS "  silksurf-webview: ENABLED (libcurl found)")
+else()
+    message(STATUS "  silksurf-webview: DISABLED (libcurl not found)")
+endif()
+
 # Install
 install(TARGETS silksurf DESTINATION bin)
 

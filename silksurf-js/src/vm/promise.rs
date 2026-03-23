@@ -1,11 +1,27 @@
-//! Promise implementation per ES2024 specification.
-//!
-//! Promises represent the eventual completion (or failure) of an
-//! asynchronous operation. This module implements:
-//! - Promise state machine (pending -> fulfilled/rejected)
-//! - Reaction chains (.then/.catch/.finally)
-//! - Microtask queue for async resolution
-//! - Promise.resolve/reject/all/race static methods
+/*
+ * promise.rs -- ES2024 Promise implementation + microtask queue.
+ *
+ * WHY: Promises are the foundation of async JS. React, fetch(), and
+ * all modern APIs return Promises. Without this, no async code runs.
+ *
+ * State machine: Pending -> Fulfilled(value) | Rejected(reason)
+ * Once settled, state never changes (double-resolve is silently ignored).
+ *
+ * Reaction chain: .then(onFulfilled, onRejected) attaches callbacks.
+ * If the promise is already settled, the reaction fires immediately
+ * via microtask queue. If pending, it queues for later settlement.
+ *
+ * Microtask queue: FIFO queue drained after each macrotask (timer/event).
+ * Promise reactions and queueMicrotask() callbacks go here.
+ * Safety limit: 10,000 iterations per drain to prevent infinite loops.
+ *
+ * Memory: Promise is Rc<RefCell<Promise>>. Reactions clone the Rc.
+ * Queue is VecDeque<Microtask> -- each microtask ~64 bytes.
+ *
+ * See: builtins/promise_builtin.rs for Promise.resolve/reject/all/race
+ * See: event_loop.rs tick() for microtask drain in the event loop
+ * See: vm/mod.rs Vm.microtasks for the queue on the VM struct
+ */
 
 use std::cell::RefCell;
 use std::collections::VecDeque;

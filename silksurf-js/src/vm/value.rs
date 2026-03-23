@@ -1,7 +1,30 @@
-//! JavaScript value representation
-//!
-//! Simple tagged enum for Phase 4. Phase 5 will implement NaN-boxing
-//! for 64-bit pointer-sized values with inline numbers.
+/*
+ * value.rs -- JavaScript value representation (tagged enum).
+ *
+ * WHY: Every JS value (number, string, object, function, etc.) must be
+ * representable as a single Rust type. Value is a tagged enum with
+ * variants for each JS type. Strings use Rc<JsString> with SSO (Small
+ * String Optimization -- inline up to 22 bytes, heap above).
+ *
+ * Type coercions per ES spec:
+ *   to_number(): Undefined->NaN, Null->0, Bool->0/1, String->parse
+ *   to_i32(): ES 7.1.6 ToInt32 with 2^32 modulo wrapping
+ *   to_u32(): ES 7.1.7 ToUint32 (same modulo, unsigned)
+ *   to_js_string(): ToString for each type (number formatting, etc.)
+ *
+ * PropertyKey: String(Rc<JsString>) | Index(u32) for object property access.
+ * Objects use HashMap<PropertyKey, Value> with prototype chain lookup.
+ *
+ * NativeFunction: Rust closures callable from JS (Box<dyn Fn(&[Value])->Value>).
+ * HostObject: native Rust objects exposed to JS via HostObject trait.
+ *
+ * Memory: Value is ~32-40 bytes (enum tag + largest variant).
+ * Phase 5 target: NaN-boxing to compress to 8 bytes (see: nanbox.rs).
+ *
+ * See: string.rs JsString for SSO implementation
+ * See: host.rs HostObject trait for native object dispatch
+ * See: vm/mod.rs for register file (Vec<Value>)
+ */
 
 use std::cell::RefCell;
 use std::collections::HashMap;

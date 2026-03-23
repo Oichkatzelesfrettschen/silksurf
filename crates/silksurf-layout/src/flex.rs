@@ -1,12 +1,31 @@
-//! Flexbox layout algorithm per CSS Flexible Box Layout Module Level 1.
-//!
-//! Implements the core flex layout:
-//! 1. Determine main/cross axes from flex-direction
-//! 2. Collect flex items, compute flex-basis
-//! 3. Distribute free space per flex-grow/flex-shrink
-//! 4. Line wrapping (flex-wrap)
-//! 5. Cross-axis alignment (align-items, align-self)
-//! 6. Main-axis alignment (justify-content)
+/*
+ * flex.rs -- CSS Flexible Box Layout Module Level 1 algorithm.
+ *
+ * WHY: Flexbox is the primary layout model for modern web applications.
+ * ChatGPT.com uses display:flex pervasively. Without this, no modern
+ * site renders correctly.
+ *
+ * Algorithm (per CSS spec Section 9):
+ *   1. Determine main/cross axes from flex-direction (row/column)
+ *   2. Collect flex items, compute flex-basis (auto or explicit)
+ *   3. Build flex lines (wrap/nowrap) based on container main size
+ *   4. Distribute free space: flex-grow (expand) / flex-shrink (compress)
+ *   5. Resolve cross-axis sizes per line
+ *   6. Align items: justify-content (main), align-items/align-self (cross)
+ *   7. Position items with gap support
+ *
+ * justify-content modes: flex-start, flex-end, center,
+ *   space-between, space-around, space-evenly
+ *
+ * Complexity: O(N * L) where N=flex items, L=flex lines
+ * Memory: Vec<FlexItem> + Vec<FlexLine> (proportional to children count)
+ *
+ * INVARIANT: items sorted by CSS order property before line breaking
+ * INVARIANT: line cross-size >= max(item cross-sizes) in that line
+ *
+ * See: layout/lib.rs layout_flex() for integration with layout tree
+ * See: style.rs FlexContainerStyle/FlexItemStyle for parsed flex properties
+ */
 
 use silksurf_css::{
     AlignItems, AlignSelf, ComputedStyle, Display, FlexBasis, FlexDirection, FlexWrap,

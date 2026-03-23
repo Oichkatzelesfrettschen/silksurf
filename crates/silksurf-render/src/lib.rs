@@ -1,4 +1,31 @@
-//! Rendering and rasterization pipeline (cleanroom).
+/*
+ * render/lib.rs -- display list construction and tile-based rasterization.
+ *
+ * WHY: Final stage of the rendering pipeline. Converts positioned layout
+ * boxes into a flat DisplayList of paint commands (SolidColor, Text),
+ * then rasterizes them to an RGBA pixel buffer.
+ *
+ * Architecture:
+ *   build_display_list: layout tree -> Vec<DisplayItem> (depth-first walk)
+ *   with_tiles: partition display items into spatial tile buckets
+ *   rasterize_damage: paint only tiles intersecting the damage region
+ *   fill_rect: per-row pixel fill with SSE2 SIMD (4 pixels/store)
+ *
+ * Tile-based rendering: viewport divided into 64x64 tiles. Each tile
+ * has a bucket of display item indices. Damage rasterization only
+ * processes tiles that overlap the dirty rectangle.
+ *
+ * SIMD: fill_row_sse2 uses _mm_set1_epi32 + _mm_storeu_si128 to fill
+ * 4 pixels per instruction. Falls back to scalar .fill() on non-x86.
+ *
+ * TODO(perf): AVX2 fill (8 pixels/store), rayon tile parallelism (Phase 4.6)
+ * TODO(perf): SoA DisplayList for type-batched rasterization
+ *
+ * Memory: RGBA buffer = width * height * 4 bytes (4MB for 1280x800)
+ *
+ * See: layout/lib.rs for LayoutTree input
+ * See: style.rs ComputedStyle for color/background data
+ */
 #![allow(
     clippy::collapsible_if,
     clippy::needless_borrow,

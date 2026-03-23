@@ -1,7 +1,31 @@
-//! Built-in objects and functions for the JS runtime.
-//!
-//! Provides console, JSON, Math, Array/String prototypes,
-//! and global functions (parseInt, parseFloat, isNaN, etc.).
+/*
+ * builtins/mod.rs -- all built-in JS objects and global functions.
+ *
+ * WHY: JavaScript engines must provide a rich set of built-in objects
+ * (console, JSON, Math, Error, Promise, Array, String, etc.) and
+ * global functions (parseInt, parseFloat, isNaN, fetch, setTimeout).
+ * These are installed on the global object at VM creation.
+ *
+ * Module map:
+ *   console.rs       -- console.log/warn/error/info/debug
+ *   json.rs          -- JSON.parse (serde_json) / JSON.stringify
+ *   math.rs          -- Math.* (17 methods + 8 constants)
+ *   error.rs         -- Error/TypeError/SyntaxError/RangeError/ReferenceError
+ *   globals.rs       -- parseInt, parseFloat, isNaN, isFinite, encode/decodeURI
+ *   promise_builtin.rs -- Promise.resolve/reject/all/race
+ *   timers_builtin.rs  -- setTimeout, setInterval, rAF, queueMicrotask
+ *   fetch_builtin.rs   -- fetch() -> Promise<Response>
+ *   storage.rs         -- localStorage / sessionStorage (in-memory HashMap)
+ *   window.rs          -- window/self/globalThis, performance.now(), navigator
+ *   array.rs           -- Array.prototype (14 methods: push, map, filter, etc.)
+ *   string_proto.rs    -- String.prototype (20 methods: split, replace, etc.)
+ *
+ * install_builtins() is called from Vm::new() to populate the global object.
+ * The last step installs window/self/globalThis as self-referential pointers.
+ *
+ * See: vm/mod.rs Vm::new() for installation call
+ * See: value.rs NativeFunction for how Rust closures become JS functions
+ */
 
 pub mod array;
 mod console;

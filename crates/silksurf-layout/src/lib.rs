@@ -1,4 +1,32 @@
-//! Layout and box model computation (cleanroom).
+/*
+ * layout/lib.rs -- CSS box model layout engine (block, inline, flex).
+ *
+ * WHY: Transforms a styled DOM tree into positioned layout boxes. Each box
+ * has content, padding, border, and margin dimensions. Block boxes flow
+ * vertically; inline boxes flow horizontally with line wrapping.
+ *
+ * Architecture:
+ *   build_layout_tree: DOM + styles -> arena-allocated LayoutBox tree
+ *   layout_block: computes block flow (vertical stacking, margin collapse)
+ *   layout_inline: computes inline flow (text measurement, line breaking)
+ *   layout_flex: delegates to flex.rs for display:flex containers
+ *
+ * Fixed-point arithmetic: uses FIXED_SCALE=64 (6 fractional bits) for
+ * sub-pixel precision. Matches CSS spec requirement for sub-pixel layout.
+ * /* FIXED_SCALE=64: 6 fractional bits, 1/64 px resolution */
+ *
+ * Memory: LayoutBox<'a> allocated in bumpalo arena (SilkArena).
+ * Children stored in ArenaVec (bump-allocated Vec). Zero heap allocation
+ * during layout computation -- all temp storage in arena.
+ *
+ * TODO(perf): SoA conversion for Dimensions (Phase 4.4)
+ * TODO(perf): Fused style-layout-paint pass (Phase 4.5)
+ * TODO(perf): NeighborTable for BFS-level parallel layout (Phase 4.7)
+ *
+ * See: flex.rs for CSS flexbox algorithm
+ * See: style.rs ComputedStyle for input style data
+ * See: render/lib.rs for display list generation from layout
+ */
 
 pub mod flex;
 
