@@ -29,6 +29,7 @@
  */
 
 pub mod flex;
+pub mod neighbor_table;
 
 use rustc_hash::FxHashMap;
 use silksurf_core::{ArenaVec, SilkArena};
