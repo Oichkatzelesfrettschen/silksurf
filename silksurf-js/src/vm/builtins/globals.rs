@@ -17,6 +17,28 @@ pub fn install(global: &mut Object) {
     global.set_by_str("String", native_fn("String", string_fn));
     global.set_by_str("Number", native_fn("Number", number_fn));
     global.set_by_str("Boolean", native_fn("Boolean", boolean_fn));
+
+    /*
+     * Array constructor -- new Array(n) or new Array(a, b, c).
+     *
+     * WHY: Scripts call Array() / new Array() to create arrays, and
+     * access Array.isArray() / Array.from() as static methods.
+     * The static methods are dispatched by name in op_get_prop via
+     * the NativeFunction.name field (see vm/mod.rs op_get_prop).
+     *
+     * Note: name "Array" is the dispatch key for static methods.
+     */
+    global.set_by_str("Array", native_fn("Array", |args| {
+        use crate::vm::builtins::array::create_array;
+        if args.len() == 1 {
+            if let Value::Number(n) = args[0] {
+                let n = n.max(0.0) as usize;
+                let elements = vec![Value::Undefined; n.min(1_000_000)];
+                return create_array(elements);
+            }
+        }
+        create_array(args.to_vec())
+    }));
     // undefined is already the default register value
     global.set_by_str("undefined", Value::Undefined);
     global.set_by_str("null", Value::Null);
