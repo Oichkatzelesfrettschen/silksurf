@@ -9,8 +9,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use silksurf_core::SilkArena;
-use silksurf_css::compute_styles;
+use silksurf_engine::fused_pipeline::fused_style_layout_paint;
 use silksurf_engine::parse_html;
 use silksurf_js::vm::Vm;
 use silksurf_js::vm::dom_bridge;
@@ -135,22 +134,9 @@ fn main() {
         match client.fetch(&sheet_req) {
             Ok(resp) if resp.status == 200 => {
                 eprintln!("[SilkSurf] Fetched {} bytes of CSS", resp.body.len());
-                // Limit total CSS to prevent slow parsing
-                const MAX_TOTAL_CSS: usize = 128 * 1024;
-                if css_text.len() < MAX_TOTAL_CSS {
-                    let sheet_css = String::from_utf8_lossy(&resp.body);
-                    let remaining = MAX_TOTAL_CSS - css_text.len();
-                    let to_add = sheet_css.len().min(remaining);
-                    // Truncate at rule boundary
-                    let safe = sheet_css[..to_add]
-                        .rfind('}')
-                        .map(|p| p + 1)
-                        .unwrap_or(to_add);
-                    css_text.push_str(&sheet_css[..safe]);
-                    css_text.push('\n');
-                } else {
-                    eprintln!("[SilkSurf] Skipping (CSS budget exceeded)");
-                }
+                let sheet_css = String::from_utf8_lossy(&resp.body);
+                css_text.push_str(&sheet_css);
+                css_text.push('\n');
             }
             Ok(resp) => eprintln!("[SilkSurf] Stylesheet HTTP {}", resp.status),
             Err(e) => eprintln!("[SilkSurf] Stylesheet fetch error: {}", e.message),
@@ -176,43 +162,20 @@ fn main() {
     };
     eprintln!("[SilkSurf] CSS parsed in {:?}", css_start.elapsed());
 
-    // 5. Compute styles
-    let style_start = std::time::Instant::now();
-    let styles = compute_styles(&dom, doc_node, &stylesheet);
-    let style_elapsed = style_start.elapsed();
-    eprintln!("[SilkSurf] Computed styles for {} nodes in {:?}", styles.len(), style_elapsed);
-
-    // 6. Build layout tree
+    // Viewport dimensions used by fused pipeline and rasterizer
     let viewport = Rect {
         x: 0.0,
         y: 0.0,
         width: 1280.0,
         height: 800.0,
     };
-    let arena = SilkArena::new();
-    let layout_start = std::time::Instant::now();
-    let layout = silksurf_layout::build_layout_tree(&arena, &dom, &styles, doc_node, viewport);
-    let layout_elapsed = layout_start.elapsed();
 
-    match &layout {
-        Some(tree) => {
-            let dims = tree.root.dimensions();
-            eprintln!(
-                "[SilkSurf] Layout complete: {}x{} at ({}, {}) in {:?}",
-                dims.content.width, dims.content.height, dims.content.x, dims.content.y, layout_elapsed
-            );
-        }
-        None => {
-            eprintln!("[SilkSurf] Layout failed (no root box)");
-        }
-    }
-
-    // 7. Create JS VM with DOM bridge
+    // 5. Create JS VM with DOM bridge (post-CSS, pre-render)
     let shared_dom = Rc::new(RefCell::new(dom));
     let mut vm = Vm::new();
     dom_bridge::install_document(&vm.global, Rc::clone(&shared_dom), doc_node);
 
-    // 8. Extract and execute inline <script> tags
+    // 6. Extract and execute inline <script> tags
     let scripts = extract_inline_scripts(&shared_dom.borrow(), doc_node);
     eprintln!("[SilkSurf] Found {} inline script(s)", scripts.len());
     for (i, script) in scripts.iter().enumerate() {
@@ -356,39 +319,47 @@ fn main() {
         }
     }
 
-    // 9. Run one tick of the event loop
+    // 7. Run one tick of the event loop
     let tick_result = silksurf_js::vm::event_loop::tick(&mut vm.timers, &mut vm.microtasks);
     eprintln!("[SilkSurf] Event loop tick: {tick_result:?}");
 
-    // 10. Build display list + rasterize
-    if let Some(layout_tree) = &layout {
-        let dl_start = std::time::Instant::now();
-        let display_list =
-            silksurf_render::build_display_list(&shared_dom.borrow(), &styles, layout_tree);
-        let dl_elapsed = dl_start.elapsed();
+    // 8. Fused style+layout+paint: single BFS pass over post-JS DOM.
+    //    Replaces separate compute_styles + build_layout_tree + build_display_list calls.
+    //    Running post-JS ensures DOM mutations from scripts are visible in the render.
+    let fused_start = std::time::Instant::now();
+    let fused = fused_style_layout_paint(&shared_dom.borrow(), &stylesheet, doc_node, viewport);
+    let fused_elapsed = fused_start.elapsed();
+    eprintln!(
+        "[SilkSurf] Fused style+layout+paint: {} items, {} styled nodes in {:?}",
+        fused.display_items.len(),
+        fused.styles.len(),
+        fused_elapsed
+    );
+    if let Some(root_rect) = fused.node_rects.get(&doc_node) {
         eprintln!(
-            "[SilkSurf] Display list: {} items in {:?}",
-            display_list.items.len(),
-            dl_elapsed
+            "[SilkSurf] Root: {}x{} at ({}, {})",
+            root_rect.width, root_rect.height, root_rect.x, root_rect.y
         );
-
-        let raster_start = std::time::Instant::now();
-        // Use sequential rasterizer (faster for single-shot; parallel wins at sustained 60fps)
-        let buffer = silksurf_render::rasterize(&display_list, 1280, 800);
-        let raster_elapsed = raster_start.elapsed();
-        eprintln!("[SilkSurf] Rasterized: {} bytes in {:?}", buffer.len(), raster_elapsed);
-
-        // Total processing time (excluding network)
-        let total_processing = css_start.elapsed();
-        eprintln!("\n=== PROCESSING BUDGET (excludes network) ===");
-        eprintln!("  CSS parse:      {:?}", css_start.elapsed() - style_elapsed - layout_elapsed - dl_elapsed - raster_elapsed);
-        eprintln!("  Style cascade:  {:?}", style_elapsed);
-        eprintln!("  Layout:         {:?}", layout_elapsed);
-        eprintln!("  Display list:   {:?}", dl_elapsed);
-        eprintln!("  Rasterize:      {:?}", raster_elapsed);
-        eprintln!("  TOTAL:          {:?}", total_processing);
-        eprintln!("============================================\n");
     }
+
+    let display_list = silksurf_render::DisplayList {
+        items: fused.display_items,
+        tiles: None,
+    }
+    .with_tiles(1280, 800, 64);
+
+    // 9. Tile-parallel rasterization via Rayon (disjoint tile regions, no sync)
+    let raster_start = std::time::Instant::now();
+    let buffer = silksurf_render::rasterize_parallel(&display_list, 1280, 800, 64);
+    let raster_elapsed = raster_start.elapsed();
+    eprintln!("[SilkSurf] Rasterized: {} bytes in {:?}", buffer.len(), raster_elapsed);
+
+    eprintln!("\n=== PROCESSING BUDGET (excludes network) ===");
+    eprintln!("  CSS parse:      {:?}", css_start.elapsed() - fused_elapsed - raster_elapsed);
+    eprintln!("  Fused pipeline: {:?}", fused_elapsed);
+    eprintln!("  Rasterize:      {:?}", raster_elapsed);
+    eprintln!("  TOTAL:          {:?}", css_start.elapsed());
+    eprintln!("============================================\n");
 
     eprintln!("[SilkSurf] Pipeline complete for {url}");
 }
