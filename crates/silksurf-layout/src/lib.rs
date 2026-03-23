@@ -20,8 +20,8 @@
  * during layout computation -- all temp storage in arena.
  *
  * TODO(perf): SoA conversion for Dimensions (Phase 4.4)
- * TODO(perf): Fused style-layout-paint pass (Phase 4.5)
- * TODO(perf): NeighborTable for BFS-level parallel layout (Phase 4.7)
+ * DONE(perf): Fused style-layout-paint pass (Phase 4.5) -- see fused_pipeline.rs
+ * DONE(perf): NeighborTable for BFS-level parallel layout (Phase 4.7) -- neighbor_table.rs
  *
  * See: flex.rs for CSS flexbox algorithm
  * See: style.rs ComputedStyle for input style data

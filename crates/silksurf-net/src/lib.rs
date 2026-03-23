@@ -19,7 +19,8 @@
  * TLS: system certs (rustls-native-certs) + Mozilla bundle (webpki-roots).
  * --insecure flag available for environments with broken cert chains.
  *
- * TODO(perf): Connection pooling, HTTP/2 upgrade, response caching (Phase 4.3)
+ * DONE(perf): Response caching (Phase 4.3) -- see silksurf-engine/src/speculative.rs
+ * TODO(perf): Connection pooling, HTTP/2 upgrade
  *
  * See: silksurf-tls for TLS configuration and cert loading
  * See: builtins/fetch_builtin.rs for JS fetch() API binding

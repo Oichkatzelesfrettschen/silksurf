@@ -17,7 +17,7 @@
  *   Per-node cascade: O(matching_rules) -- typically 5-20 rules
  *   Total: O(nodes * avg_matching_rules) -- ~8000 operations
  *
- * TODO(perf): Property ID interning for 40% cascade speedup (Phase 4.2)
+ * DONE(perf): Property ID interning (Phase 4.2) -- see property_id.rs
  * TODO(perf): SoA conversion for 16x cache reuse (Phase 4.4)
  *
  * See: matching.rs for selector matching, selector.rs for parsing
@@ -882,9 +882,6 @@ fn compute_styles_recursive(
  *
  * INVARIANT: specificity ordering preserved by apply_property's
  * should_override check -- !important > specificity > source order
- *
- * TODO(perf): Replace string matching in apply_declaration with u16
- * property ID table (40% speedup measured). See: Phase 4.2
  *
  * See: StyleIndex for candidate lookup
  * See: matches_selector (matching.rs) for full selector verification

@@ -18,7 +18,8 @@
  * SIMD: fill_row_sse2 uses _mm_set1_epi32 + _mm_storeu_si128 to fill
  * 4 pixels per instruction. Falls back to scalar .fill() on non-x86.
  *
- * TODO(perf): AVX2 fill (8 pixels/store), rayon tile parallelism (Phase 4.6)
+ * DONE(perf): Rayon tile parallelism (Phase 4.6) -- rasterize_parallel{,_into}
+ * DONE(perf): Buffer reuse -- rasterize_parallel_into eliminates per-frame alloc
  * TODO(perf): SoA DisplayList for type-batched rasterization
  *
  * Memory: RGBA buffer = width * height * 4 bytes (4MB for 1280x800)
