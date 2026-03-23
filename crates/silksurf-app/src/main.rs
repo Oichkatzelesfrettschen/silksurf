@@ -177,8 +177,10 @@ fn main() {
     eprintln!("[SilkSurf] CSS parsed in {:?}", css_start.elapsed());
 
     // 5. Compute styles
+    let style_start = std::time::Instant::now();
     let styles = compute_styles(&dom, doc_node, &stylesheet);
-    eprintln!("[SilkSurf] Computed styles for {} nodes", styles.len());
+    let style_elapsed = style_start.elapsed();
+    eprintln!("[SilkSurf] Computed styles for {} nodes in {:?}", styles.len(), style_elapsed);
 
     // 6. Build layout tree
     let viewport = Rect {
@@ -188,14 +190,16 @@ fn main() {
         height: 800.0,
     };
     let arena = SilkArena::new();
+    let layout_start = std::time::Instant::now();
     let layout = silksurf_layout::build_layout_tree(&arena, &dom, &styles, doc_node, viewport);
+    let layout_elapsed = layout_start.elapsed();
 
     match &layout {
         Some(tree) => {
             let dims = tree.root.dimensions();
             eprintln!(
-                "[SilkSurf] Layout complete: {}x{} at ({}, {})",
-                dims.content.width, dims.content.height, dims.content.x, dims.content.y
+                "[SilkSurf] Layout complete: {}x{} at ({}, {}) in {:?}",
+                dims.content.width, dims.content.height, dims.content.x, dims.content.y, layout_elapsed
             );
         }
         None => {
@@ -289,18 +293,33 @@ fn main() {
     let tick_result = silksurf_js::vm::event_loop::tick(&mut vm.timers, &mut vm.microtasks);
     eprintln!("[SilkSurf] Event loop tick: {tick_result:?}");
 
-    // 10. Build display list
+    // 10. Build display list + rasterize
     if let Some(layout_tree) = &layout {
+        let dl_start = std::time::Instant::now();
         let display_list =
             silksurf_render::build_display_list(&shared_dom.borrow(), &styles, layout_tree);
+        let dl_elapsed = dl_start.elapsed();
         eprintln!(
-            "[SilkSurf] Display list: {} items",
-            display_list.items.len()
+            "[SilkSurf] Display list: {} items in {:?}",
+            display_list.items.len(),
+            dl_elapsed
         );
 
-        // Rasterize to buffer (headless)
+        let raster_start = std::time::Instant::now();
         let buffer = silksurf_render::rasterize(&display_list, 1280, 800);
-        eprintln!("[SilkSurf] Rasterized: {} bytes", buffer.len());
+        let raster_elapsed = raster_start.elapsed();
+        eprintln!("[SilkSurf] Rasterized: {} bytes in {:?}", buffer.len(), raster_elapsed);
+
+        // Total processing time (excluding network)
+        let total_processing = css_start.elapsed();
+        eprintln!("\n=== PROCESSING BUDGET (excludes network) ===");
+        eprintln!("  CSS parse:      {:?}", css_start.elapsed() - style_elapsed - layout_elapsed - dl_elapsed - raster_elapsed);
+        eprintln!("  Style cascade:  {:?}", style_elapsed);
+        eprintln!("  Layout:         {:?}", layout_elapsed);
+        eprintln!("  Display list:   {:?}", dl_elapsed);
+        eprintln!("  Rasterize:      {:?}", raster_elapsed);
+        eprintln!("  TOTAL:          {:?}", total_processing);
+        eprintln!("============================================\n");
     }
 
     eprintln!("[SilkSurf] Pipeline complete for {url}");
