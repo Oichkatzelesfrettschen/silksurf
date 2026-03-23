@@ -4,6 +4,7 @@
 //! and the JavaScript runtime. Concrete implementations are introduced
 //! in staged migration phases per the cleanroom plan.
 
+pub mod fused_pipeline;
 mod js;
 
 use rustc_hash::FxHashMap;
