@@ -79,6 +79,8 @@ struct LoopContext {
 /// Bytecode compiler
 pub struct Compiler<'src, 'arena> {
     chunk: Chunk,
+    /// Child chunks for nested function expressions / arrow functions
+    child_chunks: Vec<Chunk>,
     scopes: Vec<Scope>,
     current_scope: usize,
     next_register: u8,
@@ -96,6 +98,7 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
 
         Self {
             chunk: Chunk::new(),
+            child_chunks: Vec::new(),
             scopes,
             current_scope: 0,
             next_register: 0,
@@ -107,7 +110,17 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
         }
     }
 
-    /// Compile a program to bytecode
+    /*
+     * compile -- transform a parsed AST into bytecode.
+     *
+     * Returns (main_chunk, child_chunks) where child_chunks are
+     * function expression / arrow function bodies. The caller must
+     * add all chunks to the VM: main chunk first, then children.
+     * Function constants reference child chunks by index.
+     *
+     * See: Vm::add_chunk() for registering chunks
+     * See: op_new_function for creating Value::Function from chunk index
+     */
     pub fn compile(mut self, program: &Program<'src, 'arena>) -> CompileResult<Chunk> {
         self.check_strict_directive(program);
         self.collect_declarations(program.body);
@@ -125,6 +138,37 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
         }
 
         Ok(self.chunk)
+    }
+
+    /// Get child chunks (function bodies) produced during compilation.
+    /// Must be called after compile() on a second Compiler instance,
+    /// or via compile_with_children().
+    pub fn compile_with_children(
+        mut self,
+        program: &Program<'src, 'arena>,
+    ) -> CompileResult<(Chunk, Vec<Chunk>)> {
+        self.check_strict_directive(program);
+        self.collect_declarations(program.body);
+
+        for stmt in program.body {
+            self.compile_statement(stmt)?;
+        }
+
+        self.emit(Instruction::new(Opcode::RetUndefined));
+        self.chunk.register_count = self.max_register + 1;
+        self.chunk.strict = self.strict;
+
+        if !self.errors.is_empty() {
+            return Err(self.errors.remove(0));
+        }
+
+        Ok((self.chunk, self.child_chunks))
+    }
+
+    /// Convert this compiler into its chunk (for child function compilation).
+    fn into_chunk(mut self) -> Chunk {
+        self.chunk.register_count = self.max_register + 1;
+        self.chunk
     }
 
     fn check_strict_directive(&mut self, program: &Program<'src, 'arena>) {
@@ -475,6 +519,67 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                     }
                 }
                 Ok(last_reg)
+            }
+            /*
+             * Expression::Function -- function expression (IIFEs, callbacks, etc.)
+             *
+             * WHY: `!function(){}()`, `var f = function(){}`, `arr.map(function(){})`
+             * all produce function expressions. The body is compiled into a separate
+             * Chunk. The chunk index is stored as a Constant::Function, and
+             * NewFunction emits a Value::Function at runtime.
+             *
+             * ROOT CAUSE FIX: Previously fell through to _ => LoadUndefined,
+             * causing all function expressions (including IIFEs) to evaluate to
+             * Undefined. This was the real cause of ChatGPT's TypeError("not a
+             * function") on `!function(){...}()` patterns.
+             *
+             * See: op_new_function (vm/mod.rs) for runtime Function creation
+             * See: op_call (vm/mod.rs) for function invocation
+             */
+            Expression::Function(func) => {
+                let result_reg = self.alloc_register();
+                let mut child = Compiler::new();
+                // Compile function body into child chunk
+                for stmt in func.body.body {
+                    child.compile_statement(stmt)?;
+                }
+                // Ensure the child chunk has a RetUndefined at the end
+                child.chunk.emit(Instruction::new(Opcode::RetUndefined));
+                let child_chunk = child.into_chunk();
+                // Store child chunk as a constant and emit NewFunction
+                let func_idx = self.child_chunks.len() as u32;
+                self.child_chunks.push(child_chunk);
+                let const_idx = self.chunk.add_constant(Constant::Function(func_idx));
+                self.emit(Instruction::new_ri(Opcode::NewFunction, result_reg.0, const_idx));
+                Ok(result_reg)
+            }
+            Expression::Arrow(arrow) => {
+                let result_reg = self.alloc_register();
+                let mut child = Compiler::new();
+                match &arrow.body {
+                    crate::parser::ArrowBody::Expression(expr) => {
+                        let val_reg = child.compile_expression(expr)?;
+                        child.chunk.emit(Instruction::new_r(Opcode::Ret, val_reg.0));
+                    }
+                    crate::parser::ArrowBody::Block(block) => {
+                        for stmt in block.body {
+                            child.compile_statement(stmt)?;
+                        }
+                        child.chunk.emit(Instruction::new(Opcode::RetUndefined));
+                    }
+                }
+                let child_chunk = child.into_chunk();
+                let func_idx = self.child_chunks.len() as u32;
+                self.child_chunks.push(child_chunk);
+                let const_idx = self.chunk.add_constant(Constant::Function(func_idx));
+                self.emit(Instruction::new_ri(Opcode::NewFunction, result_reg.0, const_idx));
+                Ok(result_reg)
+            }
+            Expression::Class(_) => {
+                // Class expressions compile to an object (simplified)
+                let reg = self.alloc_register();
+                self.emit(Instruction::new_r(Opcode::NewObject, reg.0));
+                Ok(reg)
             }
             _ => {
                 let reg = self.alloc_register();

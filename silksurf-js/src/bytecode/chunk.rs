@@ -162,6 +162,11 @@ impl Chunk {
         self.constants.get(idx as usize)
     }
 
+    /// Mutable access to constants (for patching function chunk indices).
+    pub fn constants_mut(&mut self) -> &mut [Constant] {
+        &mut self.constants
+    }
+
     /// Current instruction count
     #[must_use]
     pub fn len(&self) -> usize {
