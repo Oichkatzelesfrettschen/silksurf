@@ -323,3 +323,131 @@ unsafe fn fill_row_sse2(row: &mut [u32], pixel: u32) {
         idx += 1;
     }
 }
+
+// ============================================================================
+// Parallel tile rasterization (behind "parallel" feature flag)
+// ============================================================================
+
+/*
+ * rasterize_parallel -- tile-based parallel rasterization using rayon.
+ *
+ * WHY: The rasterizer is embarrassingly parallel -- each tile writes to a
+ * disjoint region of the output buffer. No synchronization is needed.
+ *
+ * Architecture (inspired by gororoba LBM z-slice parallelism):
+ *   1. Divide viewport into NxM tiles (default 64x64 pixels each)
+ *   2. For each tile: collect display items that overlap it
+ *   3. Rasterize each tile independently via rayon::par_iter
+ *   4. Each rayon worker writes to buffer[tile_y_start..tile_y_end]
+ *      which is disjoint from all other workers' regions
+ *
+ * SAFETY: Uses raw pointer arithmetic (SendPtr pattern from gororoba)
+ * to allow parallel writes to disjoint buffer regions. The safety proof:
+ * tile (tx, ty) writes to rows [ty*tile_h..(ty+1)*tile_h] and columns
+ * [tx*tile_w..(tx+1)*tile_w]. No two tiles share any pixel offset.
+ *
+ * See: gororoba_app/crates/gororoba_bevy_lbm/src/soa_solver.rs:1254
+ * See: gororoba_app/docs/engine_optimizations.md Section 3
+ */
+#[cfg(feature = "parallel")]
+pub fn rasterize_parallel(
+    display_list: &DisplayList,
+    width: u32,
+    height: u32,
+    tile_size: u32,
+) -> Vec<u8> {
+    use rayon::prelude::*;
+
+    let tile_size = tile_size.max(1);
+    let tiles_x = (width + tile_size - 1) / tile_size;
+    let tiles_y = (height + tile_size - 1) / tile_size;
+    let total_tiles = (tiles_x * tiles_y) as usize;
+
+    // Allocate output buffer (white background)
+    let mut buffer = vec![255u8; (width * height * 4) as usize];
+
+    // SAFETY: We use a raw pointer to allow parallel writes to disjoint regions.
+    // Each tile writes to a unique rectangular region of the buffer.
+    // The SendPtr wrapper (see gororoba pattern) makes this safe to send across threads.
+    let buf_ptr = buffer.as_mut_ptr();
+    let buf_len = buffer.len();
+
+    // Wrapper to make raw pointer Send (safe because writes are disjoint)
+    struct SendPtr(*mut u8, usize);
+    unsafe impl Send for SendPtr {}
+    unsafe impl Sync for SendPtr {}
+
+    let shared = &SendPtr(buf_ptr, buf_len);
+
+    (0..total_tiles).into_par_iter().for_each(|tile_idx| {
+        let tx = (tile_idx % tiles_x as usize) as u32;
+        let ty = (tile_idx / tiles_x as usize) as u32;
+
+        let tile_x0 = tx * tile_size;
+        let tile_y0 = ty * tile_size;
+        let tile_x1 = (tile_x0 + tile_size).min(width);
+        let tile_y1 = (tile_y0 + tile_size).min(height);
+
+        let tile_rect = Rect {
+            x: tile_x0 as f32,
+            y: tile_y0 as f32,
+            width: (tile_x1 - tile_x0) as f32,
+            height: (tile_y1 - tile_y0) as f32,
+        };
+
+        // Get items for this tile
+        let items = if let Some(tiles) = &display_list.tiles {
+            tiles.items_for_rect(tile_rect)
+        } else {
+            (0..display_list.items.len()).collect()
+        };
+
+        // Rasterize items into the tile's region of the shared buffer
+        for idx in items {
+            if idx >= display_list.items.len() {
+                continue;
+            }
+            let item = &display_list.items[idx];
+            let item_r = item_rect(item);
+            if !rect_intersects(item_r, tile_rect) {
+                continue;
+            }
+            let color = match item {
+                DisplayItem::SolidColor { color, .. } => color,
+                DisplayItem::Text { color, .. } => color,
+            };
+
+            // Clip to tile bounds
+            let x0 = (item_r.x.max(tile_x0 as f32).floor() as i32).max(0);
+            let y0 = (item_r.y.max(tile_y0 as f32).floor() as i32).max(0);
+            let x1 = ((item_r.x + item_r.width).min(tile_x1 as f32).ceil() as i32).min(width as i32);
+            let y1 = ((item_r.y + item_r.height).min(tile_y1 as f32).ceil() as i32).min(height as i32);
+
+            if x0 >= x1 || y0 >= y1 {
+                continue;
+            }
+
+            let pixel_bytes = [color.r, color.g, color.b, color.a];
+            let width_u = width as usize;
+
+            for y in y0..y1 {
+                let row_offset = (y as usize * width_u + x0 as usize) * 4;
+                let row_len = ((x1 - x0) as usize) * 4;
+                if row_offset + row_len <= shared.1 {
+                    // SAFETY: disjoint tile regions guarantee no data race
+                    unsafe {
+                        let row = std::slice::from_raw_parts_mut(
+                            shared.0.add(row_offset),
+                            row_len,
+                        );
+                        for pixel in row.chunks_exact_mut(4) {
+                            pixel.copy_from_slice(&pixel_bytes);
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    buffer
+}
