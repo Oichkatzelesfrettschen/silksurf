@@ -15,6 +15,7 @@ mod parser;
 pub mod property_id;
 mod selector;
 mod style;
+pub mod style_soa;
 
 pub use matching::{Specificity, matches_selector, matches_selector_list, selector_specificity};
 pub use parser::{
