@@ -6,8 +6,8 @@
 #[cfg(kani)]
 mod proofs {
     use crate::lexer::{Lexer, Span, TokenKind};
-    use crate::parser::ast_arena::AstArena;
     use crate::parser::Parser;
+    use crate::parser::ast_arena::AstArena;
 
     /// Verify that Span creation never panics for valid inputs
     #[kani::proof]

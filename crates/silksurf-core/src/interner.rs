@@ -9,7 +9,9 @@ pub struct SilkInterner {
 
 impl SilkInterner {
     pub fn new() -> Self {
-        Self { rodeo: Rodeo::default() }
+        Self {
+            rodeo: Rodeo::default(),
+        }
     }
 
     pub fn intern(&mut self, value: &str) -> Atom {
@@ -22,6 +24,10 @@ impl SilkInterner {
 
     pub fn len(&self) -> usize {
         self.rodeo.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.rodeo.is_empty()
     }
 }
 
@@ -41,5 +47,8 @@ pub fn should_intern_identifier(value: &str) -> bool {
     if !value.is_ascii() {
         return false;
     }
-    !value.as_bytes().iter().any(|byte| byte.is_ascii_whitespace())
+    !value
+        .as_bytes()
+        .iter()
+        .any(|byte| byte.is_ascii_whitespace())
 }

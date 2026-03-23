@@ -1,6 +1,6 @@
 use crate::{
-    AttributeOperator, AttributeSelector, CompoundSelector, Combinator, Selector, SelectorList,
-    SelectorIdent, SelectorModifier, TypeSelector,
+    AttributeOperator, AttributeSelector, Combinator, CompoundSelector, Selector, SelectorIdent,
+    SelectorList, SelectorModifier, TypeSelector,
 };
 use silksurf_dom::{Attribute, AttributeName, Dom, NodeId, NodeKind};
 
@@ -148,7 +148,9 @@ fn matches_attribute(dom: &Dom, node: NodeId, attribute: &AttributeSelector) -> 
     match operator {
         AttributeOperator::Equals => value == expected,
         AttributeOperator::Includes => value.split_whitespace().any(|part| part == expected),
-        AttributeOperator::DashMatch => value == expected || value.starts_with(&format!("{}-", expected)),
+        AttributeOperator::DashMatch => {
+            value == expected || value.starts_with(&format!("{}-", expected))
+        }
         AttributeOperator::PrefixMatch => value.starts_with(expected),
         AttributeOperator::SuffixMatch => value.ends_with(expected),
         AttributeOperator::SubstringMatch => value.contains(expected),
@@ -157,9 +159,7 @@ fn matches_attribute(dom: &Dom, node: NodeId, attribute: &AttributeSelector) -> 
 
 fn attribute_record<'a>(dom: &'a Dom, node: NodeId, name: &AttributeName) -> Option<&'a Attribute> {
     let attrs = dom.attributes(node).ok()?;
-    attrs
-        .iter()
-        .find(|attr| attr.name == *name)
+    attrs.iter().find(|attr| attr.name == *name)
 }
 
 fn matches_id(dom: &Dom, node: NodeId, name: &SelectorIdent) -> bool {
@@ -219,7 +219,9 @@ fn is_root(dom: &Dom, node: NodeId) -> bool {
 }
 
 fn is_empty(dom: &Dom, node: NodeId) -> bool {
-    dom.children(node).map(|children| children.is_empty()).unwrap_or(false)
+    dom.children(node)
+        .map(|children| children.is_empty())
+        .unwrap_or(false)
 }
 
 fn is_first_child(dom: &Dom, node: NodeId) -> bool {

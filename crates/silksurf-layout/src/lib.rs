@@ -1,10 +1,12 @@
 //! Layout and box model computation (cleanroom).
 
+pub mod flex;
+
+use rustc_hash::FxHashMap;
 use silksurf_core::{ArenaVec, SilkArena};
 use silksurf_css::{ComputedStyle, Display, Edges, Length};
 use silksurf_dom::{Dom, NodeId, NodeKind, TagName};
 use std::cell::Cell;
-use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Rect {
@@ -51,11 +53,11 @@ impl Dimensions {
 
 const FIXED_SCALE: i32 = 64;
 
-fn fixed_from_f32(value: f32) -> i32 {
+pub(crate) fn fixed_from_f32(value: f32) -> i32 {
     (value * FIXED_SCALE as f32).round() as i32
 }
 
-fn fixed_to_f32(value: i32) -> f32 {
+pub(crate) fn fixed_to_f32(value: i32) -> f32 {
     value as f32 / FIXED_SCALE as f32
 }
 
@@ -81,7 +83,7 @@ pub struct LayoutTree<'a> {
 pub fn build_layout_tree<'a>(
     arena: &'a SilkArena,
     dom: &Dom,
-    styles: &HashMap<NodeId, ComputedStyle>,
+    styles: &FxHashMap<NodeId, ComputedStyle>,
     root: NodeId,
     viewport: Rect,
 ) -> Option<LayoutTree<'a>> {
@@ -94,7 +96,7 @@ pub fn build_layout_tree<'a>(
 pub fn build_layout_tree_incremental<'a>(
     arena: &'a SilkArena,
     dom: &Dom,
-    styles: &HashMap<NodeId, ComputedStyle>,
+    styles: &FxHashMap<NodeId, ComputedStyle>,
     root: NodeId,
     viewport: Rect,
     dirty_nodes: &[NodeId],
@@ -108,7 +110,7 @@ pub fn build_layout_tree_incremental<'a>(
 fn build_layout_box<'a>(
     arena: &'a SilkArena,
     dom: &Dom,
-    styles: &HashMap<NodeId, ComputedStyle>,
+    styles: &FxHashMap<NodeId, ComputedStyle>,
     node: NodeId,
 ) -> Option<&'a LayoutBox<'a>> {
     let display = match dom.node(node).ok().map(|node| node.kind()) {
@@ -129,7 +131,7 @@ fn build_layout_box<'a>(
         return None;
     }
     let box_type = match display {
-        Display::Block => BoxType::BlockNode(node),
+        Display::Block | Display::Flex | Display::InlineFlex => BoxType::BlockNode(node),
         Display::Inline => BoxType::InlineNode(node),
         Display::None => BoxType::Anonymous,
     };
@@ -159,21 +161,118 @@ impl<'a> LayoutBox<'a> {
     pub fn layout(
         &self,
         dom: &Dom,
-        styles: &HashMap<NodeId, ComputedStyle>,
+        styles: &FxHashMap<NodeId, ComputedStyle>,
         containing: Rect,
         cursor_y: &mut f32,
     ) {
         match self.box_type {
-            BoxType::BlockNode(_) => self.layout_block(dom, styles, containing, cursor_y),
+            BoxType::BlockNode(node) => {
+                let is_flex = styles
+                    .get(&node)
+                    .is_some_and(|s| matches!(s.display, Display::Flex | Display::InlineFlex));
+                if is_flex {
+                    self.layout_flex(dom, styles, node, containing, cursor_y);
+                } else {
+                    self.layout_block(dom, styles, containing, cursor_y);
+                }
+            }
             BoxType::InlineNode(_) => self.layout_inline(dom, styles, containing, cursor_y),
             BoxType::Anonymous => {}
         }
     }
 
+    fn layout_flex(
+        &self,
+        dom: &Dom,
+        styles: &FxHashMap<NodeId, ComputedStyle>,
+        node: NodeId,
+        containing: Rect,
+        cursor_y: &mut f32,
+    ) {
+        let style = self.style_for(styles);
+        let mut dims = self.dimensions();
+        let margin_fixed = edges_to_fixed(&style.margin);
+        let padding_fixed = edges_to_fixed(&style.padding);
+        let border_fixed = edges_to_fixed(&style.border);
+        dims.margin = edges_from_fixed(margin_fixed);
+        dims.padding = edges_from_fixed(padding_fixed);
+        dims.border = edges_from_fixed(border_fixed);
+
+        let containing_width_fixed = fixed_from_f32(containing.width);
+        let content_width_fixed = (containing_width_fixed
+            - margin_fixed.left
+            - margin_fixed.right
+            - border_fixed.left
+            - border_fixed.right
+            - padding_fixed.left
+            - padding_fixed.right)
+            .max(0);
+        let x = fixed_to_f32(
+            fixed_from_f32(containing.x)
+                + margin_fixed.left
+                + border_fixed.left
+                + padding_fixed.left,
+        );
+        let y = fixed_to_f32(
+            fixed_from_f32(*cursor_y) + margin_fixed.top + border_fixed.top + padding_fixed.top,
+        );
+        let content_width = fixed_to_f32(content_width_fixed);
+
+        dims.content = Rect {
+            x,
+            y,
+            width: content_width,
+            height: 0.0,
+        };
+
+        // Run the flex layout algorithm
+        let flex_containing = Rect {
+            x,
+            y,
+            width: content_width,
+            height: 0.0, // auto height
+        };
+        let flex_results = flex::layout_flex_container(dom, styles, node, flex_containing);
+
+        // Position children using flex results and compute content height
+        let mut max_bottom: f32 = y;
+        for child in &self.children {
+            let child_node = match child.box_type {
+                BoxType::BlockNode(n) | BoxType::InlineNode(n) => n,
+                BoxType::Anonymous => continue,
+            };
+            if let Some(result) = flex_results.get(&child_node) {
+                let mut child_dims = child.dimensions();
+                child_dims.content = result.content;
+                child.set_dimensions(child_dims);
+                let bottom = result.content.y + result.content.height;
+                if bottom > max_bottom {
+                    max_bottom = bottom;
+                }
+                // Recursively layout flex item children
+                let child_style = styles.get(&child_node);
+                let is_child_flex = child_style
+                    .is_some_and(|s| matches!(s.display, Display::Flex | Display::InlineFlex));
+                if is_child_flex {
+                    let mut child_cursor = result.content.y;
+                    child.layout_flex(dom, styles, child_node, result.content, &mut child_cursor);
+                }
+            }
+        }
+
+        let content_height = (max_bottom - y).max(0.0);
+        dims.content.height = content_height;
+        self.set_dimensions(dims);
+
+        *cursor_y = y
+            + content_height
+            + fixed_to_f32(padding_fixed.bottom + border_fixed.bottom + margin_fixed.bottom);
+    }
+
     fn layout_block(
         &self,
         dom: &Dom,
-        styles: &HashMap<NodeId, ComputedStyle>,
+        styles: &FxHashMap<NodeId, ComputedStyle>,
         containing: Rect,
         cursor_y: &mut f32,
     ) {
@@ -199,10 +298,8 @@ impl<'a> LayoutBox<'a> {
             + margin_fixed.left
             + border_fixed.left
             + padding_fixed.left;
-        let y_fixed = fixed_from_f32(*cursor_y)
-            + margin_fixed.top
-            + border_fixed.top
-            + padding_fixed.top;
+        let y_fixed =
+            fixed_from_f32(*cursor_y) + margin_fixed.top + border_fixed.top + padding_fixed.top;
         let content_width = fixed_to_f32(content_width_fixed);
         let x = fixed_to_f32(x_fixed);
         let y = fixed_to_f32(y_fixed);
@@ -275,7 +372,7 @@ impl<'a> LayoutBox<'a> {
     fn layout_inline(
         &self,
         dom: &Dom,
-        styles: &HashMap<NodeId, ComputedStyle>,
+        styles: &FxHashMap<NodeId, ComputedStyle>,
         containing: Rect,
         cursor_y: &mut f32,
     ) {
@@ -293,10 +390,8 @@ impl<'a> LayoutBox<'a> {
             + margin_fixed.left
             + border_fixed.left
             + padding_fixed.left;
-        let y_fixed = fixed_from_f32(*cursor_y)
-            + margin_fixed.top
-            + border_fixed.top
-            + padding_fixed.top;
+        let y_fixed =
+            fixed_from_f32(*cursor_y) + margin_fixed.top + border_fixed.top + padding_fixed.top;
         let width_fixed = fixed_from_f32(width);
         let height_fixed = fixed_from_f32(height);
         dims.content = Rect {
@@ -319,7 +414,7 @@ impl<'a> LayoutBox<'a> {
     fn inline_intrinsic_size(
         &self,
         dom: &Dom,
-        styles: &HashMap<NodeId, ComputedStyle>,
+        styles: &FxHashMap<NodeId, ComputedStyle>,
     ) -> (f32, f32) {
         let style = self.style_for(styles);
         let font_size_fixed = length_to_fixed(style.font_size);
@@ -333,20 +428,21 @@ impl<'a> LayoutBox<'a> {
 
     fn style_for<'style>(
         &self,
-        styles: &'style HashMap<NodeId, ComputedStyle>,
+        styles: &'style FxHashMap<NodeId, ComputedStyle>,
     ) -> &'style ComputedStyle {
         match self.box_type {
-            BoxType::BlockNode(node) | BoxType::InlineNode(node) => styles
-                .get(&node)
-                .expect("style missing for node"),
+            BoxType::BlockNode(node) | BoxType::InlineNode(node) => {
+                styles.get(&node).expect("style missing for node")
+            }
             BoxType::Anonymous => styles.values().next().unwrap(),
         }
     }
 }
 
-fn length_to_px(length: Length) -> f32 {
+pub(crate) fn length_to_px(length: Length) -> f32 {
     match length {
         Length::Px(value) => value,
+        Length::Percent(_) => 0.0, // Needs context; use length_to_px_with_context for percentages
     }
 }
 

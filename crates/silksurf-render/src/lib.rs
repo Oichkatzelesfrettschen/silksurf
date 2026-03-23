@@ -1,9 +1,14 @@
 //! Rendering and rasterization pipeline (cleanroom).
+#![allow(
+    clippy::collapsible_if,
+    clippy::needless_borrow,
+    clippy::manual_div_ceil
+)]
 
+use rustc_hash::FxHashMap;
 use silksurf_css::{Color, ComputedStyle};
 use silksurf_dom::{Dom, NodeId, NodeKind};
 use silksurf_layout::{LayoutTree, Rect};
-use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DisplayList {
@@ -21,7 +26,10 @@ pub struct DisplayListTiles {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DisplayItem {
-    SolidColor { rect: Rect, color: Color },
+    SolidColor {
+        rect: Rect,
+        color: Color,
+    },
     Text {
         rect: Rect,
         node: NodeId,
@@ -32,7 +40,7 @@ pub enum DisplayItem {
 
 pub fn build_display_list(
     dom: &Dom,
-    styles: &HashMap<NodeId, ComputedStyle>,
+    styles: &FxHashMap<NodeId, ComputedStyle>,
     layout: &LayoutTree<'_>,
 ) -> DisplayList {
     let capacity = estimate_display_items(&layout.root);
@@ -56,7 +64,7 @@ impl DisplayList {
 
 fn build_display_list_for_box(
     dom: &Dom,
-    styles: &HashMap<NodeId, ComputedStyle>,
+    styles: &FxHashMap<NodeId, ComputedStyle>,
     layout: &silksurf_layout::LayoutBox<'_>,
     list: &mut DisplayList,
 ) {
@@ -154,12 +162,7 @@ fn rect_intersects(a: Rect, b: Rect) -> bool {
     a.x < bx1 && ax1 > b.x && a.y < by1 && ay1 > b.y
 }
 
-fn build_tiles(
-    items: &[DisplayItem],
-    width: u32,
-    height: u32,
-    tile_size: u32,
-) -> DisplayListTiles {
+fn build_tiles(items: &[DisplayItem], width: u32, height: u32, tile_size: u32) -> DisplayListTiles {
     let tiles_x = (width + tile_size - 1) / tile_size;
     let tiles_y = (height + tile_size - 1) / tile_size;
     let mut buckets = vec![Vec::new(); (tiles_x * tiles_y) as usize];
@@ -235,7 +238,8 @@ fn fill_rect(buffer: &mut [u8], width: u32, height: u32, rect: Rect, color: Colo
     let width_u = width as usize;
     let pixel = u32::from_le_bytes([color.r, color.g, color.b, color.a]);
     let len_u32 = buffer.len() / 4;
-    let buffer_u32 = unsafe { std::slice::from_raw_parts_mut(buffer.as_mut_ptr() as *mut u32, len_u32) };
+    let buffer_u32 =
+        unsafe { std::slice::from_raw_parts_mut(buffer.as_mut_ptr() as *mut u32, len_u32) };
 
     for y in y0..y1 {
         if y < 0 || y >= height as i32 {

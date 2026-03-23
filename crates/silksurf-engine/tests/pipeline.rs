@@ -1,13 +1,10 @@
 use silksurf_core::SilkArena;
-use silksurf_css::{parse_stylesheet_with_interner, Color, Length};
+use silksurf_css::{Color, Length, parse_stylesheet_with_interner};
 use silksurf_dom::{AttributeName, Dom, NodeId};
-use silksurf_engine::{parse_html, render, EnginePipeline};
+use silksurf_engine::{EnginePipeline, parse_html, render};
 use silksurf_layout::{LayoutBox, Rect};
 
-fn find_layout_box<'a>(
-    layout: &'a LayoutBox<'a>,
-    target: NodeId,
-) -> Option<&'a LayoutBox<'a>> {
+fn find_layout_box<'a>(layout: &'a LayoutBox<'a>, target: NodeId) -> Option<&'a LayoutBox<'a>> {
     if matches!(
         layout.box_type,
         silksurf_layout::BoxType::BlockNode(id) | silksurf_layout::BoxType::InlineNode(id)
@@ -106,15 +103,30 @@ fn renders_incremental_after_dom_mutation() {
     let document = output.document;
     let main = find_element_by_id(&dom, document, "main").expect("main node");
     let main_style = output.styles.get(&main).expect("main style");
-    assert_eq!(main_style.color, Color { r: 255, g: 0, b: 0, a: 255 });
+    assert_eq!(
+        main_style.color,
+        Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255
+        }
+    );
 
     dom.with_mutation_batch(|dom| {
-        dom.set_attribute(main, "class", "hot")
-            .expect("set class");
+        dom.set_attribute(main, "class", "hot").expect("set class");
     });
     let output = pipeline
         .render_document_incremental_from_dom(dom, document, stylesheet, viewport, &arena)
         .expect("render incremental");
     let main_style = output.styles.get(&main).expect("main style");
-    assert_eq!(main_style.color, Color { r: 0, g: 0, b: 255, a: 255 });
+    assert_eq!(
+        main_style.color,
+        Color {
+            r: 0,
+            g: 0,
+            b: 255,
+            a: 255
+        }
+    );
 }

@@ -27,9 +27,7 @@ fn tokenizes_simple_rule() {
 #[test]
 fn tokenizes_hash_and_comment() {
     let mut tokenizer = CssTokenizer::new();
-    let mut tokens = tokenizer
-        .feed("#id { /* note */ padding: 10px }")
-        .unwrap();
+    let mut tokens = tokenizer.feed("#id { /* note */ padding: 10px }").unwrap();
     tokens.extend(tokenizer.finish().unwrap());
 
     let expected = vec![
@@ -129,9 +127,7 @@ fn tokenizes_url() {
 #[test]
 fn tokenizes_escape_and_unicode_range() {
     let mut tokenizer = CssTokenizer::new();
-    let mut tokens = tokenizer
-        .feed("#\\31 0 { unicode-range: U+4??; }")
-        .unwrap();
+    let mut tokens = tokenizer.feed("#\\31 0 { unicode-range: U+4??; }").unwrap();
     tokens.extend(tokenizer.finish().unwrap());
 
     let expected = vec![

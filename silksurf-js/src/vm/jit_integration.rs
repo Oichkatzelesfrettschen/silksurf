@@ -9,7 +9,7 @@ use std::collections::HashMap;
 #[cfg(feature = "jit")]
 use crate::bytecode::Chunk;
 #[cfg(feature = "jit")]
-use crate::jit::{should_jit_compile, JitCompiler, JitError, JIT_THRESHOLD};
+use crate::jit::{JIT_THRESHOLD, JitCompiler, JitError, should_jit_compile};
 
 /// Hot function tracker for tiered compilation
 #[cfg(feature = "jit")]

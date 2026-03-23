@@ -946,8 +946,8 @@ impl Default for Compiler<'_, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::ast_arena::AstArena;
     use crate::parser::Parser;
+    use crate::parser::ast_arena::AstArena;
 
     fn compile(source: &str) -> CompileResult<Chunk> {
         let arena = AstArena::new();

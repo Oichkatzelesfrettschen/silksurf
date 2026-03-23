@@ -1,4 +1,4 @@
-use silksurf_css::{matches_selector, parse_selector_list_with_interner, CssTokenizer};
+use silksurf_css::{CssTokenizer, matches_selector, parse_selector_list_with_interner};
 use silksurf_dom::Dom;
 use std::env;
 use std::time::Instant;
@@ -27,7 +27,8 @@ fn main() {
     dom.set_attribute(span, "class", "highlight")
         .expect("highlight");
     dom.append_child(document, container).expect("append div");
-    dom.append_child(container, section).expect("append section");
+    dom.append_child(container, section)
+        .expect("append section");
     dom.append_child(section, span).expect("append span");
 
     let mut workload_nodes = Vec::new();
@@ -39,16 +40,14 @@ fn main() {
             dom.set_attribute(node, "data-state", "active")
                 .expect("data-state");
         }
-        dom.append_child(section, node).expect("append workload span");
+        dom.append_child(section, node)
+            .expect("append workload span");
         workload_nodes.push(node);
     }
 
     let selector_list =
         dom.with_interner_mut(|interner| parse_selector_list_with_interner(tokens, Some(interner)));
-    let selector = selector_list
-        .selectors
-        .first()
-        .expect("selector parse");
+    let selector = selector_list.selectors.first().expect("selector parse");
 
     let iterations = if guard { 50_000 } else { 200_000 };
     let start = Instant::now();
@@ -74,12 +73,13 @@ fn main() {
         let mut parsed = Vec::new();
         for selector in workload_selectors {
             let mut tokenizer = CssTokenizer::new();
-            let mut tokens = tokenizer.feed(selector).expect("tokenize workload selector");
+            let mut tokens = tokenizer
+                .feed(selector)
+                .expect("tokenize workload selector");
             tokens.extend(tokenizer.finish().expect("finish workload tokenizer"));
-            let list = dom
-                .with_interner_mut(|interner| {
-                    parse_selector_list_with_interner(tokens, Some(interner))
-                });
+            let list = dom.with_interner_mut(|interner| {
+                parse_selector_list_with_interner(tokens, Some(interner))
+            });
             if let Some(first) = list.selectors.into_iter().next() {
                 parsed.push(first);
             }

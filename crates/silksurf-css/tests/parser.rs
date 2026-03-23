@@ -1,4 +1,4 @@
-use silksurf_css::{parse_stylesheet, AtRuleBlock, CssToken, Rule, TypeSelector};
+use silksurf_css::{AtRuleBlock, CssToken, Rule, TypeSelector, parse_stylesheet};
 use silksurf_dom::TagName;
 
 #[test]

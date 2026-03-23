@@ -18,17 +18,22 @@ resolver = "2"
 [workspace.package]
 edition = "2024"
 license = "MIT OR Apache-2.0"
-rust-version = "1.94.0"
+rust-version = "1.96.0"
 
 [workspace.dependencies]
-bumpalo = { version = "3.19.1", features = ["collections"] }
-lasso = "0.7.3"
-memchr = "2.7.6"
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.148"
-thiserror = "2.0.17"
-smol_str = "0.3.4"
-rustls = "0.23.35"
+bumpalo = { version = "3.20", features = ["collections"] }
+lasso = "0.7"
+memchr = "2.7"
+num-traits = "0.2"
+regress = "0.10"
+rustc-hash = "2.1"
+smallvec = { version = "1.15", features = ["union"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+smol_str = "0.3"
+url = "2.5"
+rustls = "0.23"
 
 [profile.dev]
 opt-level = 1

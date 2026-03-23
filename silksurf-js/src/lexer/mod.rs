@@ -17,4 +17,4 @@ mod token;
 pub use interner::{Interner, Symbol};
 pub use lexer::Lexer;
 pub use span::Span;
-pub use token::{keyword_lookup, Token, TokenKind};
+pub use token::{Token, TokenKind, keyword_lookup};

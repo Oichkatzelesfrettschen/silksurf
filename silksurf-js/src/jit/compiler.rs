@@ -4,9 +4,9 @@
 
 use std::collections::HashMap;
 
+use cranelift_codegen::Context;
 use cranelift_codegen::ir::{AbiParam, UserFuncName};
 use cranelift_codegen::settings::{self, Configurable};
-use cranelift_codegen::Context;
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};

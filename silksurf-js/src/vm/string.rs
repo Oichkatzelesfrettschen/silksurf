@@ -161,6 +161,12 @@ impl JsString {
     }
 }
 
+impl Default for JsString {
+    fn default() -> Self {
+        JsString::new("")
+    }
+}
+
 impl PartialEq for JsString {
     fn eq(&self, other: &Self) -> bool {
         // Fast path: both interned with same index

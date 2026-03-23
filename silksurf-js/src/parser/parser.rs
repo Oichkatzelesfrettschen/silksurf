@@ -26,10 +26,11 @@ use crate::parser::ast::{
     YieldExpression,
 };
 use crate::parser::ast_arena::{AstArena, AstVec, AstVecBuilder};
-use crate::parser::error::{is_sync_point, ParseError, ParseResult, SyncPoint};
+use crate::parser::error::{ParseError, ParseResult, SyncPoint, is_sync_point};
 use crate::parser::precedence::{
-    infix_binding_power, postfix_binding_power, prefix_binding_power, token_to_assignment_op,
-    token_to_binary_op, token_to_logical_op, token_to_unary_op, token_to_update_op, BindingPower,
+    BindingPower, infix_binding_power, postfix_binding_power, prefix_binding_power,
+    token_to_assignment_op, token_to_binary_op, token_to_logical_op, token_to_unary_op,
+    token_to_update_op,
 };
 
 /// The JavaScript parser
@@ -419,7 +420,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                     return Err(ParseError::invalid_syntax(
                         self.current.span,
                         "Shorthand property must be an identifier",
-                    ))
+                    ));
                 }
             }
         };
@@ -809,7 +810,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                 return Err(ParseError::invalid_syntax(
                     self.current.span,
                     "Expected left-hand side in for-in/of",
-                ))
+                ));
             }
         };
 
@@ -1081,7 +1082,9 @@ impl<'src, 'arena> Parser<'src, 'arena> {
 
     /// Parse assignment expression (excludes comma)
     fn parse_assignment_expression(&mut self) -> ParseResult<Expression<'src, 'arena>> {
-        self.parse_expression_bp(BindingPower::COMMA)
+        // Use COMMA + 1 to stop before consuming comma as the comma operator.
+        // This ensures {a: 1, b: 2} parses as two properties, not a comma expression.
+        self.parse_expression_bp(BindingPower(BindingPower::COMMA.0 + 1))
     }
 
     /// Parse expression with binding power (Pratt core)
@@ -2128,5 +2131,120 @@ mod tests {
         let (_program, errors) = Parser::new("let x = ; let y = 2;", &arena).parse();
         // Should recover and parse second declaration
         assert!(!errors.is_empty());
+    }
+
+    #[test]
+    fn test_empty_object_literal() {
+        let arena = AstArena::new();
+        let (program, errors) = Parser::new("var x = {};", &arena).parse();
+        assert!(errors.is_empty(), "Empty object should parse: {errors:?}");
+        assert!(!program.body.is_empty());
+    }
+
+    #[test]
+    fn test_object_literal_single_ident_key() {
+        let arena = AstArena::new();
+        let (program, errors) = Parser::new("var x = {a: 1};", &arena).parse();
+        assert!(errors.is_empty(), "Single ident key should parse: {errors:?}");
+        assert!(!program.body.is_empty());
+    }
+
+    #[test]
+    fn test_object_literal_string_keys() {
+        let arena = AstArena::new();
+        let (program, errors) = Parser::new(r#"var x = {"a": 1};"#, &arena).parse();
+        assert!(errors.is_empty(), "Object literal with string keys should parse: {errors:?}");
+        assert!(!program.body.is_empty());
+    }
+
+    #[test]
+    fn test_member_assignment_object() {
+        // This is the pattern ChatGPT uses: window.x = {key: "value"}
+        let arena = AstArena::new();
+        let start = std::time::Instant::now();
+        let (program, errors) =
+            Parser::new(r#"window.__test = {"basename": "/", "future": {"a": true}};"#, &arena)
+                .parse();
+        let elapsed = start.elapsed();
+        eprintln!(
+            "Parse time: {elapsed:?}, errors: {}, stmts: {}",
+            errors.len(),
+            program.body.len()
+        );
+        for e in &errors {
+            eprintln!("  Error: {:?}", e);
+        }
+        assert!(elapsed.as_secs() < 5, "Parser should not hang (took {elapsed:?})");
+    }
+
+    #[test]
+    fn test_simple_assignment_empty_object() {
+        let arena = AstArena::new();
+        let start = std::time::Instant::now();
+        let (program, errors) = Parser::new("x = {};", &arena).parse();
+        let elapsed = start.elapsed();
+        eprintln!(
+            "x = {{}} time: {elapsed:?}, errors: {}, stmts: {}",
+            errors.len(),
+            program.body.len()
+        );
+        assert!(elapsed.as_secs() < 2, "x = {{}} should not hang");
+    }
+
+    #[test]
+    fn test_member_assign_empty_object() {
+        let arena = AstArena::new();
+        let start = std::time::Instant::now();
+        let (program, errors) = Parser::new("a.b = {};", &arena).parse();
+        let elapsed = start.elapsed();
+        eprintln!(
+            "a.b = {{}} time: {elapsed:?}, errors: {}, stmts: {}",
+            errors.len(),
+            program.body.len()
+        );
+        assert!(elapsed.as_secs() < 2, "a.b = {{}} should not hang");
+    }
+
+    #[test]
+    fn test_window_dunder_assign() {
+        let arena = AstArena::new();
+        let start = std::time::Instant::now();
+        let (program, errors) = Parser::new(r#"window.__test = {"a": 1};"#, &arena).parse();
+        let elapsed = start.elapsed();
+        eprintln!(
+            "window.__test = {{\"a\":1}} time: {elapsed:?}, errors: {}, stmts: {}",
+            errors.len(),
+            program.body.len()
+        );
+        assert!(elapsed.as_secs() < 2, "Should not hang");
+    }
+
+    #[test]
+    fn test_nested_object_assignment() {
+        let arena = AstArena::new();
+        let start = std::time::Instant::now();
+        let (program, errors) =
+            Parser::new(r#"window.__test = {"basename":"/","future":{"a":true}};"#, &arena).parse();
+        let elapsed = start.elapsed();
+        eprintln!(
+            "nested obj time: {elapsed:?}, errors: {}, stmts: {}",
+            errors.len(),
+            program.body.len()
+        );
+        for e in errors.iter().take(3) {
+            eprintln!("  err: {:?}", e);
+        }
+        assert!(elapsed.as_secs() < 5, "Nested object should not hang");
+    }
+
+    #[test]
+    fn test_two_string_key_properties() {
+        let arena = AstArena::new();
+        let start = std::time::Instant::now();
+        let (_program, errors) =
+            Parser::new(r#"var x = {"a": "hello", "b": true};"#, &arena).parse();
+        let elapsed = start.elapsed();
+        assert!(errors.is_empty(), "Two string-key properties: {errors:?}");
+        assert!(elapsed.as_secs() < 2, "Two properties should not hang");
     }
 }

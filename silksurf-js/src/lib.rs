@@ -1,4 +1,16 @@
 //! `SilkSurfJS` - Pure Rust JavaScript Engine
+#![allow(
+    clippy::collapsible_if,
+    clippy::doc_markdown,
+    clippy::map_unwrap_or,
+    clippy::redundant_closure,
+    clippy::must_use_candidate,
+    clippy::return_self_not_must_use,
+    clippy::needless_lifetimes,
+    clippy::type_complexity,
+    clippy::needless_pass_by_value,
+    clippy::collapsible_else_if
+)]
 //!
 //! Cleanroom implementation with:
 //! - Zero-copy lexer (tokens reference source directly)

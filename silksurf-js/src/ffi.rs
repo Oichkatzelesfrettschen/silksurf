@@ -15,13 +15,13 @@
 //! Use `silksurf_last_error()` to get error details.
 
 use std::cell::RefCell;
-use std::ffi::{c_char, c_int, CStr, CString};
+use std::ffi::{CStr, CString, c_char, c_int};
 use std::ptr;
 
 use crate::bytecode::Compiler;
 use crate::lexer::Lexer;
-use crate::parser::ast_arena::AstArena;
 use crate::parser::Parser;
+use crate::parser::ast_arena::AstArena;
 use crate::vm::Vm;
 
 /// Opaque engine handle
@@ -69,13 +69,13 @@ fn set_error(msg: &str) {
 
 /// Get the last error message, or null if no error.
 /// The returned string is valid until the next API call.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn silksurf_last_error() -> *const c_char {
     LAST_ERROR.with(|e| e.borrow().as_ref().map_or(ptr::null(), |s| s.as_ptr()))
 }
 
 /// Get the library version string.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn silksurf_version() -> *const c_char {
     static VERSION: &[u8] = b"0.1.0\0";
     VERSION.as_ptr().cast::<c_char>()
@@ -83,7 +83,7 @@ pub extern "C" fn silksurf_version() -> *const c_char {
 
 /// Create a new engine instance.
 /// Returns null on failure.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn silksurf_engine_new() -> *mut SilkSurfEngine {
     if let Ok(engine) = std::panic::catch_unwind(|| Box::new(SilkSurfEngine { vm: Vm::new() })) {
         Box::into_raw(engine)
@@ -95,7 +95,7 @@ pub extern "C" fn silksurf_engine_new() -> *mut SilkSurfEngine {
 
 /// Destroy an engine instance.
 /// Safe to call with null.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn silksurf_engine_free(engine: *mut SilkSurfEngine) {
     if !engine.is_null() {
         unsafe {
@@ -106,7 +106,7 @@ pub extern "C" fn silksurf_engine_free(engine: *mut SilkSurfEngine) {
 
 /// Compile JavaScript source code to a script handle.
 /// Returns null on parse/compile error.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn silksurf_compile(
     engine: *mut SilkSurfEngine,
     source: *const c_char,
@@ -158,7 +158,7 @@ pub extern "C" fn silksurf_compile(
 
 /// Free a compiled script.
 /// Safe to call with null.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn silksurf_script_free(script: *mut SilkSurfScript) {
     if !script.is_null() {
         unsafe {
@@ -169,7 +169,7 @@ pub extern "C" fn silksurf_script_free(script: *mut SilkSurfScript) {
 
 /// Execute a compiled script.
 /// Returns status code.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn silksurf_run(
     engine: *mut SilkSurfEngine,
     script: *mut SilkSurfScript,
@@ -193,7 +193,7 @@ pub extern "C" fn silksurf_run(
 
 /// Evaluate JavaScript source code directly.
 /// Convenience wrapper around compile + run.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn silksurf_eval(
     engine: *mut SilkSurfEngine,
     source: *const c_char,
@@ -210,7 +210,7 @@ pub extern "C" fn silksurf_eval(
 
 /// Get the number of instructions in a compiled script.
 /// Note: Returns chunk index, not instruction count (requires engine access).
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn silksurf_script_instruction_count(script: *const SilkSurfScript) -> c_int {
     if script.is_null() {
         return -1;
@@ -221,7 +221,7 @@ pub extern "C" fn silksurf_script_instruction_count(script: *const SilkSurfScrip
 
 /// Trigger garbage collection.
 /// Currently a no-op; GC runs automatically when needed.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn silksurf_gc(_engine: *mut SilkSurfEngine) {
     // GC is automatic in current implementation
     // Future: Add explicit GC trigger via engine.vm.collect()
@@ -235,7 +235,7 @@ pub struct SilkSurfHeapStats {
     pub gc_count: usize,
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn silksurf_heap_stats(
     _engine: *const SilkSurfEngine,
     stats: *mut SilkSurfHeapStats,

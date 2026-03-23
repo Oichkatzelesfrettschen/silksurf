@@ -1,22 +1,34 @@
 //! CSS syntax, cascade, and computed values (cleanroom).
+#![allow(
+    clippy::collapsible_if,
+    clippy::collapsible_match,
+    clippy::derivable_impls,
+    clippy::large_enum_variant,
+    clippy::manual_contains,
+    clippy::new_without_default
+)]
 
+pub mod calc;
+pub mod custom_properties;
+mod matching;
 mod parser;
 mod selector;
-mod matching;
 mod style;
 
+pub use matching::{Specificity, matches_selector, matches_selector_list, selector_specificity};
 pub use parser::{
-    parse_stylesheet, parse_stylesheet_with_interner, AtRule, AtRuleBlock, CssParser, Declaration,
-    Rule, StyleRule, Stylesheet,
+    AtRule, AtRuleBlock, CssParser, Declaration, Rule, StyleRule, Stylesheet, parse_stylesheet,
+    parse_stylesheet_with_interner,
 };
 pub use selector::{
-    parse_selector_list, parse_selector_list_with_interner, AttributeOperator, AttributeSelector,
-    Combinator, CompoundSelector, Selector, SelectorIdent, SelectorList, SelectorModifier,
-    SelectorStep, TypeSelector,
+    AttributeOperator, AttributeSelector, Combinator, CompoundSelector, Selector, SelectorIdent,
+    SelectorList, SelectorModifier, SelectorStep, TypeSelector, parse_selector_list,
+    parse_selector_list_with_interner,
 };
-pub use matching::{matches_selector, matches_selector_list, selector_specificity, Specificity};
 pub use style::{
-    compute_style_for_node, compute_styles, Color, ComputedStyle, Display, Edges, Length, StyleCache,
+    AlignItems, AlignSelf, Color, ComputedStyle, Display, Edges, FlexBasis, FlexContainerStyle,
+    FlexDirection, FlexItemStyle, FlexWrap, JustifyContent, Length, LengthOrAuto, Overflow,
+    Position, StyleCache, compute_style_for_node, compute_styles,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,10 +72,16 @@ pub struct CssTokenizer {
     cursor: usize,
 }
 
+impl Default for CssTokenizer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CssTokenizer {
     pub fn new() -> Self {
         Self {
-            buffer: String::new(),
+            buffer: String::with_capacity(4096),
             cursor: 0,
         }
     }
@@ -178,7 +196,10 @@ impl CssTokenizer {
                     match self.parse_ident(cursor) {
                         IdentParse::Parsed(unit, next) => {
                             self.cursor = next;
-                            tokens.push(CssToken::Dimension { value: number, unit });
+                            tokens.push(CssToken::Dimension {
+                                value: number,
+                                unit,
+                            });
                             continue;
                         }
                         IdentParse::Incomplete => break,
@@ -674,10 +695,7 @@ fn is_non_printable(byte: u8) -> bool {
 }
 
 fn find_subsequence(haystack: &[u8], start: usize, needle: &[u8]) -> Option<usize> {
-    haystack[start..]
-        .windows(needle.len())
-        .position(|window| window == needle)
-        .map(|pos| start + pos)
+    memchr::memmem::find(&haystack[start..], needle).map(|pos| start + pos)
 }
 
 enum UrlParse {
