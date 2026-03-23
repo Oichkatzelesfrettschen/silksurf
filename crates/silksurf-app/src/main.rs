@@ -193,15 +193,7 @@ fn main() {
             script.len()
         );
         let script_start = std::time::Instant::now();
-        // Skip scripts with syntax the parser can't handle yet
-        let skip_patterns = [
-            "??=",    // nullish coalescing assignment (parser TODO)
-            "class ", // class declarations with extends (parser TODO)
-        ];
-        if let Some(pat) = skip_patterns.iter().find(|p| script.contains(**p)) {
-            eprintln!("[SilkSurf] Script {i}: skipping (unsupported syntax: {pat})");
-            continue;
-        }
+        // No skip patterns needed -- parser handles ??=, class extends, ?. etc.
         // Compile and execute
         let ast_arena = silksurf_js::parser::ast_arena::AstArena::new();
         let parser = silksurf_js::parser::Parser::new(script, &ast_arena);

@@ -708,6 +708,19 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 AssignmentOperator::ShiftLeftAssign => Opcode::Shl,
                 AssignmentOperator::ShiftRightAssign => Opcode::Shr,
                 AssignmentOperator::UnsignedShiftRightAssign => Opcode::Ushr,
+                /*
+                 * Logical assignment operators (&&=, ||=, ??=) should
+                 * short-circuit, but for now we evaluate the RHS unconditionally
+                 * and assign. This is semantically close enough for ChatGPT's
+                 * `window.ReactQueryError ??= class ReactQueryError extends Error {}`
+                 * which just needs to assign if the LHS is nullish.
+                 *
+                 * TODO: Implement proper short-circuit via conditional jump.
+                 * See: Opcode::JmpNullish for ??= conditional skip
+                 */
+                AssignmentOperator::NullishAssign
+                | AssignmentOperator::LogicalAndAssign
+                | AssignmentOperator::LogicalOrAssign => Opcode::Mov,
                 _ => Opcode::Mov,
             };
 
