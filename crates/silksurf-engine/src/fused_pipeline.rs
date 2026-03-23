@@ -31,7 +31,9 @@
  * See: neighbor_table.rs for the BFS-level decomposition this uses
  */
 
-use silksurf_css::{compute_style_for_node, ComputedStyle, Display, Stylesheet};
+use silksurf_css::{
+    ComputedStyle, Display, StyleIndex, Stylesheet, compute_style_for_node_with_index,
+};
 use silksurf_dom::{Dom, NodeId, NodeKind};
 use silksurf_layout::neighbor_table::LayoutNeighborTable;
 use silksurf_layout::Rect;
@@ -61,6 +63,15 @@ pub fn fused_style_layout_paint(
     root: NodeId,
     viewport: Rect,
 ) -> FusedResult {
+    /*
+     * Build StyleIndex once for all nodes.
+     *
+     * WHY: compute_style_for_node rebuilds StyleIndex on every call (O(rules)).
+     * For 401 nodes that is 401 redundant index constructions. Building once
+     * here and passing to compute_style_for_node_with_index saves ~400 allocs.
+     * See: style.rs StyleIndex::new() for construction cost.
+     */
+    let style_index = StyleIndex::new(stylesheet);
     let table = LayoutNeighborTable::build(dom, root);
     let mut styles: FxHashMap<NodeId, ComputedStyle> = FxHashMap::default();
     let mut display_items: Vec<DisplayItem> = Vec::new();
@@ -72,13 +83,14 @@ pub fn fused_style_layout_paint(
 
     for level in &table.levels {
         for &node in level {
-            // 1. CASCADE: compute style for this node
+            // 1. CASCADE: compute style for this node (reuses pre-built index)
             let parent_style = dom
                 .parent(node)
                 .ok()
                 .flatten()
                 .and_then(|p| styles.get(&p));
-            let style = compute_style_for_node(dom, node, stylesheet, parent_style);
+            let style =
+                compute_style_for_node_with_index(dom, node, stylesheet, &style_index, parent_style);
 
             // Skip display:none
             if style.display == Display::None {
