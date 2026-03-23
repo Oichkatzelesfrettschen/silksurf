@@ -19,6 +19,25 @@ pub fn install(global: &mut Object) {
     global.set_by_str("Boolean", native_fn("Boolean", boolean_fn));
 
     /*
+     * Object constructor -- new Object() or Object(value).
+     *
+     * WHY: Scripts call Object.keys(), Object.values(), Object.entries(),
+     * Object.assign(), Object.freeze(), Object.create(), and Object.fromEntries().
+     * These are dispatched by name in op_get_prop via NativeFunction.name.
+     *
+     * Note: name "Object" is the dispatch key for static methods.
+     */
+    global.set_by_str("Object", native_fn("Object", |args| {
+        match args.first() {
+            Some(Value::Object(o)) => Value::Object(std::rc::Rc::clone(o)),
+            _ => {
+                let obj = Object::new();
+                Value::Object(std::rc::Rc::new(std::cell::RefCell::new(obj)))
+            }
+        }
+    }));
+
+    /*
      * Array constructor -- new Array(n) or new Array(a, b, c).
      *
      * WHY: Scripts call Array() / new Array() to create arrays, and
