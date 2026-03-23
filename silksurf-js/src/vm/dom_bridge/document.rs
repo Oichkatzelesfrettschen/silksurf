@@ -387,6 +387,14 @@ fn parse_selector(dom: &super::SharedDom, selector: &str) -> Option<silksurf_css
  * Complexity: O(N * S) where N=nodes, S=selector complexity
  * See: silksurf_css::matches_selector_list (matching.rs)
  */
+pub fn find_first_matching_pub(
+    dom: &silksurf_dom::Dom,
+    node: NodeId,
+    selector: &silksurf_css::SelectorList,
+) -> Option<NodeId> {
+    find_first_matching(dom, node, selector)
+}
+
 fn find_first_matching(
     dom: &silksurf_dom::Dom,
     node: NodeId,
