@@ -4,7 +4,7 @@ pub mod diff;
 
 use silksurf_core::{Atom, SilkInterner, SmallString, should_intern_identifier};
 use smallvec::SmallVec;
-use std::cell::RefCell;
+use std::sync::RwLock;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct NodeId(usize);
@@ -297,7 +297,7 @@ pub struct Node {
 #[derive(Default)]
 pub struct Dom {
     nodes: Vec<Node>,
-    interner: RefCell<SilkInterner>,
+    interner: RwLock<SilkInterner>,
     dirty_nodes: Vec<NodeId>,
     dirty_batch: Vec<NodeId>,
     batch_depth: usize,
@@ -315,7 +315,7 @@ impl Dom {
     pub fn new() -> Self {
         Self {
             nodes: Vec::new(),
-            interner: RefCell::new(SilkInterner::new()),
+            interner: RwLock::new(SilkInterner::new()),
             dirty_nodes: Vec::new(),
             dirty_batch: Vec::new(),
             batch_depth: 0,
@@ -460,7 +460,7 @@ impl Dom {
                 let atom = if value.is_empty() || !should_intern_identifier(value.as_str()) {
                     None
                 } else {
-                    Some(self.interner.borrow_mut().intern(value.as_str()))
+                    Some(self.interner.write().unwrap().intern(value.as_str()))
                 };
                 (atom, SmallVec::new())
             }
@@ -468,7 +468,7 @@ impl Dom {
                 let atoms = if value.is_empty() {
                     SmallVec::new()
                 } else {
-                    let mut interner = self.interner.borrow_mut();
+                    let mut interner = self.interner.write().unwrap();
                     value
                         .split_whitespace()
                         .filter(|part| should_intern_identifier(part))
@@ -481,7 +481,7 @@ impl Dom {
                 let atom = if value.is_empty() || !should_intern_identifier(value.as_str()) {
                     None
                 } else {
-                    Some(self.interner.borrow_mut().intern(value.as_str()))
+                    Some(self.interner.write().unwrap().intern(value.as_str()))
                 };
                 (atom, SmallVec::new())
             }
@@ -489,12 +489,18 @@ impl Dom {
         let index = self.node_index(id)?;
         match &mut self.nodes[index].kind {
             NodeKind::Element { attributes, .. } => {
-                attributes.push(Attribute {
-                    name: attr_name,
-                    value,
-                    value_atom,
-                    value_atoms,
-                });
+                if let Some(existing) = attributes.iter_mut().find(|a| a.name == attr_name) {
+                    existing.value = value;
+                    existing.value_atom = value_atom;
+                    existing.value_atoms = value_atoms;
+                } else {
+                    attributes.push(Attribute {
+                        name: attr_name,
+                        value,
+                        value_atom,
+                        value_atoms,
+                    });
+                }
                 self.mark_dirty(id);
                 Ok(())
             }
@@ -626,16 +632,16 @@ impl Dom {
     where
         F: FnOnce(&mut SilkInterner) -> R,
     {
-        let mut interner = self.interner.borrow_mut();
+        let mut interner = self.interner.write().unwrap();
         f(&mut interner)
     }
 
     pub fn intern(&self, value: &str) -> Atom {
-        self.interner.borrow_mut().intern(value)
+        self.interner.write().unwrap().intern(value)
     }
 
     pub fn resolve(&self, atom: Atom) -> SmallString {
-        SmallString::from(self.interner.borrow().resolve(atom))
+        SmallString::from(self.interner.read().unwrap().resolve(atom))
     }
 
     pub fn child_elements(&self, id: NodeId) -> Result<Vec<NodeId>, DomError> {

@@ -89,7 +89,6 @@ fn matches_steps(dom: &Dom, node: NodeId, steps: &[&crate::SelectorStep]) -> boo
         Combinator::NextSibling => previous_element_sibling(dom, node)
             .is_some_and(|sibling| matches_steps(dom, sibling, &steps[1..])),
         Combinator::SubsequentSibling => previous_element_siblings(dom, node)
-            .into_iter()
             .any(|sibling| matches_steps(dom, sibling, &steps[1..])),
     }
 }
@@ -284,24 +283,19 @@ fn previous_element_sibling(dom: &Dom, node: NodeId) -> Option<NodeId> {
     previous
 }
 
-fn previous_element_siblings(dom: &Dom, node: NodeId) -> Vec<NodeId> {
-    let parent = match dom.parent(node).ok().flatten() {
-        Some(parent) => parent,
-        None => return Vec::new(),
-    };
-    let siblings = match dom.children(parent) {
-        Ok(children) => children,
-        Err(_) => return Vec::new(),
-    };
-    let mut previous = Vec::new();
-    for sibling in siblings {
-        if *sibling == node {
-            break;
-        }
-        if dom.element_name(*sibling).ok().flatten().is_some() {
-            previous.push(*sibling);
-        }
-    }
-    previous.reverse();
-    previous
+fn previous_element_siblings<'a>(dom: &'a Dom, node: NodeId) -> impl Iterator<Item = NodeId> + 'a {
+    let siblings = dom
+        .parent(node)
+        .ok()
+        .flatten()
+        .and_then(|parent| dom.children(parent).ok())
+        .unwrap_or(&[]);
+
+    let pos = siblings.iter().position(|&s| s == node).unwrap_or(0);
+
+    siblings[..pos]
+        .iter()
+        .rev()
+        .copied()
+        .filter(move |&child| dom.element_name(child).ok().flatten().is_some())
 }

@@ -1,43 +1,38 @@
-# Build outputs
-/build/
+
+*.a
+# Binaries and objects
 /build-*/
-/**/target/
-
-# Fuzzing outputs
-/fuzz_out/
-/fuzz_out_css/
-/fuzz/corpus/
-/fuzz/artifacts/
-
-# Static analysis and logs
-/infer-out/
-/logs/
-/perf/results/
-
-# Crash dumps (root-only)
+/build/
+build-fuzz/
+# Build outputs
+/.claude/settings.local.json
+# Cleanroom reference checkouts (not tracked)
 /core
 /core.*
-/logs/cores/
-
-# Cleanroom reference checkouts (not tracked)
-/silksurf-extras/
-/silksurf-js/test262/
-
-# Local tooling settings
-/.claude/settings.local.json
-
-# Binaries and objects
-*.o
-*.a
-*.so
-*.dylib
-*.dll
-*.exe
-
+# Crash dumps (root-only)
+*.data
 # Databases and profiling artifacts
 *.db
 *.db-shm
 *.db-wal
+*.dll
+*.dylib
+*.exe
+/fuzz/artifacts/
+/fuzz/corpus/
+# Fuzzing outputs
+/fuzz_out/
+/fuzz_out_css/
+/infer-out/
+# Local tooling settings
+/logs/
+/logs/cores/
+*.o
+/perf/results/
 *.profraw
-*.data
-build-fuzz/
+/silksurf-extras/
+/silksurf-js/test262/
+*.so
+# Static analysis and logs
+/**/target/
+/target
