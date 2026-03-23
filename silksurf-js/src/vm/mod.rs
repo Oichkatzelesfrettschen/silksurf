@@ -1200,6 +1200,100 @@ fn op_get_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
          * global Object value from NativeFunction to Object (which would break
          * `new Object()` and `Object(x)` call sites).
          */
+        /*
+         * Number static methods: isInteger, isFinite, isNaN, parseInt, parseFloat,
+         * EPSILON, MAX_SAFE_INTEGER, MIN_SAFE_INTEGER, MAX_VALUE, POSITIVE_INFINITY.
+         *
+         * WHY: Unlike global isNaN/isFinite (which coerce their argument),
+         * Number.isNaN/isFinite perform type-safe checks without coercion.
+         * These are required by modern JS code including React internals.
+         */
+        Value::NativeFunction(f) if f.name == "Number" => {
+            match prop_name.as_str() {
+                "isInteger" => Value::NativeFunction(Rc::new(value::NativeFunction::new(
+                    "Number.isInteger",
+                    |args| {
+                        let result = args.first().is_some_and(|v| {
+                            if let value::Value::Number(n) = v {
+                                n.is_finite() && n.fract() == 0.0
+                            } else {
+                                false
+                            }
+                        });
+                        value::Value::Boolean(result)
+                    },
+                ))),
+                "isFinite" => Value::NativeFunction(Rc::new(value::NativeFunction::new(
+                    "Number.isFinite",
+                    |args| {
+                        let result = args.first().is_some_and(|v| {
+                            if let value::Value::Number(n) = v {
+                                n.is_finite()
+                            } else {
+                                false
+                            }
+                        });
+                        value::Value::Boolean(result)
+                    },
+                ))),
+                "isNaN" => Value::NativeFunction(Rc::new(value::NativeFunction::new(
+                    "Number.isNaN",
+                    |args| {
+                        let result = args.first().is_some_and(|v| {
+                            if let value::Value::Number(n) = v { n.is_nan() } else { false }
+                        });
+                        value::Value::Boolean(result)
+                    },
+                ))),
+                "isSafeInteger" => Value::NativeFunction(Rc::new(value::NativeFunction::new(
+                    "Number.isSafeInteger",
+                    |args| {
+                        let result = args.first().is_some_and(|v| {
+                            if let value::Value::Number(n) = v {
+                                n.is_finite()
+                                    && n.fract() == 0.0
+                                    && n.abs() <= 9_007_199_254_740_991.0
+                            } else {
+                                false
+                            }
+                        });
+                        value::Value::Boolean(result)
+                    },
+                ))),
+                "parseInt" => Value::NativeFunction(Rc::new(value::NativeFunction::new(
+                    "Number.parseInt",
+                    |args| {
+                        // Same behaviour as global parseInt
+                        let s = args.first().map(|v| v.to_js_string()).unwrap_or_default();
+                        let text = s.as_str().unwrap_or("").trim();
+                        let radix = args.get(1).map_or(10, |v| v.to_number() as u32);
+                        let radix = if radix == 0 { 10 } else { radix };
+                        i64::from_str_radix(text, radix.clamp(2, 36))
+                            .map(|n| value::Value::Number(n as f64))
+                            .unwrap_or(value::Value::Number(f64::NAN))
+                    },
+                ))),
+                "parseFloat" => Value::NativeFunction(Rc::new(value::NativeFunction::new(
+                    "Number.parseFloat",
+                    |args| {
+                        let s = args.first().map(|v| v.to_js_string()).unwrap_or_default();
+                        let text = s.as_str().unwrap_or("").trim();
+                        text.parse::<f64>()
+                            .map(value::Value::Number)
+                            .unwrap_or(value::Value::Number(f64::NAN))
+                    },
+                ))),
+                "EPSILON" => value::Value::Number(f64::EPSILON),
+                "MAX_SAFE_INTEGER" => value::Value::Number(9_007_199_254_740_991.0),
+                "MIN_SAFE_INTEGER" => value::Value::Number(-9_007_199_254_740_991.0),
+                "MAX_VALUE" => value::Value::Number(f64::MAX),
+                "MIN_VALUE" => value::Value::Number(f64::MIN_POSITIVE),
+                "POSITIVE_INFINITY" => value::Value::Number(f64::INFINITY),
+                "NEGATIVE_INFINITY" => value::Value::Number(f64::NEG_INFINITY),
+                "NaN" => value::Value::Number(f64::NAN),
+                _ => Value::Undefined,
+            }
+        }
         Value::NativeFunction(f) if f.name == "Object" => {
             match prop_name.as_str() {
                 "keys" => Value::NativeFunction(Rc::new(value::NativeFunction::new(
