@@ -379,6 +379,32 @@ impl Vm {
     }
 
     /*
+     * call_function -- re-entrant function invocation.
+     *
+     * WHY: NativeFunction constructors (ReadableStream, etc.) may receive
+     * Value::Function callbacks that need to execute JS code. This method
+     * allows calling a compiled JS function from outside the main execute()
+     * loop by saving/restoring call stack state.
+     *
+     * Used by: ReadableStream's start(controller) callback
+     */
+    pub fn call_function(&mut self, func: &value::JsFunction, args: &[Value]) -> VmResult<Value> {
+        let chunk_idx = func.chunk_idx as usize;
+        if chunk_idx >= self.chunks.len() {
+            return Err(VmError::OutOfBounds);
+        }
+        // Store args in registers starting at base_reg
+        let base_reg = 1u8; // r0 reserved for return, args start at r1
+        for (i, arg) in args.iter().enumerate() {
+            let reg = base_reg as usize + i;
+            if reg < self.registers.len() {
+                self.registers[reg] = arg.clone();
+            }
+        }
+        self.execute(chunk_idx)
+    }
+
+    /*
      * execute -- main bytecode interpretation loop.
      *
      * WHY: This is the VM's hot loop. Every JS instruction passes through here.
