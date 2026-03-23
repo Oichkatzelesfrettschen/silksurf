@@ -104,6 +104,35 @@ pub fn install(global: &mut Object) {
     });
     global.set_by_str("matchMedia", mql_factory);
 
+    /*
+     * addEventListener / removeEventListener / dispatchEvent stubs.
+     *
+     * WHY: Scripts call window.addEventListener('load', handler) and
+     * document.addEventListener('DOMContentLoaded', handler) at module
+     * init time. Without these, property access returns undefined and
+     * the subsequent call throws a TypeError. The handlers themselves
+     * never fire (no event loop dispatch), but absorbing the registration
+     * prevents the TypeError that would abort the script.
+     */
+    global.set_by_str(
+        "addEventListener",
+        crate::vm::value::Value::NativeFunction(Rc::new(
+            crate::vm::value::NativeFunction::new("addEventListener", |_| Value::Undefined),
+        )),
+    );
+    global.set_by_str(
+        "removeEventListener",
+        crate::vm::value::Value::NativeFunction(Rc::new(
+            crate::vm::value::NativeFunction::new("removeEventListener", |_| Value::Undefined),
+        )),
+    );
+    global.set_by_str(
+        "dispatchEvent",
+        crate::vm::value::Value::NativeFunction(Rc::new(
+            crate::vm::value::NativeFunction::new("dispatchEvent", |_| Value::Boolean(true)),
+        )),
+    );
+
     // self = window = globalThis (all point to global)
     // These are set after global construction since they're self-referential.
     // The caller (install_builtins) handles this.
