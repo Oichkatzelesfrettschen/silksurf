@@ -106,20 +106,16 @@ fn fosters_text_out_of_table() {
     let body = find_child_element(dom, html, TagName::Body).expect("body element");
     let body_children = dom.children(body).unwrap();
 
-    assert!(body_children.len() >= 1);
+    assert!(!body_children.is_empty());
     let mut saw_text = false;
     let mut saw_table = false;
     for child in body_children {
         match dom.node(*child).unwrap().kind() {
-            NodeKind::Text { text } => {
-                if text == "text" {
-                    saw_text = true;
-                }
+            NodeKind::Text { text } if text == "text" => {
+                saw_text = true;
             }
-            NodeKind::Element { name, .. } => {
-                if *name == TagName::Table {
-                    saw_table = true;
-                }
+            NodeKind::Element { name, .. } if *name == TagName::Table => {
+                saw_table = true;
             }
             _ => {}
         }

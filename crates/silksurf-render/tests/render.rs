@@ -103,7 +103,7 @@ fn rasterizes_solid_color_rect() {
         tiles: None,
     };
     let buffer = rasterize(&list, 4, 4);
-    let idx = ((1 * 4 + 1) * 4) as usize;
+    let idx = (5 * 4) as usize;
     assert_eq!(buffer[idx], 10);
     assert_eq!(buffer[idx + 1], 20);
     assert_eq!(buffer[idx + 2], 30);
@@ -154,7 +154,7 @@ fn rasterizes_damage_region() {
         height: 2.0,
     };
     let buffer = rasterize_damage(&list, 4, 4, damage);
-    let red_idx = ((0 * 4 + 0) * 4) as usize;
+    let red_idx = 0usize;
     assert_eq!(buffer[red_idx], 200);
     assert_eq!(buffer[red_idx + 1], 10);
     assert_eq!(buffer[red_idx + 2], 10);
@@ -212,7 +212,7 @@ fn rasterizes_damage_region_with_tiles() {
         height: 2.0,
     };
     let buffer = rasterize_damage(&list, 4, 4, damage);
-    let red_idx = ((0 * 4 + 0) * 4) as usize;
+    let red_idx = 0usize;
     assert_eq!(buffer[red_idx], 50);
     assert_eq!(buffer[red_idx + 1], 60);
     assert_eq!(buffer[red_idx + 2], 70);

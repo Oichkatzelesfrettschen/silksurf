@@ -100,7 +100,12 @@ const BENCH_CSS: &str = concat!(
 );
 
 const ITERATIONS: u32 = 1000;
-const VIEWPORT: Rect = Rect { x: 0.0, y: 0.0, width: 1280.0, height: 800.0 };
+const VIEWPORT: Rect = Rect {
+    x: 0.0,
+    y: 0.0,
+    width: 1280.0,
+    height: 800.0,
+};
 
 fn main() {
     // Pre-parse HTML and CSS once -- both paths operate on the same DOM snapshot.
@@ -112,7 +117,11 @@ fn main() {
         .expect("parse css");
 
     println!("=== SilkSurf Pipeline Benchmark ({ITERATIONS} iterations) ===");
-    println!("Page: {} DOM nodes, {} CSS rules", count_hint(), stylesheet.rules.len());
+    println!(
+        "Page: {} DOM nodes, {} CSS rules",
+        count_hint(),
+        stylesheet.rules.len()
+    );
     println!();
 
     // ---- HTML PARSE cost (needed for full cached-re-render budget) ----
@@ -128,7 +137,11 @@ fn main() {
     }
     let parse_per = parse_total / ITERATIONS;
     println!("--- HTML parse cost (input to cached re-render) ---");
-    println!("  html parse:   {:>8?}  per-iter  ({} bytes)", parse_per, BENCH_HTML.len());
+    println!(
+        "  html parse:   {:>8?}  per-iter  ({} bytes)",
+        parse_per,
+        BENCH_HTML.len()
+    );
     println!();
 
     // ---- OLD PATH: 3-pass (compute_styles + build_layout_tree + build_display_list) ----
@@ -147,13 +160,11 @@ fn main() {
 
         let t = Instant::now();
         let layout: LayoutTree<'_> =
-            build_layout_tree(&arena, &doc.dom, &styles, doc.document, VIEWPORT)
-                .expect("layout");
+            build_layout_tree(&arena, &doc.dom, &styles, doc.document, VIEWPORT).expect("layout");
         layout_total += t.elapsed();
 
         let t = Instant::now();
-        let dl = build_display_list(&doc.dom, &styles, &layout)
-            .with_tiles(1280, 800, 64);
+        let dl = build_display_list(&doc.dom, &styles, &layout).with_tiles(1280, 800, 64);
         display_total += t.elapsed();
         old_items = dl.items.len();
         arena.reset();
@@ -163,9 +174,18 @@ fn main() {
 
     println!("--- 3-pass pipeline ---");
     println!("  cascade:      {:>8?}  per-iter", style_total / ITERATIONS);
-    println!("  layout:       {:>8?}  per-iter", layout_total / ITERATIONS);
-    println!("  display list: {:>8?}  per-iter", display_total / ITERATIONS);
-    println!("  TOTAL:        {:>8?}  per-iter  ({} display items)", old_per, old_items);
+    println!(
+        "  layout:       {:>8?}  per-iter",
+        layout_total / ITERATIONS
+    );
+    println!(
+        "  display list: {:>8?}  per-iter",
+        display_total / ITERATIONS
+    );
+    println!(
+        "  TOTAL:        {:>8?}  per-iter  ({} display items)",
+        old_per, old_items
+    );
     println!();
 
     // ---- NEW PATH: fused single BFS pass + Rayon rasterize (fresh buffer each iter) ----
@@ -197,14 +217,24 @@ fn main() {
 
     println!("--- fused pipeline (style+layout+paint in 1 BFS pass) ---");
     println!("  fused pass:   {:>8?}  per-iter", fused_per);
-    println!("  rasterize:    {:>8?}  per-iter  (fresh alloc each frame)", raster_per);
-    println!("  TOTAL:        {:>8?}  per-iter  ({} display items)", fused_per + raster_per, fused_items);
+    println!(
+        "  rasterize:    {:>8?}  per-iter  (fresh alloc each frame)",
+        raster_per
+    );
+    println!(
+        "  TOTAL:        {:>8?}  per-iter  ({} display items)",
+        fused_per + raster_per,
+        fused_items
+    );
     println!();
 
     // ---- Speedup comparison ----
     let speedup = old_per.as_nanos() as f64 / fused_per.as_nanos() as f64;
     println!("=== Speedup (fused pass vs 3-pass cascade+layout+display) ===");
-    println!("  {:.2}x  ({:?} -> {:?} per iter)", speedup, old_per, fused_per);
+    println!(
+        "  {:.2}x  ({:?} -> {:?} per iter)",
+        speedup, old_per, fused_per
+    );
     println!();
 
     // ---- REUSE PATH: rasterize_parallel_into with pre-allocated buffer ----
@@ -234,11 +264,22 @@ fn main() {
     let raster_reuse_per = raster_reuse_total / (ITERATIONS - 1);
 
     println!("=== Buffer reuse (steady-state, pre-allocated 4MB buffer) ===");
-    println!("  rasterize:    {:>8?}  per-iter  (buffer reused, zero alloc)", raster_reuse_per);
-    println!("  fused+raster: {:>8?}  per-iter  (target: <500us cached re-render)", fused_per + raster_reuse_per);
+    println!(
+        "  rasterize:    {:>8?}  per-iter  (buffer reused, zero alloc)",
+        raster_reuse_per
+    );
+    println!(
+        "  fused+raster: {:>8?}  per-iter  (target: <500us cached re-render)",
+        fused_per + raster_reuse_per
+    );
     let alloc_overhead = raster_per.saturating_sub(raster_reuse_per);
-    println!("  alloc savings:{:>8?}  per-frame  (eliminated by buffer reuse)", alloc_overhead);
+    println!(
+        "  alloc savings:{:>8?}  per-frame  (eliminated by buffer reuse)",
+        alloc_overhead
+    );
 }
 
 /// Approximate node count for display (parse once outside any timing section).
-fn count_hint() -> &'static str { "~50" }
+fn count_hint() -> &'static str {
+    "~50"
+}

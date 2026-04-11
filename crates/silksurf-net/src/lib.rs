@@ -246,10 +246,7 @@ impl BasicClient {
      * See: h2_client.rs for the H2 implementation
      * See: SpeculativeRenderer::fetch_all_or_speculate for cache integration
      */
-    pub fn fetch_parallel(
-        &self,
-        requests: &[HttpRequest],
-    ) -> Vec<Result<HttpResponse, NetError>> {
+    pub fn fetch_parallel(&self, requests: &[HttpRequest]) -> Vec<Result<HttpResponse, NetError>> {
         if requests.is_empty() {
             return vec![];
         }
@@ -260,9 +257,8 @@ impl BasicClient {
             let h2_reqs: Vec<h2_client::H2Request> = requests
                 .iter()
                 .map(|r| {
-                    let parsed = url::Url::parse(&r.url).unwrap_or_else(|_| {
-                        url::Url::parse("https://localhost/").unwrap()
-                    });
+                    let parsed = url::Url::parse(&r.url)
+                        .unwrap_or_else(|_| url::Url::parse("https://localhost/").unwrap());
                     h2_client::H2Request {
                         path: parsed.path().to_string(),
                         query: parsed.query().map(|q| q.to_string()),

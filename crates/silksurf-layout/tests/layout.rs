@@ -48,8 +48,8 @@ fn lays_out_block_boxes_vertically() {
     let arena = SilkArena::new();
     let tree = build_layout_tree(&arena, &dom, &styles, doc, viewport).expect("layout tree");
 
-    let box1 = find_box(&tree.root, div1).expect("div1 box");
-    let box2 = find_box(&tree.root, div2).expect("div2 box");
+    let box1 = find_box(tree.root, div1).expect("div1 box");
+    let box2 = find_box(tree.root, div2).expect("div2 box");
 
     assert!(box2.dimensions().content.y > box1.dimensions().content.y);
 }

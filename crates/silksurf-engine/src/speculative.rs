@@ -26,8 +26,10 @@
  */
 
 use rustc_hash::FxHashMap;
-use silksurf_css::{Stylesheet, intern_rules, parse_stylesheet_with_interner, strip_selector_atoms};
 use silksurf_core::SilkInterner;
+use silksurf_css::{
+    Stylesheet, intern_rules, parse_stylesheet_with_interner, strip_selector_atoms,
+};
 use silksurf_net::cache::ResponseCache;
 use silksurf_net::{BasicClient, HttpMethod, HttpRequest, HttpResponse, NetClient, NetError};
 use std::hash::{Hash, Hasher};
@@ -174,13 +176,13 @@ fn disk_cache_path(key: u64) -> PathBuf {
  * Returns None on any error (file not found, corrupt bytes, format version
  * mismatch). Callers fall through to full parse on None.
  *
- * WHY graceful fallback: bincode format changes between releases would
+ * WHY graceful fallback: serialization format changes between releases would
  * otherwise cause panics. By catching errors here, we silently re-parse
  * and overwrite stale caches.
  */
 fn load_stylesheet_from_disk(path: &PathBuf) -> Option<Stylesheet> {
     let bytes = std::fs::read(path).ok()?;
-    bincode::deserialize::<Stylesheet>(&bytes).ok()
+    serde_json::from_slice::<Stylesheet>(&bytes).ok()
 }
 
 /*
@@ -194,7 +196,7 @@ fn save_stylesheet_to_disk(path: &PathBuf, sheet: &Stylesheet) {
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    if let Ok(bytes) = bincode::serialize(sheet) {
+    if let Ok(bytes) = serde_json::to_vec(sheet) {
         let _ = std::fs::write(path, bytes);
     }
 }
@@ -218,6 +220,8 @@ pub struct SpeculativeRenderer {
     client: Arc<BasicClient>,
     stylesheet_cache: StylesheetCache,
 }
+
+type FetchResult = Result<(HttpResponse, FetchOrigin, std::time::Duration), NetError>;
 
 impl SpeculativeRenderer {
     pub fn new() -> Self {
@@ -284,7 +288,7 @@ impl SpeculativeRenderer {
 
         // Cache miss: try disk cache before full parse.
         //
-        // WHY: full parse costs ~2.5ms; disk read + bincode::deserialize + intern_rules
+        // WHY: full parse costs ~2.5ms; disk read + JSON decode + intern_rules
         // costs ~200us. On cold process start the in-memory cache is empty but the disk
         // cache may have a valid serialized Stylesheet from a previous run.
         //
@@ -387,11 +391,10 @@ impl SpeculativeRenderer {
     pub fn fetch_all_or_speculate(
         &mut self,
         requests: &[(&str, &[(String, String)])],
-    ) -> Vec<Result<(HttpResponse, FetchOrigin, std::time::Duration), NetError>> {
+    ) -> Vec<FetchResult> {
         let t0 = Instant::now();
         let n = requests.len();
-        let mut results: Vec<Option<Result<(HttpResponse, FetchOrigin, std::time::Duration), NetError>>> =
-            vec![None; n];
+        let mut results: Vec<Option<FetchResult>> = vec![None; n];
 
         // Phase 1: serve cached URLs immediately.
         let mut uncached_indices: Vec<usize> = Vec::new();

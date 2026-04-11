@@ -36,8 +36,8 @@ use silksurf_css::{
     compute_style_for_node_with_workspace,
 };
 use silksurf_dom::{Dom, NodeId, NodeKind};
-use silksurf_layout::neighbor_table::LayoutNeighborTable;
 use silksurf_layout::Rect;
+use silksurf_layout::neighbor_table::LayoutNeighborTable;
 use silksurf_render::DisplayItem;
 
 /*
@@ -125,7 +125,12 @@ pub fn fused_style_layout_paint(
 
         // 1. CASCADE: reuses pre-built index and shared workspace (zero alloc after first node)
         let style = compute_style_for_node_with_workspace(
-            dom, node, stylesheet, &style_index, parent_style, &mut cascade_ws,
+            dom,
+            node,
+            stylesheet,
+            &style_index,
+            parent_style,
+            &mut cascade_ws,
         );
 
         // Skip display:none; still store style for child inheritance
@@ -145,14 +150,22 @@ pub fn fused_style_layout_paint(
             + length_px(style.border.left);
         let y = cursor + margin_top + padding_top + border_top;
         let width = parent_rect.width
-            - length_px(style.margin.left) - length_px(style.margin.right)
-            - length_px(style.padding.left) - length_px(style.padding.right)
-            - length_px(style.border.left) - length_px(style.border.right);
+            - length_px(style.margin.left)
+            - length_px(style.margin.right)
+            - length_px(style.padding.left)
+            - length_px(style.padding.right)
+            - length_px(style.border.left)
+            - length_px(style.border.right);
 
         // Estimate height from line-height
         let height = length_px(style.line_height);
 
-        let content_rect = Rect { x, y, width, height };
+        let content_rect = Rect {
+            x,
+            y,
+            width,
+            height,
+        };
         node_rects[i] = content_rect;
 
         // Advance parent's block cursor past this node
@@ -174,15 +187,15 @@ pub fn fused_style_layout_paint(
             });
         }
 
-        if let Ok(dom_node) = dom.node(node) {
-            if let NodeKind::Text { text } = dom_node.kind() {
-                display_items.push(DisplayItem::Text {
-                    rect: content_rect,
-                    node,
-                    text_len: text.len() as u32,
-                    color: style.color,
-                });
-            }
+        if let Ok(dom_node) = dom.node(node)
+            && let NodeKind::Text { text } = dom_node.kind()
+        {
+            display_items.push(DisplayItem::Text {
+                rect: content_rect,
+                node,
+                text_len: text.len() as u32,
+                color: style.color,
+            });
         }
 
         styles[i] = Some(style);
@@ -212,7 +225,12 @@ mod tests {
         let mut dom = Dom::new();
         let root = dom.create_document();
         let stylesheet = silksurf_css::parse_stylesheet("").unwrap();
-        let viewport = Rect { x: 0.0, y: 0.0, width: 1280.0, height: 800.0 };
+        let viewport = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 1280.0,
+            height: 800.0,
+        };
 
         let result = fused_style_layout_paint(&dom, &stylesheet, root, viewport);
         // BFS index 0 is always the root node; its style must be computed.

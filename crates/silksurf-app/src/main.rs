@@ -62,14 +62,13 @@ fn main() {
     eprintln!("[SilkSurf] Fetching: {url}");
 
     // 1. Fetch the page (cache-first)
-    let (response, fetch_origin, fetch_elapsed) =
-        match renderer.fetch_or_speculate(&url, &[]) {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("[SilkSurf] Fetch error: {}", e.message);
-                return;
-            }
-        };
+    let (response, fetch_origin, fetch_elapsed) = match renderer.fetch_or_speculate(&url, &[]) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[SilkSurf] Fetch error: {}", e.message);
+            return;
+        }
+    };
 
     match fetch_origin {
         FetchOrigin::Cache => eprintln!(
@@ -166,7 +165,10 @@ fn main() {
             Ok((resp, _, _)) => {
                 eprintln!("[SilkSurf] Stylesheet {sheet_url}: HTTP {}", resp.status)
             }
-            Err(e) => eprintln!("[SilkSurf] Stylesheet {sheet_url}: fetch error: {}", e.message),
+            Err(e) => eprintln!(
+                "[SilkSurf] Stylesheet {sheet_url}: fetch error: {}",
+                e.message
+            ),
         }
     }
 
@@ -216,7 +218,10 @@ fn main() {
         }
         let preview = &script[..script.len().min(80)];
         if script.len() <= 1200 {
-            eprintln!("[SilkSurf] Script {i} FULL ({} bytes): {script}", script.len());
+            eprintln!(
+                "[SilkSurf] Script {i} FULL ({} bytes): {script}",
+                script.len()
+            );
         } else {
             eprintln!(
                 "[SilkSurf] Executing script {i} ({} bytes): {preview}...",
@@ -323,7 +328,9 @@ fn main() {
             if i == 4 {
                 // After script 3 + 4, check if __reactRouterContext exists
                 let prop_count = g.properties.len();
-                eprintln!("[DEBUG] Global has {prop_count} props, __reactRouterContext type: {ctx_type}");
+                eprintln!(
+                    "[DEBUG] Global has {prop_count} props, __reactRouterContext type: {ctx_type}"
+                );
             }
             if let silksurf_js::vm::value::Value::Object(ctx_obj) = &ctx {
                 let sc = ctx_obj.borrow().get_by_str("streamController");
@@ -333,14 +340,27 @@ fn main() {
                     let ctrl_rc = std::rc::Rc::new(std::cell::RefCell::new(ctrl));
                     {
                         let mut c = ctrl_rc.borrow_mut();
-                        c.set_by_str("enqueue", silksurf_js::vm::value::Value::NativeFunction(std::rc::Rc::new(
-                            silksurf_js::vm::value::NativeFunction::new("enqueue", |_| silksurf_js::vm::value::Value::Undefined),
-                        )));
-                        c.set_by_str("close", silksurf_js::vm::value::Value::NativeFunction(std::rc::Rc::new(
-                            silksurf_js::vm::value::NativeFunction::new("close", |_| silksurf_js::vm::value::Value::Undefined),
-                        )));
+                        c.set_by_str(
+                            "enqueue",
+                            silksurf_js::vm::value::Value::NativeFunction(std::rc::Rc::new(
+                                silksurf_js::vm::value::NativeFunction::new("enqueue", |_| {
+                                    silksurf_js::vm::value::Value::Undefined
+                                }),
+                            )),
+                        );
+                        c.set_by_str(
+                            "close",
+                            silksurf_js::vm::value::Value::NativeFunction(std::rc::Rc::new(
+                                silksurf_js::vm::value::NativeFunction::new("close", |_| {
+                                    silksurf_js::vm::value::Value::Undefined
+                                }),
+                            )),
+                        );
                     }
-                    ctx_obj.borrow_mut().set_by_str("streamController", silksurf_js::vm::value::Value::Object(ctrl_rc));
+                    ctx_obj.borrow_mut().set_by_str(
+                        "streamController",
+                        silksurf_js::vm::value::Value::Object(ctrl_rc),
+                    );
                 }
             }
         }
@@ -391,10 +411,17 @@ fn main() {
     let mut raster_buf: Vec<u8> = Vec::new();
     silksurf_render::rasterize_parallel_into(&display_list, 1280, 800, 64, &mut raster_buf);
     let raster_elapsed = raster_start.elapsed();
-    eprintln!("[SilkSurf] Rasterized: {} bytes in {:?}", raster_buf.len(), raster_elapsed);
+    eprintln!(
+        "[SilkSurf] Rasterized: {} bytes in {:?}",
+        raster_buf.len(),
+        raster_elapsed
+    );
 
     eprintln!("\n=== PROCESSING BUDGET (excludes network) ===");
-    eprintln!("  CSS parse:      {:?}", css_start.elapsed() - fused_elapsed - raster_elapsed);
+    eprintln!(
+        "  CSS parse:      {:?}",
+        css_start.elapsed() - fused_elapsed - raster_elapsed
+    );
     eprintln!("  Fused pipeline: {:?}", fused_elapsed);
     eprintln!("  Rasterize:      {:?}", raster_elapsed);
     eprintln!("  TOTAL:          {:?}", css_start.elapsed());
@@ -446,10 +473,14 @@ fn main() {
                 );
 
                 // DOM diff: compare cached parse against the new HTML.
-                let new_html = String::from_utf8_lossy(&renderer.cache.get(&url)
-                    .map(|e| e.body.clone())
-                    .unwrap_or_default())
-                    .to_string();
+                let new_html = String::from_utf8_lossy(
+                    &renderer
+                        .cache
+                        .get(&url)
+                        .map(|e| e.body.clone())
+                        .unwrap_or_default(),
+                )
+                .to_string();
                 if let Ok(new_doc) = silksurf_engine::parse_html(&new_html) {
                     let diff = silksurf_dom::diff::diff_doms(
                         &shared_dom.borrow(),
@@ -458,7 +489,9 @@ fn main() {
                         new_doc.document,
                     );
                     if diff.is_empty() {
-                        eprintln!("[SilkSurf] DOM diff: no structural changes (cached render valid)");
+                        eprintln!(
+                            "[SilkSurf] DOM diff: no structural changes (cached render valid)"
+                        );
                     } else {
                         eprintln!(
                             "[SilkSurf] DOM diff: {} changed, {} added, {} removed nodes -- re-render needed",
@@ -499,36 +532,32 @@ fn collect_link_tags(
     base_url: &str,
     urls: &mut Vec<String>,
 ) {
-    if let Ok(name) = dom.element_name(node) {
-        if name == Some("link") {
-            if let Ok(attrs) = dom.attributes(node) {
-                let is_stylesheet = attrs.iter().any(|a| {
-                    a.name == silksurf_dom::AttributeName::from_str("rel")
-                        && a.value.as_str() == "stylesheet"
-                });
-                if is_stylesheet {
-                    if let Some(href) = attrs
-                        .iter()
-                        .find(|a| a.name == silksurf_dom::AttributeName::from_str("href"))
-                    {
-                        let href_str = href.value.as_str();
-                        // Resolve relative URLs
-                        let resolved = if href_str.starts_with("http://")
-                            || href_str.starts_with("https://")
-                        {
-                            href_str.to_string()
-                        } else if let Ok(base) = url::Url::parse(base_url) {
-                            base.join(href_str)
-                                .map(|u| u.to_string())
-                                .unwrap_or_default()
-                        } else {
-                            href_str.to_string()
-                        };
-                        if !resolved.is_empty() {
-                            urls.push(resolved);
-                        }
-                    }
-                }
+    if let Ok(name) = dom.element_name(node)
+        && name == Some("link")
+        && let Ok(attrs) = dom.attributes(node)
+    {
+        let is_stylesheet = attrs.iter().any(|a| {
+            a.name == silksurf_dom::AttributeName::from_str("rel")
+                && a.value.as_str() == "stylesheet"
+        });
+        if is_stylesheet
+            && let Some(href) = attrs
+                .iter()
+                .find(|a| a.name == silksurf_dom::AttributeName::from_str("href"))
+        {
+            let href_str = href.value.as_str();
+            // Resolve relative URLs
+            let resolved = if href_str.starts_with("http://") || href_str.starts_with("https://") {
+                href_str.to_string()
+            } else if let Ok(base) = url::Url::parse(base_url) {
+                base.join(href_str)
+                    .map(|u| u.to_string())
+                    .unwrap_or_default()
+            } else {
+                href_str.to_string()
+            };
+            if !resolved.is_empty() {
+                urls.push(resolved);
             }
         }
     }
@@ -546,17 +575,16 @@ fn extract_inline_css(dom: &silksurf_dom::Dom, root: silksurf_dom::NodeId) -> St
 }
 
 fn collect_style_tags(dom: &silksurf_dom::Dom, node: silksurf_dom::NodeId, css: &mut String) {
-    if let Ok(name) = dom.element_name(node) {
-        if name == Some("style") {
-            if let Ok(children) = dom.children(node) {
-                for &child in children {
-                    if let Ok(n) = dom.node(child) {
-                        if let silksurf_dom::NodeKind::Text { text } = n.kind() {
-                            css.push_str(text);
-                            css.push('\n');
-                        }
-                    }
-                }
+    if let Ok(name) = dom.element_name(node)
+        && name == Some("style")
+        && let Ok(children) = dom.children(node)
+    {
+        for &child in children {
+            if let Ok(n) = dom.node(child)
+                && let silksurf_dom::NodeKind::Text { text } = n.kind()
+            {
+                css.push_str(text);
+                css.push('\n');
             }
         }
     }
@@ -579,42 +607,42 @@ fn collect_script_tags(
     node: silksurf_dom::NodeId,
     scripts: &mut Vec<String>,
 ) {
-    if let Ok(name) = dom.element_name(node) {
-        if name == Some("script") {
-            let attrs = dom.attributes(node).ok();
-            // Skip external scripts (src="...") and non-JS types
-            let has_src = attrs
-                .as_ref()
-                .map(|a| {
-                    a.iter()
-                        .any(|a| a.name == silksurf_dom::AttributeName::from_str("src"))
-                })
-                .unwrap_or(false);
-            let script_type = attrs.as_ref().and_then(|a| {
+    if let Ok(name) = dom.element_name(node)
+        && name == Some("script")
+    {
+        let attrs = dom.attributes(node).ok();
+        // Skip external scripts (src="...") and non-JS types
+        let has_src = attrs
+            .as_ref()
+            .map(|a| {
                 a.iter()
-                    .find(|a| a.name == silksurf_dom::AttributeName::from_str("type"))
-                    .map(|a| a.value.to_string())
-            });
-            // Skip JSON-LD, importmap, and other non-JS types
-            let is_js = match script_type.as_deref() {
-                None | Some("") | Some("text/javascript") | Some("application/javascript") => true,
-                _ => false,
-            };
+                    .any(|a| a.name == silksurf_dom::AttributeName::from_str("src"))
+            })
+            .unwrap_or(false);
+        let script_type = attrs.as_ref().and_then(|a| {
+            a.iter()
+                .find(|a| a.name == silksurf_dom::AttributeName::from_str("type"))
+                .map(|a| a.value.to_string())
+        });
+        // Skip JSON-LD, importmap, and other non-JS types
+        let is_js = matches!(
+            script_type.as_deref(),
+            None | Some("") | Some("text/javascript") | Some("application/javascript")
+        );
 
-            if !has_src && is_js {
-                let mut text = String::new();
-                if let Ok(children) = dom.children(node) {
-                    for &child in children {
-                        if let Ok(n) = dom.node(child) {
-                            if let silksurf_dom::NodeKind::Text { text: t } = n.kind() {
-                                text.push_str(t);
-                            }
-                        }
+        if !has_src && is_js {
+            let mut text = String::new();
+            if let Ok(children) = dom.children(node) {
+                for &child in children {
+                    if let Ok(n) = dom.node(child)
+                        && let silksurf_dom::NodeKind::Text { text: t } = n.kind()
+                    {
+                        text.push_str(t);
                     }
                 }
-                if !text.trim().is_empty() {
-                    scripts.push(text);
-                }
+            }
+            if !text.trim().is_empty() {
+                scripts.push(text);
             }
         }
     }

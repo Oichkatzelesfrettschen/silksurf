@@ -36,6 +36,12 @@ impl NoopJsRuntime {
     }
 }
 
+impl Default for NoopJsRuntime {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl JsRuntime for NoopJsRuntime {
     fn bind_dom(&mut self, _dom: &Dom, _document: NodeId) -> Result<(), JsError> {
         Ok(())
