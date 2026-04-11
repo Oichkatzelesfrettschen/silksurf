@@ -1,0 +1,4 @@
+# directive pattern
+expected-fail invalid/syntax.invalid.css
+expected-pass invalid/forced-pass.css
+skip skip-by-manifest.css

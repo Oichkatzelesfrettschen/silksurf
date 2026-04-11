@@ -526,7 +526,7 @@ fn selector_key(selector: &Selector) -> SelectorKey {
             SelectorModifier::Class(name) if class_key.is_none() => {
                 class_key = Some(name.clone());
             }
-            _=> {}
+            _ => {}
         }
     }
     if let Some(id) = id_key {
@@ -663,7 +663,15 @@ pub fn compute_styles(
     let index = StyleIndex::new(stylesheet);
     let mut workspace = CascadeWorkspace::new(stylesheet.rules.len());
     let mut styles = FxHashMap::default();
-    compute_styles_recursive(dom, root, stylesheet, &index, None, &mut styles, &mut workspace);
+    compute_styles_recursive(
+        dom,
+        root,
+        stylesheet,
+        &index,
+        None,
+        &mut styles,
+        &mut workspace,
+    );
     styles
 }
 
@@ -920,7 +928,9 @@ fn cascade_for_node(
             workspace.candidates.extend_from_slice(entries);
         }
     }
-    workspace.candidates.extend_from_slice(&index.universal_rules);
+    workspace
+        .candidates
+        .extend_from_slice(&index.universal_rules);
 
     /*
      * Take candidates and seen out of workspace so we can mutate
@@ -966,7 +976,10 @@ fn cascade_for_node(
     workspace.seen = seen;
 
     for (rule_index, rule) in stylesheet.rules.iter().enumerate() {
-        let Some(specificity) = workspace.matched_by_rule.get(rule_index).and_then(|spec| *spec)
+        let Some(specificity) = workspace
+            .matched_by_rule
+            .get(rule_index)
+            .and_then(|spec| *spec)
         else {
             continue;
         };

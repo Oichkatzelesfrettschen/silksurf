@@ -25,8 +25,9 @@
  * See: style.rs compute_styles() for the cascade that produces styles
  */
 
-use crate::{Color, ComputedStyle, Display, FlexContainerStyle, FlexItemStyle,
-            Length, Overflow, Position};
+use crate::{
+    Color, ComputedStyle, Display, FlexContainerStyle, FlexItemStyle, Length, Overflow, Position,
+};
 use rustc_hash::FxHashMap;
 use silksurf_dom::NodeId;
 

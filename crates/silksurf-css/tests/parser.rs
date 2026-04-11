@@ -1,4 +1,6 @@
-use silksurf_css::{AtRuleBlock, CssToken, Rule, TypeSelector, parse_stylesheet};
+use silksurf_css::{
+    AtRuleBlock, CssToken, Rule, TypeSelector, parse_stylesheet, parse_stylesheet_bytes,
+};
 use silksurf_dom::TagName;
 
 #[test]
@@ -83,7 +85,45 @@ fn parses_multiple_selectors() {
     let h2 = &rule.selectors.selectors[1].steps[0].compound;
     assert_eq!(h2.type_selector, Some(TypeSelector::Tag(TagName::H2)));
     assert!(matches!(
-        h2.modifiers.get(0),
+        h2.modifiers.first(),
         Some(silksurf_css::SelectorModifier::Class(name)) if name.as_str() == "title"
     ));
+}
+
+#[test]
+fn parses_utf16le_stylesheet_bytes_with_bom() {
+    let utf16: Vec<u16> = "body { color: red; }".encode_utf16().collect();
+    let mut bytes = Vec::with_capacity(2 + utf16.len() * 2);
+    bytes.extend_from_slice(&[0xff, 0xfe]);
+    for unit in utf16 {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+
+    let sheet = parse_stylesheet_bytes(&bytes).unwrap();
+    assert_eq!(sheet.rules.len(), 1);
+}
+
+#[test]
+fn honors_charset_label_for_non_utf8_stylesheet_bytes() {
+    let mut bytes = br#"@charset "windows-1250";
+body { content: ""#
+        .to_vec();
+    bytes.push(0x8a);
+    bytes.extend_from_slice(br#""; }"#);
+
+    let sheet = parse_stylesheet_bytes(&bytes).unwrap();
+    let rule = sheet
+        .rules
+        .iter()
+        .find_map(|rule| match rule {
+            Rule::Style(rule) => Some(rule),
+            _ => None,
+        })
+        .expect("expected style rule");
+    assert_eq!(rule.declarations.len(), 1);
+    assert_eq!(rule.declarations[0].name, "content");
+    assert_eq!(
+        rule.declarations[0].value,
+        vec![CssToken::String("Š".to_string())]
+    );
 }

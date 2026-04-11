@@ -1,7 +1,9 @@
 use crate::selector::{SelectorList, parse_selector_list};
 use crate::{CssError, CssToken, CssTokenizer};
+use encoding_rs::{Encoding, UTF_8, UTF_16BE, UTF_16LE};
 use silksurf_core::SilkInterner;
 use smol_str::SmolStr;
+use std::borrow::Cow;
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Stylesheet {
@@ -194,6 +196,11 @@ pub fn parse_stylesheet(input: &str) -> Result<Stylesheet, CssError> {
     Ok(parser.parse_stylesheet())
 }
 
+pub fn parse_stylesheet_bytes(input: &[u8]) -> Result<Stylesheet, CssError> {
+    let decoded = decode_stylesheet_bytes(input);
+    parse_stylesheet(decoded.as_ref())
+}
+
 pub fn parse_stylesheet_with_interner(
     input: &str,
     interner: &mut SilkInterner,
@@ -235,6 +242,98 @@ pub fn parse_stylesheet_with_interner(
     intern_rules(&mut sheet.rules, interner);
     Ok(sheet)
 }
+
+fn decode_stylesheet_bytes(input: &[u8]) -> Cow<'_, str> {
+    if input.is_empty() {
+        return Cow::Borrowed("");
+    }
+
+    if let Some((encoding, _)) = Encoding::for_bom(input) {
+        let (decoded, _) = encoding.decode_with_bom_removal(input);
+        return decoded;
+    }
+
+    if let Some(encoding) =
+        sniff_declared_encoding(input).or_else(|| sniff_utf16_without_bom(input))
+    {
+        let (decoded, _) = encoding.decode_without_bom_handling(input);
+        return decoded;
+    }
+
+    let (decoded, _) = UTF_8.decode_without_bom_handling(input);
+    decoded
+}
+
+fn sniff_declared_encoding(input: &[u8]) -> Option<&'static Encoding> {
+    let mut cursor = 0usize;
+    while cursor < input.len() && is_css_whitespace(input[cursor]) {
+        cursor += 1;
+    }
+    let bytes = &input[cursor..];
+
+    const PREFIX: &[u8] = b"@charset";
+    if bytes.len() < PREFIX.len() || !bytes[..PREFIX.len()].eq_ignore_ascii_case(PREFIX) {
+        return None;
+    }
+
+    let mut index = PREFIX.len();
+    while index < bytes.len() && is_css_whitespace(bytes[index]) {
+        index += 1;
+    }
+    if bytes.get(index) != Some(&b'"') {
+        return None;
+    }
+    index += 1;
+
+    let label_start = index;
+    while index < bytes.len() && bytes[index] != b'"' {
+        index += 1;
+    }
+    if index >= bytes.len() {
+        return None;
+    }
+    let label = &bytes[label_start..index];
+    index += 1;
+
+    while index < bytes.len() && is_css_whitespace(bytes[index]) {
+        index += 1;
+    }
+    if bytes.get(index) != Some(&b';') {
+        return None;
+    }
+
+    Encoding::for_label(label)
+}
+
+fn sniff_utf16_without_bom(input: &[u8]) -> Option<&'static Encoding> {
+    if input.len() < 4 {
+        return None;
+    }
+
+    let sample = &input[..input.len().min(128)];
+    let even_zero_count = sample.iter().step_by(2).filter(|&&byte| byte == 0).count();
+    let odd_zero_count = sample
+        .iter()
+        .skip(1)
+        .step_by(2)
+        .filter(|&&byte| byte == 0)
+        .count();
+
+    if odd_zero_count >= 2 && odd_zero_count >= even_zero_count.saturating_mul(2) {
+        return Some(UTF_16LE);
+    }
+
+    if even_zero_count >= 2 && even_zero_count >= odd_zero_count.saturating_mul(2) {
+        return Some(UTF_16BE);
+    }
+
+    None
+}
+
+fn is_css_whitespace(byte: u8) -> bool {
+    matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | 0x0c)
+}
+
 fn parse_at_rule_block(tokens: Vec<CssToken>) -> AtRuleBlock {
     if looks_like_declarations(&tokens) {
         AtRuleBlock::Declarations(parse_declarations(tokens))
