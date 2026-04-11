@@ -9,7 +9,7 @@
  * HTTP/1.1 path (BasicClient::fetch):
  *   1. Parse URL via url crate (WHATWG compliant)
  *   2. TCP connect to host:port
- *   3. TLS handshake via rustls StreamOwned (HTTPS only)
+ *   3. TLS handshake via rustls (HTTPS only)
  *   4. Send HTTP/1.1 request with headers
  *   5. Read response (16MB limit, 30s timeout)
  *   6. Parse headers via httparse (zero-copy)
@@ -178,7 +178,7 @@ impl NetClient for BasicClient {
 
             // Connect
             let addr = format!("{host}:{port}");
-            let tcp = TcpStream::connect(&addr)
+            let mut tcp = TcpStream::connect(&addr)
                 .map_err(|e| NetError::new(format!("TCP connect to {addr}: {e}")))?;
             tcp.set_read_timeout(Some(std::time::Duration::from_secs(30)))
                 .ok();
@@ -189,15 +189,18 @@ impl NetClient for BasicClient {
                     .map_err(|e| NetError::new(format!("Invalid server name: {e}")))?
                     .to_owned();
                 let config = self.tls.config();
-                let conn = rustls::ClientConnection::new(config, server_name)
-                    .map_err(|e| NetError::new(format!("TLS handshake: {e}")))?;
+                let mut conn = rustls::ClientConnection::new(config, server_name)
+                    .map_err(|e| NetError::new(format!("TLS setup: {e}")))?;
+                while conn.is_handshaking() {
+                    conn.complete_io(&mut tcp)
+                        .map_err(|e| NetError::new(format!("TLS handshake: {e}")))?;
+                }
                 let mut stream = StreamOwned::new(conn, tcp);
                 stream
                     .write_all(&req_buf)
                     .map_err(|e| NetError::new(format!("TLS write: {e}")))?;
                 read_response(&mut stream)?
             } else {
-                let mut tcp = tcp;
                 tcp.write_all(&req_buf)
                     .map_err(|e| NetError::new(format!("TCP write: {e}")))?;
                 read_response(&mut tcp)?

@@ -7,6 +7,19 @@ use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, Server
 use rustls::{ClientConfig, DigitallySignedStruct, Error, RootCertStore, SignatureScheme};
 use std::sync::Arc;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RootStoreDiagnostics {
+    pub mozilla_roots: usize,
+    pub native_certs_loaded: usize,
+    pub native_certs_added: usize,
+    pub native_certs_rejected: usize,
+    pub native_cert_errors: Vec<String>,
+    pub total_roots: usize,
+    pub ssl_cert_file: Option<String>,
+    pub ssl_cert_dir: Option<String>,
+    pub nix_ssl_cert_file: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct TlsConfig {
     inner: Arc<ClientConfig>,
@@ -15,16 +28,7 @@ pub struct TlsConfig {
 impl TlsConfig {
     /// Create TLS config with Mozilla + system root certificates.
     pub fn new() -> Self {
-        let mut roots = RootCertStore::empty();
-
-        // Mozilla's root certificates (reliable baseline)
-        roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-
-        // System root certificates (enterprise CAs, local trust)
-        let result = rustls_native_certs::load_native_certs();
-        for cert in result.certs {
-            let _ = roots.add(cert);
-        }
+        let (roots, _) = build_root_store();
 
         let config = ClientConfig::builder()
             .with_root_certificates(roots)
@@ -41,12 +45,7 @@ impl TlsConfig {
     /// Used only by the h2 parallel-fetch path in silksurf-net; single-URL fetches
     /// via BasicClient::fetch continue to use the default (HTTP/1.1) config.
     pub fn new_h2() -> Self {
-        let mut roots = RootCertStore::empty();
-        roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-        let result = rustls_native_certs::load_native_certs();
-        for cert in result.certs {
-            let _ = roots.add(cert);
-        }
+        let (roots, _) = build_root_store();
         let mut config = ClientConfig::builder()
             .with_root_certificates(roots)
             .with_no_client_auth();
@@ -76,6 +75,40 @@ impl Default for TlsConfig {
     fn default() -> Self {
         Self::new()
     }
+}
+
+pub fn root_store_diagnostics() -> RootStoreDiagnostics {
+    build_root_store().1
+}
+
+fn build_root_store() -> (RootCertStore, RootStoreDiagnostics) {
+    let mut roots = RootCertStore::empty();
+    let mozilla_roots = webpki_roots::TLS_SERVER_ROOTS.len();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+
+    let native_result = rustls_native_certs::load_native_certs();
+    let native_certs_loaded = native_result.certs.len();
+    let native_cert_errors = native_result
+        .errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    let (native_certs_added, native_certs_rejected) =
+        roots.add_parsable_certificates(native_result.certs);
+
+    let diagnostics = RootStoreDiagnostics {
+        mozilla_roots,
+        native_certs_loaded,
+        native_certs_added,
+        native_certs_rejected,
+        native_cert_errors,
+        total_roots: roots.len(),
+        ssl_cert_file: std::env::var("SSL_CERT_FILE").ok(),
+        ssl_cert_dir: std::env::var("SSL_CERT_DIR").ok(),
+        nix_ssl_cert_file: std::env::var("NIX_SSL_CERT_FILE").ok(),
+    };
+
+    (roots, diagnostics)
 }
 
 #[derive(Debug, Clone)]
@@ -180,5 +213,22 @@ impl ServerCertVerifier for NoVerifier {
             SignatureScheme::ED25519,
             SignatureScheme::ED448,
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::root_store_diagnostics;
+
+    #[test]
+    fn root_store_diagnostics_reports_loaded_roots() {
+        let diagnostics = root_store_diagnostics();
+
+        assert!(diagnostics.mozilla_roots > 0);
+        assert!(diagnostics.total_roots >= diagnostics.mozilla_roots);
+        assert_eq!(
+            diagnostics.total_roots,
+            diagnostics.mozilla_roots + diagnostics.native_certs_added
+        );
     }
 }
