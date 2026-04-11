@@ -251,6 +251,29 @@ impl SpeculativeRenderer {
     }
 
     /*
+     * with_platform_verifier -- constructor that asks rustls to use the best
+     * platform verifier available for this target.
+     *
+     * On Linux this still uses WebPKI over the discovered native root bundle;
+     * on Windows/macOS/mobile it can use the OS verifier and its richer trust
+     * policy.
+     */
+    #[cfg(feature = "platform-verifier")]
+    pub fn with_platform_verifier() -> Result<Self, NetError> {
+        use silksurf_tls::RustlsProvider;
+
+        let provider = RustlsProvider::new_platform_verifier().map_err(|e| NetError {
+            message: format!("TLS platform verifier setup: {e}"),
+        })?;
+
+        Ok(Self {
+            cache: ResponseCache::new(),
+            client: Arc::new(BasicClient::with_tls(Arc::new(provider))),
+            stylesheet_cache: StylesheetCache::new(),
+        })
+    }
+
+    /*
      * get_or_parse_stylesheet -- CSS parse with in-process result caching.
      *
      * WHY: Calling parse_stylesheet_with_interner on every render costs 2.5ms

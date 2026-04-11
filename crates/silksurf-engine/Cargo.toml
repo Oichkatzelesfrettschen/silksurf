@@ -22,3 +22,4 @@ silksurf-tls = { path = "../silksurf-tls", optional = true }
 default = []
 full = ["net"]
 net = ["dep:silksurf-net", "dep:silksurf-tls"]
+platform-verifier = ["net", "silksurf-tls/platform-verifier"]

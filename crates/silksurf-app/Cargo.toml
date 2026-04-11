@@ -15,3 +15,6 @@ silksurf-js = { path = "../../silksurf-js" }
 silksurf-core = { path = "../silksurf-core" }
 url = { workspace = true }
 mimalloc = { workspace = true }
+
+[features]
+platform-verifier = ["silksurf-engine/platform-verifier"]

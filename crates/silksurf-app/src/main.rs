@@ -31,6 +31,7 @@ use silksurf_layout::Rect;
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let insecure = args.iter().any(|a| a == "--insecure" || a == "-k");
+    let platform_verifier = args.iter().any(|a| a == "--platform-verifier");
     let speculative = args.iter().any(|a| a == "--speculative" || a == "-s");
 
     let url = args
@@ -42,6 +43,9 @@ fn main() {
 
     if insecure {
         eprintln!("[SilkSurf] WARNING: TLS certificate verification disabled (--insecure)");
+    }
+    if platform_verifier {
+        eprintln!("[SilkSurf] TLS platform verifier requested");
     }
 
     /*
@@ -55,6 +59,27 @@ fn main() {
      */
     let mut renderer = if insecure {
         SpeculativeRenderer::with_insecure()
+    } else if platform_verifier {
+        #[cfg(feature = "platform-verifier")]
+        {
+            match SpeculativeRenderer::with_platform_verifier() {
+                Ok(renderer) => renderer,
+                Err(e) => {
+                    eprintln!(
+                        "[SilkSurf] TLS platform verifier setup error: {}",
+                        e.message
+                    );
+                    return;
+                }
+            }
+        }
+        #[cfg(not(feature = "platform-verifier"))]
+        {
+            eprintln!(
+                "[SilkSurf] Rebuild with `--features platform-verifier` to use --platform-verifier"
+            );
+            return;
+        }
     } else {
         SpeculativeRenderer::new()
     };

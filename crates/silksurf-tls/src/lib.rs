@@ -55,12 +55,52 @@ impl TlsConfig {
         }
     }
 
+    /// Create TLS config using the platform verifier instead of SilkSurf's
+    /// default WebPKI roots plus native-root bundle path.
+    #[cfg(feature = "platform-verifier")]
+    pub fn new_platform_verifier() -> Result<Self, Error> {
+        use rustls_platform_verifier::BuilderVerifierExt;
+
+        let config = ClientConfig::builder()
+            .with_platform_verifier()?
+            .with_no_client_auth();
+        Ok(Self {
+            inner: Arc::new(config),
+        })
+    }
+
+    /// Create platform-verifier TLS config with ALPN ["h2", "http/1.1"].
+    #[cfg(feature = "platform-verifier")]
+    pub fn new_platform_verifier_h2() -> Result<Self, Error> {
+        use rustls_platform_verifier::BuilderVerifierExt;
+
+        let mut config = ClientConfig::builder()
+            .with_platform_verifier()?
+            .with_no_client_auth();
+        config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+        Ok(Self {
+            inner: Arc::new(config),
+        })
+    }
+
     /// Create TLS config that accepts any certificate (INSECURE -- for debugging only).
     pub fn new_insecure() -> Self {
         let config = ClientConfig::builder()
             .dangerous()
             .with_custom_certificate_verifier(Arc::new(NoVerifier))
             .with_no_client_auth();
+        Self {
+            inner: Arc::new(config),
+        }
+    }
+
+    /// Create insecure TLS config with ALPN ["h2", "http/1.1"].
+    pub fn new_insecure_h2() -> Self {
+        let mut config = ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(NoVerifier))
+            .with_no_client_auth();
+        config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
         Self {
             inner: Arc::new(config),
         }
@@ -114,12 +154,14 @@ fn build_root_store() -> (RootCertStore, RootStoreDiagnostics) {
 #[derive(Debug, Clone)]
 pub struct RustlsProvider {
     config: TlsConfig,
+    h2_config: TlsConfig,
 }
 
 impl RustlsProvider {
     pub fn new() -> Self {
         Self {
             config: TlsConfig::new(),
+            h2_config: TlsConfig::new_h2(),
         }
     }
 
@@ -127,7 +169,17 @@ impl RustlsProvider {
     pub fn new_insecure() -> Self {
         Self {
             config: TlsConfig::new_insecure(),
+            h2_config: TlsConfig::new_insecure_h2(),
         }
+    }
+
+    /// Create a provider backed by rustls-platform-verifier.
+    #[cfg(feature = "platform-verifier")]
+    pub fn new_platform_verifier() -> Result<Self, Error> {
+        Ok(Self {
+            config: TlsConfig::new_platform_verifier()?,
+            h2_config: TlsConfig::new_platform_verifier_h2()?,
+        })
     }
 }
 
@@ -161,7 +213,7 @@ impl TlsProvider for RustlsProvider {
     }
 
     fn h2_config(&self) -> Arc<ClientConfig> {
-        TlsConfig::new_h2().inner()
+        self.h2_config.inner()
     }
 }
 
@@ -229,6 +281,23 @@ mod tests {
         assert_eq!(
             diagnostics.total_roots,
             diagnostics.mozilla_roots + diagnostics.native_certs_added
+        );
+    }
+
+    #[test]
+    fn provider_h2_configs_preserve_mode_and_alpn() {
+        use super::{RustlsProvider, TlsProvider};
+
+        let default_provider = RustlsProvider::new();
+        assert_eq!(
+            default_provider.h2_config().alpn_protocols,
+            vec![b"h2".to_vec(), b"http/1.1".to_vec()]
+        );
+
+        let insecure_provider = RustlsProvider::new_insecure();
+        assert_eq!(
+            insecure_provider.h2_config().alpn_protocols,
+            vec![b"h2".to_vec(), b"http/1.1".to_vec()]
         );
     }
 }

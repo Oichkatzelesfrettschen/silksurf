@@ -86,11 +86,61 @@ The probe prints:
 Current local probe output for `example.com:443`:
 
 ```text
+Default root-store diagnostics:
 Mozilla/webpki roots: 136
 Native certs: loaded=145, added=145, rejected=0
 Total rustls roots: 281
 Cert env: SSL_CERT_FILE=Some("/etc/ssl/cert.pem"), SSL_CERT_DIR=Some("/etc/ssl/certs"), NIX_SSL_CERT_FILE=Some("/etc/ssl/certs/ca-certificates.crt")
 Native cert loader errors: none
+Verifier mode: webpki-roots + rustls-native-certs
+TLS handshake: failed: rustls complete_io: invalid peer certificate: UnknownIssuer
+```
+
+Deeper chain check:
+
+```text
+leaf issuer:         Cloudflare TLS Issuing ECC CA 1
+intermediate issuer: SSL.com TLS Transit ECC CA R2
+chain root issuer:   AAA Certificate Services
+
+openssl verify -CAfile /etc/ssl/certs/ca-certificates.crt \
+  -untrusted cert-02.pem -untrusted cert-03.pem cert-01.pem
+error 20 at 2 depth lookup: unable to get local issuer certificate
+```
+
+The local p11-kit trust database lists `Comodo AAA Services root`, but a
+server-auth PEM extraction does not include an `AAA Certificate Services` root.
+`webpki-roots` also includes COMODO and SSL.com roots, but not the exact `AAA
+Certificate Services` anchor needed by the served chain. That explains why
+SilkSurf, curl, and openssl all fail the same target: they receive a chain that
+terminates at an issuer this host does not expose as a usable server-auth trust
+anchor.
+
+## Verifier Modes
+
+Default mode:
+
+```sh
+cargo run -p silksurf-tls --bin tls_probe -- example.com 443
+```
+
+Platform verifier mode:
+
+```sh
+cargo run -p silksurf-tls --features platform-verifier --bin tls_probe -- --platform-verifier example.com 443
+cargo run -p silksurf-app --features platform-verifier -- --platform-verifier https://example.com
+```
+
+On Linux, `rustls-platform-verifier` still uses WebPKI with the discovered
+native roots, so it is not expected to repair this specific `example.com`
+failure. It is useful as a better production option for targets where the crate
+can delegate to richer platform verifiers, such as Windows, macOS, iOS, and
+Android.
+
+Current local platform-verifier result on Linux:
+
+```text
+Verifier mode: platform-verifier
 TLS handshake: failed: rustls complete_io: invalid peer certificate: UnknownIssuer
 ```
 
@@ -109,9 +159,8 @@ TLS handshake: failed: rustls complete_io: invalid peer certificate: UnknownIssu
 
 - Keep the current rustls WebPKI path and fix the host trust store when curl and
   OpenSSL fail the same target.
-- Add `rustls-platform-verifier` behind a feature flag if SilkSurf needs browser
-  or OS-native path-building semantics on platforms where WebPKI plus native
-  roots is not enough.
+- Use `--features platform-verifier -- --platform-verifier` when SilkSurf needs
+  OS-native verifier semantics on supported platforms.
 - Add an offline regression test for diagnostic formatting and keep live network
   certificate validation in manual probes, because public certificate chains can
   change without a source-code change.

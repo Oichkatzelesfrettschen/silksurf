@@ -8,4 +8,8 @@ publish = false
 [dependencies]
 rustls = { workspace = true }
 rustls-native-certs = "0.8"
+rustls-platform-verifier = { version = "0.6.2", optional = true }
 webpki-roots = "1.0"
+
+[features]
+platform-verifier = ["dep:rustls-platform-verifier"]
