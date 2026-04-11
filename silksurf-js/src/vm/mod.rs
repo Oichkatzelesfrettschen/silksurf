@@ -1313,13 +1313,12 @@ fn make_iterator_for(iterable: Value) -> Value {
                 vec![]
             }
         }
-        Value::String(s) => {
-            s.as_str()
-                .unwrap_or("")
-                .chars()
-                .map(|c| value::Value::string_owned(c.to_string()))
-                .collect()
-        }
+        Value::String(s) => s
+            .as_str()
+            .unwrap_or("")
+            .chars()
+            .map(|c| value::Value::string_owned(c.to_string()))
+            .collect(),
         _ => vec![],
     };
 
@@ -1353,7 +1352,9 @@ fn make_iterator_for(iterable: Value) -> Value {
         )));
         iter_obj.borrow_mut().set_by_str("next", next_fn);
         // Also store done state as a flag for fast IterDone check
-        iter_obj.borrow_mut().set_by_str("__done__", Value::Boolean(false));
+        iter_obj
+            .borrow_mut()
+            .set_by_str("__done__", Value::Boolean(false));
     }
 
     Value::Object(iter_obj)
@@ -1485,18 +1486,23 @@ fn op_get_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
                 // Return a new function that prepends bound_args
                 let orig = original.clone();
                 let ba = bound_args.clone();
-                Value::NativeFunction(Rc::new(value::NativeFunction::new("bound", move |call_args| {
-                    let mut all_args = ba.clone();
-                    all_args.extend(call_args.iter().cloned());
-                    // Call the original -- but we can only call NativeFunction, not Function
-                    match &orig {
-                        Value::NativeFunction(f) => f.call(&all_args),
-                        _ => Value::Undefined, // Can't call Value::Function from NativeFunction
-                    }
-                })))
+                Value::NativeFunction(Rc::new(value::NativeFunction::new(
+                    "bound",
+                    move |call_args| {
+                        let mut all_args = ba.clone();
+                        all_args.extend(call_args.iter().cloned());
+                        // Call the original -- but we can only call NativeFunction, not Function
+                        match &orig {
+                            Value::NativeFunction(f) => f.call(&all_args),
+                            _ => Value::Undefined, // Can't call Value::Function from NativeFunction
+                        }
+                    },
+                )))
             })))
         }
-        Value::Function(_) | Value::NativeFunction(_) if prop_name == "call" || prop_name == "apply" => {
+        Value::Function(_) | Value::NativeFunction(_)
+            if prop_name == "call" || prop_name == "apply" =>
+        {
             // .call(thisArg, ...args) -- simplified: ignore thisArg, call with args
             let original = obj.clone();
             Value::NativeFunction(Rc::new(value::NativeFunction::new(&prop_name, move |args| {
@@ -1573,20 +1579,25 @@ fn op_get_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
                     }
                     SYM_ASYNC.with(|c| {
                         value::Value::string_owned(
-                            c.get_or_init(|| "@@symbol_wk_asyncIterator".to_string()).clone(),
+                            c.get_or_init(|| "@@symbol_wk_asyncIterator".to_string())
+                                .clone(),
                         )
                     })
                 }
                 "toPrimitive" => value::Value::string("@@symbol_wk_toPrimitive"),
-                "toStringTag"  => value::Value::string("@@symbol_wk_toStringTag"),
-                "hasInstance"  => value::Value::string("@@symbol_wk_hasInstance"),
-                "species"      => value::Value::string("@@symbol_wk_species"),
+                "toStringTag" => value::Value::string("@@symbol_wk_toStringTag"),
+                "hasInstance" => value::Value::string("@@symbol_wk_hasInstance"),
+                "species" => value::Value::string("@@symbol_wk_species"),
                 "isConcatSpreadable" => value::Value::string("@@symbol_wk_isConcatSpreadable"),
                 "for" => Value::NativeFunction(Rc::new(value::NativeFunction::new(
                     "Symbol.for",
                     |args| {
-                        let key = args.first()
-                            .map(|v| { let s = v.to_js_string(); s.as_str().unwrap_or("").to_string() })
+                        let key = args
+                            .first()
+                            .map(|v| {
+                                let s = v.to_js_string();
+                                s.as_str().unwrap_or("").to_string()
+                            })
                             .unwrap_or_default();
                         // Registry lookup/insert
                         thread_local! {
@@ -1607,8 +1618,12 @@ fn op_get_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
                 "keyFor" => Value::NativeFunction(Rc::new(value::NativeFunction::new(
                     "Symbol.keyFor",
                     |args| {
-                        let sym = args.first()
-                            .map(|v| { let s = v.to_js_string(); s.as_str().unwrap_or("").to_string() })
+                        let sym = args
+                            .first()
+                            .map(|v| {
+                                let s = v.to_js_string();
+                                s.as_str().unwrap_or("").to_string()
+                            })
                             .unwrap_or_default();
                         // Extract key from "@@symbol_for_KEY" format
                         if let Some(key) = sym.strip_prefix("@@symbol_for_") {
@@ -1653,7 +1668,11 @@ fn op_get_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
                     "Number.isNaN",
                     |args| {
                         let result = args.first().is_some_and(|v| {
-                            if let value::Value::Number(n) = v { n.is_nan() } else { false }
+                            if let value::Value::Number(n) = v {
+                                n.is_nan()
+                            } else {
+                                false
+                            }
                         });
                         value::Value::Boolean(result)
                     },
@@ -1820,16 +1839,11 @@ fn op_get_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
                         let obj = value::Object::new();
                         let obj_rc = Rc::new(RefCell::new(obj));
                         if let Some(value::Value::Object(arr)) = args.first() {
-                            let entries =
-                                builtins::array::collect_elements_pub(&arr.borrow());
+                            let entries = builtins::array::collect_elements_pub(&arr.borrow());
                             for entry in entries {
                                 if let value::Value::Object(pair) = entry {
-                                    let k = pair.borrow().get_by_key(
-                                        &value::PropertyKey::Index(0),
-                                    );
-                                    let v = pair.borrow().get_by_key(
-                                        &value::PropertyKey::Index(1),
-                                    );
+                                    let k = pair.borrow().get_by_key(&value::PropertyKey::Index(0));
+                                    let v = pair.borrow().get_by_key(&value::PropertyKey::Index(1));
                                     let key_str = k.to_js_string();
                                     let key_s = key_str.as_str().unwrap_or("");
                                     obj_rc
@@ -1841,70 +1855,60 @@ fn op_get_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
                         value::Value::Object(obj_rc)
                     },
                 ))),
-                "getOwnPropertyNames" | "getOwnPropertySymbols" => {
-                    Value::NativeFunction(Rc::new(value::NativeFunction::new(
-                        "Object.getOwnPropertyNames",
-                        |args| {
-                            if let Some(value::Value::Object(o)) = args.first() {
-                                let keys: Vec<value::Value> = o
-                                    .borrow()
-                                    .properties
-                                    .keys()
-                                    .filter_map(|k| match k {
-                                        value::PropertyKey::String(s) => {
-                                            Some(value::Value::String(Rc::clone(s)))
-                                        }
-                                        value::PropertyKey::Index(i) => {
-                                            Some(value::Value::string_owned(i.to_string()))
-                                        }
-                                    })
-                                    .collect();
-                                builtins::array::create_array(keys)
-                            } else {
-                                builtins::array::create_array(vec![])
-                            }
-                        },
-                    )))
-                }
+                "getOwnPropertyNames" | "getOwnPropertySymbols" => Value::NativeFunction(Rc::new(
+                    value::NativeFunction::new("Object.getOwnPropertyNames", |args| {
+                        if let Some(value::Value::Object(o)) = args.first() {
+                            let keys: Vec<value::Value> = o
+                                .borrow()
+                                .properties
+                                .keys()
+                                .filter_map(|k| match k {
+                                    value::PropertyKey::String(s) => {
+                                        Some(value::Value::String(Rc::clone(s)))
+                                    }
+                                    value::PropertyKey::Index(i) => {
+                                        Some(value::Value::string_owned(i.to_string()))
+                                    }
+                                })
+                                .collect();
+                            builtins::array::create_array(keys)
+                        } else {
+                            builtins::array::create_array(vec![])
+                        }
+                    }),
+                )),
                 "defineProperty" | "defineProperties" | "seal" | "preventExtensions"
                 | "isFrozen" | "isSealed" | "isExtensible" => {
                     // Stubs: return first arg unchanged or true/false as appropriate
-                    let is_predicate = matches!(
-                        prop_name.as_str(),
-                        "isFrozen" | "isSealed" | "isExtensible"
-                    );
+                    let is_predicate =
+                        matches!(prop_name.as_str(), "isFrozen" | "isSealed" | "isExtensible");
                     let name = prop_name.clone();
-                    Value::NativeFunction(Rc::new(value::NativeFunction::new(
-                        name,
-                        move |args| {
-                            if is_predicate {
-                                value::Value::Boolean(false)
-                            } else {
-                                args.first().cloned().unwrap_or(value::Value::Undefined)
-                            }
-                        },
-                    )))
+                    Value::NativeFunction(Rc::new(value::NativeFunction::new(name, move |args| {
+                        if is_predicate {
+                            value::Value::Boolean(false)
+                        } else {
+                            args.first().cloned().unwrap_or(value::Value::Undefined)
+                        }
+                    })))
                 }
                 _ => Value::Undefined,
             }
         }
         Value::NativeFunction(f) if f.name == "String" => {
             match prop_name.as_str() {
-                "fromCharCode" => {
-                    Value::NativeFunction(Rc::new(value::NativeFunction::new(
-                        "String.fromCharCode",
-                        |args| {
-                            let s: String = args
-                                .iter()
-                                .filter_map(|v| {
-                                    let code = v.to_number() as u32;
-                                    char::from_u32(code)
-                                })
-                                .collect();
-                            value::Value::string_owned(s)
-                        },
-                    )))
-                }
+                "fromCharCode" => Value::NativeFunction(Rc::new(value::NativeFunction::new(
+                    "String.fromCharCode",
+                    |args| {
+                        let s: String = args
+                            .iter()
+                            .filter_map(|v| {
+                                let code = v.to_number() as u32;
+                                char::from_u32(code)
+                            })
+                            .collect();
+                        value::Value::string_owned(s)
+                    },
+                ))),
                 "raw" => {
                     // String.raw`...` -- simplified: join strings without escape processing
                     Value::NativeFunction(Rc::new(value::NativeFunction::new(
@@ -1915,9 +1919,8 @@ fn op_get_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
                             if let Some(value::Value::Object(tmpl)) = args.first() {
                                 let raw = tmpl.borrow().get_by_str("raw");
                                 if let value::Value::Object(raw_arr) = raw {
-                                    let parts = builtins::array::collect_elements_pub(
-                                        &raw_arr.borrow(),
-                                    );
+                                    let parts =
+                                        builtins::array::collect_elements_pub(&raw_arr.borrow());
                                     let subs = &args[1..];
                                     let mut result = String::new();
                                     for (i, part) in parts.iter().enumerate() {
@@ -1940,26 +1943,26 @@ fn op_get_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
         }
         Value::NativeFunction(f) if f.name == "Array" => {
             match prop_name.as_str() {
-                "isArray" => {
-                    Value::NativeFunction(Rc::new(value::NativeFunction::new(
-                        "Array.isArray",
-                        |args| {
-                            let result = args.first().is_some_and(|v| {
-                                if let value::Value::Object(o) = v {
-                                    builtins::array::is_array_like(&o.borrow())
-                                } else {
-                                    false
-                                }
-                            });
-                            value::Value::Boolean(result)
-                        },
-                    )))
-                }
+                "isArray" => Value::NativeFunction(Rc::new(value::NativeFunction::new(
+                    "Array.isArray",
+                    |args| {
+                        let result = args.first().is_some_and(|v| {
+                            if let value::Value::Object(o) = v {
+                                builtins::array::is_array_like(&o.borrow())
+                            } else {
+                                false
+                            }
+                        });
+                        value::Value::Boolean(result)
+                    },
+                ))),
                 "from" => {
                     Value::NativeFunction(Rc::new(value::NativeFunction::new(
                         "Array.from",
                         |args| {
-                            use builtins::array::{collect_elements_pub, create_array, is_array_like};
+                            use builtins::array::{
+                                collect_elements_pub, create_array, is_array_like,
+                            };
                             let source = args.first().cloned().unwrap_or(value::Value::Undefined);
                             let map_fn = args.get(1).cloned();
                             let elements: Vec<value::Value> = match &source {
@@ -1996,10 +1999,9 @@ fn op_get_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
                     )))
                 }
                 "of" => {
-                    Value::NativeFunction(Rc::new(value::NativeFunction::new(
-                        "Array.of",
-                        |args| builtins::array::create_array(args.to_vec()),
-                    )))
+                    Value::NativeFunction(Rc::new(value::NativeFunction::new("Array.of", |args| {
+                        builtins::array::create_array(args.to_vec())
+                    })))
                 }
                 _ => Value::Undefined,
             }
@@ -2536,7 +2538,10 @@ mod tests {
         run_script(&mut vm, "requestAnimationFrame(function(){});").ok();
 
         // Now script 6
-        let r = run_script(&mut vm, "$RB=[];$RV=function(a){$RT=performance.now();for(var b=0;b<a.length;b+=2){var c=a[b];}a.length=0};");
+        let r = run_script(
+            &mut vm,
+            "$RB=[];$RV=function(a){$RT=performance.now();for(var b=0;b<a.length;b+=2){var c=a[b];}a.length=0};",
+        );
         assert!(r.is_ok(), "Script 6 after 5: {r:?}");
     }
 
@@ -2577,10 +2582,9 @@ mod tests {
     #[test]
     fn test_run_and_get_result_basic() {
         // Sanity check: run_and_get_result works for a plain function call
-        let v = run_and_get_result(
-            "function add(x, y) { return x + y; } window.result = add(3, 4);",
-        )
-        .expect("script failed");
+        let v =
+            run_and_get_result("function add(x, y) { return x + y; } window.result = add(3, 4);")
+                .expect("script failed");
         assert!(matches!(v, Value::Number(n) if n == 7.0), "expected 7, got {v:?}");
     }
 

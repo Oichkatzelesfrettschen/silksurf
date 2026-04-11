@@ -116,21 +116,24 @@ pub fn install(global: &mut Object) {
      */
     global.set_by_str(
         "addEventListener",
-        crate::vm::value::Value::NativeFunction(Rc::new(
-            crate::vm::value::NativeFunction::new("addEventListener", |_| Value::Undefined),
-        )),
+        crate::vm::value::Value::NativeFunction(Rc::new(crate::vm::value::NativeFunction::new(
+            "addEventListener",
+            |_| Value::Undefined,
+        ))),
     );
     global.set_by_str(
         "removeEventListener",
-        crate::vm::value::Value::NativeFunction(Rc::new(
-            crate::vm::value::NativeFunction::new("removeEventListener", |_| Value::Undefined),
-        )),
+        crate::vm::value::Value::NativeFunction(Rc::new(crate::vm::value::NativeFunction::new(
+            "removeEventListener",
+            |_| Value::Undefined,
+        ))),
     );
     global.set_by_str(
         "dispatchEvent",
-        crate::vm::value::Value::NativeFunction(Rc::new(
-            crate::vm::value::NativeFunction::new("dispatchEvent", |_| Value::Boolean(true)),
-        )),
+        crate::vm::value::Value::NativeFunction(Rc::new(crate::vm::value::NativeFunction::new(
+            "dispatchEvent",
+            |_| Value::Boolean(true),
+        ))),
     );
 
     // self = window = globalThis (all point to global)

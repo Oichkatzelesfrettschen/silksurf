@@ -3,7 +3,9 @@
 //! Target: 50-100 MB/s
 //! Comparison: Boa ~25 MB/s, QuickJS ~40 MB/s
 
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use std::hint::black_box;
+
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use silksurf_js::Lexer;
 
 /// Sample JavaScript code for benchmarking
