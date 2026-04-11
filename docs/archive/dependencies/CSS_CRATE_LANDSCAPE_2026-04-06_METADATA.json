@@ -1,0 +1,405 @@
+{
+  "count": 50,
+  "rows": [
+    {
+      "crate": "cssparser",
+      "area": "parser_tokenizer",
+      "updated_at": "2026-03-17",
+      "recent_downloads": 10649044,
+      "downloads": 41208748,
+      "tier": "evaluate/prototype"
+    },
+    {
+      "crate": "cssparser-macros",
+      "area": "parser_tokenizer",
+      "updated_at": "2026-03-17",
+      "recent_downloads": 8791426,
+      "downloads": 36400524,
+      "tier": "evaluate/prototype"
+    },
+    {
+      "crate": "cssparser-color",
+      "area": "style_representation",
+      "updated_at": "2026-03-17",
+      "recent_downloads": 534188,
+      "downloads": 2116362,
+      "tier": "evaluate/prototype"
+    },
+    {
+      "crate": "selectors",
+      "area": "selector_matching",
+      "updated_at": "2026-03-18",
+      "recent_downloads": 9020499,
+      "downloads": 34971023,
+      "tier": "evaluate/prototype"
+    },
+    {
+      "crate": "parcel_selectors",
+      "area": "selector_matching",
+      "updated_at": "2025-05-11",
+      "recent_downloads": 498655,
+      "downloads": 2197743,
+      "tier": "avoid/reject"
+    },
+    {
+      "crate": "lightningcss",
+      "area": "parser_tokenizer",
+      "updated_at": "2026-03-09",
+      "recent_downloads": 504262,
+      "downloads": 2280600,
+      "tier": "avoid/reject"
+    },
+    {
+      "crate": "swc_css_parser",
+      "area": "parser_tokenizer",
+      "updated_at": "2026-04-03",
+      "recent_downloads": 74794,
+      "downloads": 1246276,
+      "tier": "evaluate/prototype"
+    },
+    {
+      "crate": "swc_css_ast",
+      "area": "parser_tokenizer",
+      "updated_at": "2026-04-03",
+      "recent_downloads": 78430,
+      "downloads": 1113110,
+      "tier": "evaluate/prototype"
+    },
+    {
+      "crate": "swc_css_visit",
+      "area": "parser_tokenizer",
+      "updated_at": "2026-04-03",
+      "recent_downloads": 76907,
+      "downloads": 1072451,
+      "tier": "evaluate/prototype"
+    },
+    {
+      "crate": "swc_css_compat",
+      "area": "parser_tokenizer",
+      "updated_at": "2026-04-03",
+      "recent_downloads": 53325,
+      "downloads": 707127,
+      "tier": "avoid/reject"
+    },
+    {
+      "crate": "swc_css_modules",
+      "area": "parser_tokenizer",
+      "updated_at": "2026-04-03",
+      "recent_downloads": 26418,
+      "downloads": 672073,
+      "tier": "avoid/reject"
+    },
+    {
+      "crate": "biome_css_parser",
+      "area": "parser_tokenizer",
+      "updated_at": "2024-12-18",
+      "recent_downloads": 1851,
+      "downloads": 16991,
+      "tier": "avoid/reject"
+    },
+    {
+      "crate": "css_lexer",
+      "area": "parser_tokenizer",
+      "updated_at": "2026-04-06",
+      "recent_downloads": 3645,
+      "downloads": 83223,
+      "tier": "avoid/reject"
+    },
+    {
+      "crate": "csscolorparser",
+      "area": "style_representation",
+      "updated_at": "2026-03-09",
+      "recent_downloads": 3574282,
+      "downloads": 7577491,
+      "tier": "adopt now"
+    },
+    {
+      "crate": "html5ever",
+      "area": "selector_matching",
+      "updated_at": "2026-03-13",
+      "recent_downloads": 13127596,
+      "downloads": 51744693,
+      "tier": "evaluate/prototype"
+    },
+    {
+      "crate": "markup5ever",
+      "area": "selector_matching",
+      "updated_at": "2026-03-13",
+      "recent_downloads": 13213598,
+      "downloads": 52108173,
+      "tier": "evaluate/prototype"
+    },
+    {
+      "crate": "tendril",
+      "area": "selector_matching",
+      "updated_at": "2026-01-09",
+      "recent_downloads": 10411172,
+      "downloads": 46008675,
+      "tier": "evaluate/prototype"
+    },
+    {
+      "crate": "ego-tree",
+      "area": "selector_matching",
+      "updated_at": "2026-01-23",
+      "recent_downloads": 3834788,
+      "downloads": 15342394,
+      "tier": "evaluate/prototype"
+    },
+    {
+      "crate": "phf",
+      "area": "selector_matching",
+      "updated_at": "2025-08-23",
+      "recent_downloads": 70901709,
+      "downloads": 307013076,
+      "tier": "adopt now"
+    },
+    {
+      "crate": "lasso",
+      "area": "interning_small_string",
+      "updated_at": "2024-08-19",
+      "recent_downloads": 1162903,
+      "downloads": 7903863,
+      "tier": "adopt now"
+    },
+    {
+      "crate": "string-interner",
+      "area": "interning_small_string",
+      "updated_at": "2025-02-11",
+      "recent_downloads": 6106332,
+      "downloads": 27623008,
+      "tier": "evaluate/prototype"
+    },
+    {
+      "crate": "internment",
+      "area": "interning_small_string",
+      "updated_at": "2024-10-12",
+      "recent_downloads": 2416065,
+      "downloads": 9012302,
+      "tier": "evaluate/prototype"
+    },
+    {
+      "crate": "intaglio",
+      "area": "interning_small_string",
+      "updated_at": "2026-03-30",
+      "recent_downloads": 943870,
+      "downloads": 1239272,
+      "tier": "evaluate/prototype"
+    },
+    {
+      "crate": "smol_str",
+      "area": "interning_small_string",
+      "updated_at": "2026-03-04",
+      "recent_downloads": 15761894,
+      "downloads": 65707203,
+      "tier": "adopt now"
+    },
+    {
+      "crate": "compact_str",
+      "area": "interning_small_string",
+      "updated_at": "2025-02-25",
+      "recent_downloads": 25430167,
+      "downloads": 80473020,
+      "tier": "evaluate/prototype"
+    },
+    {
+      "crate": "arcstr",
+      "area": "interning_small_string",
+      "updated_at": "2024-05-07",
+      "recent_downloads": 3012235,
+      "downloads": 10764809,
+      "tier": "evaluate/prototype"
+    },
+    {
+      "crate": "kstring",
+      "area": "interning_small_string",
+      "updated_at": "2024-07-25",
+      "recent_downloads": 8363208,
+      "downloads": 33646125,
+      "tier": "evaluate/prototype"
+    },
+    {
+      "crate": "bumpalo",
+      "area": "perf_helpers",
+      "updated_at": "2026-02-19",
+      "recent_downloads": 73079776,
+      "downloads": 344304280,
+      "tier": "adopt now"
+    },
+    {
+      "crate": "id-arena",
+      "area": "perf_helpers",
+      "updated_at": "2026-01-14",
+      "recent_downloads": 16971458,
+      "downloads": 40231568,
+      "tier": "evaluate/prototype"
+    },
+    {
+      "crate": "slotmap",
+      "area": "perf_helpers",
+      "updated_at": "2025-12-06",
+      "recent_downloads": 15192891,
+      "downloads": 62231814,
+      "tier": "evaluate/prototype"
+    },
+    {
+      "crate": "smallvec",
+      "area": "perf_helpers",
+      "updated_at": "2025-11-16",
+      "recent_downloads": 133639083,
+      "downloads": 745407699,
+      "tier": "adopt now"
+    },
+    {
+      "crate": "memchr",
+      "area": "perf_helpers",
+      "updated_at": "2026-02-06",
+      "recent_downloads": 161062560,
+      "downloads": 860775151,
+      "tier": "adopt now"
+    },
+    {
+      "crate": "simdutf8",
+      "area": "perf_helpers",
+      "updated_at": "2024-09-22",
+      "recent_downloads": 28647624,
+      "downloads": 110643208,
+      "tier": "adopt now"
+    },
+    {
+      "crate": "rustc-hash",
+      "area": "perf_helpers",
+      "updated_at": "2026-03-28",
+      "recent_downloads": 101947005,
+      "downloads": 449888837,
+      "tier": "adopt now"
+    },
+    {
+      "crate": "ahash",
+      "area": "perf_helpers",
+      "updated_at": "2025-05-08",
+      "recent_downloads": 90603574,
+      "downloads": 521673839,
+      "tier": "evaluate/prototype"
+    },
+    {
+      "crate": "indexmap",
+      "area": "perf_helpers",
+      "updated_at": "2026-04-02",
+      "recent_downloads": 186664983,
+      "downloads": 960034885,
+      "tier": "adopt now"
+    },
+    {
+      "crate": "serde",
+      "area": "serialization_cache",
+      "updated_at": "2025-09-27",
+      "recent_downloads": 149035257,
+      "downloads": 910012819,
+      "tier": "adopt now"
+    },
+    {
+      "crate": "serde_json",
+      "area": "serialization_cache",
+      "updated_at": "2026-01-06",
+      "recent_downloads": 145247153,
+      "downloads": 815787579,
+      "tier": "adopt now"
+    },
+    {
+      "crate": "rkyv",
+      "area": "serialization_cache",
+      "updated_at": "2026-02-10",
+      "recent_downloads": 24348964,
+      "downloads": 95164428,
+      "tier": "evaluate/prototype"
+    },
+    {
+      "crate": "postcard",
+      "area": "serialization_cache",
+      "updated_at": "2025-07-24",
+      "recent_downloads": 7830925,
+      "downloads": 27036519,
+      "tier": "avoid/reject"
+    },
+    {
+      "crate": "bitcode",
+      "area": "serialization_cache",
+      "updated_at": "2025-12-18",
+      "recent_downloads": 2098017,
+      "downloads": 4861540,
+      "tier": "evaluate/prototype"
+    },
+    {
+      "crate": "zerocopy",
+      "area": "serialization_cache",
+      "updated_at": "2026-03-28",
+      "recent_downloads": 134106202,
+      "downloads": 505549961,
+      "tier": "evaluate/prototype"
+    },
+    {
+      "crate": "bytemuck",
+      "area": "serialization_cache",
+      "updated_at": "2026-01-31",
+      "recent_downloads": 45427031,
+      "downloads": 219551135,
+      "tier": "evaluate/prototype"
+    },
+    {
+      "crate": "bincode",
+      "area": "serialization_cache",
+      "updated_at": "2025-12-16",
+      "recent_downloads": 39331361,
+      "downloads": 217810083,
+      "tier": "avoid/reject"
+    },
+    {
+      "crate": "datatest-stable",
+      "area": "spec_compliance_tooling",
+      "updated_at": "2026-03-31",
+      "recent_downloads": 582059,
+      "downloads": 3002886,
+      "tier": "adopt now"
+    },
+    {
+      "crate": "insta",
+      "area": "spec_compliance_tooling",
+      "updated_at": "2026-03-30",
+      "recent_downloads": 14626011,
+      "downloads": 57274467,
+      "tier": "adopt now"
+    },
+    {
+      "crate": "proptest",
+      "area": "spec_compliance_tooling",
+      "updated_at": "2026-03-24",
+      "recent_downloads": 25479094,
+      "downloads": 109645483,
+      "tier": "adopt now"
+    },
+    {
+      "crate": "arbitrary",
+      "area": "spec_compliance_tooling",
+      "updated_at": "2025-08-14",
+      "recent_downloads": 20917025,
+      "downloads": 94793250,
+      "tier": "adopt now"
+    },
+    {
+      "crate": "libfuzzer-sys",
+      "area": "spec_compliance_tooling",
+      "updated_at": "2026-02-10",
+      "recent_downloads": 9252642,
+      "downloads": 39417165,
+      "tier": "adopt now"
+    },
+    {
+      "crate": "similar-asserts",
+      "area": "spec_compliance_tooling",
+      "updated_at": "2026-04-01",
+      "recent_downloads": 5535088,
+      "downloads": 26828956,
+      "tier": "adopt now"
+    }
+  ]
+}

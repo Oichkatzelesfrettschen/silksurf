@@ -2,7 +2,7 @@
 
 **Status**: Phase 3 (Implementation) in progress
 **Next**: Phase 4 (Performance + Integration)
-**Toolchain**: nightly-2026-01-01 (rustc 1.94.0-nightly), MSRV 1.94.0
+**Toolchain**: nightly-2026-04-05 (rustc 1.96.0-nightly), MSRV 1.94.0
 
 ---
 

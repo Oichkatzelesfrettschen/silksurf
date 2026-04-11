@@ -46,6 +46,27 @@ Guardrails:
 - `make perf-guardrails` (thresholds via `PIPELINE_US`, `SELECTORS_NS`, `CASCADE_US`)
 - Optional RSS check: `MAX_RSS_KB=26000 make perf-guardrails`
 
+### Interner Microbenchmarks (local interners)
+- `cargo bench -p silksurf-core --bench interner`
+- `cargo bench -p silksurf-js --bench interner`
+
+Representative medians from one local run:
+
+| Crate | Scenario | Median |
+|---|---|---:|
+| `silksurf-core` | insert-heavy (10k unique keys) | `944 µs` |
+| `silksurf-core` | resolve path (10k symbols) | `13.48 µs` |
+| `silksurf-core` | repeated-key hit (100k hits) | `2.016 ms` |
+| `silksurf-js` | insert-heavy (10k unique keys) | `1.445 ms` |
+| `silksurf-js` | lookup `get` path (10k existing keys) | `305.6 µs` |
+| `silksurf-js` | resolve path (10k symbols) | `9.700 µs` |
+| `silksurf-js` | repeated-key hit (100k hits) | `2.685 ms` |
+
+Notes:
+- This establishes a baseline for the post-`lasso` local interners in both crates.
+- No low-risk optimization was applied in this pass: no benchmark indicated a clear regression requiring code changes.
+- Scope boundary: this benchmark/documentation pass adds no CI schedule-trigger changes.
+
 ## Optimization Tooling
 - PGO: `./scripts/pgo_build.sh bench_pipeline`
 - BOLT: `./scripts/bolt_build.sh bench_pipeline`

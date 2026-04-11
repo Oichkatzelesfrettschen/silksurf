@@ -1,12 +1,12 @@
 # Toolchain and Build
 
 ## Toolchain Pin and MSRV
-- Toolchain: `nightly-2026-01-01` (rustc 1.94.0-nightly).
+- Toolchain: `nightly-2026-04-05` (rustc 1.96.0-nightly).
 - MSRV baseline: 1.94.0 (aligned with current dependency requirements).
 - Install:
-  - `rustup toolchain install nightly-2026-01-01`
-  - `rustup component add rustfmt clippy llvm-tools-preview --toolchain nightly-2026-01-01`
-- Use `cargo +nightly-2026-01-01` if your shell overrides the toolchain.
+  - `rustup toolchain install nightly-2026-04-05`
+  - `rustup component add rustfmt clippy llvm-tools-preview --toolchain nightly-2026-04-05`
+- Use `cargo +nightly-2026-04-05` if your shell overrides the toolchain.
 
 ## Core Commands
 - Build: `cargo build` / `cargo build --release`

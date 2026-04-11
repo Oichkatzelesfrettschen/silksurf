@@ -11,15 +11,8 @@ url = { workspace = true }
 httparse = "1.10"
 rustls = { workspace = true }
 rustc-hash = { workspace = true }
-flume = { workspace = true, optional = true }
-memmap2 = { version = "0.9", optional = true }
 tokio = { workspace = true }
 tokio-rustls = { workspace = true }
 h2 = { workspace = true }
 bytes = { workspace = true }
 http = { workspace = true }
-
-[features]
-default = []
-async-fetch = ["flume"]
-cache = ["memmap2"]

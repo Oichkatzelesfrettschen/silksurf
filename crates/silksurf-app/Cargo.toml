@@ -7,8 +7,6 @@ publish = false
 
 [dependencies]
 silksurf-engine = { path = "../silksurf-engine", features = ["net"] }
-silksurf-net = { path = "../silksurf-net" }
-silksurf-tls = { path = "../silksurf-tls" }
 silksurf-dom = { path = "../silksurf-dom" }
 silksurf-css = { path = "../silksurf-css" }
 silksurf-layout = { path = "../silksurf-layout" }

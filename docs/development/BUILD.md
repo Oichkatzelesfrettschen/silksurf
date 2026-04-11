@@ -59,9 +59,9 @@ sudo dnf install libxcb-devel xcb-util-devel netsurf-buildsystem \
 # Install rustup
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
-# Install nightly (required for some dependencies)
-rustup install nightly
-rustup default nightly
+# Install pinned nightly (required for some dependencies)
+rustup toolchain install nightly-2026-04-05
+rustup default nightly-2026-04-05
 ```
 
 ### Optional Dependencies
@@ -158,6 +158,14 @@ cmake --build build
 ```bash
 ctest --test-dir build
 ```
+
+### Run Local Gates (Primary)
+```bash
+make local-gate-fast
+make local-gate-full
+```
+
+Routine gating is local-first/local-only.
 
 **Expected output**:
 ```
@@ -420,25 +428,14 @@ time ./build/silksurf --benchmark startup
 
 ## CI/CD Integration
 
-### GitHub Actions (planned)
-```yaml
-# .github/workflows/ci.yml
-name: CI
+### GitHub Actions
+CI is local-first/local-only for routine gating.
 
-on: [push, pull_request]
+Run gates locally:
+- `make local-gate-fast`
+- `make local-gate-full`
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - name: Install dependencies
-        run: sudo apt install libxcb1-dev libhubbub-dev libcss-dev libdom-dev
-      - name: Build
-        run: cmake -B build && cmake --build build
-      - name: Test
-        run: ctest --test-dir build --output-on-failure
-```
+Cloud workflow is manual-only (`workflow_dispatch`) and intentionally not used for routine gating.
 
 ---
 

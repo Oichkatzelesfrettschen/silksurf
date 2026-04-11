@@ -1,0 +1,51 @@
+crate,area,updated_at,recent_downloads,downloads,tier
+cssparser,parser_tokenizer,2026-03-17,10649044,41208748,evaluate/prototype
+cssparser-macros,parser_tokenizer,2026-03-17,8791426,36400524,evaluate/prototype
+cssparser-color,style_representation,2026-03-17,534188,2116362,evaluate/prototype
+selectors,selector_matching,2026-03-18,9020499,34971023,evaluate/prototype
+parcel_selectors,selector_matching,2025-05-11,498655,2197743,avoid/reject
+lightningcss,parser_tokenizer,2026-03-09,504262,2280600,avoid/reject
+swc_css_parser,parser_tokenizer,2026-04-03,74794,1246276,evaluate/prototype
+swc_css_ast,parser_tokenizer,2026-04-03,78430,1113110,evaluate/prototype
+swc_css_visit,parser_tokenizer,2026-04-03,76907,1072451,evaluate/prototype
+swc_css_compat,parser_tokenizer,2026-04-03,53325,707127,avoid/reject
+swc_css_modules,parser_tokenizer,2026-04-03,26418,672073,avoid/reject
+biome_css_parser,parser_tokenizer,2024-12-18,1851,16991,avoid/reject
+css_lexer,parser_tokenizer,2026-04-06,3645,83223,avoid/reject
+csscolorparser,style_representation,2026-03-09,3574282,7577491,adopt now
+html5ever,selector_matching,2026-03-13,13127596,51744693,evaluate/prototype
+markup5ever,selector_matching,2026-03-13,13213598,52108173,evaluate/prototype
+tendril,selector_matching,2026-01-09,10411172,46008675,evaluate/prototype
+ego-tree,selector_matching,2026-01-23,3834788,15342394,evaluate/prototype
+phf,selector_matching,2025-08-23,70901709,307013076,adopt now
+lasso,interning_small_string,2024-08-19,1162903,7903863,adopt now
+string-interner,interning_small_string,2025-02-11,6106332,27623008,evaluate/prototype
+internment,interning_small_string,2024-10-12,2416065,9012302,evaluate/prototype
+intaglio,interning_small_string,2026-03-30,943870,1239272,evaluate/prototype
+smol_str,interning_small_string,2026-03-04,15761894,65707203,adopt now
+compact_str,interning_small_string,2025-02-25,25430167,80473020,evaluate/prototype
+arcstr,interning_small_string,2024-05-07,3012235,10764809,evaluate/prototype
+kstring,interning_small_string,2024-07-25,8363208,33646125,evaluate/prototype
+bumpalo,perf_helpers,2026-02-19,73079776,344304280,adopt now
+id-arena,perf_helpers,2026-01-14,16971458,40231568,evaluate/prototype
+slotmap,perf_helpers,2025-12-06,15192891,62231814,evaluate/prototype
+smallvec,perf_helpers,2025-11-16,133639083,745407699,adopt now
+memchr,perf_helpers,2026-02-06,161062560,860775151,adopt now
+simdutf8,perf_helpers,2024-09-22,28647624,110643208,adopt now
+rustc-hash,perf_helpers,2026-03-28,101947005,449888837,adopt now
+ahash,perf_helpers,2025-05-08,90603574,521673839,evaluate/prototype
+indexmap,perf_helpers,2026-04-02,186664983,960034885,adopt now
+serde,serialization_cache,2025-09-27,149035257,910012819,adopt now
+serde_json,serialization_cache,2026-01-06,145247153,815787579,adopt now
+rkyv,serialization_cache,2026-02-10,24348964,95164428,evaluate/prototype
+postcard,serialization_cache,2025-07-24,7830925,27036519,avoid/reject
+bitcode,serialization_cache,2025-12-18,2098017,4861540,evaluate/prototype
+zerocopy,serialization_cache,2026-03-28,134106202,505549961,evaluate/prototype
+bytemuck,serialization_cache,2026-01-31,45427031,219551135,evaluate/prototype
+bincode,serialization_cache,2025-12-16,39331361,217810083,avoid/reject
+datatest-stable,spec_compliance_tooling,2026-03-31,582059,3002886,adopt now
+insta,spec_compliance_tooling,2026-03-30,14626011,57274467,adopt now
+proptest,spec_compliance_tooling,2026-03-24,25479094,109645483,adopt now
+arbitrary,spec_compliance_tooling,2025-08-14,20917025,94793250,adopt now
+libfuzzer-sys,spec_compliance_tooling,2026-02-10,9252642,39417165,adopt now
+similar-asserts,spec_compliance_tooling,2026-04-01,5535088,26828956,adopt now
