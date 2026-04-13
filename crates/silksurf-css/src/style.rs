@@ -612,8 +612,14 @@ fn node_tag_id_class(
                         class_keys.push(SelectorIdent::new_with_atom(s.clone(), atom));
                     }
                 } else if !attr.value_atoms.is_empty() {
+                    // Fallback: atoms without pre-resolved class_strings.
+                    // Uses resolve_fast (lock-free array index) instead of
+                    // resolve (RwLock acquire) when resolve table is materialized.
                     for &atom in &attr.value_atoms {
-                        class_keys.push(SelectorIdent::new_with_atom(dom.resolve(atom), atom));
+                        class_keys.push(SelectorIdent::new_with_atom(
+                            dom.resolve_fast(atom).clone(),
+                            atom,
+                        ));
                     }
                 } else {
                     for part in attr.value.as_str().split_whitespace() {

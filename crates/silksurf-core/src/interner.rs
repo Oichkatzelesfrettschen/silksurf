@@ -2,8 +2,24 @@ use std::collections::HashMap;
 
 use crate::SmallString;
 
+/*
+ * Atom -- opaque handle into the SilkInterner string table.
+ *
+ * Internally a u32 index into SilkInterner::values. Sequential assignment
+ * guarantees atoms from the same interner form a dense range [0..N).
+ * raw() exposes the index for direct array access in the resolve table.
+ */
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Atom(u32);
+
+impl Atom {
+    /// Raw index for direct array access into a materialized resolve table.
+    /// SAFETY: only valid against the interner that created this atom.
+    #[inline]
+    pub fn raw(self) -> u32 {
+        self.0
+    }
+}
 
 pub struct SilkInterner {
     ids: HashMap<SmallString, Atom>,
@@ -43,6 +59,13 @@ impl SilkInterner {
 
     pub fn is_empty(&self) -> bool {
         self.values.is_empty()
+    }
+
+    /// Direct slice access to all interned values, indexed by Atom::raw().
+    /// Used by Dom::materialize_resolve_table() to bulk-copy new atoms
+    /// into the lock-free resolve table without per-atom RwLock acquire.
+    pub fn values_slice(&self) -> &[SmallString] {
+        &self.values
     }
 }
 

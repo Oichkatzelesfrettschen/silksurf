@@ -54,7 +54,11 @@ impl TreeBuilder {
         &mut self.dom
     }
 
-    pub fn into_dom(self) -> Dom {
+    pub fn into_dom(mut self) -> Dom {
+        // Materialize the resolve table after parse completes.
+        // All atoms interned during tree building become available
+        // via dom.resolve_fast() without RwLock for the cascade phase.
+        self.dom.materialize_resolve_table();
         self.dom
     }
 

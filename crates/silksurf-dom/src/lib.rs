@@ -304,10 +304,35 @@ pub struct Node {
     children: SmallVec<[NodeId; 8]>,
 }
 
+/*
+ * Dom -- arena-allocated DOM tree with monotonic lock-free resolve table.
+ *
+ * WHY resolve_table: dom.resolve(atom) acquires interner RwLock per call.
+ * In the cascade hot path this costs ~6ns/call * 29 class atoms = ~164ns.
+ * The resolve table materializes interner.values into a Vec<SmallString>
+ * on the Dom itself, enabling resolve_fast(atom) = &table[atom.raw()] --
+ * a plain array index with zero synchronization.
+ *
+ * LIFECYCLE: The table is extended (never rebuilt) at two phase boundaries:
+ *   1. After TreeBuilder::into_dom() -- initial materialization of all parsed atoms
+ *   2. After end_mutation_batch() -- extends with any newly interned atoms
+ *
+ * INVARIANT: resolve_table.len() >= interner.values.len() after materialization.
+ * Atoms created during a mutation batch may temporarily exceed the table length;
+ * they are appended when the batch closes. Between materialization points,
+ * resolve_fast() is valid for all atoms created before the last materialization.
+ *
+ * GROWTH: Monotonic append-only. Old atoms never move. New atoms extend the end.
+ * No rebuild, no branch, no two-tier lookup. SmallString is 24 bytes (SmolStr)
+ * so the table is dense and prefetcher-friendly.
+ */
 #[derive(Default)]
 pub struct Dom {
     nodes: Vec<Node>,
     interner: RwLock<SilkInterner>,
+    /// Lock-free resolve table: resolve_table[atom.raw()] = SmallString.
+    /// Materialized from interner at phase boundaries, monotonically growing.
+    resolve_table: Vec<SmallString>,
     dirty_nodes: Vec<NodeId>,
     dirty_batch: Vec<NodeId>,
     batch_depth: usize,
@@ -326,10 +351,46 @@ impl Dom {
         Self {
             nodes: Vec::new(),
             interner: RwLock::new(SilkInterner::new()),
+            resolve_table: Vec::new(),
             dirty_nodes: Vec::new(),
             dirty_batch: Vec::new(),
             batch_depth: 0,
         }
+    }
+
+    /*
+     * materialize_resolve_table -- extend the lock-free resolve table
+     * with any atoms interned since the last materialization.
+     *
+     * WHY: Called after parse (into_dom) and after each mutation batch.
+     * Copies interner.values[table.len()..] into resolve_table, making
+     * all atoms resolvable via resolve_fast() without RwLock.
+     *
+     * Cost: O(K) where K = new atoms since last call. Zero if no new atoms.
+     * After steady state (no new interning), this is a no-op.
+     */
+    pub fn materialize_resolve_table(&mut self) {
+        let interner = self.interner.read().unwrap();
+        let values = interner.values_slice();
+        if values.len() > self.resolve_table.len() {
+            self.resolve_table
+                .extend_from_slice(&values[self.resolve_table.len()..]);
+        }
+    }
+
+    /*
+     * resolve_fast -- lock-free atom resolution via materialized table.
+     *
+     * WHY: dom.resolve(atom) acquires RwLock. This is a plain array index.
+     * Valid for all atoms created before the last materialize_resolve_table().
+     *
+     * PANICS: if atom.raw() >= resolve_table.len() (atom created after
+     * last materialization). In practice this cannot happen if
+     * materialize_resolve_table() is called at the documented boundaries.
+     */
+    #[inline]
+    pub fn resolve_fast(&self, atom: Atom) -> &SmallString {
+        &self.resolve_table[atom.raw() as usize]
     }
 
     pub fn create_document(&mut self) -> NodeId {
@@ -552,6 +613,7 @@ impl Dom {
         self.batch_depth -= 1;
         if self.batch_depth == 0 {
             self.flush_dirty_batch();
+            self.materialize_resolve_table();
         }
     }
 
