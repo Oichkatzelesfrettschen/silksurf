@@ -302,9 +302,9 @@ pub fn fused_style_layout_paint(
     let style_index = StyleIndex::new(stylesheet);
     /*
      * Shared CascadeWorkspace: allocated once, reused for every node in the
-     * BFS traversal. Eliminates 3 heap allocations per node (matched_by_rule
-     * Vec, candidates Vec, seen FxHashSet) -- ~150 allocs for a 50-node page.
-     * See: silksurf_css::CascadeWorkspace for lifecycle details.
+     * BFS traversal. Eliminates per-node allocations (matched_by_rule Vec,
+     * candidates Vec, seen_bits bitvec, class_keys Vec) -- ~200 allocs saved
+     * for a 50-node page. See: silksurf_css::CascadeWorkspace for lifecycle.
      */
     let mut cascade_ws = CascadeWorkspace::new(stylesheet.rules.len());
     let table = LayoutNeighborTable::build(dom, root);

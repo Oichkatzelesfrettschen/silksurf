@@ -21,12 +21,22 @@ impl NodeId {
     }
 }
 
+/// A DOM element attribute.
+///
+/// `value_atoms` and `class_strings` are co-indexed: `class_strings[i]` is the
+/// pre-resolved string for the class token interned as `value_atoms[i]`.
+/// Populated at `set_attribute` time so the cascade hot path can read class
+/// names without acquiring the `interner` RwLock.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Attribute {
     pub name: AttributeName,
     pub value: SmallString,
     pub value_atom: Option<Atom>,
     pub value_atoms: SmallVec<[Atom; 4]>,
+    /// Pre-resolved strings for each atom in `value_atoms` (class tokens only).
+    /// Co-indexed: `class_strings[i]` corresponds to `value_atoms[i]`.
+    /// Using these avoids `dom.resolve(atom)` + RwLock in the cascade hot path.
+    pub class_strings: SmallVec<[SmallString; 4]>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -455,27 +465,33 @@ impl Dom {
         let value = value.into();
         let attr_name = AttributeName::from_str(&name);
         let value: SmallString = value.into();
-        let (value_atom, value_atoms) = match attr_name {
+        let (value_atom, value_atoms, class_strings) = match attr_name {
             AttributeName::Id => {
                 let atom = if value.is_empty() || !should_intern_identifier(value.as_str()) {
                     None
                 } else {
                     Some(self.interner.write().unwrap().intern(value.as_str()))
                 };
-                (atom, SmallVec::new())
+                (atom, SmallVec::new(), SmallVec::new())
             }
             AttributeName::Class => {
-                let atoms = if value.is_empty() {
-                    SmallVec::new()
+                // Collect atoms and pre-resolved strings in one pass so the
+                // cascade hot path can read class names without the RwLock.
+                let (atoms, strings) = if value.is_empty() {
+                    (SmallVec::new(), SmallVec::new())
                 } else {
                     let mut interner = self.interner.write().unwrap();
                     value
                         .split_whitespace()
                         .filter(|part| should_intern_identifier(part))
-                        .map(|part| interner.intern(part))
-                        .collect()
+                        .map(|part| {
+                            let atom = interner.intern(part);
+                            let s: SmallString = part.into();
+                            (atom, s)
+                        })
+                        .unzip()
                 };
-                (None, atoms)
+                (None, atoms, strings)
             }
             _ => {
                 let atom = if value.is_empty() || !should_intern_identifier(value.as_str()) {
@@ -483,7 +499,7 @@ impl Dom {
                 } else {
                     Some(self.interner.write().unwrap().intern(value.as_str()))
                 };
-                (atom, SmallVec::new())
+                (atom, SmallVec::new(), SmallVec::new())
             }
         };
         let index = self.node_index(id)?;
@@ -493,12 +509,14 @@ impl Dom {
                     existing.value = value;
                     existing.value_atom = value_atom;
                     existing.value_atoms = value_atoms;
+                    existing.class_strings = class_strings;
                 } else {
                     attributes.push(Attribute {
                         name: attr_name,
                         value,
                         value_atom,
                         value_atoms,
+                        class_strings,
                     });
                 }
                 self.mark_dirty(id);

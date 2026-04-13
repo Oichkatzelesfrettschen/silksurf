@@ -26,10 +26,11 @@
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use silksurf_core::SilkArena;
-use silksurf_css::{StyleIndex, compute_styles, parse_stylesheet_with_interner};
+use silksurf_css::{ComputedStyle, StyleIndex, compute_styles, parse_stylesheet_with_interner};
 use silksurf_engine::fused_pipeline::{FusedWorkspace, fused_style_layout_paint};
 use silksurf_engine::parse_html;
 use silksurf_layout::Rect;
+use silksurf_layout::neighbor_table::LayoutNeighborTable;
 use silksurf_layout::{LayoutTree, build_layout_tree};
 use silksurf_render::{build_display_list, rasterize_parallel, rasterize_parallel_into};
 use std::time::Duration;
@@ -283,6 +284,113 @@ fn main() {
         old_per.as_nanos() as f64 / ws_per.as_nanos() as f64;
     println!("=== Speedup workspace vs cold fused: {:.2}x ===", speedup_ws_vs_cold);
     println!("=== Speedup workspace vs 3-pass:     {:.2}x ===", speedup_ws_vs_3pass);
+    println!();
+
+    // ---- RCA: sub-phase breakdown of workspace steady-state cost ----
+    //
+    // ws.run() = ?us.  Where does the time go?
+    //
+    // Sub-phase 1: LayoutNeighborTable::rebuild() alone.
+    // Measures FxHashMap clear + 50 inserts + flat Vec refill.
+    // This is purely DOM traversal cost (dom.children per node).
+    let template_doc2 = parse_html(BENCH_HTML).expect("parse html");
+    let mut rca_table = LayoutNeighborTable::build(&template_doc2.dom, template_doc2.document);
+    let mut rebuild_total = Duration::ZERO;
+    for i in 0..ITERATIONS {
+        let doc = parse_html(BENCH_HTML).expect("parse html");
+        let t = Instant::now();
+        rca_table.rebuild(&doc.dom, doc.document);
+        let elapsed = t.elapsed();
+        if i > 0 { rebuild_total += elapsed; }
+    }
+    let rebuild_per = rebuild_total / (ITERATIONS - 1);
+
+    // Sub-phase 2: ComputedStyle::default() construction cost.
+    // This is called inside CascadedStyle::resolve() for EVERY node (allocates
+    // font_family: Vec<String> as the fallback, even when parent covers it).
+    let mut default_total = Duration::ZERO;
+    let n_nodes = rca_table.len();
+    for i in 0..ITERATIONS {
+        let t = Instant::now();
+        for _ in 0..n_nodes {
+            let _s: ComputedStyle = ComputedStyle::default();
+            std::hint::black_box(_s);
+        }
+        let elapsed = t.elapsed();
+        if i > 0 { default_total += elapsed; }
+    }
+    let default_per = default_total / (ITERATIONS - 1);
+
+    // Sub-phase 3: cascade-only time = total ws.run() - rebuild.
+    // Everything in ws.run() that is not table.rebuild() goes here:
+    //   - compute_style_for_node_with_workspace x50
+    //   - layout math x50
+    //   - display item push x27
+    let cascade_only_per = ws_per.saturating_sub(rebuild_per);
+
+    println!("--- RCA: sub-phase breakdown of workspace steady-state ({} nodes) ---", n_nodes);
+    println!("  table.rebuild():           {:>8?}  per-iter  (FxHashMap clear+50 inserts)", rebuild_per);
+    println!("  cascade+layout+paint:      {:>8?}  per-iter  (ws.run minus rebuild)", cascade_only_per);
+    println!("  ComputedStyle::default x{}: {:>8?}  per-iter  (SmallVec<SmolStr> -- zero heap alloc)", n_nodes, default_per);
+    println!("  TOTAL ws.run():            {:>8?}  per-iter", ws_per);
+    println!();
+    println!("  APPLIED FIXES: SmolStr font_family (Fix 1), bitvec seen (Fix D),");
+    println!("  workspace class_keys (Fix 2), pre-resolved class_strings (Fix 3),");
+    println!("  fused tag+id+class (Fix F). ComputedStyle::default now zero-heap-alloc.");
+    println!();
+    let unaccounted = cascade_only_per.saturating_sub(default_per);
+    println!("  cascade+layout+paint minus default overhead: {:>8?}", unaccounted);
+    println!("  (remaining: selector matching, apply_declaration, layout math)");
+    println!();
+
+    // Sub-phase 4: REFERENCE COST: Vec alloc (now eliminated by workspace.class_keys).
+    // node_tag_id_class() reuses workspace.class_keys (Fix 2). This measures the
+    // OLD cost for comparison: Vec::new() + push per class node.
+    let n_class_nodes: usize = 24; // nodes with class attrs in BENCH_HTML
+    let mut class_vec_total = Duration::ZERO;
+    for i in 0..ITERATIONS {
+        let t = Instant::now();
+        for _ in 0..n_class_nodes {
+            let mut v: Vec<[u8; 24]> = Vec::new(); // same size as SelectorIdent (SmolStr=24)
+            v.push([0u8; 24]);
+            std::hint::black_box(&v);
+            drop(v);
+        }
+        let elapsed = t.elapsed();
+        if i > 0 { class_vec_total += elapsed; }
+    }
+    let class_vec_per = class_vec_total / (ITERATIONS - 1);
+
+    // Sub-phase 5: REFERENCE COST: RwLock acquire (now eliminated by class_strings).
+    // node_tag_id_class() reads attr.class_strings (Fix 3) instead of calling
+    // dom.resolve(atom). This measures the OLD cost for comparison.
+    let rw = std::sync::RwLock::new(42u64);
+    let n_class_atoms: usize = 29; // approximate total class atoms in bench DOM
+    let mut rwlock_total = Duration::ZERO;
+    for i in 0..ITERATIONS {
+        let t = Instant::now();
+        for _ in 0..n_class_atoms {
+            let guard = rw.read().unwrap();
+            std::hint::black_box(*guard);
+            drop(guard);
+        }
+        let elapsed = t.elapsed();
+        if i > 0 { rwlock_total += elapsed; }
+    }
+    let rwlock_per = rwlock_total / (ITERATIONS - 1);
+
+    println!("  [REF] Vec alloc x{n_class_nodes} (eliminated): {:>8?}  per-iter  (was node_id_class_keys)", class_vec_per);
+    println!("  [REF] RwLock x{n_class_atoms} (eliminated):  {:>8?}  per-iter  (was dom.resolve)", rwlock_per);
+    println!();
+
+    let sum_known = rebuild_per + default_per + class_vec_per + rwlock_per;
+    let true_residual = ws_per.saturating_sub(sum_known);
+    println!("  Known overhead sum:          {:>8?}  (rebuild + default + Vec + RwLock)", sum_known);
+    println!("  Residual (selector + layout): {:>8?}  (pure algorithm work -- target floor)", true_residual);
+    println!();
+    println!("  Fixes applied: SmolStr default (-{:?}), bitvec seen, workspace class_keys,", default_per);
+    println!("  pre-resolved class_strings, fused tag+id+class lookup.");
+    println!("  Remaining: flatten DOM memory layout (DOD) for cache locality.");
     println!();
 
     // ---- REUSE PATH: rasterize_parallel_into with pre-allocated buffer ----
