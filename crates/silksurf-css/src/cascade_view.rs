@@ -52,10 +52,17 @@ pub struct CascadeEntry {
     pub id_index: u32,
     pub class_start: u32,
     pub class_count: u16,
+    /// Parent node index (NodeId.raw() as u16). NO_PARENT = no parent.
+    /// Enables combinator tree walking without dom.parent() (168-byte fetch).
+    /// u16 supports DOMs up to 65534 nodes; larger DOMs fall back to dom.parent().
+    pub parent_id: u16,
 }
 
 /// Sentinel value for CascadeEntry::id_index when no id attribute exists.
 pub const NO_ID: u32 = u32::MAX;
+
+/// Sentinel value for CascadeEntry::parent_id when no parent exists.
+pub const NO_PARENT: u16 = u16::MAX;
 
 /*
  * CascadeView -- materialized SoA view of DOM cascade data.
@@ -107,12 +114,29 @@ impl CascadeView {
 
         for idx in 0..node_count {
             let id = NodeId::from_raw(idx);
+            // Compute parent_id for combinator tree walking.
+            // u16 supports DOMs up to 65534 nodes; larger -> NO_PARENT (fallback).
+            let parent_id = dom
+                .parent(id)
+                .ok()
+                .flatten()
+                .map(|p| {
+                    let raw = p.raw();
+                    if raw <= u16::MAX as usize - 1 {
+                        raw as u16
+                    } else {
+                        NO_PARENT
+                    }
+                })
+                .unwrap_or(NO_PARENT);
+
             let Ok(node) = dom.node(id) else {
                 self.entries.push(CascadeEntry {
-                    tag: TagName::Div, // placeholder, never matched
+                    tag: TagName::Div,
                     id_index: NO_ID,
                     class_start: 0,
                     class_count: 0,
+                    parent_id,
                 });
                 continue;
             };
@@ -126,6 +150,7 @@ impl CascadeView {
                     id_index: NO_ID,
                     class_start: 0,
                     class_count: 0,
+                    parent_id,
                 });
                 continue;
             };
@@ -184,6 +209,7 @@ impl CascadeView {
                 id_index,
                 class_start,
                 class_count: class_count.min(u16::MAX as u32) as u16,
+                parent_id,
             });
         }
     }
@@ -211,6 +237,17 @@ impl CascadeView {
     pub fn id_ident(&self, entry: &CascadeEntry) -> Option<&SelectorIdent> {
         if entry.id_index != NO_ID {
             Some(&self.idents[entry.id_index as usize])
+        } else {
+            None
+        }
+    }
+
+    /// Parent NodeId for a given entry, if present and within u16 range.
+    /// Returns None for root nodes or nodes with parent_id > u16::MAX-1.
+    #[inline]
+    pub fn parent_of(&self, entry: &CascadeEntry) -> Option<NodeId> {
+        if entry.parent_id != NO_PARENT {
+            Some(NodeId::from_raw(entry.parent_id as usize))
         } else {
             None
         }

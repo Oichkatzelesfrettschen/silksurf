@@ -340,8 +340,19 @@ struct CascadedStyle {
 }
 
 impl CascadedStyle {
+    /*
+     * resolve -- produce final ComputedStyle from cascaded values + parent inheritance.
+     *
+     * WHY static FALLBACK: Previously constructed ComputedStyle::default() per
+     * call (61 times per render). Each construction built a SmallVec + SmolStr.
+     * With LazyLock, the default is constructed once and reused via reference.
+     * Copy fields use the static directly; non-Copy (font_family) clones only
+     * when needed (rare: only when no cascade value and no parent inheritance).
+     */
     fn resolve(self, parent: Option<&ComputedStyle>) -> ComputedStyle {
-        let fallback = ComputedStyle::default();
+        static FALLBACK: std::sync::LazyLock<ComputedStyle> =
+            std::sync::LazyLock::new(ComputedStyle::default);
+        let fallback = &*FALLBACK;
         let resolved_font_size = self
             .font_size
             .map(|entry| entry.value)
@@ -371,7 +382,7 @@ impl CascadedStyle {
                 .font_family
                 .map(|entry| entry.value)
                 .or_else(|| parent.map(|style| style.font_family.clone()))
-                .unwrap_or(fallback.font_family),
+                .unwrap_or_else(|| fallback.font_family.clone()),
             margin: self
                 .margin
                 .map(|entry| entry.value)

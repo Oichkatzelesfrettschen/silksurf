@@ -74,9 +74,9 @@ use silksurf_render::DisplayItem;
  * See: CascadeWorkspace for cascade scratch reuse semantics
  */
 pub struct FusedWorkspace {
-    /// BFS traversal table -- rebuilt in-place each run() call.
+    /// BFS traversal table -- rebuilt only when DOM generation changes.
     table: LayoutNeighborTable,
-    /// SoA cascade view -- materialized per run(), 36 bytes/node (1 cache line).
+    /// SoA cascade view -- materialized only when DOM generation changes.
     cascade_view: CascadeView,
     /// Cascade scratch -- grows to peak rule count, never shrinks.
     cascade_ws: CascadeWorkspace,
@@ -88,6 +88,8 @@ pub struct FusedWorkspace {
     pub node_rects: Vec<Rect>,
     /// Paint commands (valid after run(); order is BFS paint order).
     pub display_items: Vec<DisplayItem>,
+    /// Cached DOM generation to skip rebuild when DOM unchanged.
+    dom_generation: u64,
 }
 
 impl Default for FusedWorkspace {
@@ -113,6 +115,7 @@ impl FusedWorkspace {
             styles: Vec::new(),
             node_rects: Vec::new(),
             display_items: Vec::new(),
+            dom_generation: u64::MAX, // force first rebuild
         }
     }
 
@@ -142,13 +145,23 @@ impl FusedWorkspace {
         root: NodeId,
         viewport: Rect,
     ) {
-        // Rebuild BFS table in-place (FxHashMap + Vecs cleared, capacity retained).
-        self.table.rebuild(dom, root);
+        /*
+         * Conditional rebuild: skip BFS table and CascadeView materialization
+         * when the DOM has not changed since the last run(). This hoists ~2us
+         * of rebuild cost out of the steady-state re-render path (e.g., hover
+         * state changes, media query re-evaluation on the same DOM).
+         *
+         * The DOM's mutation_generation increments on end_mutation_batch() and
+         * materialize_resolve_table(). If it matches our cached value, the
+         * topology and attribute data are identical -- skip rebuild.
+         */
+        let dom_gen = dom.generation();
+        if dom_gen != self.dom_generation {
+            self.table.rebuild(dom, root);
+            self.cascade_view.rebuild(dom);
+            self.dom_generation = dom_gen;
+        }
         let n = self.table.len();
-
-        // Materialize SoA cascade view: 36 bytes/node (1 cache line) vs
-        // 168 bytes/node from dom.node(). Pre-constructs SelectorIdents.
-        self.cascade_view.rebuild(dom);
 
         // Resize output/temp Vecs to n.  clear() retains heap allocation when
         // n <= previous capacity (the common case for stable pages).

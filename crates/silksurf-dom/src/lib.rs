@@ -336,6 +336,12 @@ pub struct Dom {
     dirty_nodes: Vec<NodeId>,
     dirty_batch: Vec<NodeId>,
     batch_depth: usize,
+    /// Unique instance ID + monotonic mutation counter, combined into a single u64.
+    /// High 32 bits: per-instance unique ID (from global atomic counter).
+    /// Low 32 bits: mutation counter (incremented on end_mutation_batch, etc.).
+    /// Different Dom instances always have different high bits, ensuring
+    /// FusedWorkspace detects DOM replacement even when mutation counts match.
+    generation: u64,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -348,6 +354,9 @@ pub enum DomError {
 
 impl Dom {
     pub fn new() -> Self {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static INSTANCE_COUNTER: AtomicU32 = AtomicU32::new(0);
+        let instance_id = INSTANCE_COUNTER.fetch_add(1, Ordering::Relaxed);
         Self {
             nodes: Vec::new(),
             interner: RwLock::new(SilkInterner::new()),
@@ -355,7 +364,16 @@ impl Dom {
             dirty_nodes: Vec::new(),
             dirty_batch: Vec::new(),
             batch_depth: 0,
+            generation: (instance_id as u64) << 32,
         }
+    }
+
+    /// Current generation (instance ID + mutation counter). Different Dom
+    /// instances always have different values. Same instance increments on
+    /// each mutation batch, ensuring stale-data detection.
+    #[inline]
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     /*
@@ -376,6 +394,7 @@ impl Dom {
             self.resolve_table
                 .extend_from_slice(&values[self.resolve_table.len()..]);
         }
+        self.generation = self.generation.wrapping_add(1);
     }
 
     /*
@@ -614,6 +633,7 @@ impl Dom {
         if self.batch_depth == 0 {
             self.flush_dirty_batch();
             self.materialize_resolve_table();
+            self.generation = self.generation.wrapping_add(1);
         }
     }
 

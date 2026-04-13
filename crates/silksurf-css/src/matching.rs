@@ -138,21 +138,29 @@ fn matches_steps_rev(
         Some(combinator) => combinator,
         None => return false,
     };
+    // Helper: get parent via CascadeView (flat array) or dom.parent() (168-byte Node).
+    let get_parent = |n: NodeId| -> Option<NodeId> {
+        if let Some(v) = view {
+            let idx = n.raw();
+            if idx < v.entries.len() {
+                return v.parent_of(&v.entries[idx]);
+            }
+        }
+        dom.parent(n).ok().flatten()
+    };
+
     match combinator {
         Combinator::Descendant => {
-            let mut current = dom.parent(node).ok().flatten();
+            let mut current = get_parent(node);
             while let Some(ancestor) = current {
                 if matches_steps_rev(dom, ancestor, steps, from - 1, view) {
                     return true;
                 }
-                current = dom.parent(ancestor).ok().flatten();
+                current = get_parent(ancestor);
             }
             false
         }
-        Combinator::Child => dom
-            .parent(node)
-            .ok()
-            .flatten()
+        Combinator::Child => get_parent(node)
             .is_some_and(|parent| matches_steps_rev(dom, parent, steps, from - 1, view)),
         Combinator::NextSibling => previous_element_sibling(dom, node)
             .is_some_and(|sibling| matches_steps_rev(dom, sibling, steps, from - 1, view)),
