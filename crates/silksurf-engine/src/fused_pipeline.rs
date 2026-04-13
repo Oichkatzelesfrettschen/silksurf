@@ -33,6 +33,7 @@
 
 use silksurf_css::{
     CascadeWorkspace, ComputedStyle, Display, StyleIndex, Stylesheet,
+    cascade_view::CascadeView,
     compute_style_for_node_with_workspace,
 };
 use silksurf_dom::{Dom, NodeId, NodeKind};
@@ -75,6 +76,8 @@ use silksurf_render::DisplayItem;
 pub struct FusedWorkspace {
     /// BFS traversal table -- rebuilt in-place each run() call.
     table: LayoutNeighborTable,
+    /// SoA cascade view -- materialized per run(), 36 bytes/node (1 cache line).
+    cascade_view: CascadeView,
     /// Cascade scratch -- grows to peak rule count, never shrinks.
     cascade_ws: CascadeWorkspace,
     /// Block-flow cursor per node (internal layout temp, not exposed).
@@ -104,6 +107,7 @@ impl FusedWorkspace {
     pub fn new() -> Self {
         Self {
             table: LayoutNeighborTable::default(),
+            cascade_view: CascadeView::new(),
             cascade_ws: CascadeWorkspace::new(0),
             block_cursors: Vec::new(),
             styles: Vec::new(),
@@ -142,6 +146,10 @@ impl FusedWorkspace {
         self.table.rebuild(dom, root);
         let n = self.table.len();
 
+        // Materialize SoA cascade view: 36 bytes/node (1 cache line) vs
+        // 168 bytes/node from dom.node(). Pre-constructs SelectorIdents.
+        self.cascade_view.rebuild(dom);
+
         // Resize output/temp Vecs to n.  clear() retains heap allocation when
         // n <= previous capacity (the common case for stable pages).
         self.styles.clear();
@@ -169,6 +177,7 @@ impl FusedWorkspace {
                 style_index,
                 parent_style,
                 &mut self.cascade_ws,
+                Some(&self.cascade_view),
             );
 
             if style.display == Display::None {
@@ -346,6 +355,7 @@ pub fn fused_style_layout_paint(
             &style_index,
             parent_style,
             &mut cascade_ws,
+            None, // no CascadeView in cold path
         );
 
         // Skip display:none; still store style for child inheritance

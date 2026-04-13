@@ -733,6 +733,11 @@ impl Dom {
             .collect())
     }
 
+    /// Total number of nodes in the DOM (used for parallel array sizing).
+    pub fn node_count(&self) -> usize {
+        self.nodes.len()
+    }
+
     fn push_node(&mut self, kind: NodeKind) -> NodeId {
         let id = NodeId(self.nodes.len());
         self.nodes.push(Node {

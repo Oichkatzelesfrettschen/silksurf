@@ -9,6 +9,7 @@
 )]
 
 pub mod calc;
+pub mod cascade_view;
 pub mod custom_properties;
 mod matching;
 mod parser;

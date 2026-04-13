@@ -872,7 +872,7 @@ pub fn compute_style_for_node(
 ) -> ComputedStyle {
     let index = StyleIndex::new(stylesheet);
     let mut workspace = CascadeWorkspace::new(stylesheet.rules.len());
-    compute_style_for_node_with_workspace(dom, node, stylesheet, &index, parent, &mut workspace)
+    compute_style_for_node_with_workspace(dom, node, stylesheet, &index, parent, &mut workspace, None)
 }
 
 pub fn compute_style_for_node_with_index(
@@ -883,7 +883,7 @@ pub fn compute_style_for_node_with_index(
     parent: Option<&ComputedStyle>,
 ) -> ComputedStyle {
     let mut workspace = CascadeWorkspace::new(stylesheet.rules.len());
-    compute_style_for_node_with_workspace(dom, node, stylesheet, index, parent, &mut workspace)
+    compute_style_for_node_with_workspace(dom, node, stylesheet, index, parent, &mut workspace, None)
 }
 
 /*
@@ -904,11 +904,12 @@ pub fn compute_style_for_node_with_workspace(
     index: &StyleIndex,
     parent: Option<&ComputedStyle>,
     workspace: &mut CascadeWorkspace,
+    cascade_view: Option<&crate::cascade_view::CascadeView>,
 ) -> ComputedStyle {
     if dom.element_name(node).ok().flatten().is_none() {
         return parent.cloned().unwrap_or_default();
     }
-    cascade_for_node(dom, node, stylesheet, index, workspace).resolve(parent)
+    cascade_for_node(dom, node, stylesheet, index, workspace, cascade_view).resolve(parent)
 }
 
 fn compute_styles_recursive(
@@ -921,7 +922,7 @@ fn compute_styles_recursive(
     workspace: &mut CascadeWorkspace,
 ) {
     let style =
-        compute_style_for_node_with_workspace(dom, node, stylesheet, index, parent, workspace);
+        compute_style_for_node_with_workspace(dom, node, stylesheet, index, parent, workspace, None);
     styles.insert(node, style.clone());
     if let Ok(children) = dom.children(node) {
         for child in children {
@@ -969,6 +970,7 @@ fn cascade_for_node(
     stylesheet: &Stylesheet,
     index: &StyleIndex,
     workspace: &mut CascadeWorkspace,
+    cascade_view: Option<&crate::cascade_view::CascadeView>,
 ) -> CascadedStyle {
     /*
      * Prepare workspace: zero-fill matched_by_rule, zero seen_bits, clear
@@ -981,30 +983,51 @@ fn cascade_for_node(
     let mut order = 0usize;
 
     /*
-     * Fix F: fused tag+id+class extraction in a single dom.node() call.
-     * Previously node_tag() and node_id_class_keys() each called dom.node()
-     * separately -- two lookups and attribute scans per node.
+     * Candidate collection: two paths depending on whether CascadeView
+     * is available.
      *
-     * Fix 3: uses attr.class_strings (pre-resolved at set_attribute time)
-     * instead of dom.resolve(atom) + RwLock acquire per class token.
+     * CascadeView path (SoA, single cache line per node):
+     *   Reads CascadeEntry (36 bytes) + pre-constructed SelectorIdents
+     *   from flat array. No dom.node() call, no attribute iteration,
+     *   no SelectorIdent construction. Each node touches 1 cache line
+     *   for the entry + sequential ident reads.
      *
-     * Fix 2: class_keys written into workspace.class_keys (reused Vec)
-     * instead of allocating a new Vec per call.
+     * Fallback path (AoS, 2.6 cache lines per node):
+     *   Calls node_tag_id_class -> dom.node() -> pattern match -> attr scan.
+     *   Used when CascadeView is not materialized (e.g., compute_styles
+     *   without FusedWorkspace).
      */
-    let (tag, id_key) = node_tag_id_class(dom, node, &mut workspace.class_keys);
-    if let Some(tag) = tag {
-        if let Some(entries) = index.tag_rules.get(&tag) {
+    if let Some(view) = cascade_view {
+        let entry = &view.entries[node.raw()];
+        if let Some(entries) = index.tag_rules.get(&entry.tag) {
             workspace.candidates.extend_from_slice(entries);
         }
-    }
-    if let Some(ref id_key) = id_key {
-        if let Some(entries) = index.id_rules.get(id_key) {
-            workspace.candidates.extend_from_slice(entries);
+        if let Some(id_ident) = view.id_ident(entry) {
+            if let Some(entries) = index.id_rules.get(id_ident) {
+                workspace.candidates.extend_from_slice(entries);
+            }
         }
-    }
-    for class_key in &workspace.class_keys {
-        if let Some(entries) = index.class_rules.get(class_key) {
-            workspace.candidates.extend_from_slice(entries);
+        for class_ident in view.class_idents(entry) {
+            if let Some(entries) = index.class_rules.get(class_ident) {
+                workspace.candidates.extend_from_slice(entries);
+            }
+        }
+    } else {
+        let (tag, id_key) = node_tag_id_class(dom, node, &mut workspace.class_keys);
+        if let Some(tag) = tag {
+            if let Some(entries) = index.tag_rules.get(&tag) {
+                workspace.candidates.extend_from_slice(entries);
+            }
+        }
+        if let Some(ref id_key) = id_key {
+            if let Some(entries) = index.id_rules.get(id_key) {
+                workspace.candidates.extend_from_slice(entries);
+            }
+        }
+        for class_key in &workspace.class_keys {
+            if let Some(entries) = index.class_rules.get(class_key) {
+                workspace.candidates.extend_from_slice(entries);
+            }
         }
     }
     workspace

@@ -145,6 +145,41 @@ fn main() {
     );
     println!();
 
+    // ---- DOM memory layout analysis (cache line utilization) ----
+    println!("--- DOM type sizes (cache line = 64 bytes) ---");
+    println!(
+        "  Node:            {} bytes  ({:.1} cache lines)",
+        std::mem::size_of::<silksurf_dom::Node>(),
+        std::mem::size_of::<silksurf_dom::Node>() as f64 / 64.0
+    );
+    println!(
+        "  NodeKind:        {} bytes",
+        std::mem::size_of::<silksurf_dom::NodeKind>()
+    );
+    println!(
+        "  Attribute:       {} bytes",
+        std::mem::size_of::<silksurf_dom::Attribute>()
+    );
+    println!(
+        "  TagName:         {} bytes",
+        std::mem::size_of::<silksurf_dom::TagName>()
+    );
+    println!(
+        "  ComputedStyle:   {} bytes  ({:.1} cache lines)",
+        std::mem::size_of::<silksurf_css::ComputedStyle>(),
+        std::mem::size_of::<silksurf_css::ComputedStyle>() as f64 / 64.0
+    );
+    println!(
+        "  CascadeEntry:    {} bytes  ({:.1} cache lines)",
+        std::mem::size_of::<silksurf_css::cascade_view::CascadeEntry>(),
+        std::mem::size_of::<silksurf_css::cascade_view::CascadeEntry>() as f64 / 64.0
+    );
+    println!(
+        "  SelectorIdent:   {} bytes",
+        std::mem::size_of::<silksurf_css::SelectorIdent>()
+    );
+    println!();
+
     // ---- OLD PATH: 3-pass (compute_styles + build_layout_tree + build_display_list) ----
     let mut style_total = Duration::ZERO;
     let mut layout_total = Duration::ZERO;
