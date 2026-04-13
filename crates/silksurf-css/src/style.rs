@@ -24,7 +24,7 @@
  * See: custom_properties.rs for CSS var() resolution
  * See: calc.rs for calc() expression evaluation
  */
-use crate::matching::{Specificity, matches_selector, selector_specificity};
+use crate::matching::{Specificity, matches_selector, matches_selector_with_view, selector_specificity};
 use crate::selector::{Selector, SelectorIdent, SelectorModifier, TypeSelector};
 use crate::{CssToken, Declaration, Rule, Stylesheet};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -1064,7 +1064,12 @@ fn cascade_for_node(
         let Some(selector) = rule.selectors.selectors.get(candidate.selector_index) else {
             continue;
         };
-        if matches_selector(dom, node, selector) {
+        let matched = if let Some(view) = cascade_view {
+            matches_selector_with_view(dom, node, selector, view)
+        } else {
+            matches_selector(dom, node, selector)
+        };
+        if matched {
             if let Some(slot) = workspace.matched_by_rule.get_mut(candidate.rule_index) {
                 match slot {
                     Some(existing) => {

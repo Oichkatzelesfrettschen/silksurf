@@ -1,3 +1,32 @@
+/*
+ * matching.rs -- CSS selector matching and specificity calculation.
+ *
+ * WHY: For each DOM node, the cascade must determine which CSS rules apply.
+ * This module implements right-to-left selector matching (CSS Selectors L4)
+ * and specificity computation (CSS Cascade L4 Section 6).
+ *
+ * Architecture:
+ *   matches_selector: public API, no CascadeView (for external callers)
+ *   matches_selector_with_view: internal, uses CascadeView when available
+ *   matches_compound: tag + modifier checks per compound selector
+ *   matches_class/matches_id: atom-based O(1) comparison via CascadeView
+ *
+ * CascadeView integration (SoA hot path):
+ *   When a CascadeView is provided, matches_compound reads the 40-byte
+ *   CascadeEntry instead of the 168-byte Node. Tag comparison uses
+ *   entry.tag directly. Class/id matching uses pre-constructed
+ *   SelectorIdents from the flat idents array. This eliminates all
+ *   dom.node() and dom.attributes() calls from the cascade hot path.
+ *
+ *   Fallback to dom.node() occurs only for:
+ *     - matches_attribute (arbitrary attribute selectors, rare)
+ *     - matches_pseudo_class (needs DOM topology: parent/children/siblings)
+ *     - External callers without CascadeView
+ *
+ * See: cascade_view.rs for the SoA layout
+ * See: style.rs cascade_for_node() for the caller
+ */
+use crate::cascade_view::CascadeView;
 use crate::{
     AttributeOperator, AttributeSelector, Combinator, CompoundSelector, Selector, SelectorIdent,
     SelectorList, SelectorModifier, TypeSelector,
@@ -48,26 +77,48 @@ pub fn matches_selector_list(dom: &Dom, node: NodeId, list: &SelectorList) -> bo
 }
 
 /*
- * matches_selector -- right-to-left CSS selector matching, zero allocation.
+ * matches_selector -- public API, right-to-left matching without CascadeView.
  *
- * WHY: CSS selectors match right-to-left (rightmost compound first, then
- * walk up the tree checking combinators). The previous implementation
- * allocated a Vec and called reverse() on EVERY matches_selector call.
- * For ~427 calls per render, that was ~8.5us of heap allocation -- 70%
- * of the 12us ws.run() budget -- hidden inside the matching hot path.
- *
- * FIX: Use reverse index arithmetic. steps[from] is the rightmost step
- * (from = steps.len() - 1), walking toward steps[0] (leftmost).
- * Zero heap allocation. Same semantic behavior as the Vec+reverse path.
- *
- * Complexity: O(steps * ancestors) worst case for descendant combinators
+ * Used by external callers (e.g., querySelector). Falls back to dom.node()
+ * for all DOM access. For the cascade hot path, use matches_selector_with_view.
  */
 pub fn matches_selector(dom: &Dom, node: NodeId, selector: &Selector) -> bool {
+    matches_selector_inner(dom, node, selector, None)
+}
+
+/*
+ * matches_selector_with_view -- internal fast path using CascadeView.
+ *
+ * WHY: During the cascade, every matches_selector call previously fetched
+ * the 168-byte Node via dom.node(). With CascadeView, tag/id/class matching
+ * reads from the 40-byte CascadeEntry + flat SelectorIdent array instead.
+ * This eliminates all dom.node() and dom.attributes() calls from the
+ * matching hot path (except for rare attribute selectors and pseudo-classes).
+ *
+ * CascadeView is indexed by NodeId.raw(), so ancestor/sibling lookups
+ * during combinator matching also use the SoA path -- no Node fetches
+ * anywhere in the recursive match chain.
+ */
+pub(crate) fn matches_selector_with_view(
+    dom: &Dom,
+    node: NodeId,
+    selector: &Selector,
+    view: &CascadeView,
+) -> bool {
+    matches_selector_inner(dom, node, selector, Some(view))
+}
+
+fn matches_selector_inner(
+    dom: &Dom,
+    node: NodeId,
+    selector: &Selector,
+    view: Option<&CascadeView>,
+) -> bool {
     let n = selector.steps.len();
     if n == 0 {
         return false;
     }
-    matches_steps_rev(dom, node, &selector.steps, n - 1)
+    matches_steps_rev(dom, node, &selector.steps, n - 1, view)
 }
 
 fn matches_steps_rev(
@@ -75,8 +126,9 @@ fn matches_steps_rev(
     node: NodeId,
     steps: &[crate::SelectorStep],
     from: usize,
+    view: Option<&CascadeView>,
 ) -> bool {
-    if !matches_compound(dom, node, &steps[from].compound) {
+    if !matches_compound(dom, node, &steps[from].compound, view) {
         return false;
     }
     if from == 0 {
@@ -90,7 +142,7 @@ fn matches_steps_rev(
         Combinator::Descendant => {
             let mut current = dom.parent(node).ok().flatten();
             while let Some(ancestor) = current {
-                if matches_steps_rev(dom, ancestor, steps, from - 1) {
+                if matches_steps_rev(dom, ancestor, steps, from - 1, view) {
                     return true;
                 }
                 current = dom.parent(ancestor).ok().flatten();
@@ -101,15 +153,56 @@ fn matches_steps_rev(
             .parent(node)
             .ok()
             .flatten()
-            .is_some_and(|parent| matches_steps_rev(dom, parent, steps, from - 1)),
+            .is_some_and(|parent| matches_steps_rev(dom, parent, steps, from - 1, view)),
         Combinator::NextSibling => previous_element_sibling(dom, node)
-            .is_some_and(|sibling| matches_steps_rev(dom, sibling, steps, from - 1)),
+            .is_some_and(|sibling| matches_steps_rev(dom, sibling, steps, from - 1, view)),
         Combinator::SubsequentSibling => previous_element_siblings(dom, node)
-            .any(|sibling| matches_steps_rev(dom, sibling, steps, from - 1)),
+            .any(|sibling| matches_steps_rev(dom, sibling, steps, from - 1, view)),
     }
 }
 
-fn matches_compound(dom: &Dom, node: NodeId, compound: &CompoundSelector) -> bool {
+/*
+ * matches_compound -- check a compound selector against a DOM node.
+ *
+ * WHY two paths:
+ *   CascadeView path: reads CascadeEntry.tag (24 bytes) for type selector,
+ *   then checks modifiers via SoA idents. No dom.node() fetch (168 bytes).
+ *   Fallback path: dom.node() for tag, dom.attributes() for modifiers.
+ *
+ * The CascadeView path is used during cascade (hot). The fallback path
+ * is used by external callers and for nodes outside CascadeView bounds.
+ */
+fn matches_compound(
+    dom: &Dom,
+    node: NodeId,
+    compound: &CompoundSelector,
+    view: Option<&CascadeView>,
+) -> bool {
+    // CascadeView fast path: read 40-byte entry instead of 168-byte Node
+    if let Some(view) = view {
+        let idx = node.raw();
+        if idx < view.entries.len() {
+            let entry = &view.entries[idx];
+            if let Some(type_selector) = &compound.type_selector {
+                match type_selector {
+                    TypeSelector::Any => {}
+                    TypeSelector::Tag(expected) => {
+                        if &entry.tag != expected {
+                            return false;
+                        }
+                    }
+                }
+            }
+            for modifier in &compound.modifiers {
+                if !matches_modifier_with_view(dom, node, modifier, view, entry) {
+                    return false;
+                }
+            }
+            return true;
+        }
+    }
+
+    // Fallback: fetch full Node from DOM
     let name = match dom.node(node).ok().map(|node| node.kind()) {
         Some(NodeKind::Element { name, .. }) => name,
         _ => return false,
@@ -131,6 +224,35 @@ fn matches_compound(dom: &Dom, node: NodeId, compound: &CompoundSelector) -> boo
     }
     true
 }
+
+/*
+ * matches_modifier_with_view -- SoA modifier matching via CascadeView.
+ *
+ * Class: O(classes) atom comparison against pre-constructed SelectorIdents.
+ * Id: O(1) SelectorIdent comparison against entry's id ident.
+ * Attribute/PseudoClass: falls back to dom (rare, needs topology/raw attrs).
+ */
+fn matches_modifier_with_view(
+    dom: &Dom,
+    node: NodeId,
+    modifier: &SelectorModifier,
+    view: &CascadeView,
+    entry: &crate::cascade_view::CascadeEntry,
+) -> bool {
+    match modifier {
+        SelectorModifier::Class(name) => {
+            let class_idents = view.class_idents(entry);
+            class_idents.iter().any(|ident| ident == name)
+        }
+        SelectorModifier::Id(name) => {
+            view.id_ident(entry).is_some_and(|ident| ident == name)
+        }
+        // Attribute selectors and pseudo-classes need raw DOM access
+        SelectorModifier::Attribute(attribute) => matches_attribute(dom, node, attribute),
+        SelectorModifier::PseudoClass(name) => matches_pseudo_class(dom, node, name),
+    }
+}
+
 fn matches_modifier(dom: &Dom, node: NodeId, modifier: &SelectorModifier) -> bool {
     match modifier {
         SelectorModifier::Class(name) => matches_class(dom, node, name),
