@@ -251,6 +251,33 @@ impl SpeculativeRenderer {
     }
 
     /*
+     * with_extra_ca_file -- constructor that adds a user-supplied PEM CA bundle
+     * to the default Mozilla + native root store.
+     *
+     * WHY: Corporate proxies and private PKI deployments present certificates
+     * signed by an internal CA that is not in Mozilla's root bundle. Rather
+     * than disabling all verification (--insecure), the user can supply the
+     * specific CA cert file so only that chain is trusted additionally.
+     *
+     * Error: returns Err if the file cannot be opened, contains no parseable
+     * PEM certificates, or rustls rejects all of them.
+     */
+    pub fn with_extra_ca_file(path: &std::path::Path) -> Result<Self, NetError> {
+        use silksurf_tls::RustlsProvider;
+
+        let provider =
+            RustlsProvider::new_with_extra_ca_file(path).map_err(|e| NetError {
+                message: format!("TLS CA file {}: {e}", path.display()),
+            })?;
+
+        Ok(Self {
+            cache: ResponseCache::new(),
+            client: Arc::new(BasicClient::with_tls(Arc::new(provider))),
+            stylesheet_cache: StylesheetCache::new(),
+        })
+    }
+
+    /*
      * with_platform_verifier -- constructor that asks rustls to use the best
      * platform verifier available for this target.
      *

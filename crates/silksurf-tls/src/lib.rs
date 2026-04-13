@@ -4,7 +4,12 @@
 //! (rustls-native-certs). Provides a configured rustls ClientConfig.
 
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::pki_types::CertificateDer;
 use rustls::{ClientConfig, DigitallySignedStruct, Error, RootCertStore, SignatureScheme};
+use std::fmt;
+use std::fs::File;
+use std::io::BufReader;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,6 +23,45 @@ pub struct RootStoreDiagnostics {
     pub ssl_cert_file: Option<String>,
     pub ssl_cert_dir: Option<String>,
     pub nix_ssl_cert_file: Option<String>,
+}
+
+#[derive(Debug)]
+pub enum TlsConfigError {
+    Io(std::io::Error),
+    Rustls(Error),
+    NoCertificates { path: PathBuf },
+    NoUsableCertificates { path: PathBuf, rejected: usize },
+}
+
+impl fmt::Display for TlsConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(error) => write!(f, "{error}"),
+            Self::Rustls(error) => write!(f, "{error}"),
+            Self::NoCertificates { path } => {
+                write!(f, "no PEM certificates found in {}", path.display())
+            }
+            Self::NoUsableCertificates { path, rejected } => write!(
+                f,
+                "no usable CA certificates found in {}; rejected {rejected}",
+                path.display()
+            ),
+        }
+    }
+}
+
+impl std::error::Error for TlsConfigError {}
+
+impl From<std::io::Error> for TlsConfigError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+impl From<Error> for TlsConfigError {
+    fn from(error: Error) -> Self {
+        Self::Rustls(error)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -55,6 +99,32 @@ impl TlsConfig {
         }
     }
 
+    /// Create TLS config with Mozilla + system roots plus a user-supplied PEM
+    /// CA bundle.
+    pub fn new_with_extra_ca_file(path: impl AsRef<Path>) -> Result<Self, TlsConfigError> {
+        let (roots, _) = build_root_store_with_extra_ca_file(path.as_ref())?;
+
+        let config = ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        Ok(Self {
+            inner: Arc::new(config),
+        })
+    }
+
+    /// Create TLS config with ALPN and a user-supplied PEM CA bundle.
+    pub fn new_h2_with_extra_ca_file(path: impl AsRef<Path>) -> Result<Self, TlsConfigError> {
+        let (roots, _) = build_root_store_with_extra_ca_file(path.as_ref())?;
+
+        let mut config = ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+        Ok(Self {
+            inner: Arc::new(config),
+        })
+    }
+
     /// Create TLS config using the platform verifier instead of SilkSurf's
     /// default WebPKI roots plus native-root bundle path.
     #[cfg(feature = "platform-verifier")]
@@ -76,6 +146,47 @@ impl TlsConfig {
 
         let mut config = ClientConfig::builder()
             .with_platform_verifier()?
+            .with_no_client_auth();
+        config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+        Ok(Self {
+            inner: Arc::new(config),
+        })
+    }
+
+    /// Create platform-verifier TLS config with additional PEM roots.
+    #[cfg(feature = "platform-verifier")]
+    pub fn new_platform_verifier_with_extra_ca_file(
+        path: impl AsRef<Path>,
+    ) -> Result<Self, TlsConfigError> {
+        let extra_roots = load_extra_ca_file(path.as_ref())?;
+        let builder = ClientConfig::builder();
+        let verifier = rustls_platform_verifier::Verifier::new_with_extra_roots(
+            extra_roots,
+            builder.crypto_provider().clone(),
+        )?;
+        let config = builder
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(verifier))
+            .with_no_client_auth();
+        Ok(Self {
+            inner: Arc::new(config),
+        })
+    }
+
+    /// Create platform-verifier TLS config with ALPN and additional PEM roots.
+    #[cfg(feature = "platform-verifier")]
+    pub fn new_platform_verifier_h2_with_extra_ca_file(
+        path: impl AsRef<Path>,
+    ) -> Result<Self, TlsConfigError> {
+        let extra_roots = load_extra_ca_file(path.as_ref())?;
+        let builder = ClientConfig::builder();
+        let verifier = rustls_platform_verifier::Verifier::new_with_extra_roots(
+            extra_roots,
+            builder.crypto_provider().clone(),
+        )?;
+        let mut config = builder
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(verifier))
             .with_no_client_auth();
         config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
         Ok(Self {
@@ -119,6 +230,35 @@ impl Default for TlsConfig {
 
 pub fn root_store_diagnostics() -> RootStoreDiagnostics {
     build_root_store().1
+}
+
+fn build_root_store_with_extra_ca_file(
+    path: &Path,
+) -> Result<(RootCertStore, RootStoreDiagnostics), TlsConfigError> {
+    let extra_certs = load_extra_ca_file(path)?;
+    let (mut roots, diagnostics) = build_root_store();
+    let (added, rejected) = roots.add_parsable_certificates(extra_certs);
+    if added == 0 {
+        return Err(TlsConfigError::NoUsableCertificates {
+            path: path.to_path_buf(),
+            rejected,
+        });
+    }
+
+    Ok((roots, diagnostics))
+}
+
+fn load_extra_ca_file(path: &Path) -> Result<Vec<CertificateDer<'static>>, TlsConfigError> {
+    let mut reader = BufReader::new(File::open(path)?);
+    let certs = rustls_pemfile::certs(&mut reader).collect::<Result<Vec<_>, _>>()?;
+
+    if certs.is_empty() {
+        return Err(TlsConfigError::NoCertificates {
+            path: path.to_path_buf(),
+        });
+    }
+
+    Ok(certs)
 }
 
 fn build_root_store() -> (RootCertStore, RootStoreDiagnostics) {
@@ -173,12 +313,31 @@ impl RustlsProvider {
         }
     }
 
+    /// Create a provider with extra PEM roots.
+    pub fn new_with_extra_ca_file(path: impl AsRef<Path>) -> Result<Self, TlsConfigError> {
+        Ok(Self {
+            config: TlsConfig::new_with_extra_ca_file(path.as_ref())?,
+            h2_config: TlsConfig::new_h2_with_extra_ca_file(path.as_ref())?,
+        })
+    }
+
     /// Create a provider backed by rustls-platform-verifier.
     #[cfg(feature = "platform-verifier")]
     pub fn new_platform_verifier() -> Result<Self, Error> {
         Ok(Self {
             config: TlsConfig::new_platform_verifier()?,
             h2_config: TlsConfig::new_platform_verifier_h2()?,
+        })
+    }
+
+    /// Create a provider backed by rustls-platform-verifier plus extra PEM roots.
+    #[cfg(feature = "platform-verifier")]
+    pub fn new_platform_verifier_with_extra_ca_file(
+        path: impl AsRef<Path>,
+    ) -> Result<Self, TlsConfigError> {
+        Ok(Self {
+            config: TlsConfig::new_platform_verifier_with_extra_ca_file(path.as_ref())?,
+            h2_config: TlsConfig::new_platform_verifier_h2_with_extra_ca_file(path.as_ref())?,
         })
     }
 }

@@ -34,6 +34,33 @@ fn main() {
     let platform_verifier = args.iter().any(|a| a == "--platform-verifier");
     let speculative = args.iter().any(|a| a == "--speculative" || a == "-s");
 
+    /*
+     * --tls-ca-file <path>  -- append a PEM CA bundle to the default trust store.
+     *
+     * WHY: Corporate proxies and private PKI deployments sign TLS certificates
+     * with an internal CA absent from the Mozilla root bundle.  Supplying the
+     * specific bundle here adds only that chain rather than disabling all
+     * verification with --insecure.
+     *
+     * Accepted forms:  --tls-ca-file /etc/ssl/my-corp.pem
+     *                  --tls-ca-file=/etc/ssl/my-corp.pem   (equals form)
+     */
+    let tls_ca_file: Option<std::path::PathBuf> = args
+        .windows(2)
+        .find_map(|w| {
+            if w[0] == "--tls-ca-file" {
+                Some(std::path::PathBuf::from(&w[1]))
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            args.iter().find_map(|a| {
+                a.strip_prefix("--tls-ca-file=")
+                    .map(std::path::PathBuf::from)
+            })
+        });
+
     let url = args
         .iter()
         .skip(1)
@@ -47,6 +74,9 @@ fn main() {
     if platform_verifier {
         eprintln!("[SilkSurf] TLS platform verifier requested");
     }
+    if let Some(ref p) = tls_ca_file {
+        eprintln!("[SilkSurf] Extra CA bundle: {}", p.display());
+    }
 
     /*
      * SpeculativeRenderer: cache-first HTTP client.
@@ -59,6 +89,14 @@ fn main() {
      */
     let mut renderer = if insecure {
         SpeculativeRenderer::with_insecure()
+    } else if let Some(ref ca_path) = tls_ca_file {
+        match SpeculativeRenderer::with_extra_ca_file(ca_path) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("[SilkSurf] --tls-ca-file error: {}", e.message);
+                return;
+            }
+        }
     } else if platform_verifier {
         #[cfg(feature = "platform-verifier")]
         {

@@ -8,6 +8,7 @@ publish = false
 [dependencies]
 rustls = { workspace = true }
 rustls-native-certs = "0.8"
+rustls-pemfile = "2.2.0"
 rustls-platform-verifier = { version = "0.6.2", optional = true }
 webpki-roots = "1.0"
 

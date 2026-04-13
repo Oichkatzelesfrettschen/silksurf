@@ -39,6 +39,8 @@ tokio-rustls = "0.26"
 h2 = "0.4"
 bytes = "1"
 http = "1"
+hickory-resolver = { version = "0.26.0-beta.3", features = ["dnssec-ring", "tokio"] }
+hickory-proto = { version = "0.26.0-beta.3", features = ["dnssec-ring"] }
 
 [profile.dev]
 opt-level = 1
