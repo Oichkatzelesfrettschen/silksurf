@@ -26,8 +26,8 @@
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use silksurf_core::SilkArena;
-use silksurf_css::{compute_styles, parse_stylesheet_with_interner};
-use silksurf_engine::fused_pipeline::fused_style_layout_paint;
+use silksurf_css::{StyleIndex, compute_styles, parse_stylesheet_with_interner};
+use silksurf_engine::fused_pipeline::{FusedWorkspace, fused_style_layout_paint};
 use silksurf_engine::parse_html;
 use silksurf_layout::Rect;
 use silksurf_layout::{LayoutTree, build_layout_tree};
@@ -228,13 +228,61 @@ fn main() {
     );
     println!();
 
-    // ---- Speedup comparison ----
+    // ---- Speedup comparison (cold) ----
     let speedup = old_per.as_nanos() as f64 / fused_per.as_nanos() as f64;
-    println!("=== Speedup (fused pass vs 3-pass cascade+layout+display) ===");
+    println!("=== Speedup cold: fused pass vs 3-pass ===");
     println!(
         "  {:.2}x  ({:?} -> {:?} per iter)",
         speedup, old_per, fused_per
     );
+    println!();
+
+    // ---- WORKSPACE PATH: FusedWorkspace steady-state (zero alloc after warm-up) ----
+    //
+    // WHY: The cold fused path allocates LayoutNeighborTable (FxHashMap + flat Vecs)
+    // and output Vecs fresh every iteration.  FusedWorkspace retains capacity across
+    // calls: rebuild() clears (O(1)) and refills, eliminating all per-frame allocator
+    // traffic after the first iteration.
+    //
+    // StyleIndex is built once outside the loop -- this mirrors the production
+    // scenario where the stylesheet is stable across re-renders.
+    //
+    // WHY separate from rasterize reuse below: this section isolates the
+    // fused pipeline allocation overhead from rasterizer allocation overhead.
+    let style_index = StyleIndex::new(&stylesheet);
+    let mut ws = FusedWorkspace::new();
+    let mut ws_total = Duration::ZERO;
+    let mut ws_items = 0usize;
+
+    // Pre-warm (iter 0 establishes capacity; subsequent iters are zero-alloc).
+    for i in 0..ITERATIONS {
+        let doc = parse_html(BENCH_HTML).expect("parse html");
+
+        let t = Instant::now();
+        ws.run(&doc.dom, &stylesheet, &style_index, doc.document, VIEWPORT);
+        let elapsed = t.elapsed();
+
+        if i > 0 {
+            ws_total += elapsed;
+        }
+        ws_items = ws.display_items.len();
+    }
+    let ws_per = ws_total / (ITERATIONS - 1);
+
+    println!("--- fused pipeline (FusedWorkspace, zero-alloc steady-state) ---");
+    println!("  fused pass:   {:>8?}  per-iter  (iter 0 warm-up excluded)", ws_per);
+    println!(
+        "  display items: {} (same as cold path)",
+        ws_items
+    );
+    println!();
+
+    let speedup_ws_vs_cold =
+        fused_per.as_nanos() as f64 / ws_per.as_nanos() as f64;
+    let speedup_ws_vs_3pass =
+        old_per.as_nanos() as f64 / ws_per.as_nanos() as f64;
+    println!("=== Speedup workspace vs cold fused: {:.2}x ===", speedup_ws_vs_cold);
+    println!("=== Speedup workspace vs 3-pass:     {:.2}x ===", speedup_ws_vs_3pass);
     println!();
 
     // ---- REUSE PATH: rasterize_parallel_into with pre-allocated buffer ----

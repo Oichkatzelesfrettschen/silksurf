@@ -34,12 +34,210 @@
 use silksurf_css::{
     CascadeWorkspace, ComputedStyle, Display, StyleIndex, Stylesheet,
     compute_style_for_node_with_workspace,
-    style_soa::StyleSoA,
 };
 use silksurf_dom::{Dom, NodeId, NodeKind};
 use silksurf_layout::Rect;
 use silksurf_layout::neighbor_table::LayoutNeighborTable;
 use silksurf_render::DisplayItem;
+
+/*
+ * FusedWorkspace -- pre-allocated scratch for zero-alloc steady-state renders.
+ *
+ * WHY: fused_style_layout_paint allocates fresh on every call:
+ *   - LayoutNeighborTable: 1 FxHashMap + 4 Vecs (bfs_order, parent_idx,
+ *     child_count, level_starts) + FxHashMap insertions for N nodes
+ *   - CascadeWorkspace: 3 Vecs (matched_by_rule, candidates, seen)
+ *   - Output Vecs: styles, node_rects, block_cursors, display_items
+ *
+ * FusedWorkspace holds all of these as owned fields.  Each run() call clears
+ * them (O(1) capacity-preserving) and refills.  After the first call, no
+ * allocator traffic occurs for the same or smaller DOM.
+ *
+ * High-water-mark growth: all containers grow to the peak node count seen
+ * and never shrink.  Stable pages (cached re-renders) reach steady state
+ * after the first render and stay there.
+ *
+ * INVARIANT: styles, node_rects, display_items are valid only until the next
+ * run() call.  Callers must not hold references across run() calls.
+ *
+ * Usage:
+ *   let style_index = StyleIndex::new(&stylesheet); // cache externally
+ *   let mut ws = FusedWorkspace::default();
+ *   loop {
+ *       ws.run(&dom, &stylesheet, &style_index, root, viewport);
+ *       consume(&ws.display_items);
+ *   }
+ *
+ * See: fused_style_layout_paint for the allocating single-call version
+ * See: LayoutNeighborTable::rebuild for the in-place BFS reuse
+ * See: CascadeWorkspace for cascade scratch reuse semantics
+ */
+pub struct FusedWorkspace {
+    /// BFS traversal table -- rebuilt in-place each run() call.
+    table: LayoutNeighborTable,
+    /// Cascade scratch -- grows to peak rule count, never shrinks.
+    cascade_ws: CascadeWorkspace,
+    /// Block-flow cursor per node (internal layout temp, not exposed).
+    block_cursors: Vec<f32>,
+    /// Computed style per BFS-indexed node (valid after run()).
+    pub styles: Vec<Option<ComputedStyle>>,
+    /// Content rect per BFS-indexed node (valid after run()).
+    pub node_rects: Vec<Rect>,
+    /// Paint commands (valid after run(); order is BFS paint order).
+    pub display_items: Vec<DisplayItem>,
+}
+
+impl Default for FusedWorkspace {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FusedWorkspace {
+    /*
+     * new -- create an empty workspace.
+     *
+     * All internal containers start empty (zero allocation beyond struct
+     * overhead).  The first run() call allocates to fit the given DOM.
+     * Subsequent calls with the same or smaller DOM are zero-alloc.
+     */
+    pub fn new() -> Self {
+        Self {
+            table: LayoutNeighborTable::default(),
+            cascade_ws: CascadeWorkspace::new(0),
+            block_cursors: Vec::new(),
+            styles: Vec::new(),
+            node_rects: Vec::new(),
+            display_items: Vec::new(),
+        }
+    }
+
+    /*
+     * run -- execute fused style+layout+paint, filling workspace output fields.
+     *
+     * Takes `style_index` as a parameter to allow the caller to cache it
+     * across calls when the stylesheet does not change.  Building StyleIndex
+     * is O(rules) -- for 13 rules it is trivial; for ChatGPT-scale stylesheets
+     * (hundreds of rules) the caller should build it once and reuse it.
+     *
+     * After run() returns:
+     *   ws.display_items -- paint commands in BFS order
+     *   ws.styles        -- per-node ComputedStyle (BFS indexed)
+     *   ws.node_rects    -- per-node content rect (BFS indexed)
+     *
+     * Complexity: O(N * R_avg) where N=nodes, R_avg=matching rules per node
+     * Allocations: 0 after first call on same or smaller DOM
+     *
+     * See: fused_style_layout_paint for context on algorithm
+     */
+    pub fn run(
+        &mut self,
+        dom: &Dom,
+        stylesheet: &Stylesheet,
+        style_index: &StyleIndex,
+        root: NodeId,
+        viewport: Rect,
+    ) {
+        // Rebuild BFS table in-place (FxHashMap + Vecs cleared, capacity retained).
+        self.table.rebuild(dom, root);
+        let n = self.table.len();
+
+        // Resize output/temp Vecs to n.  clear() retains heap allocation when
+        // n <= previous capacity (the common case for stable pages).
+        self.styles.clear();
+        self.styles.resize(n, None);
+        self.node_rects.clear();
+        self.node_rects.resize(n, viewport);
+        self.block_cursors.clear();
+        self.block_cursors.resize(n, viewport.y);
+        self.display_items.clear();
+
+        for (i, &node) in self.table.bfs_order.iter().enumerate() {
+            let pidx = self.table.parent_idx[i];
+
+            let (parent_style, parent_rect, cursor) = if pidx == u32::MAX {
+                (None, viewport, viewport.y)
+            } else {
+                let p = pidx as usize;
+                (self.styles[p].as_ref(), self.node_rects[p], self.block_cursors[p])
+            };
+
+            let style = compute_style_for_node_with_workspace(
+                dom,
+                node,
+                stylesheet,
+                style_index,
+                parent_style,
+                &mut self.cascade_ws,
+            );
+
+            if style.display == Display::None {
+                self.styles[i] = Some(style);
+                continue;
+            }
+
+            let margin_top = length_px(style.margin.top);
+            let padding_top = length_px(style.padding.top);
+            let border_top = length_px(style.border.top);
+
+            let x = parent_rect.x
+                + length_px(style.margin.left)
+                + length_px(style.padding.left)
+                + length_px(style.border.left);
+            let y = cursor + margin_top + padding_top + border_top;
+            let width = parent_rect.width
+                - length_px(style.margin.left)
+                - length_px(style.margin.right)
+                - length_px(style.padding.left)
+                - length_px(style.padding.right)
+                - length_px(style.border.left)
+                - length_px(style.border.right);
+            let height = length_px(style.line_height);
+
+            let content_rect = Rect { x, y, width, height };
+            self.node_rects[i] = content_rect;
+
+            if pidx != u32::MAX {
+                self.block_cursors[pidx as usize] = y
+                    + height
+                    + length_px(style.padding.bottom)
+                    + length_px(style.border.bottom)
+                    + length_px(style.margin.bottom);
+            }
+            self.block_cursors[i] = y;
+
+            if style.background_color.a > 0 {
+                self.display_items.push(DisplayItem::SolidColor {
+                    rect: content_rect,
+                    color: style.background_color,
+                });
+            }
+
+            if let Ok(dom_node) = dom.node(node)
+                && let NodeKind::Text { text } = dom_node.kind()
+            {
+                self.display_items.push(DisplayItem::Text {
+                    rect: content_rect,
+                    node,
+                    text_len: text.len() as u32,
+                    color: style.color,
+                });
+            }
+
+            self.styles[i] = Some(style);
+        }
+    }
+
+    /// Number of BFS-ordered nodes from the last run() call.
+    pub fn node_count(&self) -> usize {
+        self.table.len()
+    }
+
+    /// BFS traversal table from the last run() call.
+    pub fn table(&self) -> &LayoutNeighborTable {
+        &self.table
+    }
+}
 
 /*
  * FusedResult -- output of the single-pass pipeline.
@@ -61,11 +259,11 @@ use silksurf_render::DisplayItem;
  * constant -- no hashing, no collision chains, contiguous cache lines.
  * For 50 nodes this is ~3x faster in the parent lookup hot path.
  *
- * soa: StyleSoA -- column-oriented style storage derived from styles.
- * Built once after the BFS cascade pass. Callers that need to scan a single
- * CSS property across all nodes (e.g. display, background_color) use soa
- * columns instead of iterating styles[] for 300x better cache utilization.
- * See: silksurf_css::style_soa for column layout details.
+ * WHY no StyleSoA field: building StyleSoA unconditionally costs ~4us for
+ * 50 nodes (FxHashMap insertions + 25 Vec pushes) and eliminates the fused
+ * pipeline's speedup advantage over the 3-pass baseline.  Instead, callers
+ * that need column-oriented access call StyleSoA::from_bfs on demand.
+ * See: silksurf_css::style_soa::StyleSoA::from_bfs
  */
 pub struct FusedResult {
     /// Style per node in BFS order. None for display:none or skipped nodes.
@@ -75,10 +273,6 @@ pub struct FusedResult {
     pub node_rects: Vec<Rect>,
     /// BFS traversal table; use node_to_bfs_idx for NodeId -> index mapping.
     pub table: LayoutNeighborTable,
-    /// Column-oriented style storage built from styles after the BFS cascade.
-    /// Indexed by a compact soa-internal index (not BFS index).
-    /// Use soa.index_of(node_id) to get the soa index for a NodeId.
-    pub soa: StyleSoA,
 }
 
 /*
@@ -222,24 +416,11 @@ pub fn fused_style_layout_paint(
         styles[i] = Some(style);
     }
 
-    /*
-     * Build StyleSoA from the BFS-ordered cascade results.
-     *
-     * WHY post-loop: cascade+layout+paint are interleaved in the BFS loop because
-     * layout requires parent style data in-flight. SoA is built once after the pass
-     * using the already-computed styles[] Vec -- O(N) pass, no re-cascade.
-     *
-     * Cost: O(N) fill into 25 columns. For 400 nodes this is ~5us (cache-warm copy).
-     * See: StyleSoA::from_bfs for the construction details.
-     */
-    let soa = StyleSoA::from_bfs(&table.bfs_order, &styles);
-
     FusedResult {
         styles,
         display_items,
         node_rects,
         table,
-        soa,
     }
 }
 

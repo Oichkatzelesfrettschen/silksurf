@@ -628,9 +628,10 @@ fn main() {
                         let raster_elapsed = raster_t0.elapsed();
 
                         let total = rerender_t0.elapsed();
+                        let new_styled = new_fused.styles.iter().filter(|s| s.is_some()).count();
                         eprintln!(
-                            "[SilkSurf] Re-render ({} SoA styled nodes): CSS {:?} + fused {:?} + raster {:?} = {:?}",
-                            new_fused.soa.len(),
+                            "[SilkSurf] Re-render ({} styled nodes): CSS {:?} + fused {:?} + raster {:?} = {:?}",
+                            new_styled,
                             css_elapsed,
                             fused_elapsed,
                             raster_elapsed,
