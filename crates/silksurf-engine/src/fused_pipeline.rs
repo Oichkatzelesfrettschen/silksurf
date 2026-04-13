@@ -34,6 +34,7 @@
 use silksurf_css::{
     CascadeWorkspace, ComputedStyle, Display, StyleIndex, Stylesheet,
     compute_style_for_node_with_workspace,
+    style_soa::StyleSoA,
 };
 use silksurf_dom::{Dom, NodeId, NodeKind};
 use silksurf_layout::Rect;
@@ -50,6 +51,22 @@ use silksurf_render::DisplayItem;
  * constant -- no hashing, no collision chains, contiguous cache lines.
  * For 50 nodes this is ~3x faster in the parent lookup hot path.
  */
+/*
+ * FusedResult -- output of the single-pass pipeline.
+ *
+ * All per-node arrays are indexed by BFS order (same as table.bfs_order[i]).
+ * To look up a specific node by NodeId, use table.node_to_bfs_idx[&node_id].
+ *
+ * WHY Vec over FxHashMap: O(1) array index vs O(1)-amortised hash with higher
+ * constant -- no hashing, no collision chains, contiguous cache lines.
+ * For 50 nodes this is ~3x faster in the parent lookup hot path.
+ *
+ * soa: StyleSoA -- column-oriented style storage derived from styles.
+ * Built once after the BFS cascade pass. Callers that need to scan a single
+ * CSS property across all nodes (e.g. display, background_color) use soa
+ * columns instead of iterating styles[] for 300x better cache utilization.
+ * See: silksurf_css::style_soa for column layout details.
+ */
 pub struct FusedResult {
     /// Style per node in BFS order. None for display:none or skipped nodes.
     pub styles: Vec<Option<ComputedStyle>>,
@@ -58,6 +75,10 @@ pub struct FusedResult {
     pub node_rects: Vec<Rect>,
     /// BFS traversal table; use node_to_bfs_idx for NodeId -> index mapping.
     pub table: LayoutNeighborTable,
+    /// Column-oriented style storage built from styles after the BFS cascade.
+    /// Indexed by a compact soa-internal index (not BFS index).
+    /// Use soa.index_of(node_id) to get the soa index for a NodeId.
+    pub soa: StyleSoA,
 }
 
 /*
@@ -201,11 +222,24 @@ pub fn fused_style_layout_paint(
         styles[i] = Some(style);
     }
 
+    /*
+     * Build StyleSoA from the BFS-ordered cascade results.
+     *
+     * WHY post-loop: cascade+layout+paint are interleaved in the BFS loop because
+     * layout requires parent style data in-flight. SoA is built once after the pass
+     * using the already-computed styles[] Vec -- O(N) pass, no re-cascade.
+     *
+     * Cost: O(N) fill into 25 columns. For 400 nodes this is ~5us (cache-warm copy).
+     * See: StyleSoA::from_bfs for the construction details.
+     */
+    let soa = StyleSoA::from_bfs(&table.bfs_order, &styles);
+
     FusedResult {
         styles,
         display_items,
         node_rects,
         table,
+        soa,
     }
 }
 

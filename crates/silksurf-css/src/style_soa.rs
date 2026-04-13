@@ -81,6 +81,88 @@ pub struct StyleSoA {
 
 impl StyleSoA {
     /*
+     * from_bfs -- build SoA directly from the fused pipeline's BFS-ordered output.
+     *
+     * WHY: fused_pipeline produces Vec<Option<ComputedStyle>> indexed by BFS position
+     * alongside the BFS node order Vec<NodeId>. Converting via FxHashMap would re-hash
+     * every node; this constructor fills columns in one O(N) pass with no extra allocation.
+     *
+     * Invariant: bfs_order.len() == styles.len(). None slots (display:none) are skipped
+     * and do not receive a column entry -- so soa.len() <= bfs_order.len().
+     *
+     * See: fused_pipeline.rs FusedResult for the source arrays.
+     * See: from_computed for the legacy FxHashMap path.
+     */
+    pub fn from_bfs(bfs_order: &[NodeId], styles: &[Option<ComputedStyle>]) -> Self {
+        let n = styles.iter().filter(|s| s.is_some()).count();
+        let mut soa = Self {
+            node_index: FxHashMap::default(),
+            nodes: Vec::with_capacity(n),
+            display: Vec::with_capacity(n),
+            color: Vec::with_capacity(n),
+            background_color: Vec::with_capacity(n),
+            font_size: Vec::with_capacity(n),
+            line_height: Vec::with_capacity(n),
+            margin_top: Vec::with_capacity(n),
+            margin_right: Vec::with_capacity(n),
+            margin_bottom: Vec::with_capacity(n),
+            margin_left: Vec::with_capacity(n),
+            padding_top: Vec::with_capacity(n),
+            padding_right: Vec::with_capacity(n),
+            padding_bottom: Vec::with_capacity(n),
+            padding_left: Vec::with_capacity(n),
+            border_top: Vec::with_capacity(n),
+            border_right: Vec::with_capacity(n),
+            border_bottom: Vec::with_capacity(n),
+            border_left: Vec::with_capacity(n),
+            position: Vec::with_capacity(n),
+            z_index: Vec::with_capacity(n),
+            overflow_x: Vec::with_capacity(n),
+            overflow_y: Vec::with_capacity(n),
+            opacity: Vec::with_capacity(n),
+            flex_container: Vec::with_capacity(n),
+            flex_item: Vec::with_capacity(n),
+        };
+
+        for (&node_id, style) in bfs_order.iter().zip(styles.iter()) {
+            let Some(style) = style else { continue };
+            let idx = soa.nodes.len();
+            soa.node_index.insert(node_id, idx);
+            soa.nodes.push(node_id);
+
+            soa.display.push(style.display);
+            soa.color.push(style.color);
+            soa.background_color.push(style.background_color);
+            soa.font_size.push(length_to_f32(style.font_size));
+            soa.line_height.push(length_to_f32(style.line_height));
+
+            soa.margin_top.push(length_to_f32(style.margin.top));
+            soa.margin_right.push(length_to_f32(style.margin.right));
+            soa.margin_bottom.push(length_to_f32(style.margin.bottom));
+            soa.margin_left.push(length_to_f32(style.margin.left));
+            soa.padding_top.push(length_to_f32(style.padding.top));
+            soa.padding_right.push(length_to_f32(style.padding.right));
+            soa.padding_bottom.push(length_to_f32(style.padding.bottom));
+            soa.padding_left.push(length_to_f32(style.padding.left));
+            soa.border_top.push(length_to_f32(style.border.top));
+            soa.border_right.push(length_to_f32(style.border.right));
+            soa.border_bottom.push(length_to_f32(style.border.bottom));
+            soa.border_left.push(length_to_f32(style.border.left));
+
+            soa.position.push(style.position);
+            soa.z_index.push(style.z_index);
+            soa.overflow_x.push(style.overflow_x);
+            soa.overflow_y.push(style.overflow_y);
+            soa.opacity.push(style.opacity);
+
+            soa.flex_container.push(style.flex_container);
+            soa.flex_item.push(style.flex_item);
+        }
+
+        soa
+    }
+
+    /*
      * from_computed -- convert AoS HashMap to SoA column storage.
      *
      * Complexity: O(N) where N = number of styled nodes

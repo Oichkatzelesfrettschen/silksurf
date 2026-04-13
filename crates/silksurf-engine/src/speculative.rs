@@ -20,6 +20,12 @@
  * Complexity: O(1) cache lookup, O(network) on first fetch and revalidation
  * Memory: O(responses) in ResponseCache -- one entry per URL
  *
+ * Disk persistence: all constructors initialize ResponseCache with
+ * with_disk(http_cache_dir()), which loads previously cached responses from
+ * ~/.cache/silksurf/http/ at startup. This makes the second process invocation
+ * return FetchOrigin::Cache immediately (zero network cost) and spawn
+ * background revalidation to check for updates.
+ *
  * See: silksurf-net/src/cache.rs ResponseCache for entry format
  * See: silksurf-net/src/lib.rs BasicClient for HTTP/1.1 + TLS client
  * See: silksurf-app/src/main.rs for integration point
@@ -215,6 +221,25 @@ fn save_stylesheet_to_disk(path: &PathBuf, sheet: &Stylesheet) {
  * BasicClient is Send+Sync (its only non-trivial field is Arc<dyn TlsProvider
  * + Send+Sync>), so it is safe to share across threads via Arc.
  */
+
+/*
+ * http_cache_dir -- return the per-user HTTP response cache directory.
+ *
+ * WHY: We need a stable, writable directory that survives process restarts.
+ * Follows the XDG Base Directory spec: $XDG_CACHE_HOME or ~/.cache.
+ * On success returns ~/.cache/silksurf/http (directory need not exist yet;
+ * ResponseCache::with_disk creates it on first write).
+ */
+fn http_cache_dir() -> std::path::PathBuf {
+    let base = std::env::var_os("XDG_CACHE_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            let home = std::env::var_os("HOME").unwrap_or_else(|| "/tmp".into());
+            std::path::PathBuf::from(home).join(".cache")
+        });
+    base.join("silksurf").join("http")
+}
+
 pub struct SpeculativeRenderer {
     pub cache: ResponseCache,
     client: Arc<BasicClient>,
@@ -226,7 +251,7 @@ type FetchResult = Result<(HttpResponse, FetchOrigin, std::time::Duration), NetE
 impl SpeculativeRenderer {
     pub fn new() -> Self {
         Self {
-            cache: ResponseCache::new(),
+            cache: ResponseCache::with_disk(&http_cache_dir()),
             client: Arc::new(BasicClient::new()),
             stylesheet_cache: StylesheetCache::new(),
         }
@@ -242,7 +267,7 @@ impl SpeculativeRenderer {
     pub fn with_insecure() -> Self {
         use silksurf_tls::RustlsProvider;
         Self {
-            cache: ResponseCache::new(),
+            cache: ResponseCache::with_disk(&http_cache_dir()),
             client: Arc::new(BasicClient::with_tls(Arc::new(
                 RustlsProvider::new_insecure(),
             ))),
@@ -271,7 +296,7 @@ impl SpeculativeRenderer {
             })?;
 
         Ok(Self {
-            cache: ResponseCache::new(),
+            cache: ResponseCache::with_disk(&http_cache_dir()),
             client: Arc::new(BasicClient::with_tls(Arc::new(provider))),
             stylesheet_cache: StylesheetCache::new(),
         })
@@ -294,7 +319,7 @@ impl SpeculativeRenderer {
         })?;
 
         Ok(Self {
-            cache: ResponseCache::new(),
+            cache: ResponseCache::with_disk(&http_cache_dir()),
             client: Arc::new(BasicClient::with_tls(Arc::new(provider))),
             stylesheet_cache: StylesheetCache::new(),
         })
@@ -611,9 +636,12 @@ mod tests {
     }
 
     #[test]
-    fn test_cache_empty_on_new() {
-        let renderer = SpeculativeRenderer::new();
-        assert_eq!(renderer.cache.len(), 0);
-        assert_eq!(renderer.cache_bytes(), 0);
+    fn test_cache_empty_without_disk() {
+        // Use ResponseCache::new() (no disk) to test the invariant in isolation.
+        // SpeculativeRenderer::new() uses with_disk(), which may load disk entries
+        // on a developer machine with a pre-existing ~/.cache/silksurf/http/ dir.
+        let cache = ResponseCache::new();
+        assert_eq!(cache.len(), 0);
+        assert_eq!(cache.total_bytes(), 0);
     }
 }

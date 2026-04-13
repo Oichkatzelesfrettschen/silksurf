@@ -7,6 +7,8 @@ publish = false
 
 [dependencies]
 silksurf-tls = { path = "../silksurf-tls" }
+serde = { workspace = true }
+serde_json = { workspace = true }
 url = { workspace = true }
 httparse = "1.10"
 rustls = { workspace = true }

@@ -2380,6 +2380,8 @@ dependencies = [
  "httparse",
  "rustc-hash",
  "rustls",
+ "serde",
+ "serde_json",
  "silksurf-tls",
  "tokio",
  "tokio-rustls",
