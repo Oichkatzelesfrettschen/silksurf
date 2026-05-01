@@ -48,6 +48,23 @@ impl From<CssError> for EngineError {
     }
 }
 
+impl From<EngineError> for silksurf_core::SilkError {
+    fn from(e: EngineError) -> Self {
+        match e {
+            EngineError::Tokenize(t) => silksurf_core::SilkError::HtmlTokenize {
+                offset: t.offset,
+                message: t.message,
+            },
+            EngineError::TreeBuild(t) => silksurf_core::SilkError::HtmlTreeBuild(format!("{t:?}")),
+            EngineError::Css(c) => silksurf_core::SilkError::Css {
+                offset: c.offset,
+                message: c.message,
+            },
+            EngineError::Layout(msg) => silksurf_core::SilkError::Engine(format!("layout: {msg}")),
+        }
+    }
+}
+
 pub struct ParsedDocument {
     pub dom: Dom,
     pub document: NodeId,

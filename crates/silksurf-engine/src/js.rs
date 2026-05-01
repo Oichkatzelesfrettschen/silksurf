@@ -10,6 +10,12 @@ pub struct JsError {
     pub message: String,
 }
 
+impl From<JsError> for silksurf_core::SilkError {
+    fn from(e: JsError) -> Self {
+        silksurf_core::SilkError::Js(e.message)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JsTask {
     Script(String),

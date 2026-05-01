@@ -10,6 +10,7 @@
 
 pub mod calc;
 pub mod cascade_view;
+pub use cascade_view::{CascadeEntry, CascadeView};
 pub mod custom_properties;
 mod matching;
 mod parser;
@@ -87,6 +88,15 @@ pub enum CssToken {
 pub struct CssError {
     pub offset: usize,
     pub message: String,
+}
+
+impl From<CssError> for silksurf_core::SilkError {
+    fn from(e: CssError) -> Self {
+        silksurf_core::SilkError::Css {
+            offset: e.offset,
+            message: e.message,
+        }
+    }
 }
 
 pub struct CssTokenizer {
@@ -229,6 +239,7 @@ impl CssTokenizer {
                     self.cursor = cursor;
                     tokens.push(CssToken::Number(number));
                 } else {
+                    // UNWRAP-OK: outer loop checks self.cursor < buffer.len() so the slice is non-empty.
                     let delim = self.buffer[self.cursor..].chars().next().unwrap();
                     self.cursor += delim.len_utf8();
                     tokens.push(CssToken::Delim(delim));
@@ -305,6 +316,7 @@ impl CssTokenizer {
                     tokens.push(CssToken::BracketClose);
                 }
                 _ => {
+                    // UNWRAP-OK: outer loop checks self.cursor < buffer.len() so the slice is non-empty.
                     let delim = self.buffer[self.cursor..].chars().next().unwrap();
                     self.cursor += delim.len_utf8();
                     tokens.push(CssToken::Delim(delim));

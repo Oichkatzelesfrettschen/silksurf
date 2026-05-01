@@ -47,6 +47,9 @@ impl SilkInterner {
     }
 
     pub fn resolve(&self, symbol: Atom) -> &str {
+        // UNWRAP-OK: Atoms are only constructed by intern() (this module), which inserts into
+        // self.values before returning, so every valid Atom maps to a present index. A panic
+        // here means the caller forged an Atom or used one across interners (programmer bug).
         self.values
             .get(symbol.0 as usize)
             .map(SmallString::as_str)

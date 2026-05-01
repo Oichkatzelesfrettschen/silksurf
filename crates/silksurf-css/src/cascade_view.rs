@@ -55,7 +55,11 @@ pub struct CascadeEntry {
     /// Parent node index (NodeId.raw() as u16). NO_PARENT = no parent.
     /// Enables combinator tree walking without dom.parent() (168-byte fetch).
     /// u16 supports DOMs up to 65534 nodes; larger DOMs fall back to dom.parent().
-    pub parent_id: u16,
+    ///
+    /// Crate-private: external readers should use [`CascadeView::parent_of`]
+    /// instead of touching the raw u16 sentinel; that API hides the
+    /// NO_PARENT encoding and the u16-overflow fallback.
+    pub(crate) parent_id: u16,
 }
 
 /// Sentinel value for CascadeEntry::id_index when no id attribute exists.

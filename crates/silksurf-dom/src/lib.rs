@@ -352,6 +352,12 @@ pub enum DomError {
     NotText(NodeId),
 }
 
+impl From<DomError> for silksurf_core::SilkError {
+    fn from(e: DomError) -> Self {
+        silksurf_core::SilkError::Dom(format!("{e:?}"))
+    }
+}
+
 impl Dom {
     pub fn new() -> Self {
         use std::sync::atomic::{AtomicU32, Ordering};
@@ -388,6 +394,7 @@ impl Dom {
      * After steady state (no new interning), this is a no-op.
      */
     pub fn materialize_resolve_table(&mut self) {
+        // UNWRAP-OK: RwLock poison only on prior-holder panic; propagating preserves the crash invariant.
         let interner = self.interner.read().unwrap();
         let values = interner.values_slice();
         if values.len() > self.resolve_table.len() {
@@ -550,6 +557,7 @@ impl Dom {
                 let atom = if value.is_empty() || !should_intern_identifier(value.as_str()) {
                     None
                 } else {
+                    // UNWRAP-OK: RwLock poison only on prior-holder panic; propagating preserves the crash invariant.
                     Some(self.interner.write().unwrap().intern(value.as_str()))
                 };
                 (atom, SmallVec::new(), SmallVec::new())
@@ -560,6 +568,7 @@ impl Dom {
                 let (atoms, strings) = if value.is_empty() {
                     (SmallVec::new(), SmallVec::new())
                 } else {
+                    // UNWRAP-OK: RwLock poison only on prior-holder panic; propagating preserves the crash invariant.
                     let mut interner = self.interner.write().unwrap();
                     value
                         .split_whitespace()
@@ -577,6 +586,7 @@ impl Dom {
                 let atom = if value.is_empty() || !should_intern_identifier(value.as_str()) {
                     None
                 } else {
+                    // UNWRAP-OK: RwLock poison only on prior-holder panic; propagating preserves the crash invariant.
                     Some(self.interner.write().unwrap().intern(value.as_str()))
                 };
                 (atom, SmallVec::new(), SmallVec::new())
@@ -732,15 +742,18 @@ impl Dom {
     where
         F: FnOnce(&mut SilkInterner) -> R,
     {
+        // UNWRAP-OK: RwLock poison only on prior-holder panic; propagating preserves the crash invariant.
         let mut interner = self.interner.write().unwrap();
         f(&mut interner)
     }
 
     pub fn intern(&self, value: &str) -> Atom {
+        // UNWRAP-OK: RwLock poison only on prior-holder panic; propagating preserves the crash invariant.
         self.interner.write().unwrap().intern(value)
     }
 
     pub fn resolve(&self, atom: Atom) -> SmallString {
+        // UNWRAP-OK: RwLock poison only on prior-holder panic; propagating preserves the crash invariant.
         SmallString::from(self.interner.read().unwrap().resolve(atom))
     }
 

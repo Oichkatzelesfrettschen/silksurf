@@ -114,6 +114,7 @@ impl CssParser {
                     }));
                 }
                 _ => {
+                    // UNWRAP-OK: peek() above returned Some(non-Eof) so next() is guaranteed Some.
                     prelude.push(self.next().unwrap());
                 }
             }
@@ -135,6 +136,7 @@ impl CssParser {
                 }
                 Some(CssToken::Eof) | None => return None,
                 _ => {
+                    // UNWRAP-OK: peek() above returned Some(non-Eof) so next() is guaranteed Some.
                     selector_tokens.push(self.next().unwrap());
                 }
             }

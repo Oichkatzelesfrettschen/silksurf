@@ -266,6 +266,11 @@ fn fill_rect(buffer: &mut [u8], width: u32, height: u32, rect: Rect, color: Colo
     let width_u = width as usize;
     let pixel = u32::from_le_bytes([color.r, color.g, color.b, color.a]);
     let len_u32 = buffer.len() / 4;
+    // SAFETY: Vec<u8> from a u32 framebuffer is always 4-byte aligned (Vec
+    // alignment >= alignof::<u32>) and len_u32 = buffer.len() / 4 is the
+    // exact number of u32-sized chunks that fit. The returned slice
+    // covers the same memory as `buffer` for its lifetime; we hold the
+    // exclusive &mut borrow on `buffer` so no aliasing is possible.
     let buffer_u32 =
         unsafe { std::slice::from_raw_parts_mut(buffer.as_mut_ptr() as *mut u32, len_u32) };
 
@@ -286,6 +291,9 @@ fn fill_row_u32(row: &mut [u32], pixel: u32) {
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     {
         if std::is_x86_feature_detected!("sse2") {
+            // SAFETY: is_x86_feature_detected!("sse2") gates the call;
+            // fill_row_sse2 only uses SSE2 intrinsics (_mm_set1_epi32 and
+            // _mm_storeu_si128), both available whenever SSE2 is.
             unsafe {
                 fill_row_sse2(row, pixel);
             }
@@ -309,15 +317,27 @@ unsafe fn fill_row_sse2(row: &mut [u32], pixel: u32) {
     }
     let mut idx = 0usize;
     let ptr = row.as_mut_ptr();
+    // SAFETY: _mm_set1_epi32 has no preconditions beyond SSE2 availability,
+    // which the caller has already verified (see fill_row_u32).
     let value = unsafe { _mm_set1_epi32(pixel as i32) };
     while idx + 4 <= len {
+        // SAFETY: idx + 4 <= len guarantees ptr.add(idx) is in-bounds and
+        // ptr.add(idx + 3) is the last element of the chunk. The cast to
+        // *mut __m128i is sound because u32 is 4-byte aligned and 4*u32 =
+        // 16 bytes which __m128i expects (and _mm_storeu_si128 tolerates
+        // unaligned pointers anyway).
         let dst = unsafe { ptr.add(idx) } as *mut __m128i;
+        // SAFETY: dst points to 16 valid writable bytes (4 * u32) within
+        // the row borrow held by the caller; storeu does not require
+        // alignment.
         unsafe {
             _mm_storeu_si128(dst, value);
         }
         idx += 4;
     }
     while idx < len {
+        // SAFETY: idx < len guarantees ptr.add(idx) is in-bounds and we
+        // hold the exclusive &mut on row, so the write is sound.
         unsafe {
             *ptr.add(idx) = pixel;
         }

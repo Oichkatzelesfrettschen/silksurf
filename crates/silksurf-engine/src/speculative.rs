@@ -525,6 +525,9 @@ impl SpeculativeRenderer {
             }
         }
 
+        // UNWRAP-OK: every results[idx] slot is filled in the loop above (either Ok or Err
+        // branch); the only way an entry is None is if the input requests vec was shorter than
+        // results, which it cannot be (results is sized from requests).
         results.into_iter().map(|r| r.unwrap()).collect()
     }
 

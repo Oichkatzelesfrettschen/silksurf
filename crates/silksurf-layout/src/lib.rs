@@ -461,8 +461,12 @@ impl<'a> LayoutBox<'a> {
     ) -> &'style ComputedStyle {
         match self.box_type {
             BoxType::BlockNode(node) | BoxType::InlineNode(node) => {
+                // UNWRAP-OK: the cascade pass always produces a ComputedStyle for every node
+                // in the layout tree before this is called; missing entries are a pipeline bug.
                 styles.get(&node).expect("style missing for node")
             }
+            // UNWRAP-OK: anonymous boxes are only created when at least one styled box exists,
+            // so styles is non-empty.
             BoxType::Anonymous => styles.values().next().unwrap(),
         }
     }
