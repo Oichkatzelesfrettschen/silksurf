@@ -679,6 +679,291 @@ a Wayland backend lands.
 
 ---
 
+## AD-016: Fused Render Pipeline (FusedWorkspace)
+
+**Status**: Accepted
+**Date**: 2026-04-30 (codifies design from `main` = `409356d`)
+**Deciders**: SNAZZY-WAFFLE roadmap (P2.S3)
+
+### Context
+
+The legacy 3-pass pipeline (`EnginePipeline::render_document`) walked
+the DOM three times: cascade, layout, paint. Each pass allocated its
+own intermediate `HashMap` / `Vec`. Per-frame allocator pressure
+dominated the steady state (~24 us at 50 nodes); the cascade was
+fetching 168-byte `Node` rows when only ~36 bytes (tag, id_index,
+class_*, parent_id) were actually needed.
+
+### Decision
+
+Adopt a single-BFS-walk fused pipeline that emits styles, layout
+rects, and display-list items in one pass, backed by a `FusedWorkspace`
+that owns all reusable per-frame buffers (`LayoutNeighborTable`,
+`CascadeWorkspace`, output `Vec`s for styles / rects / cursors /
+display items). After the first call, zero allocator traffic for
+same-or-smaller DOMs.
+
+Materialise a `CascadeView` SoA projection (40-byte `CascadeEntry`
+rows, fits one cache line) once per render and consume it from the
+matching hot path so `dom.node()` and per-call attribute scans
+disappear.
+
+### Rationale
+
+  * 9.5 us steady-state at 50 nodes (1.69x over 3-pass workspace
+    fused, 2.05x over 3-pass cold) -- measured in
+    `bench_pipeline.rs`.
+  * High-water-mark growth keeps the workspace warm across many
+    page renders; fits cacheable-page workloads (404, wiki landing).
+  * SoA layout gives 4.2x compression vs Node and exposes
+    `parent_id` for combinator walks without `dom.parent()` (avoids
+    the 168-byte fetch).
+
+### Consequences
+
+Positive: production-path is the fast-path, no behaviour switch
+between bench and real workloads; the legacy 3-pass remains as a
+parity test.
+
+Negative: more state to keep coherent (the `generation`-gated
+rebuild pattern, see AD-017). FusedWorkspace must be reused across
+calls; passing a fresh `FusedWorkspace::new()` each call regresses to
+cold cost.
+
+### See
+
+  * `crates/silksurf-engine/src/fused_pipeline.rs`
+  * `docs/PERFORMANCE.md`
+  * GLOSSARY -> CascadeView, FusedWorkspace, generation-gated rebuild
+
+---
+
+## AD-017: Lock-free Monotonic Resolve Table
+
+**Status**: Accepted
+**Date**: 2026-04-30 (codifies design from `main` = `662ddb9`)
+**Deciders**: SNAZZY-WAFFLE roadmap (P2.S3)
+
+### Context
+
+`Dom` holds a `RwLock<SilkInterner>`. The cascade matching path called
+`dom.resolve(atom) -> SmallString` once per atom comparison (~29 atoms
+per cascade); each call paid ~6 ns of `RwLock::read` acquisition
+overhead, totalling ~168 ns per cascade just on lock traffic.
+
+### Decision
+
+Add a per-`Dom` `resolve_table: Vec<SmallString>`, materialised from
+the interner's `values_slice()` at two phase boundaries:
+
+  1. `TreeBuilder::into_dom()` -- after parse completes.
+  2. `Dom::end_mutation_batch()` -- after JS / dynamic mutations.
+
+`Dom::resolve_fast(atom)` is a plain array index by `atom.raw()`,
+zero synchronisation. The table is monotonically growing: old atoms
+never move, new atoms extend the end. The interner's `RwLock` is
+retained on the write path (intern during parse / mutation), but the
+read path (resolve during cascade) is entirely lock-free.
+
+### Rationale
+
+  * Eliminates ~168 ns of lock traffic per cascade.
+  * Supports full dynamic DOM mutations without architectural
+    penalty -- mutation batches mark a phase boundary, the table
+    grows, and the cascade reads continue lock-free.
+  * No two-tier lookup, no branch on the read path.
+
+### Consequences
+
+Positive: cascade write path becomes lock-free; the only remaining
+synchronisation in the hot path is the rayon scope for tile
+rasterisation.
+
+Negative: callers must `end_mutation_batch()` after batched mutations
+(or call `materialize_resolve_table()` explicitly) before the next
+cascade can see new atoms. Document this discipline.
+
+### See
+
+  * `crates/silksurf-dom/src/lib.rs::materialize_resolve_table`
+  * `crates/silksurf-core/src/interner.rs::values_slice`
+  * GLOSSARY -> Lock-free monotonic resolve table, resolve_fast
+
+---
+
+## AD-018: Persistent On-Disk Response Cache
+
+**Status**: Accepted
+**Date**: 2026-04-30 (codifies design from `main` = `418ea00`)
+**Deciders**: SNAZZY-WAFFLE roadmap (P2.S3)
+
+### Context
+
+The original `silksurf-net::ResponseCache` was in-memory only.
+`FetchOrigin::Cache` therefore could not fire across process
+invocations; the speculative-render revalidation path was unreachable
+at the CLI boundary.
+
+### Decision
+
+Introduce `CachedResponseDisk` (serde-serializable, no `Instant`) for
+on-disk JSON entries. `ResponseCache::with_disk(dir)` loads all
+`*.json` from `dir` on construction; `put()` writes-through (silent on
+I/O error -- the in-memory entry is still recorded). Filename =
+`FxHash(url)` hex (16 chars; structurally path-traversal-safe).
+
+`SpeculativeRenderer` constructors default to `with_disk()` rooted at
+`$XDG_CACHE_HOME/silksurf/http` (or `~/.cache/silksurf/http`).
+
+### Rationale
+
+  * Second-run cache hit: ~9 us vs ~327 ms cold network fetch on
+    chatgpt.com.
+  * `Cache-Control: private` is not yet enforced on disk; documented
+    as a threat-model gap (THREAT-MODEL.md Subsystem 7).
+  * No URL bytes in the filename; the hash is collision-resistant
+    enough for the workload.
+
+### Consequences
+
+Positive: speculative rendering finally has a write-through cache.
+First-fetch creates the directory and writes 3 files (the response,
+its conditional-GET headers, and the post-revalidation 304/200 result).
+
+Negative: the cache grows unboundedly until manually cleared; SIZE-
+bounded LRU is a future option. Disk encryption-at-rest discipline
+becomes a user concern. Documented in `OPERATIONS.md`.
+
+### See
+
+  * `crates/silksurf-net/src/cache.rs`
+  * `crates/silksurf-net/OPERATIONS.md`
+  * `docs/design/THREAT-MODEL.md` Subsystem 7
+
+---
+
+## AD-019: tls-probe as Supported Diagnostic Surface
+
+**Status**: Accepted
+**Date**: 2026-04-30 (codifies design from `main` = `63e7551`)
+**Deciders**: SNAZZY-WAFFLE roadmap (P2.S3)
+
+### Context
+
+TLS handshake failures were opaque -- no way to distinguish a
+corporate-proxy CA injection from an incomplete server chain (e.g. a
+Cloudflare host missing an intermediate) from a Nix env that simply
+has no system roots. Each failure required an ad-hoc
+`openssl s_client` session and manual cert-chain inspection.
+
+### Decision
+
+Adopt `tls-probe` (982 lines, lives at
+`crates/silksurf-app/src/bin/tls_probe.rs`) as a first-class
+diagnostic binary. Output sections:
+
+  1. Root-store inventory (counts of native + webpki-roots + extra
+     CAs, plus `SSL_CERT_*` env-var snapshot).
+  2. TLS handshake (negotiated protocol + cipher + ALPN + leaf-cert
+     chain in human-readable form, X.509 parsed via a pure-Rust ASN.1
+     DER parser).
+  3. DANE TLSA probe (DNSSEC-validated via hickory-resolver 0.26).
+  4. RCA paragraph for the four canonical UnknownIssuer failure
+     classes: Nix env / Cloudflare incomplete chain / corporate proxy
+     / TLSA FQDN trailing-dot bug.
+
+The runtime CA injection flag (`silksurf-app --tls-ca-file <path>`)
+shares the same loader (`rustls-pemfile`).
+
+### Rationale
+
+  * Single command goes from "TLS broke" to a printable RCA.
+  * The four canonical failure classes were observed during
+    development; embedding them in the tool means the next contributor
+    does not have to rediscover them.
+
+### Consequences
+
+Positive: handshake debugging is bounded to one tool. A 100-line
+in-crate smoke variant remains under `silksurf-tls/src/bin/` for
+silksurf-tls library development; consolidation tracked as a
+follow-up task.
+
+Negative: dependency on `hickory-resolver 0.26.0-beta.3` (unstable
+version pin); migration to stable hickory release tracked.
+
+### See
+
+  * `crates/silksurf-app/src/bin/tls_probe.rs`
+  * `docs/development/RUNBOOK-TLS-PROBE.md`
+
+---
+
+## AD-020: Workspace-Wide Canonical Error -- silksurf_core::SilkError
+
+**Status**: Accepted
+**Date**: 2026-04-30 (lands in SNAZZY-WAFFLE Wave 1 Batch 2)
+**Deciders**: SNAZZY-WAFFLE roadmap (P1.S1)
+
+### Context
+
+Per-crate error types proliferated: `CssError`, `DomError`,
+`TokenizeError`, `TreeBuildError`, `NetError`, `TlsConfigError`,
+`EngineError`, `JsError`. Cross-crate APIs either matched 7 variants
+or fell back to `Box<dyn Error>` with bad diagnostics. 184 unwrap /
+expect sites had no annotated invariants.
+
+### Decision
+
+`silksurf_core::SilkError` is the canonical workspace error. It is
+string-erased rather than generic-over-source-types, because
+silksurf-core has no rev-deps on its dependents (which would create
+cycles). Per-crate `From<MyError> for SilkError` impls live in the
+leaf crates that own the source types.
+
+`SilkError` variants: `InvalidInput(String)`,
+`Unsupported(String)`, `Css { offset, message }`, `Dom(String)`,
+`HtmlTokenize { offset, message }`, `HtmlTreeBuild(String)`,
+`Net(String)`, `Tls(String)`, `Engine(String)`, `Js(String)`,
+`Io(#[from] std::io::Error)`. `thiserror` provides the `Display`
+impl.
+
+The lint scripts `scripts/lint_unwrap.sh` and
+`scripts/lint_unsafe.sh` enforce the matching annotation discipline:
+every `.unwrap()`/`.expect(` site needs `// UNWRAP-OK: <invariant>`
+within 7 lines above; every `unsafe { ... }` block needs
+`// SAFETY: <invariant>` within 7 lines above. Both are wired into
+the local-gate fast pass.
+
+### Rationale
+
+  * The cross-crate boundary becomes one type; callers do not match
+    7 variants.
+  * The lints make adding new bare unwraps or unsafe blocks
+    impossible to merge accidentally.
+  * Per-crate types remain visible inside each crate for richer
+    pattern matching.
+
+### Consequences
+
+Positive: error-handling becomes mechanical at boundaries; the lint
+discipline scales (annotate any new site at write-time, not later).
+
+Negative: silksurf-html, silksurf-net, silksurf-tls grew a
+silksurf-core dependency (lightweight: thiserror + a small enum). The
+silksurf-js follow-up batch (~118 unannotated unwrap, ~40
+unannotated unsafe) is documented as deferred and currently excluded
+from the lint scope.
+
+### See
+
+  * `crates/silksurf-core/src/error.rs`
+  * `scripts/lint_unwrap.sh`, `scripts/lint_unsafe.sh`
+  * `docs/design/UNSAFE-CONTRACTS.md`
+  * GLOSSARY -> SilkError, UNWRAP-OK / SAFETY annotations
+
+---
+
 ## Decision Log
 
 | ID | Title | Status | Date | Impact |
@@ -693,6 +978,11 @@ a Wayland backend lands.
 | AD-008 | Stable-Rust Migration + MSRV Declaration | Accepted | 2026-04-30 | High |
 | AD-009 | Strict-Local-Only CI Policy | Accepted | 2026-04-30 | High |
 | AD-010 | GUI Backend Formalization (XCB-Only, Linux-First) | Accepted | 2026-04-30 | High |
+| AD-016 | Fused Render Pipeline (FusedWorkspace) | Accepted | 2026-04-30 | High |
+| AD-017 | Lock-free Monotonic Resolve Table | Accepted | 2026-04-30 | High |
+| AD-018 | Persistent On-Disk Response Cache | Accepted | 2026-04-30 | Medium |
+| AD-019 | tls-probe as Supported Diagnostic Surface | Accepted | 2026-04-30 | Medium |
+| AD-020 | Workspace-Wide Canonical Error (SilkError) | Accepted | 2026-04-30 | High |
 
 ---
 
