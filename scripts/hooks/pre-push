@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# silksurf pre-push hook: runs the local-gate full pass.
+# Installed via scripts/install-git-hooks.sh. See docs/development/LOCAL-GATE.md.
+#
+# Add MIRI=1 or FUZZ=1 to enable the corresponding opt-in checks; defaults
+# keep the hook fast enough for everyday pushes.
+set -euo pipefail
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+exec "${REPO_ROOT}/scripts/local_gate.sh" full

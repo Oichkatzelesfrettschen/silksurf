@@ -588,7 +588,8 @@ fn main() {
 
                         // CSS: cache hit path -- intern_rules against new DOM's interner.
                         let css_t0 = std::time::Instant::now();
-                        let new_stylesheet = new_doc.dom
+                        let new_stylesheet = new_doc
+                            .dom
                             .with_interner_mut(|interner| {
                                 renderer.get_or_parse_stylesheet(&css_text, interner)
                             })
@@ -631,11 +632,7 @@ fn main() {
                         let new_styled = new_fused.styles.iter().filter(|s| s.is_some()).count();
                         eprintln!(
                             "[SilkSurf] Re-render ({} styled nodes): CSS {:?} + fused {:?} + raster {:?} = {:?}",
-                            new_styled,
-                            css_elapsed,
-                            fused_elapsed,
-                            raster_elapsed,
-                            total,
+                            new_styled, css_elapsed, fused_elapsed, raster_elapsed, total,
                         );
                     }
                 }

@@ -95,24 +95,32 @@ fn lexer_benchmark(c: &mut Criterion) {
     // Medium input (10x)
     let medium = small.repeat(10);
     group.throughput(Throughput::Bytes(medium.len() as u64));
-    group.bench_with_input(BenchmarkId::new("medium", medium.len()), &medium, |b, input| {
-        b.iter(|| {
-            let lexer = Lexer::new(black_box(input));
-            let tokens: Vec<_> = lexer.collect();
-            black_box(tokens.len())
-        });
-    });
+    group.bench_with_input(
+        BenchmarkId::new("medium", medium.len()),
+        &medium,
+        |b, input| {
+            b.iter(|| {
+                let lexer = Lexer::new(black_box(input));
+                let tokens: Vec<_> = lexer.collect();
+                black_box(tokens.len())
+            });
+        },
+    );
 
     // Large input (100x)
     let large = small.repeat(100);
     group.throughput(Throughput::Bytes(large.len() as u64));
-    group.bench_with_input(BenchmarkId::new("large", large.len()), &large, |b, input| {
-        b.iter(|| {
-            let lexer = Lexer::new(black_box(input));
-            let tokens: Vec<_> = lexer.collect();
-            black_box(tokens.len())
-        });
-    });
+    group.bench_with_input(
+        BenchmarkId::new("large", large.len()),
+        &large,
+        |b, input| {
+            b.iter(|| {
+                let lexer = Lexer::new(black_box(input));
+                let tokens: Vec<_> = lexer.collect();
+                black_box(tokens.len())
+            });
+        },
+    );
 
     group.finish();
 }
@@ -125,13 +133,17 @@ fn token_types_benchmark(c: &mut Criterion) {
         "function const let var if else for while return class extends import export async await"
             .repeat(100);
     group.throughput(Throughput::Bytes(keywords.len() as u64));
-    group.bench_with_input(BenchmarkId::new("keywords", keywords.len()), &keywords, |b, input| {
-        b.iter(|| {
-            let lexer = Lexer::new(black_box(input));
-            let tokens: Vec<_> = lexer.collect();
-            black_box(tokens.len())
-        });
-    });
+    group.bench_with_input(
+        BenchmarkId::new("keywords", keywords.len()),
+        &keywords,
+        |b, input| {
+            b.iter(|| {
+                let lexer = Lexer::new(black_box(input));
+                let tokens: Vec<_> = lexer.collect();
+                black_box(tokens.len())
+            });
+        },
+    );
 
     // Operators
     let operators =
@@ -168,13 +180,17 @@ fn token_types_benchmark(c: &mut Criterion) {
     // Numbers
     let numbers = "42 3.14159 0xFF 0b1010 0o777 1e10 2.5e-3 123_456_789 0xDEAD_BEEF ".repeat(100);
     group.throughput(Throughput::Bytes(numbers.len() as u64));
-    group.bench_with_input(BenchmarkId::new("numbers", numbers.len()), &numbers, |b, input| {
-        b.iter(|| {
-            let lexer = Lexer::new(black_box(input));
-            let tokens: Vec<_> = lexer.collect();
-            black_box(tokens.len())
-        });
-    });
+    group.bench_with_input(
+        BenchmarkId::new("numbers", numbers.len()),
+        &numbers,
+        |b, input| {
+            b.iter(|| {
+                let lexer = Lexer::new(black_box(input));
+                let tokens: Vec<_> = lexer.collect();
+                black_box(tokens.len())
+            });
+        },
+    );
 
     group.finish();
 }
@@ -271,5 +287,10 @@ function example(x, y) { // inline comment
     group.finish();
 }
 
-criterion_group!(benches, lexer_benchmark, token_types_benchmark, simd_benchmark);
+criterion_group!(
+    benches,
+    lexer_benchmark,
+    token_types_benchmark,
+    simd_benchmark
+);
 criterion_main!(benches);

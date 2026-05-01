@@ -32,6 +32,7 @@
 use silksurf_dom::{Dom, NodeId};
 
 /// Pre-computed BFS-level decomposition for parallel layout.
+#[derive(Default)]
 pub struct LayoutNeighborTable {
     /// Start index of each BFS level in bfs_order.
     /// Level i contains bfs_order[level_starts[i]..level_starts[i+1]].
@@ -52,18 +53,6 @@ pub struct LayoutNeighborTable {
     /// Reverse map: NodeId -> flat BFS index.
     /// Enables O(1) node lookup for callers that hold a NodeId.
     pub node_to_bfs_idx: rustc_hash::FxHashMap<NodeId, u32>,
-}
-
-impl Default for LayoutNeighborTable {
-    fn default() -> Self {
-        Self {
-            level_starts: Vec::new(),
-            parent_idx: Vec::new(),
-            bfs_order: Vec::new(),
-            child_count: Vec::new(),
-            node_to_bfs_idx: rustc_hash::FxHashMap::default(),
-        }
-    }
 }
 
 impl LayoutNeighborTable {

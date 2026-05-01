@@ -778,7 +778,10 @@ fn is_identifier_start_byte(b: Option<u8>) -> bool {
 /// Check if a byte can continue an ASCII identifier
 #[inline]
 fn is_identifier_continue_byte(b: Option<u8>) -> bool {
-    matches!(b, Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'$'))
+    matches!(
+        b,
+        Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'$')
+    )
 }
 
 /// Iterator adapter for Lexer

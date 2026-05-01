@@ -983,7 +983,10 @@ impl RestElement<'_, '_> {
     #[must_use]
     pub fn span(&self) -> Span {
         // Span from ... to end of argument
-        Span::new(self.argument.span().start.saturating_sub(3), self.argument.span().end)
+        Span::new(
+            self.argument.span().start.saturating_sub(3),
+            self.argument.span().end,
+        )
     }
 }
 

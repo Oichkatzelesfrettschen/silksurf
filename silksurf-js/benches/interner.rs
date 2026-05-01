@@ -79,5 +79,10 @@ fn bench_repeated_hit(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_insert_heavy, bench_lookup_and_resolve, bench_repeated_hit);
+criterion_group!(
+    benches,
+    bench_insert_heavy,
+    bench_lookup_and_resolve,
+    bench_repeated_hit
+);
 criterion_main!(benches);

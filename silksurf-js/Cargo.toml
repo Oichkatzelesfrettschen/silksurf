@@ -2,7 +2,7 @@
 name = "silksurf-js"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.96.0"
+rust-version = "1.94.1"
 authors = ["SilkSurf Project"]
 description = "Pure Rust JavaScript engine - cleanroom implementation with zero-copy lexer, arena GC, and bytecode VM"
 license = "MIT OR Apache-2.0"

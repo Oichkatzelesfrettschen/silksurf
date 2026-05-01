@@ -545,7 +545,10 @@ mod tests {
 
     #[test]
     fn test_keyword_lookup() {
-        assert!(matches!(keyword_lookup("function"), Some(TokenKind::Function)));
+        assert!(matches!(
+            keyword_lookup("function"),
+            Some(TokenKind::Function)
+        ));
         assert!(matches!(keyword_lookup("const"), Some(TokenKind::Const)));
         assert!(keyword_lookup("notakeyword").is_none());
     }

@@ -480,7 +480,10 @@ mod tests {
         assert_eq!(Value::Boolean(true).to_js_string().as_str(), Some("true"));
         assert_eq!(Value::Number(42.0).to_js_string().as_str(), Some("42"));
         assert_eq!(Value::Number(3.14).to_js_string().as_str(), Some("3.14"));
-        assert_eq!(Value::string("hello").to_js_string().as_str(), Some("hello"));
+        assert_eq!(
+            Value::string("hello").to_js_string().as_str(),
+            Some("hello")
+        );
     }
 
     #[test]

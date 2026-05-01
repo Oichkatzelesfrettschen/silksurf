@@ -748,7 +748,9 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         {
             Some(self.parse_for_init_var()?)
         } else {
-            Some(ForInit::Expression(self.arena.alloc(self.parse_expression()?)))
+            Some(ForInit::Expression(
+                self.arena.alloc(self.parse_expression()?),
+            ))
         };
 
         // Check for for-in or for-of
@@ -869,7 +871,10 @@ impl<'src, 'arena> Parser<'src, 'arena> {
     ) -> ParseResult<Pattern<'src, 'arena>> {
         match expr {
             Expression::Identifier(ident) => Ok(Pattern::Identifier(ident.clone())),
-            _ => Err(ParseError::invalid_syntax(expr.span(), "Invalid destructuring pattern")),
+            _ => Err(ParseError::invalid_syntax(
+                expr.span(),
+                "Invalid destructuring pattern",
+            )),
         }
     }
 
@@ -1523,11 +1528,17 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             TokenKind::String(_) => self.parse_string_literal(),
             TokenKind::True => {
                 let span = self.advance().span;
-                Ok(Expression::Literal(Literal::Boolean(BooleanLiteral { value: true, span })))
+                Ok(Expression::Literal(Literal::Boolean(BooleanLiteral {
+                    value: true,
+                    span,
+                })))
             }
             TokenKind::False => {
                 let span = self.advance().span;
-                Ok(Expression::Literal(Literal::Boolean(BooleanLiteral { value: false, span })))
+                Ok(Expression::Literal(Literal::Boolean(BooleanLiteral {
+                    value: false,
+                    span,
+                })))
             }
             TokenKind::Null => {
                 let span = self.advance().span;
@@ -1715,7 +1726,10 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                 }
                 Ok(params)
             }
-            _ => Err(ParseError::invalid_syntax(expr.span(), "Invalid arrow function parameter")),
+            _ => Err(ParseError::invalid_syntax(
+                expr.span(),
+                "Invalid arrow function parameter",
+            )),
         }
     }
 
@@ -2234,7 +2248,10 @@ mod tests {
     fn test_object_literal_single_ident_key() {
         let arena = AstArena::new();
         let (program, errors) = Parser::new("var x = {a: 1};", &arena).parse();
-        assert!(errors.is_empty(), "Single ident key should parse: {errors:?}");
+        assert!(
+            errors.is_empty(),
+            "Single ident key should parse: {errors:?}"
+        );
         assert!(!program.body.is_empty());
     }
 
@@ -2242,7 +2259,10 @@ mod tests {
     fn test_object_literal_string_keys() {
         let arena = AstArena::new();
         let (program, errors) = Parser::new(r#"var x = {"a": 1};"#, &arena).parse();
-        assert!(errors.is_empty(), "Object literal with string keys should parse: {errors:?}");
+        assert!(
+            errors.is_empty(),
+            "Object literal with string keys should parse: {errors:?}"
+        );
         assert!(!program.body.is_empty());
     }
 
@@ -2251,9 +2271,11 @@ mod tests {
         // This is the pattern ChatGPT uses: window.x = {key: "value"}
         let arena = AstArena::new();
         let start = std::time::Instant::now();
-        let (program, errors) =
-            Parser::new(r#"window.__test = {"basename": "/", "future": {"a": true}};"#, &arena)
-                .parse();
+        let (program, errors) = Parser::new(
+            r#"window.__test = {"basename": "/", "future": {"a": true}};"#,
+            &arena,
+        )
+        .parse();
         let elapsed = start.elapsed();
         eprintln!(
             "Parse time: {elapsed:?}, errors: {}, stmts: {}",
@@ -2263,7 +2285,10 @@ mod tests {
         for e in &errors {
             eprintln!("  Error: {:?}", e);
         }
-        assert!(elapsed.as_secs() < 5, "Parser should not hang (took {elapsed:?})");
+        assert!(
+            elapsed.as_secs() < 5,
+            "Parser should not hang (took {elapsed:?})"
+        );
     }
 
     #[test]
@@ -2312,8 +2337,11 @@ mod tests {
     fn test_nested_object_assignment() {
         let arena = AstArena::new();
         let start = std::time::Instant::now();
-        let (program, errors) =
-            Parser::new(r#"window.__test = {"basename":"/","future":{"a":true}};"#, &arena).parse();
+        let (program, errors) = Parser::new(
+            r#"window.__test = {"basename":"/","future":{"a":true}};"#,
+            &arena,
+        )
+        .parse();
         let elapsed = start.elapsed();
         eprintln!(
             "nested obj time: {elapsed:?}, errors: {}, stmts: {}",
@@ -2363,7 +2391,10 @@ mod tests {
         let arena = AstArena::new();
         let (_program, errors) =
             Parser::new("var E = class MyError extends Error {};", &arena).parse();
-        assert!(errors.is_empty(), "class extends expression should parse: {errors:?}");
+        assert!(
+            errors.is_empty(),
+            "class extends expression should parse: {errors:?}"
+        );
     }
 
     #[test]

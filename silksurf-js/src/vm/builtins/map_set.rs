@@ -80,12 +80,16 @@ pub fn install(global: &mut Object) {
 
     global.set_by_str(
         "Map",
-        Value::NativeFunction(Rc::new(NativeFunction::new("Map", |args| make_map(args.first())))),
+        Value::NativeFunction(Rc::new(NativeFunction::new("Map", |args| {
+            make_map(args.first())
+        }))),
     );
 
     global.set_by_str(
         "Set",
-        Value::NativeFunction(Rc::new(NativeFunction::new("Set", |args| make_set(args.first())))),
+        Value::NativeFunction(Rc::new(NativeFunction::new("Set", |args| {
+            make_set(args.first())
+        }))),
     );
 
     /*
@@ -149,25 +153,28 @@ pub fn install(global: &mut Object) {
      */
     global.set_by_str(
         "FinalizationRegistry",
-        Value::NativeFunction(Rc::new(NativeFunction::new("FinalizationRegistry", |_args| {
-            let obj = Rc::new(RefCell::new(Object::new()));
-            {
-                let mut o = obj.borrow_mut();
-                o.set_by_str(
-                    "register",
-                    Value::NativeFunction(Rc::new(NativeFunction::new("register", |_| {
-                        Value::Undefined
-                    }))),
-                );
-                o.set_by_str(
-                    "unregister",
-                    Value::NativeFunction(Rc::new(NativeFunction::new("unregister", |_| {
-                        Value::Undefined
-                    }))),
-                );
-            }
-            Value::Object(obj)
-        }))),
+        Value::NativeFunction(Rc::new(NativeFunction::new(
+            "FinalizationRegistry",
+            |_args| {
+                let obj = Rc::new(RefCell::new(Object::new()));
+                {
+                    let mut o = obj.borrow_mut();
+                    o.set_by_str(
+                        "register",
+                        Value::NativeFunction(Rc::new(NativeFunction::new("register", |_| {
+                            Value::Undefined
+                        }))),
+                    );
+                    o.set_by_str(
+                        "unregister",
+                        Value::NativeFunction(Rc::new(NativeFunction::new("unregister", |_| {
+                            Value::Undefined
+                        }))),
+                    );
+                }
+                Value::Object(obj)
+            },
+        ))),
     );
 }
 

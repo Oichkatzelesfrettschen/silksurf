@@ -306,19 +306,23 @@ fn main() {
     let ws_per = ws_total / (ITERATIONS - 1);
 
     println!("--- fused pipeline (FusedWorkspace, zero-alloc steady-state) ---");
-    println!("  fused pass:   {:>8?}  per-iter  (iter 0 warm-up excluded)", ws_per);
     println!(
-        "  display items: {} (same as cold path)",
-        ws_items
+        "  fused pass:   {:>8?}  per-iter  (iter 0 warm-up excluded)",
+        ws_per
     );
+    println!("  display items: {} (same as cold path)", ws_items);
     println!();
 
-    let speedup_ws_vs_cold =
-        fused_per.as_nanos() as f64 / ws_per.as_nanos() as f64;
-    let speedup_ws_vs_3pass =
-        old_per.as_nanos() as f64 / ws_per.as_nanos() as f64;
-    println!("=== Speedup workspace vs cold fused: {:.2}x ===", speedup_ws_vs_cold);
-    println!("=== Speedup workspace vs 3-pass:     {:.2}x ===", speedup_ws_vs_3pass);
+    let speedup_ws_vs_cold = fused_per.as_nanos() as f64 / ws_per.as_nanos() as f64;
+    let speedup_ws_vs_3pass = old_per.as_nanos() as f64 / ws_per.as_nanos() as f64;
+    println!(
+        "=== Speedup workspace vs cold fused: {:.2}x ===",
+        speedup_ws_vs_cold
+    );
+    println!(
+        "=== Speedup workspace vs 3-pass:     {:.2}x ===",
+        speedup_ws_vs_3pass
+    );
     println!();
 
     // ---- RCA: sub-phase breakdown of workspace steady-state cost ----
@@ -336,7 +340,9 @@ fn main() {
         let t = Instant::now();
         rca_table.rebuild(&doc.dom, doc.document);
         let elapsed = t.elapsed();
-        if i > 0 { rebuild_total += elapsed; }
+        if i > 0 {
+            rebuild_total += elapsed;
+        }
     }
     let rebuild_per = rebuild_total / (ITERATIONS - 1);
 
@@ -352,7 +358,9 @@ fn main() {
             std::hint::black_box(_s);
         }
         let elapsed = t.elapsed();
-        if i > 0 { default_total += elapsed; }
+        if i > 0 {
+            default_total += elapsed;
+        }
     }
     let default_per = default_total / (ITERATIONS - 1);
 
@@ -363,10 +371,22 @@ fn main() {
     //   - display item push x27
     let cascade_only_per = ws_per.saturating_sub(rebuild_per);
 
-    println!("--- RCA: sub-phase breakdown of workspace steady-state ({} nodes) ---", n_nodes);
-    println!("  table.rebuild():           {:>8?}  per-iter  (FxHashMap clear+50 inserts)", rebuild_per);
-    println!("  cascade+layout+paint:      {:>8?}  per-iter  (ws.run minus rebuild)", cascade_only_per);
-    println!("  ComputedStyle::default x{}: {:>8?}  per-iter  (SmallVec<SmolStr> -- zero heap alloc)", n_nodes, default_per);
+    println!(
+        "--- RCA: sub-phase breakdown of workspace steady-state ({} nodes) ---",
+        n_nodes
+    );
+    println!(
+        "  table.rebuild():           {:>8?}  per-iter  (FxHashMap clear+50 inserts)",
+        rebuild_per
+    );
+    println!(
+        "  cascade+layout+paint:      {:>8?}  per-iter  (ws.run minus rebuild)",
+        cascade_only_per
+    );
+    println!(
+        "  ComputedStyle::default x{}: {:>8?}  per-iter  (SmallVec<SmolStr> -- zero heap alloc)",
+        n_nodes, default_per
+    );
     println!("  TOTAL ws.run():            {:>8?}  per-iter", ws_per);
     println!();
     println!("  APPLIED FIXES: SmolStr font_family (Fix 1), bitvec seen (Fix D),");
@@ -374,7 +394,10 @@ fn main() {
     println!("  fused tag+id+class (Fix F). ComputedStyle::default now zero-heap-alloc.");
     println!();
     let unaccounted = cascade_only_per.saturating_sub(default_per);
-    println!("  cascade+layout+paint minus default overhead: {:>8?}", unaccounted);
+    println!(
+        "  cascade+layout+paint minus default overhead: {:>8?}",
+        unaccounted
+    );
     println!("  (remaining: selector matching, apply_declaration, layout math)");
     println!();
 
@@ -386,13 +409,21 @@ fn main() {
     for i in 0..ITERATIONS {
         let t = Instant::now();
         for _ in 0..n_class_nodes {
-            let mut v: Vec<[u8; 24]> = Vec::new(); // same size as SelectorIdent (SmolStr=24)
-            v.push([0u8; 24]);
-            std::hint::black_box(&v);
-            drop(v);
+            // Deliberately Vec::new() + push to reproduce the pre-Fix-2
+            // two-allocation pattern (empty Vec, then growth on push).
+            // Rewriting to vec![] would change what is measured.
+            #[allow(clippy::vec_init_then_push)]
+            {
+                let mut v: Vec<[u8; 24]> = Vec::new(); // same size as SelectorIdent (SmolStr=24)
+                v.push([0u8; 24]);
+                std::hint::black_box(&v);
+                drop(v);
+            }
         }
         let elapsed = t.elapsed();
-        if i > 0 { class_vec_total += elapsed; }
+        if i > 0 {
+            class_vec_total += elapsed;
+        }
     }
     let class_vec_per = class_vec_total / (ITERATIONS - 1);
 
@@ -410,20 +441,37 @@ fn main() {
             drop(guard);
         }
         let elapsed = t.elapsed();
-        if i > 0 { rwlock_total += elapsed; }
+        if i > 0 {
+            rwlock_total += elapsed;
+        }
     }
     let rwlock_per = rwlock_total / (ITERATIONS - 1);
 
-    println!("  [REF] Vec alloc x{n_class_nodes} (eliminated): {:>8?}  per-iter  (was node_id_class_keys)", class_vec_per);
-    println!("  [REF] RwLock x{n_class_atoms} (eliminated):  {:>8?}  per-iter  (was dom.resolve)", rwlock_per);
+    println!(
+        "  [REF] Vec alloc x{n_class_nodes} (eliminated): {:>8?}  per-iter  (was node_id_class_keys)",
+        class_vec_per
+    );
+    println!(
+        "  [REF] RwLock x{n_class_atoms} (eliminated):  {:>8?}  per-iter  (was dom.resolve)",
+        rwlock_per
+    );
     println!();
 
     let sum_known = rebuild_per + default_per + class_vec_per + rwlock_per;
     let true_residual = ws_per.saturating_sub(sum_known);
-    println!("  Known overhead sum:          {:>8?}  (rebuild + default + Vec + RwLock)", sum_known);
-    println!("  Residual (selector + layout): {:>8?}  (pure algorithm work -- target floor)", true_residual);
+    println!(
+        "  Known overhead sum:          {:>8?}  (rebuild + default + Vec + RwLock)",
+        sum_known
+    );
+    println!(
+        "  Residual (selector + layout): {:>8?}  (pure algorithm work -- target floor)",
+        true_residual
+    );
     println!();
-    println!("  Fixes applied: SmolStr default (-{:?}), bitvec seen, workspace class_keys,", default_per);
+    println!(
+        "  Fixes applied: SmolStr default (-{:?}), bitvec seen, workspace class_keys,",
+        default_per
+    );
     println!("  pre-resolved class_strings, fused tag+id+class lookup.");
     println!("  Remaining: flatten DOM memory layout (DOD) for cache locality.");
     println!();

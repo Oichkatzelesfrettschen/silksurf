@@ -32,8 +32,7 @@
  */
 
 use silksurf_css::{
-    CascadeWorkspace, ComputedStyle, Display, StyleIndex, Stylesheet,
-    cascade_view::CascadeView,
+    CascadeWorkspace, ComputedStyle, Display, StyleIndex, Stylesheet, cascade_view::CascadeView,
     compute_style_for_node_with_workspace,
 };
 use silksurf_dom::{Dom, NodeId, NodeKind};
@@ -180,7 +179,11 @@ impl FusedWorkspace {
                 (None, viewport, viewport.y)
             } else {
                 let p = pidx as usize;
-                (self.styles[p].as_ref(), self.node_rects[p], self.block_cursors[p])
+                (
+                    self.styles[p].as_ref(),
+                    self.node_rects[p],
+                    self.block_cursors[p],
+                )
             };
 
             let style = compute_style_for_node_with_workspace(
@@ -216,7 +219,12 @@ impl FusedWorkspace {
                 - length_px(style.border.right);
             let height = length_px(style.line_height);
 
-            let content_rect = Rect { x, y, width, height };
+            let content_rect = Rect {
+                x,
+                y,
+                width,
+                height,
+            };
             self.node_rects[i] = content_rect;
 
             if pidx != u32::MAX {

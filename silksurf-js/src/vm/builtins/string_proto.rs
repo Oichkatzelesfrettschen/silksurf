@@ -121,15 +121,19 @@ pub fn get_string_method(s: &Rc<JsString>, name: &str) -> Option<Value> {
             };
             Value::string(&text[start..end])
         })),
-        "toLowerCase" | "toLocaleLowerCase" => {
-            Some(Box::new(move |_args: &[Value]| Value::string_owned(text.to_lowercase())))
-        }
-        "toUpperCase" | "toLocaleUpperCase" => {
-            Some(Box::new(move |_args: &[Value]| Value::string_owned(text.to_uppercase())))
-        }
+        "toLowerCase" | "toLocaleLowerCase" => Some(Box::new(move |_args: &[Value]| {
+            Value::string_owned(text.to_lowercase())
+        })),
+        "toUpperCase" | "toLocaleUpperCase" => Some(Box::new(move |_args: &[Value]| {
+            Value::string_owned(text.to_uppercase())
+        })),
         "trim" => Some(Box::new(move |_args: &[Value]| Value::string(text.trim()))),
-        "trimStart" => Some(Box::new(move |_args: &[Value]| Value::string(text.trim_start()))),
-        "trimEnd" => Some(Box::new(move |_args: &[Value]| Value::string(text.trim_end()))),
+        "trimStart" => Some(Box::new(move |_args: &[Value]| {
+            Value::string(text.trim_start())
+        })),
+        "trimEnd" => Some(Box::new(move |_args: &[Value]| {
+            Value::string(text.trim_end())
+        })),
         "split" => Some(Box::new(move |args: &[Value]| {
             let sep = args
                 .first()

@@ -1,161 +1,44 @@
-# SilkSurfJS Rustfmt Configuration
-# Consistent code formatting across the project
-# Last updated: 2025-12-30
+# silksurf-js rustfmt configuration -- stable-rustfmt compatible.
 #
-# Run with: cargo fmt
+# WHY: AD-008 migrated the workspace to stable Rust. Stable rustfmt rejects
+# nightly-only options with warnings, and the prior config had many of them.
+# This file is the pruned, stable-compatible subset; nightly-only knobs were
+# removed rather than kept-and-warned.
+#
+# Run with:   cargo fmt
 # Check with: cargo fmt -- --check
+# (the local-gate fast pass invokes the check form)
+#
+# To re-introduce a nightly-only option, first amend AD-008 to permit a
+# nightly rustfmt for this crate, then add the option back here.
 
-# =============================================================================
-# Edition and Stability
-# =============================================================================
-
-# Target Rust edition
+# Edition is stable; matches workspace.package.edition in the root Cargo.toml.
 edition = "2024"
 
-# Use stable features only (set to true for nightly-only options)
-unstable_features = false
-
-# =============================================================================
-# Indentation and Width
-# =============================================================================
-
-# Use spaces, not tabs
+# Indentation and width.
 hard_tabs = false
-
-# 4-space indentation
 tab_spaces = 4
-
-# Maximum line width
 max_width = 100
 
-# Width for comments
-comment_width = 80
-
-# Wrap long strings
-wrap_comments = false
-
-# =============================================================================
-# Imports
-# =============================================================================
-
-# Group imports: std, external, crate
-imports_granularity = "Module"
-
-# Sort imports alphabetically
+# Imports.
 reorder_imports = true
-
-# Group imports by kind
-group_imports = "StdExternalCrate"
-
-# Reorder modules
 reorder_modules = true
 
-# =============================================================================
-# Functions and Methods
-# =============================================================================
-
-# Minimum function call arguments to be formatted across multiple lines
-fn_call_width = 80
-
-# Function parameters formatting (replaces deprecated fn_args_layout)
+# Functions and methods.
 fn_params_layout = "Tall"
 
-# =============================================================================
-# Control Flow
-# =============================================================================
-
-# Brace style for control structures
-brace_style = "SameLineWhere"
-
-# Control brace style for single-arm match
-match_arm_blocks = true
-
-# Match arm leading pipes
+# Match arms.
 match_arm_leading_pipes = "Never"
 
-# Force multiline for blocks
-force_multiline_blocks = false
-
-# =============================================================================
-# Struct and Enum
-# =============================================================================
-
-# Struct field alignment
-struct_field_align_threshold = 0
-
-# Struct literal single-line threshold
-struct_lit_single_line = true
-
-# Use field init shorthand
+# Field init shorthand and try operator shorthand.
 use_field_init_shorthand = true
-
-# =============================================================================
-# Expressions
-# =============================================================================
-
-# Chain width before breaking
-chain_width = 60
-
-# Single-line if-else
-single_line_if_else_max_width = 50
-
-# Single-line let-else
-single_line_let_else_max_width = 50
-
-# =============================================================================
-# Type Declarations
-# =============================================================================
-
-# Use try shorthand (?)
 use_try_shorthand = true
 
-# =============================================================================
-# Macros
-# =============================================================================
-
-# Format macro metavariables
-format_macro_matchers = false
-
-# Format macro bodies
-format_macro_bodies = true
-
-# =============================================================================
-# Doc Comments
-# =============================================================================
-
-# Normalize doc comments
-normalize_doc_attributes = false
-
-# Format doc comments
-format_code_in_doc_comments = true
-
-# Doc comment code block width
-doc_comment_code_block_width = 80
-
-# =============================================================================
-# Miscellaneous
-# =============================================================================
-
-# Newline at end of file
+# Newline style.
 newline_style = "Unix"
 
-# Remove nested parens where possible
+# Remove nested parens where unambiguous.
 remove_nested_parens = true
 
-# Combine attribute derives
+# Combine consecutive #[derive(...)] attributes.
 merge_derives = true
-
-# Use shorthand for closures
-short_array_element_width_threshold = 10
-
-# Skip children (if needed for generated code)
-skip_children = false
-
-# =============================================================================
-# Generated and Special Files
-# =============================================================================
-
-# Files to ignore
-# ignore = [
-#     "src/generated/",
-# ]

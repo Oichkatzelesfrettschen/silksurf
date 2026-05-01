@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# silksurf pre-commit hook: runs the local-gate fast pass.
+# Installed via scripts/install-git-hooks.sh. See docs/development/LOCAL-GATE.md.
+set -euo pipefail
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+exec "${REPO_ROOT}/scripts/local_gate.sh" fast

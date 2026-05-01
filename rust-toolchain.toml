@@ -1,3 +1,12 @@
 [toolchain]
-channel = "nightly-2026-04-05"
+# Pinned to stable for reproducibility and to unblock cargo install distribution.
+# See docs/design/ARCHITECTURE-DECISIONS.md ADR-008 (Stable-Rust Migration + MSRV
+# Declaration) and docs/development/LOCAL-GATE.md for rationale.
+#
+# Why this exact version: 1.94.1 is the current stable channel. Edition 2024
+# stabilized in 1.85, so any 1.85+ stable would build the workspace; we pin a
+# specific patch for bit-reproducible local-gate runs across contributor
+# machines. Bump in lockstep with workspace.package.rust-version in Cargo.toml.
+channel = "1.94.1"
 components = ["clippy", "llvm-tools-preview", "rustfmt"]
+profile = "minimal"

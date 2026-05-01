@@ -252,9 +252,7 @@ fn matches_modifier_with_view(
             let class_idents = view.class_idents(entry);
             class_idents.iter().any(|ident| ident == name)
         }
-        SelectorModifier::Id(name) => {
-            view.id_ident(entry).is_some_and(|ident| ident == name)
-        }
+        SelectorModifier::Id(name) => view.id_ident(entry).is_some_and(|ident| ident == name),
         // Attribute selectors and pseudo-classes need raw DOM access
         SelectorModifier::Attribute(attribute) => matches_attribute(dom, node, attribute),
         SelectorModifier::PseudoClass(name) => matches_pseudo_class(dom, node, name),

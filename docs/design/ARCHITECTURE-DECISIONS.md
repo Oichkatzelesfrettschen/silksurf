@@ -501,33 +501,226 @@ for (int i = 0; i < regions->count; i++) {
 
 ---
 
+## AD-008: Stable-Rust Migration + MSRV Declaration
+
+**Status**: Accepted
+**Date**: 2026-04-30
+**Deciders**: SNAZZY-WAFFLE roadmap (P0)
+
+### Context
+
+Until 2026-04-30 the workspace pinned `nightly-2026-04-05` via
+`rust-toolchain.toml`. The pin was load-bearing only for `[unstable] gc =
+true` in `.cargo/config.toml` (a developer convenience that triggers Cargo's
+target-directory garbage collection). A workspace-wide grep confirmed
+**zero** `#![feature(...)]` directives in any crate.
+
+The nightly pin had three negative consequences:
+
+1. **Distribution blocker**: `cargo install` from crates.io requires stable.
+   Nightly-only crates cannot be published without users opting into a
+   nightly toolchain.
+2. **MSRV theatre**: `Cargo.toml` declared `rust-version = "1.96.0"` even
+   though that version did not exist as a stable release; the build was
+   never actually verified against the declared MSRV.
+3. **Reproducibility erosion**: nightly snapshots can change semantics
+   between consecutive days; pinning to a single nightly date is a fragile
+   reproducibility guarantee.
+
+### Decision
+
+Pin the workspace toolchain to a single, real stable Rust release. Match
+`workspace.package.rust-version` to the same exact version in lockstep, and
+propagate the value to every per-crate `Cargo.toml` `rust-version` field so
+the per-crate MSRV does not drift from the workspace MSRV.
+
+The current pin is **`1.94.1`** (released 2026-03-25). Bump in lockstep
+across `rust-toolchain.toml`, `Cargo.toml` `workspace.package.rust-version`,
+and every `crates/*/Cargo.toml` and `silksurf-js/Cargo.toml` per-crate
+`rust-version`.
+
+### Rationale
+
+  * Edition 2024 stabilized in Rust 1.85, so any 1.85+ stable will build
+    the workspace.
+  * Removing `[unstable] gc = true` costs only the periodic auto-cleanup of
+    `target/`; manual `cargo clean` or a contributor-side cron is a fine
+    substitute.
+  * The local-gate now has a dedicated MSRV verification step
+    (`scripts/local_gate.sh full`) that prints the active toolchain and
+    re-runs `cargo check --workspace --all-targets` so an MSRV violation
+    is impossible to ship silently.
+
+### Consequences
+
+Positive: `cargo install` distribution becomes possible (P9 release work
+unblocked); reproducibility tightens; MSRV theatre eliminated; Dependabot
+and similar dependency-update agents work normally.
+
+Negative: lose Cargo's nightly-only target-GC convenience; any future
+nightly-only feature requires a deliberate ADR amendment.
+
+### Alternatives Considered
+
+  * Stay on nightly with explicit ADR justification -- rejected because
+    the only justification was Cargo target-GC.
+  * Dual toolchain (stable for CI, nightly for dev) -- rejected as
+    unnecessary machinery; if a developer wants nightly tooling they can
+    use `rustup` overrides locally.
+
+---
+
+## AD-009: Strict-Local-Only CI Policy
+
+**Status**: Accepted
+**Date**: 2026-04-30
+**Deciders**: SNAZZY-WAFFLE roadmap (P0)
+
+### Context
+
+Cloud CI on push and pull_request is currently disabled
+(`.github/workflows/ci.yml` is `workflow_dispatch:`-only). The decision had
+not been formally captured as an ADR; new contributors had no way to
+distinguish "intentionally off" from "broken."
+
+### Decision
+
+Adopt strict-local-only CI as the canonical merge gate.
+`scripts/local_gate.sh` is the single source of truth for merge readiness.
+Pre-commit and pre-push git hooks (installed by
+`scripts/install-git-hooks.sh`) wire the fast and full gate modes into the
+everyday git flow. Cloud CI workflows remain `workflow_dispatch:`-only and
+serve as discoverability surfaces, not gates.
+
+### Rationale
+
+  * **Latency**: local execution catches failures before the work leaves
+    the machine; no GitHub Actions queue wait.
+  * **Cost**: CI minutes are nontrivial for a workspace this size with
+    LTO=fat release builds and a CMake/CTest pass.
+  * **Reproducibility**: every contributor runs the exact same gate on the
+    exact same toolchain (pinned by `rust-toolchain.toml`), so a green
+    local-gate on one machine implies a green local-gate on another.
+  * **No silent skip**: pre-push hook is mandatory; bypassing
+    (`--no-verify`) requires explicit operator acknowledgement, and the
+    bypass should be documented in the commit body.
+
+### Consequences
+
+Positive: fast feedback loop; deterministic gate; no CI minute spend;
+fewer surprise failures on `main`.
+
+Negative: outside contributors must install hooks before contributing;
+green status is invisible from the GitHub UI; long-running checks (miri,
+fuzz) become opt-in via `MIRI=1` / `FUZZ=1` rather than always-on.
+
+### Alternatives Considered
+
+  * Hybrid (local primary, cloud non-blocking) -- rejected for now
+    because non-blocking informational scans tend to be ignored. Can be
+    revisited if outside contributor friction grows.
+  * Flip to push/PR cloud gating -- rejected as a regression of this
+    policy; the local-gate is what this project chose deliberately.
+
+---
+
+## AD-010: GUI Backend Formalization -- XCB-Only, Linux-First
+
+**Status**: Accepted (amends AD-003)
+**Date**: 2026-04-30
+**Deciders**: SNAZZY-WAFFLE roadmap (P0/P6)
+
+### Context
+
+AD-003 ("Pure XCB GUI") established the cleanroom XCB choice in 2025-12-31
+but left the cross-platform posture implicit. `crates/silksurf-gui/src/
+lib.rs` is currently a single doc-comment line; the implementation work
+in roadmap P6 needs an explicit posture before code lands.
+
+### Decision
+
+Formalize XCB as the sole supported GUI backend for the v0.1 release line.
+Linux is the only supported host platform for v0.1. Wayland, macOS, and
+Windows are explicit future work tracked under separate ADRs.
+
+The crate API will keep the backend behind a small trait
+(`Window`, `EventLoop`) so a future Wayland or winit-based backend can be
+introduced as a feature flag without an API break, but no second backend
+ships in v0.1.
+
+### Rationale
+
+  * Cleanroom philosophy: XCB is a small, well-specified protocol; winit
+    or SDL would pull a large dependency that obscures the engine's
+    surface.
+  * Smallest dep footprint matches the rest of the workspace (rustls,
+    bumpalo, smallvec, etc.).
+  * The XCB binding pattern is already documented in
+    `docs/XCB_GUIDE.md`; we are codifying existing intent, not changing
+    direction.
+
+### Consequences
+
+Positive: clear scope for P6; smaller surface to test; no cross-backend
+abstraction tax during initial development.
+
+Negative: no macOS or Windows v0.1; non-Linux contributors cannot run the
+GUI demo locally (the headless engine + bench pipeline still work on any
+Unix); Wayland-first users cannot use silksurf as a desktop browser until
+a Wayland backend lands.
+
+### Alternatives Considered
+
+  * winit cross-platform -- rejected for v0.1 due to dep weight and
+    cleanroom drift; reasonable choice for v0.2+.
+  * Both XCB primary + winit feature flag in v0.1 -- rejected as
+    premature; the trait abstraction in this ADR keeps that path open
+    without paying the maintenance cost up-front.
+
+---
+
 ## Decision Log
 
 | ID | Title | Status | Date | Impact |
 |----|-------|--------|------|--------|
-| AD-001 | Cleanroom Implementation | ✅ Accepted | 2025-12-30 | High |
-| AD-002 | Hybrid Rust + C | ✅ Accepted | 2025-12-30 | High |
-| AD-003 | Pure XCB GUI | ✅ Accepted | 2025-12-31 | High |
-| AD-004 | Arena Allocator | ✅ Accepted | 2025-12-31 | Medium |
-| AD-005 | Test262 95% Target | ✅ Accepted | 2025-12-31 | Medium |
-| AD-006 | Neural Integration | 🟡 Experimental | 2025-12-31 | Low |
-| AD-007 | Damage Tracking | ✅ Accepted | 2025-12-31 | High |
+| AD-001 | Cleanroom Implementation | Accepted | 2025-12-30 | High |
+| AD-002 | Hybrid Rust + C | Accepted | 2025-12-30 | High |
+| AD-003 | Pure XCB GUI | Accepted | 2025-12-31 | High |
+| AD-004 | Arena Allocator | Accepted | 2025-12-31 | Medium |
+| AD-005 | Test262 95% Target | Accepted | 2025-12-31 | Medium |
+| AD-006 | Neural Integration | Experimental | 2025-12-31 | Low |
+| AD-007 | Damage Tracking | Accepted | 2025-12-31 | High |
+| AD-008 | Stable-Rust Migration + MSRV Declaration | Accepted | 2026-04-30 | High |
+| AD-009 | Strict-Local-Only CI Policy | Accepted | 2026-04-30 | High |
+| AD-010 | GUI Backend Formalization (XCB-Only, Linux-First) | Accepted | 2026-04-30 | High |
 
 ---
 
 ## Future ADRs
 
-**Planned**:
-- AD-008: Wayland Support Strategy
-- AD-009: Multi-Process Architecture (browser vs renderer processes)
-- AD-010: Extension API Design
-- AD-011: Network Stack (libcurl vs custom)
-- AD-012: Image Decoding (libpng/libjpeg vs custom)
+Planned (renumbered after the 2026-04-30 batch):
+
+  * AD-011: Wayland Support Strategy
+  * AD-012: Multi-Process Architecture (browser vs renderer processes)
+  * AD-013: Extension API Design
+  * AD-014: Network Stack (libcurl vs custom)
+  * AD-015: Image Decoding (libpng/libjpeg vs custom)
+  * AD-016: Fused Render Pipeline (capturing the design now in main)
+  * AD-017: Lock-free Monotonic Resolve Table
+  * AD-018: Persistent On-Disk Response Cache
+  * AD-019: tls-probe as Supported Diagnostic Surface
+  * AD-020: Error-Type Unification (`silksurf_core::SilkError`)
+
+The 2026-04-30 batch (AD-008..AD-010) covers foundations + GUI; AD-016..
+AD-020 are queued for the documentation-baseline phase (P2) of the
+SNAZZY-WAFFLE roadmap.
 
 ---
 
 ## See Also
 
-- `/CLAUDE.md` - Engineering standards
-- `/docs/roadmaps/PHASE-3-IMPLEMENTATION-ROADMAP.md` - Implementation status
-- `/silksurf-specification/` - Technical specifications
+  * `/CLAUDE.md` -- Engineering standards
+  * `/CONTRIBUTING.md` -- Onboarding and gate discipline
+  * `/docs/development/LOCAL-GATE.md` -- Local-gate reference
+  * `/docs/roadmaps/PHASE-3-IMPLEMENTATION-ROADMAP.md` -- Implementation status
+  * `/silksurf-specification/` -- Technical specifications

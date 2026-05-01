@@ -1505,13 +1505,16 @@ fn op_get_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
         {
             // .call(thisArg, ...args) -- simplified: ignore thisArg, call with args
             let original = obj.clone();
-            Value::NativeFunction(Rc::new(value::NativeFunction::new(&prop_name, move |args| {
-                let call_args: Vec<Value> = args.iter().skip(1).cloned().collect();
-                match &original {
-                    Value::NativeFunction(f) => f.call(&call_args),
-                    _ => Value::Undefined,
-                }
-            })))
+            Value::NativeFunction(Rc::new(value::NativeFunction::new(
+                &prop_name,
+                move |args| {
+                    let call_args: Vec<Value> = args.iter().skip(1).cloned().collect();
+                    match &original {
+                        Value::NativeFunction(f) => f.call(&call_args),
+                        _ => Value::Undefined,
+                    }
+                },
+            )))
         }
         /*
          * Static method dispatch for constructor NativeFunctions.
@@ -2490,7 +2493,11 @@ mod tests {
         let ast_arena = crate::parser::ast_arena::AstArena::new();
         let parser = crate::parser::Parser::new(source, &ast_arena);
         let (ast, errors) = parser.parse();
-        eprintln!("Script 6 parse: {} statements, {} errors", ast.body.len(), errors.len());
+        eprintln!(
+            "Script 6 parse: {} statements, {} errors",
+            ast.body.len(),
+            errors.len()
+        );
         for e in &errors {
             eprintln!("  Parse error: {e:?}");
         }
@@ -2531,8 +2538,16 @@ mod tests {
     fn test_e2e_script6_after_5_scripts() {
         // Simulate running 5 scripts before script 6, accumulating strings
         let mut vm = Vm::new();
-        run_script(&mut vm, "!function(){try{var d=document.documentElement}catch(e){}}();").ok();
-        run_script(&mut vm, "!function(){try{var t=localStorage.getItem('x')}catch(e){}}();").ok();
+        run_script(
+            &mut vm,
+            "!function(){try{var d=document.documentElement}catch(e){}}();",
+        )
+        .ok();
+        run_script(
+            &mut vm,
+            "!function(){try{var t=localStorage.getItem('x')}catch(e){}}();",
+        )
+        .ok();
         run_script(&mut vm, "var x = window.__oai_SSR_HTML || 0;").ok();
         run_script(&mut vm, "window.__test = {\"a\": 1};").ok();
         run_script(&mut vm, "requestAnimationFrame(function(){});").ok();
@@ -2585,7 +2600,10 @@ mod tests {
         let v =
             run_and_get_result("function add(x, y) { return x + y; } window.result = add(3, 4);")
                 .expect("script failed");
-        assert!(matches!(v, Value::Number(n) if n == 7.0), "expected 7, got {v:?}");
+        assert!(
+            matches!(v, Value::Number(n) if n == 7.0),
+            "expected 7, got {v:?}"
+        );
     }
 
     #[test]
@@ -2594,7 +2612,10 @@ mod tests {
             "function add({x, y}) { return x + y; } window.result = add({x: 3, y: 4});",
         )
         .expect("script failed");
-        assert!(matches!(v, Value::Number(n) if n == 7.0), "expected 7, got {v:?}");
+        assert!(
+            matches!(v, Value::Number(n) if n == 7.0),
+            "expected 7, got {v:?}"
+        );
     }
 
     #[test]
@@ -2603,7 +2624,10 @@ mod tests {
             "function sum([a, b]) { return a + b; } window.result = sum([10, 20]);",
         )
         .expect("script failed");
-        assert!(matches!(v, Value::Number(n) if n == 30.0), "expected 30, got {v:?}");
+        assert!(
+            matches!(v, Value::Number(n) if n == 30.0),
+            "expected 30, got {v:?}"
+        );
     }
 
     #[test]
@@ -2628,6 +2652,9 @@ mod tests {
             "function f(n, {a, b}) { return n + a + b; } window.result = f(1, {a: 2, b: 3});",
         )
         .expect("script failed");
-        assert!(matches!(v, Value::Number(n) if n == 6.0), "expected 6, got {v:?}");
+        assert!(
+            matches!(v, Value::Number(n) if n == 6.0),
+            "expected 6, got {v:?}"
+        );
     }
 }

@@ -326,8 +326,9 @@ impl HostObject for ElementHost {
              * We return zeros since we have no display to measure against.
              * This prevents TypeError on .top/.left/.width/.height access.
              */
-            "getBoundingClientRect" => {
-                Value::NativeFunction(Rc::new(NativeFunction::new("getBoundingClientRect", |_| {
+            "getBoundingClientRect" => Value::NativeFunction(Rc::new(NativeFunction::new(
+                "getBoundingClientRect",
+                |_| {
                     use crate::vm::value::Object;
                     let rect = Rc::new(RefCell::new(Object::new()));
                     let mut r = rect.borrow_mut();
@@ -338,8 +339,8 @@ impl HostObject for ElementHost {
                     }
                     drop(r);
                     Value::Object(rect)
-                })))
-            }
+                },
+            ))),
             /*
              * querySelector / querySelectorAll on element -- same as document
              * but scoped to this element's subtree.

@@ -231,8 +231,13 @@ impl Chunk {
 
         output.push_str("\n; Instructions:\n");
         for (offset, instr) in self.instructions.iter().enumerate() {
-            writeln!(output, "  {:04x}: {}", offset, Self::disassemble_instruction(*instr))
-                .unwrap();
+            writeln!(
+                output,
+                "  {:04x}: {}",
+                offset,
+                Self::disassemble_instruction(*instr)
+            )
+            .unwrap();
         }
 
         output
@@ -295,21 +300,51 @@ impl Chunk {
 
             // Comparison
             Eq => format!("EQ r{}, r{}, r{}", instr.dst(), instr.src1(), instr.src2()),
-            StrictEq => format!("STRICT_EQ r{}, r{}, r{}", instr.dst(), instr.src1(), instr.src2()),
+            StrictEq => format!(
+                "STRICT_EQ r{}, r{}, r{}",
+                instr.dst(),
+                instr.src1(),
+                instr.src2()
+            ),
             Ne => format!("NE r{}, r{}, r{}", instr.dst(), instr.src1(), instr.src2()),
-            StrictNe => format!("STRICT_NE r{}, r{}, r{}", instr.dst(), instr.src1(), instr.src2()),
+            StrictNe => format!(
+                "STRICT_NE r{}, r{}, r{}",
+                instr.dst(),
+                instr.src1(),
+                instr.src2()
+            ),
             Lt => format!("LT r{}, r{}, r{}", instr.dst(), instr.src1(), instr.src2()),
             Le => format!("LE r{}, r{}, r{}", instr.dst(), instr.src1(), instr.src2()),
             Gt => format!("GT r{}, r{}, r{}", instr.dst(), instr.src1(), instr.src2()),
             Ge => format!("GE r{}, r{}, r{}", instr.dst(), instr.src1(), instr.src2()),
 
             // Bitwise
-            BitAnd => format!("BITAND r{}, r{}, r{}", instr.dst(), instr.src1(), instr.src2()),
-            BitOr => format!("BITOR r{}, r{}, r{}", instr.dst(), instr.src1(), instr.src2()),
-            BitXor => format!("BITXOR r{}, r{}, r{}", instr.dst(), instr.src1(), instr.src2()),
+            BitAnd => format!(
+                "BITAND r{}, r{}, r{}",
+                instr.dst(),
+                instr.src1(),
+                instr.src2()
+            ),
+            BitOr => format!(
+                "BITOR r{}, r{}, r{}",
+                instr.dst(),
+                instr.src1(),
+                instr.src2()
+            ),
+            BitXor => format!(
+                "BITXOR r{}, r{}, r{}",
+                instr.dst(),
+                instr.src1(),
+                instr.src2()
+            ),
             Shl => format!("SHL r{}, r{}, r{}", instr.dst(), instr.src1(), instr.src2()),
             Shr => format!("SHR r{}, r{}, r{}", instr.dst(), instr.src1(), instr.src2()),
-            Ushr => format!("USHR r{}, r{}, r{}", instr.dst(), instr.src1(), instr.src2()),
+            Ushr => format!(
+                "USHR r{}, r{}, r{}",
+                instr.dst(),
+                instr.src1(),
+                instr.src2()
+            ),
 
             // Jumps
             Jmp => format!("JMP {}", instr.offset24()),
@@ -319,26 +354,71 @@ impl Chunk {
             JmpNotNullish => format!("JMP_NOT_NULLISH r{}, {}", instr.dst(), instr.offset16()),
 
             // Calls
-            Call => format!("CALL r{}, r{}, argc={}", instr.dst(), instr.src1(), instr.src2()),
+            Call => format!(
+                "CALL r{}, r{}, argc={}",
+                instr.dst(),
+                instr.src1(),
+                instr.src2()
+            ),
             CallMethod => {
-                format!("CALL_METHOD r{}, r{}, #{}", instr.dst(), instr.src1(), instr.src2())
+                format!(
+                    "CALL_METHOD r{}, r{}, #{}",
+                    instr.dst(),
+                    instr.src1(),
+                    instr.src2()
+                )
             }
             TailCall => format!("TAIL_CALL r{}, argc={}", instr.dst(), instr.src1()),
 
             // Properties
-            GetProp => format!("GET_PROP r{}, r{}, #{}", instr.dst(), instr.src1(), instr.src2()),
-            SetProp => format!("SET_PROP r{}, #{}, r{}", instr.dst(), instr.src1(), instr.src2()),
-            GetElem => format!("GET_ELEM r{}, r{}, r{}", instr.dst(), instr.src1(), instr.src2()),
-            SetElem => format!("SET_ELEM r{}, r{}, r{}", instr.dst(), instr.src1(), instr.src2()),
+            GetProp => format!(
+                "GET_PROP r{}, r{}, #{}",
+                instr.dst(),
+                instr.src1(),
+                instr.src2()
+            ),
+            SetProp => format!(
+                "SET_PROP r{}, #{}, r{}",
+                instr.dst(),
+                instr.src1(),
+                instr.src2()
+            ),
+            GetElem => format!(
+                "GET_ELEM r{}, r{}, r{}",
+                instr.dst(),
+                instr.src1(),
+                instr.src2()
+            ),
+            SetElem => format!(
+                "SET_ELEM r{}, r{}, r{}",
+                instr.dst(),
+                instr.src1(),
+                instr.src2()
+            ),
             DeleteProp => {
-                format!("DELETE_PROP r{}, r{}, #{}", instr.dst(), instr.src1(), instr.src2())
+                format!(
+                    "DELETE_PROP r{}, r{}, #{}",
+                    instr.dst(),
+                    instr.src1(),
+                    instr.src2()
+                )
             }
             DeleteElem => {
-                format!("DELETE_ELEM r{}, r{}, r{}", instr.dst(), instr.src1(), instr.src2())
+                format!(
+                    "DELETE_ELEM r{}, r{}, r{}",
+                    instr.dst(),
+                    instr.src1(),
+                    instr.src2()
+                )
             }
             In => format!("IN r{}, r{}, r{}", instr.dst(), instr.src1(), instr.src2()),
             Instanceof => {
-                format!("INSTANCEOF r{}, r{}, r{}", instr.dst(), instr.src1(), instr.src2())
+                format!(
+                    "INSTANCEOF r{}, r{}, r{}",
+                    instr.dst(),
+                    instr.src1(),
+                    instr.src2()
+                )
             }
 
             // Object creation
@@ -370,7 +450,13 @@ impl Chunk {
             SetGlobal => format!("SET_GLOBAL #{}, r{}", instr.const_idx(), instr.dst()),
 
             // Default for remaining opcodes
-            _ => format!("{:?} r{}, r{}, r{}", op, instr.dst(), instr.src1(), instr.src2()),
+            _ => format!(
+                "{:?} r{}, r{}, r{}",
+                op,
+                instr.dst(),
+                instr.src1(),
+                instr.src2()
+            ),
         }
     }
 
