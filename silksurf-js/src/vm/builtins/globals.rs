@@ -9,8 +9,14 @@ pub fn install(global: &mut Object) {
     global.set_by_str("parseFloat", native_fn("parseFloat", parse_float));
     global.set_by_str("isNaN", native_fn("isNaN", is_nan));
     global.set_by_str("isFinite", native_fn("isFinite", is_finite));
-    global.set_by_str("encodeURIComponent", native_fn("encodeURIComponent", encode_uri_component));
-    global.set_by_str("decodeURIComponent", native_fn("decodeURIComponent", decode_uri_component));
+    global.set_by_str(
+        "encodeURIComponent",
+        native_fn("encodeURIComponent", encode_uri_component),
+    );
+    global.set_by_str(
+        "decodeURIComponent",
+        native_fn("decodeURIComponent", decode_uri_component),
+    );
     global.set_by_str("encodeURI", native_fn("encodeURI", encode_uri));
     global.set_by_str("decodeURI", native_fn("decodeURI", decode_uri));
     // String/Number/Boolean as type conversion functions
@@ -149,8 +155,10 @@ pub fn install(global: &mut Object) {
     );
 
     // TextEncoderStream stub
-    global
-        .set_by_str("TextEncoderStream", native_fn("TextEncoderStream", |_args| Value::Undefined));
+    global.set_by_str(
+        "TextEncoderStream",
+        native_fn("TextEncoderStream", |_args| Value::Undefined),
+    );
 }
 
 fn parse_int(args: &[Value]) -> Value {
@@ -270,7 +278,10 @@ fn encode_uri_component(args: &[Value]) -> Value {
     let mut result = String::with_capacity(text.len());
     for byte in text.bytes() {
         if byte.is_ascii_alphanumeric()
-            || matches!(byte, b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')')
+            || matches!(
+                byte,
+                b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')'
+            )
         {
             result.push(byte as char);
         } else {

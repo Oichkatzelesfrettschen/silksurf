@@ -15,7 +15,11 @@ let b = 2;
     // Parse larger source
     let large_source: String = source.repeat(1000);
     let bytes = large_source.len();
-    println!("Source size: {} bytes ({:.2} KB)", bytes, bytes as f64 / 1024.0);
+    println!(
+        "Source size: {} bytes ({:.2} KB)",
+        bytes,
+        bytes as f64 / 1024.0
+    );
 
     let arena = AstArena::new();
 

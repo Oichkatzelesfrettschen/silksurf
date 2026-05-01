@@ -110,7 +110,8 @@ impl CascadeView {
 
         let node_count = dom.node_count();
         // Pre-size entries to node_count, filling non-element nodes with defaults.
-        self.entries.reserve(node_count.saturating_sub(self.entries.capacity()));
+        self.entries
+            .reserve(node_count.saturating_sub(self.entries.capacity()));
 
         for idx in 0..node_count {
             let id = NodeId::from_raw(idx);
@@ -122,7 +123,7 @@ impl CascadeView {
                 .flatten()
                 .map(|p| {
                     let raw = p.raw();
-                    if raw <= u16::MAX as usize - 1 {
+                    if raw < u16::MAX as usize {
                         raw as u16
                     } else {
                         NO_PARENT
@@ -163,14 +164,11 @@ impl CascadeView {
                 if attr.name == AttributeName::Id {
                     if let Some(atom) = attr.value_atom {
                         id_index = self.idents.len() as u32;
-                        self.idents.push(SelectorIdent::new_with_atom(
-                            attr.value.clone(),
-                            atom,
-                        ));
+                        self.idents
+                            .push(SelectorIdent::new_with_atom(attr.value.clone(), atom));
                     } else if !attr.value.is_empty() {
                         id_index = self.idents.len() as u32;
-                        self.idents
-                            .push(SelectorIdent::from(attr.value.clone()));
+                        self.idents.push(SelectorIdent::from(attr.value.clone()));
                     }
                     break; // at most one id attribute
                 }
@@ -183,9 +181,7 @@ impl CascadeView {
                     continue;
                 }
                 if !attr.class_strings.is_empty() {
-                    for (s, &atom) in
-                        attr.class_strings.iter().zip(attr.value_atoms.iter())
-                    {
+                    for (s, &atom) in attr.class_strings.iter().zip(attr.value_atoms.iter()) {
                         self.idents
                             .push(SelectorIdent::new_with_atom(s.clone(), atom));
                     }

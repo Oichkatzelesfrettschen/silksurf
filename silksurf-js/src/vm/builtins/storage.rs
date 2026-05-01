@@ -88,7 +88,9 @@ fn make_storage() -> Value {
     )));
 
     let store_len = Rc::clone(&store);
-    let length = native_fn("length", move |_args| Value::Number(store_len.borrow().len() as f64));
+    let length = native_fn("length", move |_args| {
+        Value::Number(store_len.borrow().len() as f64)
+    });
 
     {
         let mut o = obj_rc.borrow_mut();

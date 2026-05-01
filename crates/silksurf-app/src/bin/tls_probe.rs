@@ -157,7 +157,10 @@ fn main() {
              */
             println!("[tls] handshake FAILED: {e:?}");
             println!("[tls] (partial) protocol: {:?}", conn.protocol_version());
-            println!("[tls] (partial) cipher: {:?}", conn.negotiated_cipher_suite());
+            println!(
+                "[tls] (partial) cipher: {:?}",
+                conn.negotiated_cipher_suite()
+            );
             print_peer_certs(&conn);
 
             println!("\n--- root cause analysis ---");
@@ -326,10 +329,18 @@ fn probe_dane(host: &str, port: u16) {
             println!("[dane] {} TLSA record(s):", records.len());
             for (i, tlsa) in records.iter().enumerate() {
                 let usage_str = match tlsa.cert_usage {
-                    hickory_proto::rr::rdata::tlsa::CertUsage::PkixTa => "0 PKIX-TA (CA constraint)",
-                    hickory_proto::rr::rdata::tlsa::CertUsage::PkixEe => "1 PKIX-EE (service cert constraint)",
-                    hickory_proto::rr::rdata::tlsa::CertUsage::DaneTa => "2 DANE-TA (trust anchor assertion)",
-                    hickory_proto::rr::rdata::tlsa::CertUsage::DaneEe => "3 DANE-EE (domain-issued cert)",
+                    hickory_proto::rr::rdata::tlsa::CertUsage::PkixTa => {
+                        "0 PKIX-TA (CA constraint)"
+                    }
+                    hickory_proto::rr::rdata::tlsa::CertUsage::PkixEe => {
+                        "1 PKIX-EE (service cert constraint)"
+                    }
+                    hickory_proto::rr::rdata::tlsa::CertUsage::DaneTa => {
+                        "2 DANE-TA (trust anchor assertion)"
+                    }
+                    hickory_proto::rr::rdata::tlsa::CertUsage::DaneEe => {
+                        "3 DANE-EE (domain-issued cert)"
+                    }
                     hickory_proto::rr::rdata::tlsa::CertUsage::Unassigned(v) => {
                         &format!("? (unassigned {v})")
                     }
@@ -344,7 +355,9 @@ fn probe_dane(host: &str, port: u16) {
                     hickory_proto::rr::rdata::tlsa::Selector::Private => "255 (private)",
                 };
                 let matching_str = match tlsa.matching {
-                    hickory_proto::rr::rdata::tlsa::Matching::Raw => "0 (full -- not hash-compared)",
+                    hickory_proto::rr::rdata::tlsa::Matching::Raw => {
+                        "0 (full -- not hash-compared)"
+                    }
                     hickory_proto::rr::rdata::tlsa::Matching::Sha256 => "1 SHA-256",
                     hickory_proto::rr::rdata::tlsa::Matching::Sha512 => "2 SHA-512",
                     hickory_proto::rr::rdata::tlsa::Matching::Unassigned(v) => {
@@ -358,7 +371,9 @@ fn probe_dane(host: &str, port: u16) {
                 );
                 println!("             data={data_hex}");
             }
-            println!("[dane] result: records-found (compare sha256 above with SHA-256 records for match check)");
+            println!(
+                "[dane] result: records-found (compare sha256 above with SHA-256 records for match check)"
+            );
         }
         Err(msg) => {
             if msg.contains("SERVFAIL") || msg.contains("DNSSEC") || msg.contains("Bogus") {
@@ -419,47 +434,84 @@ fn diagnose_tls_error(e: &std::io::Error, host: &str, diag: &silksurf_tls::RootS
     if msg.contains("UnknownIssuer") || msg.contains("unknown ca") {
         println!("  CAUSE: Server certificate signed by a CA not in our trust store.");
         if diag.native_certs_loaded == 0 {
-            println!("  ROOT : 0 native certs loaded -- likely Nix shell / container with no SSL_CERT_FILE.");
+            println!(
+                "  ROOT : 0 native certs loaded -- likely Nix shell / container with no SSL_CERT_FILE."
+            );
             println!("  FIX A: export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt");
-            println!("  FIX B: export NIX_SSL_CERT_FILE=$(nix eval --raw nixpkgs#cacert)/etc/ssl/certs/ca-bundle.crt");
+            println!(
+                "  FIX B: export NIX_SSL_CERT_FILE=$(nix eval --raw nixpkgs#cacert)/etc/ssl/certs/ca-bundle.crt"
+            );
             println!("  FIX C: tls-probe {} --ca /path/to/ca-bundle.pem", host);
-            println!("  FIX D: silksurf-app --tls-ca-file /path/to/ca-bundle.pem https://{}", host);
+            println!(
+                "  FIX D: silksurf-app --tls-ca-file /path/to/ca-bundle.pem https://{}",
+                host
+            );
         } else {
             println!(
                 "  ROOT : {} native certs loaded but issuing CA absent -- corporate proxy or private PKI.",
                 diag.native_certs_loaded
             );
-            println!("  NOTE : Also possible: server sent an incomplete chain (missing intermediate).");
-            println!("         Verify with: curl -v https://{} 2>&1 | grep -E 'SSL|certificate'", host);
-            println!("         OpenSSL error 20 (unable to get local issuer) confirms incomplete chain.");
+            println!(
+                "  NOTE : Also possible: server sent an incomplete chain (missing intermediate)."
+            );
+            println!(
+                "         Verify with: curl -v https://{} 2>&1 | grep -E 'SSL|certificate'",
+                host
+            );
+            println!(
+                "         OpenSSL error 20 (unable to get local issuer) confirms incomplete chain."
+            );
             println!("  FIX A: Fetch the missing intermediate via AIA URI in the leaf cert.");
-            println!("  FIX B: silksurf-app --tls-ca-file /path/to/issuer.pem https://{}", host);
+            println!(
+                "  FIX B: silksurf-app --tls-ca-file /path/to/issuer.pem https://{}",
+                host
+            );
             println!("  INFO : For corporate proxy: obtain CA from your IT/security team.");
         }
-        println!("  INFO : run `tls-probe {}` after applying fix to confirm.", host);
+        println!(
+            "  INFO : run `tls-probe {}` after applying fix to confirm.",
+            host
+        );
     } else if msg.contains("InvalidCertificate") && msg.contains("Expired") {
         println!("  CAUSE: Server certificate has expired.");
         println!("  FIX  : Contact the server operator to renew the certificate.");
-        println!("  TEMP : silksurf-app --insecure https://{} (DANGEROUS -- disables ALL verification)", host);
+        println!(
+            "  TEMP : silksurf-app --insecure https://{} (DANGEROUS -- disables ALL verification)",
+            host
+        );
     } else if msg.contains("InvalidCertificate") && msg.contains("NotValidYet") {
-        println!("  CAUSE: Server certificate not yet valid (clock skew or premature cert issuance).");
+        println!(
+            "  CAUSE: Server certificate not yet valid (clock skew or premature cert issuance)."
+        );
         println!("  FIX A: Verify system clock is correct: date && timedatectl status");
         println!("  FIX B: Check ntpd/chrony is running: systemctl status chronyd");
     } else if msg.contains("InvalidCertificate") && msg.contains("NotValidForName") {
-        println!("  CAUSE: Certificate CN/SAN does not match hostname '{}'.", host);
-        println!("  INFO : SNI misconfiguration, load balancer presenting wrong cert, or wrong IP.");
+        println!(
+            "  CAUSE: Certificate CN/SAN does not match hostname '{}'.",
+            host
+        );
+        println!(
+            "  INFO : SNI misconfiguration, load balancer presenting wrong cert, or wrong IP."
+        );
         println!("  DEBUG: compare SANs printed above against the hostname.");
     } else if msg.contains("PeerSentFatalAlert") && msg.contains("HandshakeFailure") {
         println!("  CAUSE: Server rejected TLS handshake (cipher or protocol version mismatch).");
-        println!("  INFO : rustls requires TLS 1.2+. Verify server is not restricted to TLS 1.0/1.1.");
+        println!(
+            "  INFO : rustls requires TLS 1.2+. Verify server is not restricted to TLS 1.0/1.1."
+        );
     } else if msg.contains("NoCertificatesPresented") {
-        println!("  CAUSE: Server sent no certificates -- likely not a TLS service on port {}.", diag.total_roots);
+        println!(
+            "  CAUSE: Server sent no certificates -- likely not a TLS service on port {}.",
+            diag.total_roots
+        );
         println!("  INFO : Confirm you are connecting to an HTTPS endpoint.");
     } else {
         println!("  (no specific pattern matched for this error)");
         println!("  raw error: {msg}");
-        println!("  mozilla_roots={} native_loaded={} native_added={}",
-            diag.mozilla_roots, diag.native_certs_loaded, diag.native_certs_added);
+        println!(
+            "  mozilla_roots={} native_loaded={} native_added={}",
+            diag.mozilla_roots, diag.native_certs_loaded, diag.native_certs_added
+        );
     }
 }
 
@@ -486,28 +538,22 @@ fn sha256(data: &[u8]) -> [u8; 32] {
     // Initial hash values: first 32 bits of fractional parts of sqrt(p) for
     // the first 8 primes. (FIPS 180-4 section 5.3.3)
     let mut h: [u32; 8] = [
-        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-        0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+        0x5be0cd19,
     ];
     // Round constants: first 32 bits of fractional parts of cbrt(p) for the
     // first 64 primes. (FIPS 180-4 section 4.2.2)
     const K: [u32; 64] = [
-        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
-        0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
-        0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
-        0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
-        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
-        0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
-        0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
-        0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
-        0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
+        0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
+        0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
+        0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
+        0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+        0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
+        0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
+        0xc67178f2,
     ];
 
     // Pre-processing: bit-length-prefixed padding to 512-bit boundary.
@@ -532,12 +578,8 @@ fn sha256(data: &[u8]) -> [u8; 32] {
             ]);
         }
         for i in 16..64 {
-            let s0 = w[i - 15].rotate_right(7)
-                ^ w[i - 15].rotate_right(18)
-                ^ (w[i - 15] >> 3);
-            let s1 = w[i - 2].rotate_right(17)
-                ^ w[i - 2].rotate_right(19)
-                ^ (w[i - 2] >> 10);
+            let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
+            let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
             w[i] = w[i - 16]
                 .wrapping_add(s0)
                 .wrapping_add(w[i - 7])
@@ -622,7 +664,7 @@ mod asn1_cert {
 
     // OID byte values for Name attributes we care about.
     const OID_CN: &[u8] = &[0x55, 0x04, 0x03]; // id-at-commonName
-    const OID_O: &[u8] = &[0x55, 0x04, 0x0a];  // id-at-organizationName
+    const OID_O: &[u8] = &[0x55, 0x04, 0x0a]; // id-at-organizationName
     const OID_SAN: &[u8] = &[0x55, 0x1d, 0x11]; // id-ce-subjectAltName
 
     pub fn parse_cert_info(der: &[u8]) -> Option<CertInfo> {
@@ -644,7 +686,10 @@ mod asn1_cert {
 
         // issuer Name
         let (issuer, new_cur) = match read_tlv_at(tbs, cur) {
-            Some((tlv, c)) => (decode_name(tlv).unwrap_or_else(|| "(?)".to_string()), cur + c),
+            Some((tlv, c)) => (
+                decode_name(tlv).unwrap_or_else(|| "(?)".to_string()),
+                cur + c,
+            ),
             None => ("(no issuer)".to_string(), cur),
         };
         cur = new_cur;
@@ -652,7 +697,8 @@ mod asn1_cert {
         // validity Validity
         let (not_before, not_after, new_cur) = match read_tlv_at(tbs, cur) {
             Some((tlv, c)) => {
-                let (nb, na) = decode_validity(tlv).unwrap_or_else(|| ("?".to_string(), "?".to_string()));
+                let (nb, na) =
+                    decode_validity(tlv).unwrap_or_else(|| ("?".to_string(), "?".to_string()));
                 (nb, na, cur + c)
             }
             None => ("?".to_string(), "?".to_string(), cur),
@@ -661,7 +707,10 @@ mod asn1_cert {
 
         // subject Name
         let (subject, new_cur) = match read_tlv_at(tbs, cur) {
-            Some((tlv, c)) => (decode_name(tlv).unwrap_or_else(|| "(?)".to_string()), cur + c),
+            Some((tlv, c)) => (
+                decode_name(tlv).unwrap_or_else(|| "(?)".to_string()),
+                cur + c,
+            ),
             None => ("(no subject)".to_string(), cur),
         };
         cur = new_cur;
@@ -685,7 +734,13 @@ mod asn1_cert {
             }
         }
 
-        Some(CertInfo { subject, issuer, not_before, not_after, sans })
+        Some(CertInfo {
+            subject,
+            issuer,
+            not_before,
+            not_after,
+            sans,
+        })
     }
 
     // ---- Name (Distinguished Name) decoding ---------------------------------
@@ -722,7 +777,11 @@ mod asn1_cert {
             };
             parts.push(format!("{label}={val_str}"));
         }
-        if parts.is_empty() { None } else { Some(parts.join(", ")) }
+        if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join(", "))
+        }
     }
 
     // ---- Validity -----------------------------------------------------------
@@ -745,11 +804,24 @@ mod asn1_cert {
             UTC_TIME if s.len() >= 12 => {
                 let yy: u32 = s[..2].parse().ok()?;
                 let yyyy = if yy >= 50 { 1900 + yy } else { 2000 + yy };
-                Some(format!("{yyyy}-{}-{} {}:{}:{} Z", &s[2..4], &s[4..6], &s[6..8], &s[8..10], &s[10..12]))
+                Some(format!(
+                    "{yyyy}-{}-{} {}:{}:{} Z",
+                    &s[2..4],
+                    &s[4..6],
+                    &s[6..8],
+                    &s[8..10],
+                    &s[10..12]
+                ))
             }
-            GEN_TIME if s.len() >= 14 => {
-                Some(format!("{}-{}-{} {}:{}:{} Z", &s[..4], &s[4..6], &s[6..8], &s[8..10], &s[10..12], &s[12..14]))
-            }
+            GEN_TIME if s.len() >= 14 => Some(format!(
+                "{}-{}-{} {}:{}:{} Z",
+                &s[..4],
+                &s[4..6],
+                &s[6..8],
+                &s[8..10],
+                &s[10..12],
+                &s[12..14]
+            )),
             _ => Some(s.to_string()),
         }
     }
@@ -779,29 +851,54 @@ mod asn1_cert {
         let mut result = Vec::new();
         let mut cur = 0;
         while cur < extensions_seq.len() {
-            let Some((ext_tlv, consumed)) = read_tlv_at(extensions_seq, cur) else { break };
+            let Some((ext_tlv, consumed)) = read_tlv_at(extensions_seq, cur) else {
+                break;
+            };
             cur += consumed;
-            let Some((ext_body, _)) = peel_seq(ext_tlv) else { continue };
-            if ext_body.first() != Some(&OID) { continue; }
-            let Some((oid_tlv, oid_consumed)) = read_tlv_at(ext_body, 0) else { continue };
+            let Some((ext_body, _)) = peel_seq(ext_tlv) else {
+                continue;
+            };
+            if ext_body.first() != Some(&OID) {
+                continue;
+            }
+            let Some((oid_tlv, oid_consumed)) = read_tlv_at(ext_body, 0) else {
+                continue;
+            };
             // oid_tlv is tag + length + value; extract just the value bytes.
-            let Some((oid_len, oid_hlen)) = read_len(&oid_tlv[1..]) else { continue };
-            if &oid_tlv[1 + oid_hlen..1 + oid_hlen + oid_len] != OID_SAN { continue; }
+            let Some((oid_len, oid_hlen)) = read_len(&oid_tlv[1..]) else {
+                continue;
+            };
+            if &oid_tlv[1 + oid_hlen..1 + oid_hlen + oid_len] != OID_SAN {
+                continue;
+            }
             // Skip optional BOOLEAN critical flag.
             let mut inner = oid_consumed;
             if ext_body.get(inner) == Some(&0x01) {
-                inner = match skip_tlv(ext_body, inner) { Some(n) => n, None => continue };
+                inner = match skip_tlv(ext_body, inner) {
+                    Some(n) => n,
+                    None => continue,
+                };
             }
             // OCTET STRING wrapping GeneralNames SEQUENCE.
-            if ext_body.get(inner) != Some(&0x04) { continue; }
-            let Some((octet_tlv, _)) = read_tlv_at(ext_body, inner) else { continue };
-            let Some((octet_len, octet_hlen)) = read_len(&octet_tlv[1..]) else { continue };
+            if ext_body.get(inner) != Some(&0x04) {
+                continue;
+            }
+            let Some((octet_tlv, _)) = read_tlv_at(ext_body, inner) else {
+                continue;
+            };
+            let Some((octet_len, octet_hlen)) = read_len(&octet_tlv[1..]) else {
+                continue;
+            };
             let gn_der = &octet_tlv[1 + octet_hlen..1 + octet_hlen + octet_len];
-            let Some((gn_seq, _)) = peel_seq(gn_der) else { continue };
+            let Some((gn_seq, _)) = peel_seq(gn_der) else {
+                continue;
+            };
             let mut gn = 0;
             while gn < gn_seq.len() {
                 let tag = gn_seq[gn];
-                let Some((len, hlen)) = read_len(&gn_seq[gn + 1..]) else { break };
+                let Some((len, hlen)) = read_len(&gn_seq[gn + 1..]) else {
+                    break;
+                };
                 let val = &gn_seq[gn + 1 + hlen..gn + 1 + hlen + len];
                 match tag & 0x1f {
                     2 => {
@@ -812,7 +909,8 @@ mod asn1_cert {
                     7 => match val.len() {
                         4 => result.push(format!("{}.{}.{}.{}", val[0], val[1], val[2], val[3])),
                         16 => {
-                            let w: Vec<String> = val.chunks(2)
+                            let w: Vec<String> = val
+                                .chunks(2)
                                 .map(|c| format!("{:02x}{:02x}", c[0], c[1]))
                                 .collect();
                             result.push(w.join(":"));
@@ -834,20 +932,28 @@ mod asn1_cert {
     }
 
     fn peel_tag(der: &[u8], expected: u8) -> Option<(&[u8], usize)> {
-        if der.first() != Some(&expected) { return None; }
+        if der.first() != Some(&expected) {
+            return None;
+        }
         let (len, hlen) = read_len(&der[1..])?;
         let end = 1 + hlen + len;
-        if end > der.len() { return None; }
+        if end > der.len() {
+            return None;
+        }
         Some((&der[1 + hlen..end], end))
     }
 
     /// Return (contents_slice, total_bytes_consumed) for the TLV starting at offset.
     fn read_tlv_at(buf: &[u8], offset: usize) -> Option<(&[u8], usize)> {
         let b = &buf[offset..];
-        if b.is_empty() { return None; }
+        if b.is_empty() {
+            return None;
+        }
         let (len, hlen) = read_len(&b[1..])?;
         let total = 1 + hlen + len;
-        if total > b.len() { return None; }
+        if total > b.len() {
+            return None;
+        }
         Some((&b[..total], total))
     }
 
@@ -863,7 +969,9 @@ mod asn1_cert {
             Some((first as usize, 1))
         } else {
             let n = (first & 0x7f) as usize;
-            if n == 0 || n > 4 || buf.len() < 1 + n { return None; }
+            if n == 0 || n > 4 || buf.len() < 1 + n {
+                return None;
+            }
             let mut len = 0usize;
             for &b in &buf[1..1 + n] {
                 len = (len << 8) | b as usize;
@@ -871,5 +979,4 @@ mod asn1_cert {
             Some((len, 1 + n))
         }
     }
-
 }

@@ -17,7 +17,11 @@ fn create_loop_chunk(iterations: u16) -> Chunk {
     let mut chunk = Chunk::new();
 
     // r0 = counter (start at iterations)
-    chunk.emit(Instruction::new_r_offset(Opcode::LoadSmi, 0, iterations as i16));
+    chunk.emit(Instruction::new_r_offset(
+        Opcode::LoadSmi,
+        0,
+        iterations as i16,
+    ));
     // r1 = accumulator (start at 0)
     chunk.emit(Instruction::new_r(Opcode::LoadZero, 1));
     // r2 = 1 (for decrement)
@@ -99,13 +103,17 @@ fn vm_loop_benchmark(c: &mut Criterion) {
         let ops = (iterations as u64) * 3; // 3 ops per iteration
 
         group.throughput(Throughput::Elements(ops));
-        group.bench_with_input(BenchmarkId::new("iterations", iterations), &chunk, |b, chunk| {
-            b.iter(|| {
-                let mut vm = Vm::new();
-                let idx = vm.add_chunk(chunk.clone());
-                black_box(vm.execute(idx))
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("iterations", iterations),
+            &chunk,
+            |b, chunk| {
+                b.iter(|| {
+                    let mut vm = Vm::new();
+                    let idx = vm.add_chunk(chunk.clone());
+                    black_box(vm.execute(idx))
+                });
+            },
+        );
     }
 
     group.finish();

@@ -24,7 +24,9 @@
  * See: custom_properties.rs for CSS var() resolution
  * See: calc.rs for calc() expression evaluation
  */
-use crate::matching::{Specificity, matches_selector, matches_selector_with_view, selector_specificity};
+use crate::matching::{
+    Specificity, matches_selector, matches_selector_with_view, selector_specificity,
+};
 use crate::selector::{Selector, SelectorIdent, SelectorModifier, TypeSelector};
 use crate::{CssToken, Declaration, Rule, Stylesheet};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -706,7 +708,7 @@ impl CascadeWorkspace {
         } else {
             self.matched_by_rule[..rules_len].fill(None);
         }
-        let words_needed = (total_selector_pairs + 63) / 64;
+        let words_needed = total_selector_pairs.div_ceil(64);
         if self.seen_bits.len() < words_needed {
             self.seen_bits.resize(words_needed, 0);
         } else if words_needed > 0 {
@@ -883,7 +885,15 @@ pub fn compute_style_for_node(
 ) -> ComputedStyle {
     let index = StyleIndex::new(stylesheet);
     let mut workspace = CascadeWorkspace::new(stylesheet.rules.len());
-    compute_style_for_node_with_workspace(dom, node, stylesheet, &index, parent, &mut workspace, None)
+    compute_style_for_node_with_workspace(
+        dom,
+        node,
+        stylesheet,
+        &index,
+        parent,
+        &mut workspace,
+        None,
+    )
 }
 
 pub fn compute_style_for_node_with_index(
@@ -894,7 +904,15 @@ pub fn compute_style_for_node_with_index(
     parent: Option<&ComputedStyle>,
 ) -> ComputedStyle {
     let mut workspace = CascadeWorkspace::new(stylesheet.rules.len());
-    compute_style_for_node_with_workspace(dom, node, stylesheet, index, parent, &mut workspace, None)
+    compute_style_for_node_with_workspace(
+        dom,
+        node,
+        stylesheet,
+        index,
+        parent,
+        &mut workspace,
+        None,
+    )
 }
 
 /*
@@ -932,8 +950,9 @@ fn compute_styles_recursive(
     styles: &mut FxHashMap<NodeId, ComputedStyle>,
     workspace: &mut CascadeWorkspace,
 ) {
-    let style =
-        compute_style_for_node_with_workspace(dom, node, stylesheet, index, parent, workspace, None);
+    let style = compute_style_for_node_with_workspace(
+        dom, node, stylesheet, index, parent, workspace, None,
+    );
     styles.insert(node, style.clone());
     if let Ok(children) = dom.children(node) {
         for child in children {

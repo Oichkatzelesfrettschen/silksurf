@@ -1,8 +1,31 @@
 name: Local Gate Policy
 
+# ============================================================================
+# Strict-local-only CI policy (see ADR-009 in
+# docs/design/ARCHITECTURE-DECISIONS.md).
+#
+# silksurf intentionally does NOT run automatic CI on push or pull_request.
+# The merge gate is `scripts/local_gate.sh full`, run locally via the
+# pre-push git hook installed by `scripts/install-git-hooks.sh`.
+#
+# This workflow exists only as a discoverability surface so contributors
+# arriving from the GitHub Actions tab see how to run the real gate. It is
+# not a substitute for the local gate and does not gate merges.
+#
+# Documentation:
+#   docs/development/LOCAL-GATE.md   -- canonical local-gate reference
+#   CONTRIBUTING.md                  -- onboarding flow with hook setup
+#   docs/design/ARCHITECTURE-DECISIONS.md (ADR-009)
+#
+# To run the gate yourself:
+#   scripts/install-git-hooks.sh                       # one-time setup
+#   scripts/local_gate.sh fast                         # pre-commit equivalent
+#   scripts/local_gate.sh full                         # pre-push equivalent
+#   MIRI=1 scripts/local_gate.sh full                  # add miri smoke
+#   FUZZ=1 scripts/local_gate.sh full                  # add fuzz smoke
+# ============================================================================
+
 on:
-  # Cloud CI is intentionally disabled for push/PR.
-  # Run local gates via Makefile/script entrypoints.
   workflow_dispatch:
 
 jobs:
@@ -13,6 +36,15 @@ jobs:
       - name: Show local gate commands
         run: |
           echo "Automatic cloud CI is disabled for push/pull_request."
-          echo "Run strict gates locally:"
-          echo "  make local-gate-fast"
-          echo "  make local-gate-full"
+          echo "See ADR-009 in docs/design/ARCHITECTURE-DECISIONS.md."
+          echo
+          echo "Run the merge gate locally:"
+          echo "  scripts/install-git-hooks.sh    # one-time hook setup"
+          echo "  scripts/local_gate.sh fast      # pre-commit equivalent"
+          echo "  scripts/local_gate.sh full      # pre-push equivalent"
+          echo
+          echo "Opt-in deeper checks:"
+          echo "  MIRI=1 scripts/local_gate.sh full   # miri smoke (~3-5 min)"
+          echo "  FUZZ=1 scripts/local_gate.sh full   # fuzz smoke (30s/target)"
+          echo
+          echo "Reference: docs/development/LOCAL-GATE.md"

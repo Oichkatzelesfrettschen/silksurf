@@ -100,8 +100,14 @@ fn make_response_object(response: silksurf_net::HttpResponse) -> Value {
 
     {
         let mut o = obj_rc.borrow_mut();
-        o.set_by_key(PropertyKey::from_str("status"), Value::Number(f64::from(status)));
-        o.set_by_key(PropertyKey::from_str("ok"), Value::Boolean((200..300).contains(&status)));
+        o.set_by_key(
+            PropertyKey::from_str("status"),
+            Value::Number(f64::from(status)),
+        );
+        o.set_by_key(
+            PropertyKey::from_str("ok"),
+            Value::Boolean((200..300).contains(&status)),
+        );
         o.set_by_key(
             PropertyKey::from_str("statusText"),
             Value::string(match status {

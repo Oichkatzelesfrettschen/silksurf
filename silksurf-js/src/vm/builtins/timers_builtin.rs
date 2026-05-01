@@ -38,9 +38,15 @@ pub fn install(global: &mut Object) {
         }),
     );
 
-    global.set_by_str("clearTimeout", native_fn("clearTimeout", |_args| Value::Undefined));
+    global.set_by_str(
+        "clearTimeout",
+        native_fn("clearTimeout", |_args| Value::Undefined),
+    );
 
-    global.set_by_str("clearInterval", native_fn("clearInterval", |_args| Value::Undefined));
+    global.set_by_str(
+        "clearInterval",
+        native_fn("clearInterval", |_args| Value::Undefined),
+    );
 
     global.set_by_str(
         "requestAnimationFrame",
@@ -52,5 +58,8 @@ pub fn install(global: &mut Object) {
         native_fn("cancelAnimationFrame", |_args| Value::Undefined),
     );
 
-    global.set_by_str("queueMicrotask", native_fn("queueMicrotask", |_args| Value::Undefined));
+    global.set_by_str(
+        "queueMicrotask",
+        native_fn("queueMicrotask", |_args| Value::Undefined),
+    );
 }

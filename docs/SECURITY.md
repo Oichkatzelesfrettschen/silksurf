@@ -1,13 +1,7 @@
-# Security & Configuration Notes
+# Security Policy
 
-## TLS
-- `silksurf-tls` uses `rustls`; root store loading is pending.
-- Do not hardcode cert bundles; load from OS trust store.
+This file moved to the repository root. See [`/SECURITY.md`](../SECURITY.md).
 
-## Secrets
-- Never commit API tokens, cookies, or local test credentials.
-- Use environment variables for local testing inputs.
-
-## Inputs
-- Treat HTML/CSS/JS as untrusted input.
-- Fuzz targets live under `fuzz/` and should be run on new parsers.
+The root copy is canonical; GitHub surfaces it from there as the project's
+security policy. This stub remains so that documentation references in older
+docs do not 404; do not edit content here -- edit `SECURITY.md` at the root.

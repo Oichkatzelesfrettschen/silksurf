@@ -29,7 +29,11 @@ if (true) {
     // Parse larger source for profiling
     let large_source: String = source.repeat(2000);
     let bytes = large_source.len();
-    println!("Source size: {} bytes ({:.2} KB)", bytes, bytes as f64 / 1024.0);
+    println!(
+        "Source size: {} bytes ({:.2} KB)",
+        bytes,
+        bytes as f64 / 1024.0
+    );
 
     let arena = AstArena::new();
 

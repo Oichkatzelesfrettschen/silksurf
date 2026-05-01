@@ -213,7 +213,12 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
      */
     fn into_parts(mut self) -> (Chunk, Vec<Chunk>, HashMap<String, u32>, u32) {
         self.chunk.register_count = self.max_register + 1;
-        (self.chunk, self.child_chunks, self.string_pool, self.next_string_id)
+        (
+            self.chunk,
+            self.child_chunks,
+            self.string_pool,
+            self.next_string_id,
+        )
     }
 
     /*
@@ -721,7 +726,11 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 let done_reg = self.alloc_register();
                 let val_reg = self.alloc_register();
 
-                self.emit(Instruction::new_rr(Opcode::GetIterator, iter_reg.0, iter_src.0));
+                self.emit(Instruction::new_rr(
+                    Opcode::GetIterator,
+                    iter_reg.0,
+                    iter_src.0,
+                ));
 
                 let loop_start = self.current_offset();
                 self.loop_stack.push(LoopContext {
@@ -730,14 +739,26 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 });
 
                 // result = iter.next()
-                self.emit(Instruction::new_rr(Opcode::IterNext, result_reg.0, iter_reg.0));
+                self.emit(Instruction::new_rr(
+                    Opcode::IterNext,
+                    result_reg.0,
+                    iter_reg.0,
+                ));
                 // done = result.done
-                self.emit(Instruction::new_rr(Opcode::IterDone, done_reg.0, result_reg.0));
+                self.emit(Instruction::new_rr(
+                    Opcode::IterDone,
+                    done_reg.0,
+                    result_reg.0,
+                ));
                 // if done: exit
                 let exit_jump =
                     self.emit(Instruction::new_r_offset(Opcode::JmpTrue, done_reg.0, 0));
                 // value = result.value
-                self.emit(Instruction::new_rr(Opcode::IterValue, val_reg.0, result_reg.0));
+                self.emit(Instruction::new_rr(
+                    Opcode::IterValue,
+                    val_reg.0,
+                    result_reg.0,
+                ));
 
                 // Bind loop variable
                 match &for_of.left {
@@ -839,7 +860,11 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
 
                 let obj_str_id = self.intern_string("Object");
                 let obj_const_idx = self.chunk.add_constant(Constant::String(obj_str_id));
-                self.emit(Instruction::new_ri(Opcode::GetGlobal, obj_global_reg.0, obj_const_idx));
+                self.emit(Instruction::new_ri(
+                    Opcode::GetGlobal,
+                    obj_global_reg.0,
+                    obj_const_idx,
+                ));
 
                 let keys_str_id = self.intern_string("keys");
                 let keys_const_idx = self.chunk.add_constant(Constant::String(keys_str_id));
@@ -854,7 +879,12 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 // Args are in consecutive registers starting at keys_fn+1, so mov obj_reg there
                 let arg_reg = self.alloc_register();
                 self.emit(Instruction::new_rr(Opcode::Mov, arg_reg.0, obj_reg.0));
-                self.emit(Instruction::new_rrr(Opcode::Call, keys_arr_reg.0, keys_fn_reg.0, 1));
+                self.emit(Instruction::new_rrr(
+                    Opcode::Call,
+                    keys_arr_reg.0,
+                    keys_fn_reg.0,
+                    1,
+                ));
 
                 // Now use GetIterator over keys_arr
                 let iter_reg = self.alloc_register();
@@ -862,7 +892,11 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 let done_reg = self.alloc_register();
                 let val_reg = self.alloc_register();
 
-                self.emit(Instruction::new_rr(Opcode::GetIterator, iter_reg.0, keys_arr_reg.0));
+                self.emit(Instruction::new_rr(
+                    Opcode::GetIterator,
+                    iter_reg.0,
+                    keys_arr_reg.0,
+                ));
 
                 let loop_start = self.current_offset();
                 self.loop_stack.push(LoopContext {
@@ -870,11 +904,23 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                     continue_targets: Vec::new(),
                 });
 
-                self.emit(Instruction::new_rr(Opcode::IterNext, result_reg.0, iter_reg.0));
-                self.emit(Instruction::new_rr(Opcode::IterDone, done_reg.0, result_reg.0));
+                self.emit(Instruction::new_rr(
+                    Opcode::IterNext,
+                    result_reg.0,
+                    iter_reg.0,
+                ));
+                self.emit(Instruction::new_rr(
+                    Opcode::IterDone,
+                    done_reg.0,
+                    result_reg.0,
+                ));
                 let exit_jump =
                     self.emit(Instruction::new_r_offset(Opcode::JmpTrue, done_reg.0, 0));
-                self.emit(Instruction::new_rr(Opcode::IterValue, val_reg.0, result_reg.0));
+                self.emit(Instruction::new_rr(
+                    Opcode::IterValue,
+                    val_reg.0,
+                    result_reg.0,
+                ));
 
                 match &for_in.left {
                     ForInLeft::VariableDeclaration(decl) => {
@@ -988,7 +1034,11 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 } else {
                     let str_id = self.intern_string(id.raw);
                     let const_idx = self.chunk.add_constant(Constant::String(str_id));
-                    self.emit(Instruction::new_ri(Opcode::SetGlobal, value_reg.0, const_idx));
+                    self.emit(Instruction::new_ri(
+                        Opcode::SetGlobal,
+                        value_reg.0,
+                        const_idx,
+                    ));
                 }
             }
             Pattern::Object(obj_pat) => {
@@ -1064,8 +1114,11 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 let default_reg = self.compile_expression(assign_pat.right)?;
                 let final_reg = self.alloc_register();
                 // JmpNotNullish: if value_reg is not null/undefined, skip default
-                let skip_default =
-                    self.emit(Instruction::new_r_offset(Opcode::JmpNotNullish, value_reg.0, 0));
+                let skip_default = self.emit(Instruction::new_r_offset(
+                    Opcode::JmpNotNullish,
+                    value_reg.0,
+                    0,
+                ));
                 // Use default
                 self.emit(Instruction::new_rr(Opcode::Mov, final_reg.0, default_reg.0));
                 let skip_original = self.emit(Instruction::new_offset(Opcode::Jmp, 0));
@@ -1151,7 +1204,10 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
             Expression::Update(update) => self.compile_update(update),
             Expression::This(span) => {
                 let reg = self.alloc_register();
-                self.emit_at(Instruction::new_rr(Opcode::GetLocal, reg.0, Register::THIS.0), *span);
+                self.emit_at(
+                    Instruction::new_rr(Opcode::GetLocal, reg.0, Register::THIS.0),
+                    *span,
+                );
                 Ok(reg)
             }
             Expression::Parenthesized(paren) => self.compile_expression(paren.expression),
@@ -1246,7 +1302,11 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 let func_idx = base_offset + n_nested;
                 self.child_chunks.push(child_chunk);
                 let const_idx = self.chunk.add_constant(Constant::Function(func_idx));
-                self.emit(Instruction::new_ri(Opcode::NewFunction, result_reg.0, const_idx));
+                self.emit(Instruction::new_ri(
+                    Opcode::NewFunction,
+                    result_reg.0,
+                    const_idx,
+                ));
                 Ok(result_reg)
             }
             /*
@@ -1300,7 +1360,11 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 let func_idx = base_offset + n_nested;
                 self.child_chunks.push(child_chunk);
                 let const_idx = self.chunk.add_constant(Constant::Function(func_idx));
-                self.emit(Instruction::new_ri(Opcode::NewFunction, result_reg.0, const_idx));
+                self.emit(Instruction::new_ri(
+                    Opcode::NewFunction,
+                    result_reg.0,
+                    const_idx,
+                ));
                 Ok(result_reg)
             }
             /*
@@ -1334,7 +1398,11 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                         let str_id = self.intern_string(cooked);
                         let const_idx = self.chunk.add_constant(Constant::String(str_id));
                         let quasi_reg = self.alloc_register();
-                        self.emit(Instruction::new_ri(Opcode::LoadConst, quasi_reg.0, const_idx));
+                        self.emit(Instruction::new_ri(
+                            Opcode::LoadConst,
+                            quasi_reg.0,
+                            const_idx,
+                        ));
                         if !initialized {
                             // First piece: just move to result
                             self.emit(Instruction::new_rr(Opcode::Mov, acc_reg.0, quasi_reg.0));
@@ -1514,11 +1582,17 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                     pattern: 0,
                     flags: 0,
                 });
-                self.emit_at(Instruction::new_ri(Opcode::NewRegExp, reg.0, const_idx), r.span);
+                self.emit_at(
+                    Instruction::new_ri(Opcode::NewRegExp, reg.0, const_idx),
+                    r.span,
+                );
             }
             Literal::BigInt(b) => {
                 let const_idx = self.chunk.add_constant(Constant::BigInt(Vec::new()));
-                self.emit_at(Instruction::new_ri(Opcode::LoadConst, reg.0, const_idx), b.span);
+                self.emit_at(
+                    Instruction::new_ri(Opcode::LoadConst, reg.0, const_idx),
+                    b.span,
+                );
             }
         }
         Ok(reg)
@@ -1531,12 +1605,18 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
             if depth == 0 {
                 self.emit_at(Instruction::new_rr(Opcode::GetLocal, reg.0, slot), id.span);
             } else {
-                self.emit_at(Instruction::new_rrr(Opcode::GetCapture, reg.0, depth, slot), id.span);
+                self.emit_at(
+                    Instruction::new_rrr(Opcode::GetCapture, reg.0, depth, slot),
+                    id.span,
+                );
             }
         } else {
             let str_id = self.intern_string(id.raw);
             let name_idx = self.chunk.add_constant(Constant::String(str_id));
-            self.emit_at(Instruction::new_ri(Opcode::GetGlobal, reg.0, name_idx), id.span);
+            self.emit_at(
+                Instruction::new_ri(Opcode::GetGlobal, reg.0, name_idx),
+                id.span,
+            );
         }
         Ok(reg)
     }
@@ -1574,7 +1654,10 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
             BinaryOperator::InstanceOf => Opcode::Instanceof,
         };
 
-        self.emit_at(Instruction::new_rrr(opcode, result_reg.0, left_reg.0, right_reg.0), bin.span);
+        self.emit_at(
+            Instruction::new_rrr(opcode, result_reg.0, left_reg.0, right_reg.0),
+            bin.span,
+        );
         Ok(result_reg)
     }
 
@@ -1604,7 +1687,10 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
             }
         };
 
-        self.emit_at(Instruction::new_rr(opcode, result_reg.0, arg_reg.0), unary.span);
+        self.emit_at(
+            Instruction::new_rr(opcode, result_reg.0, arg_reg.0),
+            unary.span,
+        );
         Ok(result_reg)
     }
 
@@ -1624,9 +1710,11 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
             LogicalOperator::Or => {
                 self.emit(Instruction::new_r_offset(Opcode::JmpTrue, result_reg.0, 0))
             }
-            LogicalOperator::NullishCoalescing => {
-                self.emit(Instruction::new_r_offset(Opcode::JmpNotNullish, result_reg.0, 0))
-            }
+            LogicalOperator::NullishCoalescing => self.emit(Instruction::new_r_offset(
+                Opcode::JmpNotNullish,
+                result_reg.0,
+                0,
+            )),
         };
 
         let right_reg = self.compile_expression(logical.right)?;
@@ -1708,7 +1796,12 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 _ => Opcode::Mov,
             };
 
-            self.emit(Instruction::new_rrr(opcode, computed_reg.0, current_reg.0, value_reg.0));
+            self.emit(Instruction::new_rrr(
+                opcode,
+                computed_reg.0,
+                current_reg.0,
+                value_reg.0,
+            ));
             computed_reg
         };
 
@@ -1728,7 +1821,11 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 } else {
                     let str_id = self.intern_string(id.raw);
                     let name_idx = self.chunk.add_constant(Constant::String(str_id));
-                    self.emit(Instruction::new_ri(Opcode::SetGlobal, final_value.0, name_idx));
+                    self.emit(Instruction::new_ri(
+                        Opcode::SetGlobal,
+                        final_value.0,
+                        name_idx,
+                    ));
                 }
             }
             AssignmentTarget::Member(member) => {
@@ -1759,7 +1856,11 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
             AssignmentTarget::Pattern(_) => {}
         }
 
-        self.emit(Instruction::new_rr(Opcode::Mov, result_reg.0, final_value.0));
+        self.emit(Instruction::new_rr(
+            Opcode::Mov,
+            result_reg.0,
+            final_value.0,
+        ));
         Ok(result_reg)
     }
 
@@ -1773,7 +1874,11 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
             let current_reg = self.compile_identifier(id)?;
 
             if !update.prefix {
-                self.emit(Instruction::new_rr(Opcode::Mov, result_reg.0, current_reg.0));
+                self.emit(Instruction::new_rr(
+                    Opcode::Mov,
+                    result_reg.0,
+                    current_reg.0,
+                ));
             }
 
             let updated_reg = self.alloc_register();
@@ -1787,12 +1892,21 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 if depth == 0 {
                     self.emit(Instruction::new_rr(Opcode::SetLocal, slot, updated_reg.0));
                 } else {
-                    self.emit(Instruction::new_rrr(Opcode::SetCapture, depth, slot, updated_reg.0));
+                    self.emit(Instruction::new_rrr(
+                        Opcode::SetCapture,
+                        depth,
+                        slot,
+                        updated_reg.0,
+                    ));
                 }
             }
 
             if update.prefix {
-                self.emit(Instruction::new_rr(Opcode::Mov, result_reg.0, updated_reg.0));
+                self.emit(Instruction::new_rr(
+                    Opcode::Mov,
+                    result_reg.0,
+                    updated_reg.0,
+                ));
             }
         } else {
             self.errors
@@ -1852,7 +1966,12 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                         // Call push: callee=push_fn, arg1=val (laid out after push_fn_reg)
                         let arg_slot = self.alloc_register();
                         self.emit(Instruction::new_rr(Opcode::Mov, arg_slot.0, val_reg.0));
-                        self.emit(Instruction::new_rrr(Opcode::Call, zero_reg.0, push_fn_reg.0, 1));
+                        self.emit(Instruction::new_rrr(
+                            Opcode::Call,
+                            zero_reg.0,
+                            push_fn_reg.0,
+                            1,
+                        ));
                     }
                     Argument::Spread(spread_elem) => {
                         // args_arr = args_arr.concat(spread_val)
@@ -1938,7 +2057,10 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
         let result_reg = self.alloc_register();
         let len = arr.elements.len() as u16;
 
-        self.emit_at(Instruction::new_ri(Opcode::NewArray, result_reg.0, len), arr.span);
+        self.emit_at(
+            Instruction::new_ri(Opcode::NewArray, result_reg.0, len),
+            arr.span,
+        );
 
         for (i, elem) in arr.elements.iter().enumerate() {
             match elem {
@@ -1967,7 +2089,10 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
         obj: &crate::parser::ObjectExpression<'src, 'arena>,
     ) -> CompileResult<Register> {
         let result_reg = self.alloc_register();
-        self.emit_at(Instruction::new_r(Opcode::NewObject, result_reg.0), obj.span);
+        self.emit_at(
+            Instruction::new_r(Opcode::NewObject, result_reg.0),
+            obj.span,
+        );
 
         for prop in obj.properties {
             match prop {

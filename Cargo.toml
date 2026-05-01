@@ -18,7 +18,10 @@ resolver = "2"
 [workspace.package]
 edition = "2024"
 license = "MIT OR Apache-2.0"
-rust-version = "1.96.0"
+# MSRV pinned to current stable. Bump in lockstep with rust-toolchain.toml.
+# Edition 2024 stabilized in Rust 1.85; any 1.85+ stable can build the
+# workspace. See docs/design/ARCHITECTURE-DECISIONS.md ADR-008.
+rust-version = "1.94.1"
 
 [workspace.dependencies]
 bumpalo = { version = "3.20", features = ["collections"] }

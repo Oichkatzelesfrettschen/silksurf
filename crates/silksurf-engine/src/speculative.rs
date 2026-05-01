@@ -290,10 +290,9 @@ impl SpeculativeRenderer {
     pub fn with_extra_ca_file(path: &std::path::Path) -> Result<Self, NetError> {
         use silksurf_tls::RustlsProvider;
 
-        let provider =
-            RustlsProvider::new_with_extra_ca_file(path).map_err(|e| NetError {
-                message: format!("TLS CA file {}: {e}", path.display()),
-            })?;
+        let provider = RustlsProvider::new_with_extra_ca_file(path).map_err(|e| NetError {
+            message: format!("TLS CA file {}: {e}", path.display()),
+        })?;
 
         Ok(Self {
             cache: ResponseCache::with_disk(&http_cache_dir()),

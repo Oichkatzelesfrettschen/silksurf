@@ -433,7 +433,10 @@ pub fn get_array_method(obj_rc: &Rc<RefCell<Object>>, name: &str) -> Option<Valu
                     }
                 });
                 for i in start..end {
-                    o.set_by_key(crate::vm::value::PropertyKey::Index(i as u32), value.clone());
+                    o.set_by_key(
+                        crate::vm::value::PropertyKey::Index(i as u32),
+                        value.clone(),
+                    );
                 }
                 Value::Object(Rc::clone(&arr))
             }))
