@@ -368,10 +368,66 @@
 
 ---
 
+## Phase-3 Engine Pipeline Terms (added 2026-04-30)
+
+### CascadeView
+**Type**: Structure-of-Arrays projection
+**Definition**: SoA materialization of cascade-relevant DOM fields (tag, id_index, class_start, class_count, parent_id) in a flat 40-byte-per-node array. Built once per render and consumed by the cascade pass; replaces the 168-byte `Node` fetch inside the matching hot path. Fits 1 cache line per entry; gives ~4.2x compression vs the AoS Node read.
+**SilkSurf Usage**: `crates/silksurf-css/src/cascade_view.rs`; consumed by `silksurf-engine::fused_pipeline::FusedWorkspace`.
+**Why it matters**: drove the 9.5us steady-state benchmark (see `docs/PERFORMANCE.md`).
+
+### CascadeEntry
+**Type**: 40-byte SoA row
+**Definition**: One entry in a `CascadeView`. Carries the tag, the interned id atom index, the class slice (start + count into the flat ident array), and the parent-node index. The `parent_id` field is `pub(crate)` -- external readers use `CascadeView::parent_of()` which hides the NO_PARENT sentinel and the >65534-node fallback.
+
+### FusedWorkspace
+**Type**: Reusable per-frame scratch buffer container
+**Definition**: Holds the `LayoutNeighborTable`, `CascadeWorkspace`, and the output Vecs (styles, node_rects, block_cursors, display_items) as owned fields. After the first render, zero allocator traffic for same-or-smaller DOMs. High-water-mark growth (containers grow to peak node count and never shrink). See `crates/silksurf-engine/src/fused_pipeline.rs`.
+
+### Generation-gated rebuild
+**Type**: Cache-coherence pattern
+**Definition**: `Dom::generation()` = (instance_id << 32) | mutation_counter. The fused pipeline skips `table.rebuild()` and `cascade_view.rebuild()` when the cached generation matches the current DOM. Saves ~2us on hover/resize/media-query re-renders over an unchanged DOM.
+
+### IndexedSelector.pair_id
+**Type**: Sequential u32 identifier
+**Definition**: Assigned by `StyleIndex` to each (rule, selector) pair. Replaces a `FxHashSet<(usize, usize)>` dedup with a `Vec<u64>` bitvec; dedup becomes a branchless shift+mask (3 u64 words for 159 pairs) and clearing is `fill(0)` instead of hash table reset. See `crates/silksurf-css/src/style.rs`.
+
+### Lock-free monotonic resolve table
+**Type**: Concurrency pattern
+**Definition**: `Dom::resolve_table` (a `Vec<SmallString>`) is materialized from the interner at two phase boundaries (`TreeBuilder::into_dom()` and `Dom::end_mutation_batch()`). `Dom::resolve_fast(atom)` is a plain array index by `atom.raw()`, zero synchronization. Replaces the prior `RwLock<SilkInterner>` read-lock-per-cascade-call. The interner write path retains the RwLock; the read hot path is lock-free.
+
+### resolve_fast
+**Type**: Lock-free atom resolution
+**Definition**: `dom.resolve_fast(atom) -> &SmallString`. Reads from the monotonic resolve table by raw index. Used in the cascade matching path where the prior `dom.resolve(atom)` cost a RwLock read per call (~6ns * 29 atoms = 168ns per cascade, eliminated).
+
+### Static FALLBACK
+**Type**: Lazy-allocated default-value cache
+**Definition**: `LazyLock<ComputedStyle>` in `CascadedStyle::resolve()`. Constructed once per process and reused via reference. Eliminates ~61 `ComputedStyle::default()` constructions per render (each building SmallVec + SmolStr). Non-Copy fields clone only when needed (rare).
+
+### Phase-4.4 SoA TODOs
+**Type**: Scheduled performance work
+**Definition**: Three documented-in-code TODOs to convert `ComputedStyle`, `Dimensions` (silksurf-layout), and the `DisplayList` to SoA layout. Tracked in the SNAZZY-WAFFLE roadmap P4. Expected to extend the 9.5us steady-state further by improving cache reuse during the per-node loop.
+
+### `silksurf_core::SilkError`
+**Type**: Workspace-wide canonical error
+**Definition**: String-erased `enum` (variants for Css, Dom, HtmlTokenize, HtmlTreeBuild, Net, Tls, Engine, Js, Io, plus generic InvalidInput / Unsupported). Per-crate error types implement `From<MyError> for SilkError` in their own crate (silksurf-core has no rev-deps). Public APIs at the workspace boundary funnel through this type. See `crates/silksurf-core/src/error.rs`.
+
+### UNWRAP-OK / SAFETY annotations
+**Type**: Lint-enforced documentation requirement
+**Definition**: Every `.unwrap()` or `.expect(` in production code must be preceded within 7 lines by a `// UNWRAP-OK: <invariant>` comment. Every `unsafe { ... }` block must be preceded within 7 lines by `// SAFETY: <invariant>`. Enforced by `scripts/lint_unwrap.sh` and `scripts/lint_unsafe.sh`, both wired into the local-gate fast pass. Cross-crate index of unsafe blocks: `docs/design/UNSAFE-CONTRACTS.md`.
+
+---
+
 ## See Also
 
 - `/README.md` - Project overview
 - `/CLAUDE.md` - Engineering standards
+- `/CONTRIBUTING.md` - Onboarding flow with hook setup
+- `/docs/REPO-LAYOUT.md` - Repository directory and file inventory
 - `/docs/development/BUILD.md` - Build instructions
+- `/docs/development/LOCAL-GATE.md` - Local-gate reference
+- `/docs/design/UNSAFE-CONTRACTS.md` - Unsafe-block index
+- `/docs/design/ARCHITECTURE-DECISIONS.md` - ADRs (incl. AD-008 stable Rust, AD-009 local-only CI, AD-010 XCB-only GUI)
+- `/docs/PERFORMANCE.md` - Bench reproducibility and steady-state results
 - `/docs/roadmaps/PHASE-3-IMPLEMENTATION-ROADMAP.md` - Current milestones
 - `/silksurf-specification/` - Technical specifications
