@@ -303,12 +303,7 @@ fn find_tag_recursive(dom: &silksurf_dom::Dom, node: NodeId, target_tag: &str) -
 }
 
 /// Collect all elements whose tag name matches `target` (or all if `target == "*"`).
-fn collect_by_tag(
-    dom: &silksurf_dom::Dom,
-    node: NodeId,
-    target: &str,
-    out: &mut Vec<NodeId>,
-) {
+fn collect_by_tag(dom: &silksurf_dom::Dom, node: NodeId, target: &str, out: &mut Vec<NodeId>) {
     if let Ok(Some(name)) = dom.element_name(node) {
         if target == "*" || name.eq_ignore_ascii_case(target) {
             out.push(node);
@@ -343,9 +338,9 @@ fn collect_by_class(
         let has_all = attrs.iter().any(|attr| {
             if attr.name == silksurf_dom::AttributeName::Class {
                 let val = attr.value.as_str();
-                classes.iter().all(|c| {
-                    val.split_whitespace().any(|token| token == *c)
-                })
+                classes
+                    .iter()
+                    .all(|c| val.split_whitespace().any(|token| token == *c))
             } else {
                 false
             }
@@ -365,11 +360,9 @@ fn parse_selector(dom: &super::SharedDom, selector: &str) -> Option<silksurf_css
     let mut tokenizer = silksurf_css::CssTokenizer::new();
     let mut tokens = tokenizer.feed(selector).ok()?;
     tokens.extend(tokenizer.finish().ok()?);
-    let sel = dom
-        .borrow()
-        .with_interner_mut(|interner| {
-            silksurf_css::parse_selector_list_with_interner(tokens, Some(interner))
-        });
+    let sel = dom.borrow().with_interner_mut(|interner| {
+        silksurf_css::parse_selector_list_with_interner(tokens, Some(interner))
+    });
     if sel.selectors.is_empty() {
         None
     } else {

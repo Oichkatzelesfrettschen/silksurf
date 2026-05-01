@@ -1,0 +1,51 @@
+crate,area,tier,maintenance,updated_at,recent_downloads,downloads,api_fit,perf_potential,overlap_risk,cleanroom_compat,note
+cssparser,parser_tokenizer,evaluate/prototype,high,2026-03-17,10649044,41208748,medium,high,medium,medium,"Mature low-level token/grammar parser; best as differential oracle, not full replacement."
+cssparser-macros,parser_tokenizer,evaluate/prototype,high,2026-03-17,8791426,36400524,medium,medium,medium,medium,Useful only if cssparser chosen for grammar helpers.
+cssparser-color,style_representation,evaluate/prototype,high,2026-03-17,534188,2116362,medium,medium,medium,medium,Fine-grained CSS Color syntax helper; test for value model fit first.
+selectors,selector_matching,evaluate/prototype,high,2026-03-18,9020499,34971023,medium,high,medium,medium,"Spec-aligned selector engine; strong conformance oracle, high runtime overlap with in-house matcher."
+parcel_selectors,selector_matching,avoid/reject,high,2025-05-11,498655,2197743,low,medium,high,low,Parcel-specific selector stack; overlaps selectors + adds bundler coupling.
+lightningcss,parser_tokenizer,avoid/reject,high,2026-03-09,504262,2280600,low,medium,high,low,Excellent performance but full engine (parser/transform/minify); too much cleanroom overlap.
+swc_css_parser,parser_tokenizer,evaluate/prototype,high,2026-04-03,74794,1246276,medium,high,medium,medium,Fast parser with broad syntax coverage; useful for corpus differential testing.
+swc_css_ast,parser_tokenizer,evaluate/prototype,high,2026-04-03,78430,1113110,medium,medium,medium,medium,AST model for swc_css_parser; useful only in differential harnesses.
+swc_css_visit,parser_tokenizer,evaluate/prototype,high,2026-04-03,76907,1072451,medium,medium,medium,medium,Visitor tooling for swc AST; harness-only utility.
+swc_css_compat,parser_tokenizer,avoid/reject,high,2026-04-03,53325,707127,low,medium,high,low,"Build-time compatibility transform layer, not browser runtime need."
+swc_css_modules,parser_tokenizer,avoid/reject,high,2026-04-03,26418,672073,low,medium,high,low,CSS Modules transform crate; not aligned with browser engine architecture.
+biome_css_parser,parser_tokenizer,avoid/reject,medium,2024-12-18,1851,16991,low,medium,high,low,Biome ecosystem dependency chain is heavy for this use-case.
+css_lexer,parser_tokenizer,avoid/reject,high,2026-04-06,3645,83223,low,medium,high,low,Very small ecosystem and unclear maintenance depth versus mature alternatives.
+csscolorparser,style_representation,adopt now,high,2026-03-09,3574282,7577491,high,medium,low,high,Small focused color parser fits typed color pipeline with minimal overlap.
+html5ever,selector_matching,evaluate/prototype,high,2026-03-13,13127596,51744693,medium,medium,medium,medium,Strong spec corpus and parser infra; suitable as behavior reference harness.
+markup5ever,selector_matching,evaluate/prototype,high,2026-03-13,13213598,52108173,medium,medium,medium,medium,Needed companion types if html5ever-based harnessing is used.
+tendril,selector_matching,evaluate/prototype,high,2026-01-09,10411172,46008675,medium,medium,medium,medium,Efficient string buffer abstraction if html5ever harness path is taken.
+ego-tree,selector_matching,evaluate/prototype,high,2026-01-23,3834788,15342394,medium,medium,medium,medium,Useful tree model for fixture/harness-level selector differential checks.
+phf,selector_matching,adopt now,high,2025-08-23,70901709,307013076,high,medium,low,high,Compile-time keyword tables align with parser hot paths and deterministic lookup.
+lasso,interning_small_string,adopt now,medium,2024-08-19,1162903,7903863,high,high,low,high,Already integrated interner; good balance of speed and memory.
+string-interner,interning_small_string,evaluate/prototype,medium,2025-02-11,6106332,27623008,medium,high,medium,medium,Viable alternative interner; benchmark against lasso before any switch.
+internment,interning_small_string,evaluate/prototype,medium,2024-10-12,2416065,9012302,medium,high,medium,medium,Good for static interned values; weaker fit for mutable parse-time interning.
+intaglio,interning_small_string,evaluate/prototype,high,2026-03-30,943870,1239272,medium,high,medium,medium,Promising modern interner candidate; worth side-by-side microbench.
+smol_str,interning_small_string,adopt now,high,2026-03-04,15761894,65707203,high,high,low,high,Already integrated and aligned with short CSS identifier workload.
+compact_str,interning_small_string,evaluate/prototype,medium,2025-02-25,25430167,80473020,medium,high,medium,medium,Potential smol_str alternative with different allocation behavior; benchmark first.
+arcstr,interning_small_string,evaluate/prototype,medium,2024-05-07,3012235,10764809,medium,high,medium,medium,"Arc-based immutable string; good sharing semantics, likely higher overhead for hot parser paths."
+kstring,interning_small_string,evaluate/prototype,medium,2024-07-25,8363208,33646125,medium,high,medium,medium,Useful for mixed borrowed/owned string APIs; evaluate if API ergonomics demand it.
+bumpalo,perf_helpers,adopt now,high,2026-02-19,73079776,344304280,high,high,low,high,Already core arena allocator; proven fit for parse/build phases.
+id-arena,perf_helpers,evaluate/prototype,high,2026-01-14,16971458,40231568,medium,high,medium,medium,Simple typed ID arena; useful where stable IDs matter more than raw speed.
+slotmap,perf_helpers,evaluate/prototype,high,2025-12-06,15192891,62231814,medium,high,medium,medium,Robust stable key container; evaluate for DOM/style graph mutation-heavy paths.
+smallvec,perf_helpers,adopt now,high,2025-11-16,133639083,745407699,high,high,low,high,Already core stack-first vector optimization in selector/style structures.
+memchr,perf_helpers,adopt now,high,2026-02-06,161062560,860775151,high,high,low,high,Already core SIMD scanning primitive for tokenizer hot loops.
+simdutf8,perf_helpers,adopt now,medium,2024-09-22,28647624,110643208,high,high,low,high,Fast UTF-8 validation; candidate for tokenizer ingress fast-path.
+rustc-hash,perf_helpers,adopt now,high,2026-03-28,101947005,449888837,high,high,low,high,"Already used fast hash implementation, good fit for style indexes."
+ahash,perf_helpers,evaluate/prototype,high,2025-05-08,90603574,521673839,medium,high,medium,medium,Very fast hashing but non-determinism/DoS trade-offs need explicit policy.
+indexmap,perf_helpers,adopt now,high,2026-04-02,186664983,960034885,high,high,low,high,Deterministic hash map iteration useful for stable cascade/debug output.
+serde,serialization_cache,adopt now,high,2025-09-27,149035257,910012819,high,medium,low,high,Foundation for fixtures and serializable style/cache structures.
+serde_json,serialization_cache,adopt now,high,2026-01-06,145247153,815787579,high,medium,low,high,Current safe default for stylesheet cache serialization path.
+rkyv,serialization_cache,evaluate/prototype,high,2026-02-10,24348964,95164428,medium,high,medium,medium,High-performance zero-copy option; requires careful versioning and ABI discipline.
+postcard,serialization_cache,avoid/reject,high,2025-07-24,7830925,27036519,low,medium,high,low,Previously triggered transitive unmaintained advisory path in this repo context.
+bitcode,serialization_cache,evaluate/prototype,high,2025-12-18,2098017,4861540,medium,high,medium,medium,Compact binary serde-compatible format; benchmark versus serde_json/rkyv.
+zerocopy,serialization_cache,evaluate/prototype,high,2026-03-28,134106202,505549961,medium,high,medium,medium,Strong primitive for safe binary layouts and cache transport.
+bytemuck,serialization_cache,evaluate/prototype,high,2026-01-31,45427031,219551135,medium,high,medium,medium,Useful for POD casts in hot paths when layout invariants are explicit.
+bincode,serialization_cache,avoid/reject,high,2025-12-16,39331361,217810083,low,medium,high,low,Prior repo debt includes RustSec unmaintained finding; keep out until policy re-evaluated.
+datatest-stable,spec_compliance_tooling,adopt now,high,2026-03-31,582059,3002886,high,medium,low,high,Good fit for WPT-style fixture sweeps and golden conformance runs.
+insta,spec_compliance_tooling,adopt now,high,2026-03-30,14626011,57274467,high,medium,low,high,Snapshot testing accelerates parser/serializer regression triage.
+proptest,spec_compliance_tooling,adopt now,high,2026-03-24,25479094,109645483,high,medium,low,high,Property-based testing aligns with parser/cascade invariants.
+arbitrary,spec_compliance_tooling,adopt now,high,2025-08-14,20917025,94793250,high,medium,low,high,Bridges corpus generation to fuzz/property tests.
+libfuzzer-sys,spec_compliance_tooling,adopt now,high,2026-02-10,9252642,39417165,high,medium,low,high,Fuzzing backbone for parser/tokenizer hardening.
+similar-asserts,spec_compliance_tooling,adopt now,high,2026-04-01,5535088,26828956,high,medium,low,high,Better textual diffs for expected-vs-actual CSS outputs.

@@ -21,12 +21,22 @@ impl NodeId {
     }
 }
 
+/// A DOM element attribute.
+///
+/// `value_atoms` and `class_strings` are co-indexed: `class_strings[i]` is the
+/// pre-resolved string for the class token interned as `value_atoms[i]`.
+/// Populated at `set_attribute` time so the cascade hot path can read class
+/// names without acquiring the `interner` RwLock.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Attribute {
     pub name: AttributeName,
     pub value: SmallString,
     pub value_atom: Option<Atom>,
     pub value_atoms: SmallVec<[Atom; 4]>,
+    /// Pre-resolved strings for each atom in `value_atoms` (class tokens only).
+    /// Co-indexed: `class_strings[i]` corresponds to `value_atoms[i]`.
+    /// Using these avoids `dom.resolve(atom)` + RwLock in the cascade hot path.
+    pub class_strings: SmallVec<[SmallString; 4]>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -294,13 +304,44 @@ pub struct Node {
     children: SmallVec<[NodeId; 8]>,
 }
 
+/*
+ * Dom -- arena-allocated DOM tree with monotonic lock-free resolve table.
+ *
+ * WHY resolve_table: dom.resolve(atom) acquires interner RwLock per call.
+ * In the cascade hot path this costs ~6ns/call * 29 class atoms = ~164ns.
+ * The resolve table materializes interner.values into a Vec<SmallString>
+ * on the Dom itself, enabling resolve_fast(atom) = &table[atom.raw()] --
+ * a plain array index with zero synchronization.
+ *
+ * LIFECYCLE: The table is extended (never rebuilt) at two phase boundaries:
+ *   1. After TreeBuilder::into_dom() -- initial materialization of all parsed atoms
+ *   2. After end_mutation_batch() -- extends with any newly interned atoms
+ *
+ * INVARIANT: resolve_table.len() >= interner.values.len() after materialization.
+ * Atoms created during a mutation batch may temporarily exceed the table length;
+ * they are appended when the batch closes. Between materialization points,
+ * resolve_fast() is valid for all atoms created before the last materialization.
+ *
+ * GROWTH: Monotonic append-only. Old atoms never move. New atoms extend the end.
+ * No rebuild, no branch, no two-tier lookup. SmallString is 24 bytes (SmolStr)
+ * so the table is dense and prefetcher-friendly.
+ */
 #[derive(Default)]
 pub struct Dom {
     nodes: Vec<Node>,
     interner: RwLock<SilkInterner>,
+    /// Lock-free resolve table: resolve_table[atom.raw()] = SmallString.
+    /// Materialized from interner at phase boundaries, monotonically growing.
+    resolve_table: Vec<SmallString>,
     dirty_nodes: Vec<NodeId>,
     dirty_batch: Vec<NodeId>,
     batch_depth: usize,
+    /// Unique instance ID + monotonic mutation counter, combined into a single u64.
+    /// High 32 bits: per-instance unique ID (from global atomic counter).
+    /// Low 32 bits: mutation counter (incremented on end_mutation_batch, etc.).
+    /// Different Dom instances always have different high bits, ensuring
+    /// FusedWorkspace detects DOM replacement even when mutation counts match.
+    generation: u64,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -313,13 +354,62 @@ pub enum DomError {
 
 impl Dom {
     pub fn new() -> Self {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static INSTANCE_COUNTER: AtomicU32 = AtomicU32::new(0);
+        let instance_id = INSTANCE_COUNTER.fetch_add(1, Ordering::Relaxed);
         Self {
             nodes: Vec::new(),
             interner: RwLock::new(SilkInterner::new()),
+            resolve_table: Vec::new(),
             dirty_nodes: Vec::new(),
             dirty_batch: Vec::new(),
             batch_depth: 0,
+            generation: (instance_id as u64) << 32,
         }
+    }
+
+    /// Current generation (instance ID + mutation counter). Different Dom
+    /// instances always have different values. Same instance increments on
+    /// each mutation batch, ensuring stale-data detection.
+    #[inline]
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /*
+     * materialize_resolve_table -- extend the lock-free resolve table
+     * with any atoms interned since the last materialization.
+     *
+     * WHY: Called after parse (into_dom) and after each mutation batch.
+     * Copies interner.values[table.len()..] into resolve_table, making
+     * all atoms resolvable via resolve_fast() without RwLock.
+     *
+     * Cost: O(K) where K = new atoms since last call. Zero if no new atoms.
+     * After steady state (no new interning), this is a no-op.
+     */
+    pub fn materialize_resolve_table(&mut self) {
+        let interner = self.interner.read().unwrap();
+        let values = interner.values_slice();
+        if values.len() > self.resolve_table.len() {
+            self.resolve_table
+                .extend_from_slice(&values[self.resolve_table.len()..]);
+        }
+        self.generation = self.generation.wrapping_add(1);
+    }
+
+    /*
+     * resolve_fast -- lock-free atom resolution via materialized table.
+     *
+     * WHY: dom.resolve(atom) acquires RwLock. This is a plain array index.
+     * Valid for all atoms created before the last materialize_resolve_table().
+     *
+     * PANICS: if atom.raw() >= resolve_table.len() (atom created after
+     * last materialization). In practice this cannot happen if
+     * materialize_resolve_table() is called at the documented boundaries.
+     */
+    #[inline]
+    pub fn resolve_fast(&self, atom: Atom) -> &SmallString {
+        &self.resolve_table[atom.raw() as usize]
     }
 
     pub fn create_document(&mut self) -> NodeId {
@@ -455,27 +545,33 @@ impl Dom {
         let value = value.into();
         let attr_name = AttributeName::from_str(&name);
         let value: SmallString = value.into();
-        let (value_atom, value_atoms) = match attr_name {
+        let (value_atom, value_atoms, class_strings) = match attr_name {
             AttributeName::Id => {
                 let atom = if value.is_empty() || !should_intern_identifier(value.as_str()) {
                     None
                 } else {
                     Some(self.interner.write().unwrap().intern(value.as_str()))
                 };
-                (atom, SmallVec::new())
+                (atom, SmallVec::new(), SmallVec::new())
             }
             AttributeName::Class => {
-                let atoms = if value.is_empty() {
-                    SmallVec::new()
+                // Collect atoms and pre-resolved strings in one pass so the
+                // cascade hot path can read class names without the RwLock.
+                let (atoms, strings) = if value.is_empty() {
+                    (SmallVec::new(), SmallVec::new())
                 } else {
                     let mut interner = self.interner.write().unwrap();
                     value
                         .split_whitespace()
                         .filter(|part| should_intern_identifier(part))
-                        .map(|part| interner.intern(part))
-                        .collect()
+                        .map(|part| {
+                            let atom = interner.intern(part);
+                            let s: SmallString = part.into();
+                            (atom, s)
+                        })
+                        .unzip()
                 };
-                (None, atoms)
+                (None, atoms, strings)
             }
             _ => {
                 let atom = if value.is_empty() || !should_intern_identifier(value.as_str()) {
@@ -483,7 +579,7 @@ impl Dom {
                 } else {
                     Some(self.interner.write().unwrap().intern(value.as_str()))
                 };
-                (atom, SmallVec::new())
+                (atom, SmallVec::new(), SmallVec::new())
             }
         };
         let index = self.node_index(id)?;
@@ -493,12 +589,14 @@ impl Dom {
                     existing.value = value;
                     existing.value_atom = value_atom;
                     existing.value_atoms = value_atoms;
+                    existing.class_strings = class_strings;
                 } else {
                     attributes.push(Attribute {
                         name: attr_name,
                         value,
                         value_atom,
                         value_atoms,
+                        class_strings,
                     });
                 }
                 self.mark_dirty(id);
@@ -534,6 +632,8 @@ impl Dom {
         self.batch_depth -= 1;
         if self.batch_depth == 0 {
             self.flush_dirty_batch();
+            self.materialize_resolve_table();
+            self.generation = self.generation.wrapping_add(1);
         }
     }
 
@@ -651,6 +751,11 @@ impl Dom {
             .copied()
             .filter(|child| self.element_name(*child).ok().flatten().is_some())
             .collect())
+    }
+
+    /// Total number of nodes in the DOM (used for parallel array sizing).
+    pub fn node_count(&self) -> usize {
+        self.nodes.len()
     }
 
     fn push_node(&mut self, kind: NodeKind) -> NodeId {

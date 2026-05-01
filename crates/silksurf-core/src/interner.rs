@@ -1,33 +1,71 @@
-use lasso::{Rodeo, Spur};
+use std::collections::HashMap;
 
+use crate::SmallString;
+
+/*
+ * Atom -- opaque handle into the SilkInterner string table.
+ *
+ * Internally a u32 index into SilkInterner::values. Sequential assignment
+ * guarantees atoms from the same interner form a dense range [0..N).
+ * raw() exposes the index for direct array access in the resolve table.
+ */
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub struct Atom(Spur);
+pub struct Atom(u32);
+
+impl Atom {
+    /// Raw index for direct array access into a materialized resolve table.
+    /// SAFETY: only valid against the interner that created this atom.
+    #[inline]
+    pub fn raw(self) -> u32 {
+        self.0
+    }
+}
 
 pub struct SilkInterner {
-    rodeo: Rodeo,
+    ids: HashMap<SmallString, Atom>,
+    values: Vec<SmallString>,
 }
 
 impl SilkInterner {
     pub fn new() -> Self {
         Self {
-            rodeo: Rodeo::default(),
+            ids: HashMap::new(),
+            values: Vec::new(),
         }
     }
 
     pub fn intern(&mut self, value: &str) -> Atom {
-        Atom(self.rodeo.get_or_intern(value))
+        if let Some(existing) = self.ids.get(value) {
+            return *existing;
+        }
+
+        let atom = Atom(self.values.len() as u32);
+        let owned = SmallString::from(value);
+        self.values.push(owned.clone());
+        self.ids.insert(owned, atom);
+        atom
     }
 
     pub fn resolve(&self, symbol: Atom) -> &str {
-        self.rodeo.resolve(&symbol.0)
+        self.values
+            .get(symbol.0 as usize)
+            .map(SmallString::as_str)
+            .expect("invalid Atom: symbol not found in interner")
     }
 
     pub fn len(&self) -> usize {
-        self.rodeo.len()
+        self.values.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.rodeo.is_empty()
+        self.values.is_empty()
+    }
+
+    /// Direct slice access to all interned values, indexed by Atom::raw().
+    /// Used by Dom::materialize_resolve_table() to bulk-copy new atoms
+    /// into the lock-free resolve table without per-atom RwLock acquire.
+    pub fn values_slice(&self) -> &[SmallString] {
+        &self.values
     }
 }
 

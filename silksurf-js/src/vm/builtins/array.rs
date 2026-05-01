@@ -389,9 +389,13 @@ pub fn get_array_method(obj_rc: &Rc<RefCell<Object>>, name: &str) -> Option<Valu
                     elements.sort_by(|a, b| {
                         let r = call_value(&cb_val, &[a.clone(), b.clone()]);
                         let n = r.to_number();
-                        if n < 0.0 { std::cmp::Ordering::Less }
-                        else if n > 0.0 { std::cmp::Ordering::Greater }
-                        else { std::cmp::Ordering::Equal }
+                        if n < 0.0 {
+                            std::cmp::Ordering::Less
+                        } else if n > 0.0 {
+                            std::cmp::Ordering::Greater
+                        } else {
+                            std::cmp::Ordering::Equal
+                        }
                     });
                 } else {
                     // Default: sort by string representation
@@ -414,11 +418,19 @@ pub fn get_array_method(obj_rc: &Rc<RefCell<Object>>, name: &str) -> Option<Valu
                 let len = array_length(&o);
                 let start = args.get(1).map_or(0, |v| {
                     let n = v.to_number() as i64;
-                    if n < 0 { (len as i64 + n).max(0) as usize } else { (n as usize).min(len) }
+                    if n < 0 {
+                        (len as i64 + n).max(0) as usize
+                    } else {
+                        (n as usize).min(len)
+                    }
                 });
                 let end = args.get(2).map_or(len, |v| {
                     let n = v.to_number() as i64;
-                    if n < 0 { (len as i64 + n).max(0) as usize } else { (n as usize).min(len) }
+                    if n < 0 {
+                        (len as i64 + n).max(0) as usize
+                    } else {
+                        (n as usize).min(len)
+                    }
                 });
                 for i in start..end {
                     o.set_by_key(crate::vm::value::PropertyKey::Index(i as u32), value.clone());
@@ -433,7 +445,11 @@ pub fn get_array_method(obj_rc: &Rc<RefCell<Object>>, name: &str) -> Option<Valu
                 let len = elements.len() as i64;
                 let start = args.first().map_or(0, |v| {
                     let n = v.to_number() as i64;
-                    if n < 0 { (len + n).max(0) as usize } else { (n as usize).min(len as usize) }
+                    if n < 0 {
+                        (len + n).max(0) as usize
+                    } else {
+                        (n as usize).min(len as usize)
+                    }
                 });
                 let delete_count = args.get(1).map_or(len as usize - start, |v| {
                     (v.to_number() as usize).min(elements.len() - start)

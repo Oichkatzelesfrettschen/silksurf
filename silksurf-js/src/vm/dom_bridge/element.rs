@@ -13,7 +13,7 @@ use silksurf_dom::{AttributeName, Dom, NodeId, NodeKind};
 
 use super::{SharedDom, node_to_js_value};
 use crate::vm::builtins::array::create_array;
-use crate::vm::host::{make_host_object, HostObject, HostObjectRef};
+use crate::vm::host::{HostObject, HostObjectRef, make_host_object};
 use crate::vm::value::{NativeFunction, Value};
 
 /// JS Element object backed by a NodeId + shared Dom reference.
@@ -276,13 +276,14 @@ impl HostObject for ElementHost {
              * Handlers never fire (no event loop), but absorbing the call
              * prevents TypeError from aborting the script.
              */
-            "addEventListener" | "removeEventListener" => Value::NativeFunction(Rc::new(
-                NativeFunction::new(name, |_| Value::Undefined),
-            )),
-            "dispatchEvent" => Value::NativeFunction(Rc::new(NativeFunction::new(
-                "dispatchEvent",
-                |_| Value::Boolean(true),
-            ))),
+            "addEventListener" | "removeEventListener" => {
+                Value::NativeFunction(Rc::new(NativeFunction::new(name, |_| Value::Undefined)))
+            }
+            "dispatchEvent" => {
+                Value::NativeFunction(Rc::new(NativeFunction::new("dispatchEvent", |_| {
+                    Value::Boolean(true)
+                })))
+            }
             /*
              * hasAttribute / removeAttribute -- attribute existence check and deletion.
              */
@@ -292,7 +293,10 @@ impl HostObject for ElementHost {
                 Value::NativeFunction(Rc::new(NativeFunction::new("hasAttribute", move |args| {
                     let attr = args
                         .first()
-                        .map(|v| { let s = v.to_js_string(); s.as_str().unwrap_or("").to_string() })
+                        .map(|v| {
+                            let s = v.to_js_string();
+                            s.as_str().unwrap_or("").to_string()
+                        })
                         .unwrap_or_default();
                     let dom_borrow = dom.borrow();
                     Value::Boolean(get_attribute_value(&dom_borrow, node, &attr).is_some())
@@ -301,14 +305,20 @@ impl HostObject for ElementHost {
             "removeAttribute" => {
                 let dom = Rc::clone(dom_ref);
                 let node = nid;
-                Value::NativeFunction(Rc::new(NativeFunction::new("removeAttribute", move |args| {
-                    let attr = args
-                        .first()
-                        .map(|v| { let s = v.to_js_string(); s.as_str().unwrap_or("").to_string() })
-                        .unwrap_or_default();
-                    let _ = dom.borrow_mut().set_attribute(node, attr, "");
-                    Value::Undefined
-                })))
+                Value::NativeFunction(Rc::new(NativeFunction::new(
+                    "removeAttribute",
+                    move |args| {
+                        let attr = args
+                            .first()
+                            .map(|v| {
+                                let s = v.to_js_string();
+                                s.as_str().unwrap_or("").to_string()
+                            })
+                            .unwrap_or_default();
+                        let _ = dom.borrow_mut().set_attribute(node, attr, "");
+                        Value::Undefined
+                    },
+                )))
             }
             /*
              * getBoundingClientRect -- returns a stub DOMRect.
@@ -317,19 +327,18 @@ impl HostObject for ElementHost {
              * This prevents TypeError on .top/.left/.width/.height access.
              */
             "getBoundingClientRect" => {
-                Value::NativeFunction(Rc::new(NativeFunction::new(
-                    "getBoundingClientRect",
-                    |_| {
-                        use crate::vm::value::Object;
-                        let rect = Rc::new(RefCell::new(Object::new()));
-                        let mut r = rect.borrow_mut();
-                        for prop in &["top", "left", "right", "bottom", "width", "height", "x", "y"] {
-                            r.set_by_str(prop, Value::Number(0.0));
-                        }
-                        drop(r);
-                        Value::Object(rect)
-                    },
-                )))
+                Value::NativeFunction(Rc::new(NativeFunction::new("getBoundingClientRect", |_| {
+                    use crate::vm::value::Object;
+                    let rect = Rc::new(RefCell::new(Object::new()));
+                    let mut r = rect.borrow_mut();
+                    for prop in &[
+                        "top", "left", "right", "bottom", "width", "height", "x", "y",
+                    ] {
+                        r.set_by_str(prop, Value::Number(0.0));
+                    }
+                    drop(r);
+                    Value::Object(rect)
+                })))
             }
             /*
              * querySelector / querySelectorAll on element -- same as document
@@ -341,15 +350,22 @@ impl HostObject for ElementHost {
                 Value::NativeFunction(Rc::new(NativeFunction::new("querySelector", move |args| {
                     let sel_str = args
                         .first()
-                        .map(|v| { let s = v.to_js_string(); s.as_str().unwrap_or("").to_string() })
+                        .map(|v| {
+                            let s = v.to_js_string();
+                            s.as_str().unwrap_or("").to_string()
+                        })
                         .unwrap_or_default();
                     use super::document::find_first_matching_pub;
                     let selector = parse_selector_for_element(&dom, &sel_str);
-                    let Some(selector) = selector else { return Value::Null; };
+                    let Some(selector) = selector else {
+                        return Value::Null;
+                    };
                     let dom_borrow = dom.borrow();
                     let result = find_first_matching_pub(&dom_borrow, root, &selector);
                     drop(dom_borrow);
-                    result.map(|n| node_to_js_value(&dom, n)).unwrap_or(Value::Null)
+                    result
+                        .map(|n| node_to_js_value(&dom, n))
+                        .unwrap_or(Value::Null)
                 })))
             }
             _ => Value::Undefined,
@@ -463,7 +479,11 @@ fn parse_selector_for_element(
     let sel = dom.borrow().with_interner_mut(|interner| {
         silksurf_css::parse_selector_list_with_interner(tokens, Some(interner))
     });
-    if sel.selectors.is_empty() { None } else { Some(sel) }
+    if sel.selectors.is_empty() {
+        None
+    } else {
+        Some(sel)
+    }
 }
 
 /*
@@ -546,7 +566,10 @@ impl HostObject for DatasetHost {
         let attr_name = format!("data-{}", camel_to_kebab(name));
         let v = value.to_js_string();
         let v_str = v.as_str().unwrap_or("").to_string();
-        let _ = self.dom.borrow_mut().set_attribute(self.node, attr_name, v_str);
+        let _ = self
+            .dom
+            .borrow_mut()
+            .set_attribute(self.node, attr_name, v_str);
         true
     }
 

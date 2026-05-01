@@ -14,7 +14,7 @@ use super::opcode::Opcode;
 use crate::lexer::{Span, Symbol};
 use crate::parser::{
     Argument, ArrayElement, AssignmentOperator, AssignmentTarget, BinaryOperator, Expression,
-    ForInit, ForInLeft, Identifier, Literal, LogicalOperator, ObjectProperty, Program, PropertyKey,
+    ForInLeft, ForInit, Identifier, Literal, LogicalOperator, ObjectProperty, Program, PropertyKey,
     Statement, UnaryOperator, UpdateOperator, VariableDeclaration, VariableKind,
 };
 
@@ -243,7 +243,10 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
 
     /// Get the string pool for loading into the VM's StringTable.
     pub fn get_string_pool(&self) -> Vec<(u32, String)> {
-        self.string_pool.iter().map(|(s, &id)| (id, s.clone())).collect()
+        self.string_pool
+            .iter()
+            .map(|(s, &id)| (id, s.clone()))
+            .collect()
     }
 
     fn check_strict_directive(&mut self, program: &Program<'src, 'arena>) {
@@ -542,11 +545,8 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
 
                 // Patch EnterTry to point here (catch start)
                 let catch_offset = self.current_offset() - enter_try - 1;
-                self.chunk.instructions[enter_try] = Instruction::new_ri(
-                    Opcode::EnterTry,
-                    0,
-                    catch_offset as u16,
-                );
+                self.chunk.instructions[enter_try] =
+                    Instruction::new_ri(Opcode::EnterTry, 0, catch_offset as u16);
                 self.emit(Instruction::new(Opcode::EnterCatch));
 
                 // Compile catch body (if present)
@@ -646,7 +646,11 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                         }
                     }
                     for &(slot, pattern) in &destructuring_params {
-                        child.compile_pattern_binding(pattern, Register(slot), VariableKind::Let)?;
+                        child.compile_pattern_binding(
+                            pattern,
+                            Register(slot),
+                            VariableKind::Let,
+                        )?;
                     }
                     child.collect_declarations(func.body.body);
                     for stmt in func.body.body {
@@ -676,12 +680,7 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                         if depth == 0 {
                             self.emit(Instruction::new_rr(Opcode::SetLocal, slot, tmp.0));
                         } else {
-                            self.emit(Instruction::new_rrr(
-                                Opcode::SetCapture,
-                                depth,
-                                slot,
-                                tmp.0,
-                            ));
+                            self.emit(Instruction::new_rrr(Opcode::SetCapture, depth, slot, tmp.0));
                         }
                     }
                 }
@@ -735,7 +734,8 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 // done = result.done
                 self.emit(Instruction::new_rr(Opcode::IterDone, done_reg.0, result_reg.0));
                 // if done: exit
-                let exit_jump = self.emit(Instruction::new_r_offset(Opcode::JmpTrue, done_reg.0, 0));
+                let exit_jump =
+                    self.emit(Instruction::new_r_offset(Opcode::JmpTrue, done_reg.0, 0));
                 // value = result.value
                 self.emit(Instruction::new_rr(Opcode::IterValue, val_reg.0, result_reg.0));
 
@@ -748,11 +748,16 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                                 if let Some((depth, slot)) = self.lookup_var(id.name) {
                                     if depth == 0 {
                                         self.emit(Instruction::new_rr(
-                                            Opcode::SetLocal, slot, val_reg.0,
+                                            Opcode::SetLocal,
+                                            slot,
+                                            val_reg.0,
                                         ));
                                     } else {
                                         self.emit(Instruction::new_rrr(
-                                            Opcode::SetCapture, depth, slot, val_reg.0,
+                                            Opcode::SetCapture,
+                                            depth,
+                                            slot,
+                                            val_reg.0,
                                         ));
                                     }
                                 }
@@ -762,21 +767,20 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                     ForInLeft::Pattern(crate::parser::Pattern::Identifier(id)) => {
                         if let Some((depth, slot)) = self.lookup_var(id.name) {
                             if depth == 0 {
-                                self.emit(Instruction::new_rr(
-                                    Opcode::SetLocal, slot, val_reg.0,
-                                ));
+                                self.emit(Instruction::new_rr(Opcode::SetLocal, slot, val_reg.0));
                             } else {
                                 self.emit(Instruction::new_rrr(
-                                    Opcode::SetCapture, depth, slot, val_reg.0,
+                                    Opcode::SetCapture,
+                                    depth,
+                                    slot,
+                                    val_reg.0,
                                 ));
                             }
                         } else {
                             // Fall back to global assignment
                             let str_id = self.intern_string(id.raw);
                             let const_idx = self.chunk.add_constant(Constant::String(str_id));
-                            self.emit(Instruction::new_ri(
-                                Opcode::SetGlobal, val_reg.0, const_idx,
-                            ));
+                            self.emit(Instruction::new_ri(Opcode::SetGlobal, val_reg.0, const_idx));
                         }
                     }
                     _ => {}
@@ -840,7 +844,10 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 let keys_str_id = self.intern_string("keys");
                 let keys_const_idx = self.chunk.add_constant(Constant::String(keys_str_id));
                 self.emit(Instruction::new_rrr(
-                    Opcode::GetProp, keys_fn_reg.0, obj_global_reg.0, keys_const_idx as u8,
+                    Opcode::GetProp,
+                    keys_fn_reg.0,
+                    obj_global_reg.0,
+                    keys_const_idx as u8,
                 ));
                 // Call keys_fn(obj) -> emit Call: dst=keys_arr, fn=keys_fn, argc=1, argv=obj_reg
                 // Call encoding: dst=r[keys_arr], src1=r[keys_fn], src2=argc(1)
@@ -865,7 +872,8 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
 
                 self.emit(Instruction::new_rr(Opcode::IterNext, result_reg.0, iter_reg.0));
                 self.emit(Instruction::new_rr(Opcode::IterDone, done_reg.0, result_reg.0));
-                let exit_jump = self.emit(Instruction::new_r_offset(Opcode::JmpTrue, done_reg.0, 0));
+                let exit_jump =
+                    self.emit(Instruction::new_r_offset(Opcode::JmpTrue, done_reg.0, 0));
                 self.emit(Instruction::new_rr(Opcode::IterValue, val_reg.0, result_reg.0));
 
                 match &for_in.left {
@@ -875,9 +883,18 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                                 self.declare_var(id.name, decl.kind, true);
                                 if let Some((depth, slot)) = self.lookup_var(id.name) {
                                     if depth == 0 {
-                                        self.emit(Instruction::new_rr(Opcode::SetLocal, slot, val_reg.0));
+                                        self.emit(Instruction::new_rr(
+                                            Opcode::SetLocal,
+                                            slot,
+                                            val_reg.0,
+                                        ));
                                     } else {
-                                        self.emit(Instruction::new_rrr(Opcode::SetCapture, depth, slot, val_reg.0));
+                                        self.emit(Instruction::new_rrr(
+                                            Opcode::SetCapture,
+                                            depth,
+                                            slot,
+                                            val_reg.0,
+                                        ));
                                     }
                                 }
                             }
@@ -888,7 +905,12 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                             if depth == 0 {
                                 self.emit(Instruction::new_rr(Opcode::SetLocal, slot, val_reg.0));
                             } else {
-                                self.emit(Instruction::new_rrr(Opcode::SetCapture, depth, slot, val_reg.0));
+                                self.emit(Instruction::new_rrr(
+                                    Opcode::SetCapture,
+                                    depth,
+                                    slot,
+                                    val_reg.0,
+                                ));
                             }
                         } else {
                             let str_id = self.intern_string(id.raw);
@@ -956,7 +978,12 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                     if depth == 0 {
                         self.emit(Instruction::new_rr(Opcode::SetLocal, slot, value_reg.0));
                     } else {
-                        self.emit(Instruction::new_rrr(Opcode::SetCapture, depth, slot, value_reg.0));
+                        self.emit(Instruction::new_rrr(
+                            Opcode::SetCapture,
+                            depth,
+                            slot,
+                            value_reg.0,
+                        ));
                     }
                 } else {
                     let str_id = self.intern_string(id.raw);
@@ -967,7 +994,12 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
             Pattern::Object(obj_pat) => {
                 for prop in obj_pat.properties {
                     match prop {
-                        ObjectPatternProperty::Property { key, value, computed, .. } => {
+                        ObjectPatternProperty::Property {
+                            key,
+                            value,
+                            computed,
+                            ..
+                        } => {
                             let prop_reg = self.alloc_register();
                             if *computed {
                                 let key_reg = match key {
@@ -979,18 +1011,26 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                                     }
                                 };
                                 self.emit(Instruction::new_rrr(
-                                    Opcode::GetElem, prop_reg.0, value_reg.0, key_reg.0,
+                                    Opcode::GetElem,
+                                    prop_reg.0,
+                                    value_reg.0,
+                                    key_reg.0,
                                 ));
                             } else {
                                 let prop_name = match key {
                                     PropertyKey::Identifier(id) => id.raw,
-                                    PropertyKey::Literal(crate::parser::Literal::String(s)) => s.value,
+                                    PropertyKey::Literal(crate::parser::Literal::String(s)) => {
+                                        s.value
+                                    }
                                     _ => "",
                                 };
                                 let str_id = self.intern_string(prop_name);
                                 let const_idx = self.chunk.add_constant(Constant::String(str_id));
                                 self.emit(Instruction::new_rrr(
-                                    Opcode::GetProp, prop_reg.0, value_reg.0, const_idx as u8,
+                                    Opcode::GetProp,
+                                    prop_reg.0,
+                                    value_reg.0,
+                                    const_idx as u8,
                                 ));
                             }
                             self.compile_pattern_binding(value, prop_reg, kind)?;
@@ -1009,7 +1049,10 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                         let idx_reg = self.alloc_register();
                         self.emit(Instruction::new_ri(Opcode::LoadSmi, idx_reg.0, i as u16));
                         self.emit(Instruction::new_rrr(
-                            Opcode::GetElem, elem_reg.0, value_reg.0, idx_reg.0,
+                            Opcode::GetElem,
+                            elem_reg.0,
+                            value_reg.0,
+                            idx_reg.0,
                         ));
                         self.compile_pattern_binding(pat, elem_reg, kind)?;
                     }
@@ -1021,9 +1064,8 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 let default_reg = self.compile_expression(assign_pat.right)?;
                 let final_reg = self.alloc_register();
                 // JmpNotNullish: if value_reg is not null/undefined, skip default
-                let skip_default = self.emit(Instruction::new_r_offset(
-                    Opcode::JmpNotNullish, value_reg.0, 0,
-                ));
+                let skip_default =
+                    self.emit(Instruction::new_r_offset(Opcode::JmpNotNullish, value_reg.0, 0));
                 // Use default
                 self.emit(Instruction::new_rr(Opcode::Mov, final_reg.0, default_reg.0));
                 let skip_original = self.emit(Instruction::new_offset(Opcode::Jmp, 0));
@@ -1300,7 +1342,12 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                         } else {
                             // Concat: acc = acc + quasi
                             let new_reg = self.alloc_register();
-                            self.emit(Instruction::new_rrr(Opcode::Add, new_reg.0, acc_reg.0, quasi_reg.0));
+                            self.emit(Instruction::new_rrr(
+                                Opcode::Add,
+                                new_reg.0,
+                                acc_reg.0,
+                                quasi_reg.0,
+                            ));
                             acc_reg = new_reg;
                         }
                     }
@@ -1313,7 +1360,12 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                             initialized = true;
                         } else {
                             let new_reg = self.alloc_register();
-                            self.emit(Instruction::new_rrr(Opcode::Add, new_reg.0, acc_reg.0, expr_reg.0));
+                            self.emit(Instruction::new_rrr(
+                                Opcode::Add,
+                                new_reg.0,
+                                acc_reg.0,
+                                expr_reg.0,
+                            ));
                             acc_reg = new_reg;
                         }
                     }
@@ -1351,7 +1403,12 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                     self.emit(Instruction::new_ri(Opcode::LoadConst, str_reg.0, const_idx));
                     let idx_reg = self.alloc_register();
                     self.emit(Instruction::new_ri(Opcode::LoadSmi, idx_reg.0, i as u16));
-                    self.emit(Instruction::new_rrr(Opcode::SetElem, strings_reg.0, idx_reg.0, str_reg.0));
+                    self.emit(Instruction::new_rrr(
+                        Opcode::SetElem,
+                        strings_reg.0,
+                        idx_reg.0,
+                        str_reg.0,
+                    ));
                 }
 
                 // Compile the interpolated values as additional args after strings_reg
@@ -1752,7 +1809,10 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
         let result_reg = self.alloc_register();
         let callee_reg = self.compile_expression(call.callee)?;
 
-        let has_spread = call.arguments.iter().any(|a| matches!(a, Argument::Spread(_)));
+        let has_spread = call
+            .arguments
+            .iter()
+            .any(|a| matches!(a, Argument::Spread(_)));
 
         if has_spread {
             /*
@@ -1784,7 +1844,10 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                         let push_str_id = self.intern_string("push");
                         let push_const = self.chunk.add_constant(Constant::String(push_str_id));
                         self.emit(Instruction::new_rrr(
-                            Opcode::GetProp, push_fn_reg.0, args_reg.0, push_const as u8,
+                            Opcode::GetProp,
+                            push_fn_reg.0,
+                            args_reg.0,
+                            push_const as u8,
                         ));
                         // Call push: callee=push_fn, arg1=val (laid out after push_fn_reg)
                         let arg_slot = self.alloc_register();
@@ -1798,11 +1861,19 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                         let concat_str_id = self.intern_string("concat");
                         let concat_const = self.chunk.add_constant(Constant::String(concat_str_id));
                         self.emit(Instruction::new_rrr(
-                            Opcode::GetProp, concat_fn_reg.0, args_reg.0, concat_const as u8,
+                            Opcode::GetProp,
+                            concat_fn_reg.0,
+                            args_reg.0,
+                            concat_const as u8,
                         ));
                         let arg_slot = self.alloc_register();
                         self.emit(Instruction::new_rr(Opcode::Mov, arg_slot.0, spread_reg.0));
-                        self.emit(Instruction::new_rrr(Opcode::Call, args_reg.0, concat_fn_reg.0, 1));
+                        self.emit(Instruction::new_rrr(
+                            Opcode::Call,
+                            args_reg.0,
+                            concat_fn_reg.0,
+                            1,
+                        ));
                     }
                 }
             }

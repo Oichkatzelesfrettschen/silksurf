@@ -2,7 +2,7 @@
 
 **Status**: Phase 3 (Implementation) in progress
 **Next**: Phase 4 (Performance + Integration)
-**Toolchain**: nightly-2026-01-01 (rustc 1.94.0-nightly), MSRV 1.94.0
+**Toolchain**: nightly-2026-04-05 (rustc 1.96.0-nightly), MSRV 1.94.0
 
 ---
 
@@ -22,14 +22,22 @@ data ownership boundaries:
 - `silksurf-app` / `silksurf-gui`: CLI entry and UI shell.
 
 Data flow (current):
-HTML bytes → tokenizer → tree builder → DOM (`NodeId`, `TagName`,
-`AttributeName`, `SmallString`, selective id/class interning) → CSS stylesheet
-(`SelectorIdent`, tag/id/class index) → computed styles via `StyleCache`
-→ layout tree (`LayoutBox` + `SilkArena` children) → display list (optionally
-tiled for damage regions) → raster/GUI. JS tasks (via `JsRuntime`) mutate the DOM
+HTML bytes -> tokenizer -> tree builder -> DOM (`NodeId`, `TagName`,
+`AttributeName`, `SmallString`, selective id/class interning) -> CSS stylesheet
+(`SelectorIdent`, tag/id/class index) -> computed styles via `StyleCache`
+-> layout tree (`LayoutBox` + `SilkArena` children) -> display list (optionally
+tiled for damage regions) -> raster/GUI. JS tasks (via `JsRuntime`) mutate the DOM
 through batched updates and trigger style/layout invalidation; incremental render
 flows through `EnginePipeline::render_document_incremental_from_dom`.
 Network fetch feeds HTML/CSS/JS inputs.
+
+Fused pipeline (hot path, `FusedWorkspace::run()`):
+DOM -> `LayoutNeighborTable::rebuild()` (BFS topology) +
+`CascadeView::rebuild()` (40-byte SoA entries + flat SelectorIdent array) ->
+single BFS pass: cascade via `CascadeView` (no `dom.node()`) + layout + display
+list push. Same-DOM re-renders skip both rebuilds via `Dom::generation()` check.
+Lock-free atom resolution via `Dom::resolve_fast()` (monotonic `resolve_table`).
+See `docs/PERFORMANCE.md` for measured latencies.
 
 JS runtime integration surface: `crates/silksurf-engine/src/js.rs` defines the
 host boundary (`bind_dom`, `evaluate`, `enqueue_task`, `run_microtasks`). The

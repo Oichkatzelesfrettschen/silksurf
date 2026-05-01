@@ -2,7 +2,7 @@
 # Comprehensive linting for code quality and performance
 # Last updated: 2025-12-30
 #
-# Run with: cargo clippy --all-targets --all-features -- -D warnings
+# Run with: cargo clippy --all-targets --all-features -- -D clippy::correctness -D clippy::suspicious -D clippy::perf
 # Or use alias: cargo check-all
 
 # =============================================================================
@@ -10,7 +10,7 @@
 # =============================================================================
 
 # Minimum supported Rust version for MSRV lints
-msrv = "1.94.0"
+msrv = "1.96.0"
 
 # Cognitive complexity threshold (default: 25)
 cognitive-complexity-threshold = 30
@@ -101,13 +101,13 @@ disallowed-methods = [
     # { path = "std::result::Result::unwrap", reason = "Use expect() with a message or ? operator" },
 
     # Avoid print!/println! in library code
-    { path = "std::print", reason = "Use tracing or log macros instead" },
-    { path = "std::println", reason = "Use tracing or log macros instead" },
-    { path = "std::eprint", reason = "Use tracing or log macros instead" },
-    { path = "std::eprintln", reason = "Use tracing or log macros instead" },
+    { path = "std::print", reason = "Use tracing or log macros instead", allow-invalid = true },
+    { path = "std::println", reason = "Use tracing or log macros instead", allow-invalid = true },
+    { path = "std::eprint", reason = "Use tracing or log macros instead", allow-invalid = true },
+    { path = "std::eprintln", reason = "Use tracing or log macros instead", allow-invalid = true },
 
     # Avoid dbg! in production
-    { path = "std::dbg", reason = "Remove debug statements before commit" },
+    { path = "std::dbg", reason = "Remove debug statements before commit", allow-invalid = true },
 ]
 
 # Disallowed types

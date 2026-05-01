@@ -18,14 +18,14 @@ fn parses_combinators_and_modifiers() {
     let first = &selector.steps[0];
     assert!(first.combinator.is_none());
     assert!(matches!(
-        first.compound.modifiers.get(0),
+        first.compound.modifiers.first(),
         Some(SelectorModifier::Class(name)) if name.as_str() == "item"
     ));
 
     let second = &selector.steps[1];
     assert_eq!(second.combinator, Some(Combinator::Child));
     assert!(matches!(
-        second.compound.modifiers.get(0),
+        second.compound.modifiers.first(),
         Some(SelectorModifier::Id(name)) if name.as_str() == "main"
     ));
 
@@ -36,7 +36,7 @@ fn parses_combinators_and_modifiers() {
         Some(TypeSelector::Tag(TagName::A))
     );
     assert!(matches!(
-        third.compound.modifiers.get(0),
+        third.compound.modifiers.first(),
         Some(SelectorModifier::PseudoClass(name)) if name.as_str() == "hover"
     ));
 }

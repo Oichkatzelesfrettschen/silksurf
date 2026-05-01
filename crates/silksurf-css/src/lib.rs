@@ -9,6 +9,7 @@
 )]
 
 pub mod calc;
+pub mod cascade_view;
 pub mod custom_properties;
 mod matching;
 mod parser;
@@ -20,7 +21,7 @@ pub mod style_soa;
 pub use matching::{Specificity, matches_selector, matches_selector_list, selector_specificity};
 pub use parser::{
     AtRule, AtRuleBlock, CssParser, Declaration, Rule, StyleRule, Stylesheet, parse_stylesheet,
-    parse_stylesheet_with_interner,
+    parse_stylesheet_bytes, parse_stylesheet_with_interner,
 };
 pub use selector::{
     AttributeOperator, AttributeSelector, Combinator, CompoundSelector, Selector, SelectorIdent,
@@ -426,16 +427,13 @@ impl CssTokenizer {
         };
 
         // No escape sequences in the name: fast path (single alloc + memcpy)
-        if scan_end > start
-            && (scan_end >= bytes.len() || bytes[scan_end] != b'\\')
-        {
+        if scan_end > start && (scan_end >= bytes.len() || bytes[scan_end] != b'\\') {
             // SAFETY: is_name_char only accepts ASCII name characters, so the
             // slice [start..scan_end] is valid UTF-8.
             // SAFETY: is_name_char accepts only ASCII bytes; slice is valid UTF-8.
             // SmolStr::new inlines strings <=22 bytes (all common CSS idents) -- zero alloc.
-            let name = SmolStr::new(unsafe {
-                std::str::from_utf8_unchecked(&bytes[start..scan_end])
-            });
+            let name =
+                SmolStr::new(unsafe { std::str::from_utf8_unchecked(&bytes[start..scan_end]) });
             return NameParse::Parsed(name, scan_end);
         }
 

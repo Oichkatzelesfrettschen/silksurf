@@ -1,22 +1,24 @@
 //! String interning for O(1) identifier comparison
 //!
-//! Uses lasso crate for efficient, thread-safe interning.
+//! Uses a compact project-local interner for O(1) symbol comparison.
 //! Interned strings become Symbols that compare in O(1).
 
-use lasso::{Rodeo, Spur};
+use std::collections::HashMap;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Symbol(u32);
 
 /// An interned string symbol
 ///
 /// Comparing two Symbols is O(1) (integer comparison).
 /// Getting the string back is O(1) (lookup in interner).
-pub type Symbol = Spur;
 
-/// String interner using lasso
+/// String interner for identifiers.
 ///
-/// Thread-safe, arena-allocated string storage.
-/// Once interned, strings are never deallocated.
+/// Strings are retained for the lifetime of the interner.
 pub struct Interner {
-    rodeo: Rodeo,
+    ids: HashMap<String, Symbol>,
+    values: Vec<String>,
 }
 
 impl Interner {
@@ -24,7 +26,8 @@ impl Interner {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            rodeo: Rodeo::default(),
+            ids: HashMap::new(),
+            values: Vec::new(),
         }
     }
 
@@ -45,35 +48,46 @@ impl Interner {
     /// Intern a string, returning its symbol
     #[inline]
     pub fn intern(&mut self, s: &str) -> Symbol {
-        self.rodeo.get_or_intern(s)
+        if let Some(existing) = self.ids.get(s) {
+            return *existing;
+        }
+
+        let sym = Symbol(self.values.len() as u32);
+        let owned = s.to_owned();
+        self.values.push(owned.clone());
+        self.ids.insert(owned, sym);
+        sym
     }
 
     /// Get the interned string if it exists
     #[inline]
     #[must_use]
     pub fn get(&self, s: &str) -> Option<Symbol> {
-        self.rodeo.get(s)
+        self.ids.get(s).copied()
     }
 
     /// Resolve a symbol back to its string
     #[inline]
     #[must_use]
     pub fn resolve(&self, symbol: Symbol) -> &str {
-        self.rodeo.resolve(&symbol)
+        self.values
+            .get(symbol.0 as usize)
+            .map(String::as_str)
+            .expect("invalid Symbol: symbol not found in interner")
     }
 
     /// Number of interned strings
     #[inline]
     #[must_use]
     pub fn len(&self) -> usize {
-        self.rodeo.len()
+        self.values.len()
     }
 
     /// Check if empty
     #[inline]
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.rodeo.is_empty()
+        self.values.is_empty()
     }
 }
 

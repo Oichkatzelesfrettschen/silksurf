@@ -1,6 +1,6 @@
 # SilkSurf Documentation Index
 
-**Last Updated**: 2026-01-29
+**Last Updated**: 2026-04-06
 **Status**: Phase 3 Week 1-2 Complete (14/34 tasks done, 75% test pass rate)
 
 ---
@@ -9,6 +9,7 @@
 
 **New to SilkSurf?** → README.md → BUILD.md → GLOSSARY.md
 **Building?** → docs/development/BUILD.md
+**Tech debt status?** → docs/TECH_DEBT_AUDIT.md
 **Implementing?** → docs/roadmaps/PHASE-3-IMPLEMENTATION-ROADMAP.md
 **Understanding Decisions?** → docs/design/ARCHITECTURE-DECISIONS.md
 **Contributing?** → CLAUDE.md (NO SHORTCUTS policy)
@@ -51,6 +52,7 @@ silksurf/
 ├── CMakeLists.txt                     # Build configuration
 │
 ├── docs/
+│   ├── TECH_DEBT_AUDIT.md              # 📘 Canonical debt and modernization summary
 │   ├── development/                   # Build & development guides
 │   │   ├── BUILD.md                   # 📘 Build instructions & troubleshooting
 │   │   ├── AGENTS.md                  # AI assistant coordination
@@ -68,6 +70,8 @@ silksurf/
 │   │
 │   └── archive/                       # Historical documentation
 │       ├── DEPRECATED.md              # Archive explanation
+│       ├── dependencies/
+│       │   └── CRATE_AUDIT_2026-04-06.md  # Deep dependency audit evidence
 │       ├── roadmaps/                  # Old planning docs
 │       │   ├── PHASE-3-5-MILESTONES.md
 │       │   ├── PHASE-3-SCOPE-AND-READINESS.md

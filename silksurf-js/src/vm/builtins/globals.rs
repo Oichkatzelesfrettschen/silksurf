@@ -27,15 +27,16 @@ pub fn install(global: &mut Object) {
      *
      * Note: name "Object" is the dispatch key for static methods.
      */
-    global.set_by_str("Object", native_fn("Object", |args| {
-        match args.first() {
+    global.set_by_str(
+        "Object",
+        native_fn("Object", |args| match args.first() {
             Some(Value::Object(o)) => Value::Object(std::rc::Rc::clone(o)),
             _ => {
                 let obj = Object::new();
                 Value::Object(std::rc::Rc::new(std::cell::RefCell::new(obj)))
             }
-        }
-    }));
+        }),
+    );
 
     /*
      * Array constructor -- new Array(n) or new Array(a, b, c).
@@ -47,31 +48,35 @@ pub fn install(global: &mut Object) {
      *
      * Note: name "Array" is the dispatch key for static methods.
      */
-    global.set_by_str("Array", native_fn("Array", |args| {
-        use crate::vm::builtins::array::create_array;
-        if args.len() == 1 {
-            if let Value::Number(n) = args[0] {
-                let n = n.max(0.0) as usize;
-                let elements = vec![Value::Undefined; n.min(1_000_000)];
-                return create_array(elements);
+    global.set_by_str(
+        "Array",
+        native_fn("Array", |args| {
+            use crate::vm::builtins::array::create_array;
+            if args.len() == 1 {
+                if let Value::Number(n) = args[0] {
+                    let n = n.max(0.0) as usize;
+                    let elements = vec![Value::Undefined; n.min(1_000_000)];
+                    return create_array(elements);
+                }
             }
-        }
-        create_array(args.to_vec())
-    }));
+            create_array(args.to_vec())
+        }),
+    );
     // undefined is already the default register value
     global.set_by_str("undefined", Value::Undefined);
     global.set_by_str("null", Value::Null);
 
     // Date object (minimal: just Date.now())
-    let date_obj = super::make_object_with_methods(vec![
-        ("now", native_fn("Date.now", |_args| {
+    let date_obj = super::make_object_with_methods(vec![(
+        "now",
+        native_fn("Date.now", |_args| {
             let ms = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis() as f64)
                 .unwrap_or(0.0);
             Value::Number(ms)
-        })),
-    ]);
+        }),
+    )]);
     global.set_by_str("Date", date_obj);
 
     /*
@@ -89,49 +94,63 @@ pub fn install(global: &mut Object) {
      *   3. Calls start(controller) immediately
      *   4. Returns a stream object with pipeThrough()
      */
-    global.set_by_str("ReadableStream", native_fn("ReadableStream", |_args| {
-        // Create controller with enqueue() and close()
-        let controller = Object::new();
-        let controller_rc = std::rc::Rc::new(std::cell::RefCell::new(controller));
-        {
-            let mut c = controller_rc.borrow_mut();
-            c.set_by_str("enqueue", Value::NativeFunction(std::rc::Rc::new(
-                crate::vm::value::NativeFunction::new("enqueue", |_| Value::Undefined),
-            )));
-            c.set_by_str("close", Value::NativeFunction(std::rc::Rc::new(
-                crate::vm::value::NativeFunction::new("close", |_| Value::Undefined),
-            )));
-        }
-        let controller_val = Value::Object(controller_rc);
+    global.set_by_str(
+        "ReadableStream",
+        native_fn("ReadableStream", |_args| {
+            // Create controller with enqueue() and close()
+            let controller = Object::new();
+            let controller_rc = std::rc::Rc::new(std::cell::RefCell::new(controller));
+            {
+                let mut c = controller_rc.borrow_mut();
+                c.set_by_str(
+                    "enqueue",
+                    Value::NativeFunction(std::rc::Rc::new(crate::vm::value::NativeFunction::new(
+                        "enqueue",
+                        |_| Value::Undefined,
+                    ))),
+                );
+                c.set_by_str(
+                    "close",
+                    Value::NativeFunction(std::rc::Rc::new(crate::vm::value::NativeFunction::new(
+                        "close",
+                        |_| Value::Undefined,
+                    ))),
+                );
+            }
+            let controller_val = Value::Object(controller_rc);
 
-        // Note: JS function callbacks from `start(controller){...}` require
-        // VM re-entrancy which can't happen inside a NativeFunction.
-        // Instead, we attach the controller to the returned stream object
-        // so it's accessible. The `start` callback isn't invoked.
-        //
-        // For ChatGPT specifically: script 3 creates the ReadableStream and
-        // the start callback assigns streamController. Since we can't call
-        // the start callback, we pre-create the streamController on the
-        // stream itself. Script 3 then accesses it via the returned object.
+            // Note: JS function callbacks from `start(controller){...}` require
+            // VM re-entrancy which can't happen inside a NativeFunction.
+            // Instead, we attach the controller to the returned stream object
+            // so it's accessible. The `start` callback isn't invoked.
+            //
+            // For ChatGPT specifically: script 3 creates the ReadableStream and
+            // the start callback assigns streamController. Since we can't call
+            // the start callback, we pre-create the streamController on the
+            // stream itself. Script 3 then accesses it via the returned object.
 
-        // Return stream object with controller attached
-        let stream = Object::new();
-        let stream_rc = std::rc::Rc::new(std::cell::RefCell::new(stream));
-        {
-            let mut s = stream_rc.borrow_mut();
-            s.set_by_str("pipeThrough", Value::NativeFunction(std::rc::Rc::new(
-                crate::vm::value::NativeFunction::new("pipeThrough", |_| Value::Undefined),
-            )));
-            // Expose controller on the stream for external access
-            s.set_by_str("controller", controller_val);
-        }
-        Value::Object(stream_rc)
-    }));
+            // Return stream object with controller attached
+            let stream = Object::new();
+            let stream_rc = std::rc::Rc::new(std::cell::RefCell::new(stream));
+            {
+                let mut s = stream_rc.borrow_mut();
+                s.set_by_str(
+                    "pipeThrough",
+                    Value::NativeFunction(std::rc::Rc::new(crate::vm::value::NativeFunction::new(
+                        "pipeThrough",
+                        |_| Value::Undefined,
+                    ))),
+                );
+                // Expose controller on the stream for external access
+                s.set_by_str("controller", controller_val);
+            }
+            Value::Object(stream_rc)
+        }),
+    );
 
     // TextEncoderStream stub
-    global.set_by_str("TextEncoderStream", native_fn("TextEncoderStream", |_args| {
-        Value::Undefined
-    }));
+    global
+        .set_by_str("TextEncoderStream", native_fn("TextEncoderStream", |_args| Value::Undefined));
 }
 
 fn parse_int(args: &[Value]) -> Value {

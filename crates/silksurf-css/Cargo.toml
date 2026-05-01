@@ -12,12 +12,6 @@ rustc-hash = { workspace = true }
 smallvec = { workspace = true }
 memchr = { workspace = true }
 smol_str = { workspace = true }
-bincode = { workspace = true }
 serde = { workspace = true }
 mimalloc = { workspace = true }
-dashmap = { workspace = true, optional = true }
-rayon = { workspace = true, optional = true }
-
-[features]
-default = []
-parallel = ["rayon", "dashmap"]
+encoding_rs = "0.8"

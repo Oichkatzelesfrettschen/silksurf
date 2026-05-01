@@ -97,12 +97,7 @@ impl DomDiff {
  *
  * See: diff_subtree for the recursive implementation
  */
-pub fn diff_doms(
-    old_dom: &Dom,
-    old_root: NodeId,
-    new_dom: &Dom,
-    new_root: NodeId,
-) -> DomDiff {
+pub fn diff_doms(old_dom: &Dom, old_root: NodeId, new_dom: &Dom, new_root: NodeId) -> DomDiff {
     let mut result = DomDiff::default();
     diff_subtree(old_dom, old_root, new_dom, new_root, &mut result);
     result
@@ -193,10 +188,7 @@ fn diff_subtree(
          * If the tag matches: compare attributes for changes, then recurse
          * into children.
          */
-        (
-            NodeKind::Element { name: old_tag, .. },
-            NodeKind::Element { name: new_tag, .. },
-        ) => {
+        (NodeKind::Element { name: old_tag, .. }, NodeKind::Element { name: new_tag, .. }) => {
             if old_tag != new_tag {
                 // Structurally incompatible: treat as full replacement.
                 collect_subtree_ids(old_dom, old_node, &mut result.removed);
@@ -277,12 +269,7 @@ fn diff_children(
  * Complexity: O(N_attrs^2) in the worst case, but attributes are typically
  * small in number (< 10), so this is effectively O(1) per node.
  */
-fn attributes_changed(
-    old_dom: &Dom,
-    old_node: NodeId,
-    new_dom: &Dom,
-    new_node: NodeId,
-) -> bool {
+fn attributes_changed(old_dom: &Dom, old_node: NodeId, new_dom: &Dom, new_node: NodeId) -> bool {
     let old_attrs = match old_dom.attributes(old_node) {
         Ok(a) => a,
         Err(_) => return false,
@@ -297,9 +284,9 @@ fn attributes_changed(
     }
 
     for old_attr in old_attrs {
-        let found = new_attrs.iter().any(|new_attr| {
-            new_attr.name == old_attr.name && new_attr.value == old_attr.value
-        });
+        let found = new_attrs
+            .iter()
+            .any(|new_attr| new_attr.name == old_attr.name && new_attr.value == old_attr.value);
         if !found {
             return true;
         }
@@ -392,7 +379,10 @@ mod tests {
 
         let diff = diff_doms(&old_dom, old_root, &new_dom, doc);
         assert!(!diff.is_empty());
-        assert!(!diff.added.is_empty(), "new span should be detected as added");
+        assert!(
+            !diff.added.is_empty(),
+            "new span should be detected as added"
+        );
         assert!(diff.changed.is_empty());
     }
 
@@ -407,7 +397,10 @@ mod tests {
 
         let diff = diff_doms(&old_dom, old_root, &new_dom, doc);
         assert!(!diff.is_empty());
-        assert!(!diff.removed.is_empty(), "old children should be detected as removed");
+        assert!(
+            !diff.removed.is_empty(),
+            "old children should be detected as removed"
+        );
         assert!(diff.added.is_empty());
     }
 
@@ -427,7 +420,10 @@ mod tests {
         new_dom.append_child(body, extra).unwrap();
 
         let diff = diff_doms(&old_dom, old_root, &new_dom, doc);
-        assert_eq!(diff.total_changes(), diff.changed.len() + diff.added.len() + diff.removed.len());
+        assert_eq!(
+            diff.total_changes(),
+            diff.changed.len() + diff.added.len() + diff.removed.len()
+        );
         assert!(diff.total_changes() > 0);
     }
 }

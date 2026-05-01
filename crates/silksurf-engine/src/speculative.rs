@@ -20,14 +20,22 @@
  * Complexity: O(1) cache lookup, O(network) on first fetch and revalidation
  * Memory: O(responses) in ResponseCache -- one entry per URL
  *
+ * Disk persistence: all constructors initialize ResponseCache with
+ * with_disk(http_cache_dir()), which loads previously cached responses from
+ * ~/.cache/silksurf/http/ at startup. This makes the second process invocation
+ * return FetchOrigin::Cache immediately (zero network cost) and spawn
+ * background revalidation to check for updates.
+ *
  * See: silksurf-net/src/cache.rs ResponseCache for entry format
  * See: silksurf-net/src/lib.rs BasicClient for HTTP/1.1 + TLS client
  * See: silksurf-app/src/main.rs for integration point
  */
 
 use rustc_hash::FxHashMap;
-use silksurf_css::{Stylesheet, intern_rules, parse_stylesheet_with_interner, strip_selector_atoms};
 use silksurf_core::SilkInterner;
+use silksurf_css::{
+    Stylesheet, intern_rules, parse_stylesheet_with_interner, strip_selector_atoms,
+};
 use silksurf_net::cache::ResponseCache;
 use silksurf_net::{BasicClient, HttpMethod, HttpRequest, HttpResponse, NetClient, NetError};
 use std::hash::{Hash, Hasher};
@@ -174,13 +182,13 @@ fn disk_cache_path(key: u64) -> PathBuf {
  * Returns None on any error (file not found, corrupt bytes, format version
  * mismatch). Callers fall through to full parse on None.
  *
- * WHY graceful fallback: bincode format changes between releases would
+ * WHY graceful fallback: serialization format changes between releases would
  * otherwise cause panics. By catching errors here, we silently re-parse
  * and overwrite stale caches.
  */
 fn load_stylesheet_from_disk(path: &PathBuf) -> Option<Stylesheet> {
     let bytes = std::fs::read(path).ok()?;
-    bincode::deserialize::<Stylesheet>(&bytes).ok()
+    serde_json::from_slice::<Stylesheet>(&bytes).ok()
 }
 
 /*
@@ -194,7 +202,7 @@ fn save_stylesheet_to_disk(path: &PathBuf, sheet: &Stylesheet) {
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    if let Ok(bytes) = bincode::serialize(sheet) {
+    if let Ok(bytes) = serde_json::to_vec(sheet) {
         let _ = std::fs::write(path, bytes);
     }
 }
@@ -213,16 +221,37 @@ fn save_stylesheet_to_disk(path: &PathBuf, sheet: &Stylesheet) {
  * BasicClient is Send+Sync (its only non-trivial field is Arc<dyn TlsProvider
  * + Send+Sync>), so it is safe to share across threads via Arc.
  */
+
+/*
+ * http_cache_dir -- return the per-user HTTP response cache directory.
+ *
+ * WHY: We need a stable, writable directory that survives process restarts.
+ * Follows the XDG Base Directory spec: $XDG_CACHE_HOME or ~/.cache.
+ * On success returns ~/.cache/silksurf/http (directory need not exist yet;
+ * ResponseCache::with_disk creates it on first write).
+ */
+fn http_cache_dir() -> std::path::PathBuf {
+    let base = std::env::var_os("XDG_CACHE_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            let home = std::env::var_os("HOME").unwrap_or_else(|| "/tmp".into());
+            std::path::PathBuf::from(home).join(".cache")
+        });
+    base.join("silksurf").join("http")
+}
+
 pub struct SpeculativeRenderer {
     pub cache: ResponseCache,
     client: Arc<BasicClient>,
     stylesheet_cache: StylesheetCache,
 }
 
+type FetchResult = Result<(HttpResponse, FetchOrigin, std::time::Duration), NetError>;
+
 impl SpeculativeRenderer {
     pub fn new() -> Self {
         Self {
-            cache: ResponseCache::new(),
+            cache: ResponseCache::with_disk(&http_cache_dir()),
             client: Arc::new(BasicClient::new()),
             stylesheet_cache: StylesheetCache::new(),
         }
@@ -238,12 +267,62 @@ impl SpeculativeRenderer {
     pub fn with_insecure() -> Self {
         use silksurf_tls::RustlsProvider;
         Self {
-            cache: ResponseCache::new(),
+            cache: ResponseCache::with_disk(&http_cache_dir()),
             client: Arc::new(BasicClient::with_tls(Arc::new(
                 RustlsProvider::new_insecure(),
             ))),
             stylesheet_cache: StylesheetCache::new(),
         }
+    }
+
+    /*
+     * with_extra_ca_file -- constructor that adds a user-supplied PEM CA bundle
+     * to the default Mozilla + native root store.
+     *
+     * WHY: Corporate proxies and private PKI deployments present certificates
+     * signed by an internal CA that is not in Mozilla's root bundle. Rather
+     * than disabling all verification (--insecure), the user can supply the
+     * specific CA cert file so only that chain is trusted additionally.
+     *
+     * Error: returns Err if the file cannot be opened, contains no parseable
+     * PEM certificates, or rustls rejects all of them.
+     */
+    pub fn with_extra_ca_file(path: &std::path::Path) -> Result<Self, NetError> {
+        use silksurf_tls::RustlsProvider;
+
+        let provider =
+            RustlsProvider::new_with_extra_ca_file(path).map_err(|e| NetError {
+                message: format!("TLS CA file {}: {e}", path.display()),
+            })?;
+
+        Ok(Self {
+            cache: ResponseCache::with_disk(&http_cache_dir()),
+            client: Arc::new(BasicClient::with_tls(Arc::new(provider))),
+            stylesheet_cache: StylesheetCache::new(),
+        })
+    }
+
+    /*
+     * with_platform_verifier -- constructor that asks rustls to use the best
+     * platform verifier available for this target.
+     *
+     * On Linux this still uses WebPKI over the discovered native root bundle;
+     * on Windows/macOS/mobile it can use the OS verifier and its richer trust
+     * policy.
+     */
+    #[cfg(feature = "platform-verifier")]
+    pub fn with_platform_verifier() -> Result<Self, NetError> {
+        use silksurf_tls::RustlsProvider;
+
+        let provider = RustlsProvider::new_platform_verifier().map_err(|e| NetError {
+            message: format!("TLS platform verifier setup: {e}"),
+        })?;
+
+        Ok(Self {
+            cache: ResponseCache::with_disk(&http_cache_dir()),
+            client: Arc::new(BasicClient::with_tls(Arc::new(provider))),
+            stylesheet_cache: StylesheetCache::new(),
+        })
     }
 
     /*
@@ -284,7 +363,7 @@ impl SpeculativeRenderer {
 
         // Cache miss: try disk cache before full parse.
         //
-        // WHY: full parse costs ~2.5ms; disk read + bincode::deserialize + intern_rules
+        // WHY: full parse costs ~2.5ms; disk read + JSON decode + intern_rules
         // costs ~200us. On cold process start the in-memory cache is empty but the disk
         // cache may have a valid serialized Stylesheet from a previous run.
         //
@@ -387,11 +466,10 @@ impl SpeculativeRenderer {
     pub fn fetch_all_or_speculate(
         &mut self,
         requests: &[(&str, &[(String, String)])],
-    ) -> Vec<Result<(HttpResponse, FetchOrigin, std::time::Duration), NetError>> {
+    ) -> Vec<FetchResult> {
         let t0 = Instant::now();
         let n = requests.len();
-        let mut results: Vec<Option<Result<(HttpResponse, FetchOrigin, std::time::Duration), NetError>>> =
-            vec![None; n];
+        let mut results: Vec<Option<FetchResult>> = vec![None; n];
 
         // Phase 1: serve cached URLs immediately.
         let mut uncached_indices: Vec<usize> = Vec::new();
@@ -558,9 +636,12 @@ mod tests {
     }
 
     #[test]
-    fn test_cache_empty_on_new() {
-        let renderer = SpeculativeRenderer::new();
-        assert_eq!(renderer.cache.len(), 0);
-        assert_eq!(renderer.cache_bytes(), 0);
+    fn test_cache_empty_without_disk() {
+        // Use ResponseCache::new() (no disk) to test the invariant in isolation.
+        // SpeculativeRenderer::new() uses with_disk(), which may load disk entries
+        // on a developer machine with a pre-existing ~/.cache/silksurf/http/ dir.
+        let cache = ResponseCache::new();
+        assert_eq!(cache.len(), 0);
+        assert_eq!(cache.total_bytes(), 0);
     }
 }

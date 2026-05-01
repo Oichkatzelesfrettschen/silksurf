@@ -206,20 +206,13 @@ async fn fetch_h2_parallel_async(
      */
     let mut results = Vec::with_capacity(requests.len());
     for resp_future in response_futures {
-        let response = resp_future
-            .await
-            .map_err(|e| format!("response: {e}"))?;
+        let response = resp_future.await.map_err(|e| format!("response: {e}"))?;
 
         let status = response.status().as_u16();
         let headers: Vec<(String, String)> = response
             .headers()
             .iter()
-            .map(|(k, v)| {
-                (
-                    k.as_str().to_string(),
-                    v.to_str().unwrap_or("").to_string(),
-                )
-            })
+            .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
             .collect();
 
         let mut body_stream = response.into_body();

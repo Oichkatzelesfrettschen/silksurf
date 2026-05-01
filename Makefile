@@ -57,6 +57,16 @@ perf-baselines:
 
 perf-all: perf-guardrails perf-baselines
 
+.PHONY: local-gate-fast local-gate-full local-gate
+
+local-gate-fast:
+	./scripts/local_gate.sh fast
+
+local-gate-full:
+	./scripts/local_gate.sh full
+
+local-gate: local-gate-full
+
 # ------------------------------------------------------------------------- 
 # GUI & Rendering 
 # ------------------------------------------------------------------------- 

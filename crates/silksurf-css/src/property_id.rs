@@ -135,9 +135,18 @@ mod tests {
         assert_eq!(lookup_property_id("DISPLAY"), PropertyId::Display);
         assert_eq!(lookup_property_id("Display"), PropertyId::Display);
         assert_eq!(lookup_property_id("color"), PropertyId::Color);
-        assert_eq!(lookup_property_id("background-color"), PropertyId::BackgroundColor);
-        assert_eq!(lookup_property_id("flex-direction"), PropertyId::FlexDirection);
-        assert_eq!(lookup_property_id("justify-content"), PropertyId::JustifyContent);
+        assert_eq!(
+            lookup_property_id("background-color"),
+            PropertyId::BackgroundColor
+        );
+        assert_eq!(
+            lookup_property_id("flex-direction"),
+            PropertyId::FlexDirection
+        );
+        assert_eq!(
+            lookup_property_id("justify-content"),
+            PropertyId::JustifyContent
+        );
         assert_eq!(lookup_property_id("z-index"), PropertyId::ZIndex);
     }
 

@@ -276,12 +276,14 @@ pub fn get_string_method(s: &Rc<JsString>, name: &str) -> Option<Value> {
             // Simplified: return null (no regex engine yet)
             Value::Null
         })),
-        "search" => Some(Box::new(move |_args: &[Value]| {
-            Value::Number(-1.0)
-        })),
+        "search" => Some(Box::new(move |_args: &[Value]| Value::Number(-1.0))),
         "localeCompare" => Some(Box::new(move |args: &[Value]| {
-            let other = args.first()
-                .map(|v| { let s = v.to_js_string(); s.as_str().unwrap_or("").to_string() })
+            let other = args
+                .first()
+                .map(|v| {
+                    let s = v.to_js_string();
+                    s.as_str().unwrap_or("").to_string()
+                })
                 .unwrap_or_default();
             let cmp = text.cmp(&other);
             Value::Number(match cmp {

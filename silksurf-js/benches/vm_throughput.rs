@@ -6,7 +6,9 @@
 //! - NaN-boxed value operations
 //! - Property access
 
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use std::hint::black_box;
+
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use silksurf_js::bytecode::{Chunk, Instruction, Opcode};
 use silksurf_js::vm::Vm;
 

@@ -7,6 +7,12 @@ publish = false
 
 [dependencies]
 bumpalo = { workspace = true }
-lasso = { workspace = true }
 smol_str = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+criterion = "0.8"
+
+[[bench]]
+name = "interner"
+harness = false

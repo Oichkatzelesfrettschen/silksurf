@@ -5,9 +5,9 @@
 //! in staged migration phases per the cleanroom plan.
 
 pub mod fused_pipeline;
+mod js;
 #[cfg(feature = "net")]
 pub mod speculative;
-mod js;
 
 use rustc_hash::FxHashMap;
 use silksurf_core::SilkArena;
@@ -156,6 +156,12 @@ impl EnginePipeline {
             arena,
             &dirty_nodes,
         )
+    }
+}
+
+impl Default for EnginePipeline {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
