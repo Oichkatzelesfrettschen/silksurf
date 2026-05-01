@@ -6,6 +6,7 @@
 
 pub mod fused_pipeline;
 mod js;
+pub mod sandbox;
 #[cfg(feature = "net")]
 pub mod speculative;
 

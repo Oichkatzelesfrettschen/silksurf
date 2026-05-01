@@ -1,5 +1,6 @@
 //! DOM data structures and traversal APIs (cleanroom).
 
+pub mod a11y;
 pub mod diff;
 
 use silksurf_core::{Atom, SilkInterner, SmallString, should_intern_identifier};

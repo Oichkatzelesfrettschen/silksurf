@@ -300,6 +300,18 @@ fn fill_row_u32(row: &mut [u32], pixel: u32) {
             return;
         }
     }
+    // AArch64 NEON path: skeleton. The real implementation will mirror
+    // fill_row_sse2 using `vdupq_n_u32` + `vst1q_u32` from
+    // `std::arch::aarch64`. Tracked in SNAZZY-WAFFLE roadmap P8.S7.
+    // Until that lands, AArch64 falls through to the scalar fallback
+    // below; correctness is unaffected, throughput is lower.
+    #[cfg(target_arch = "aarch64")]
+    {
+        // TODO(P8.S7): NEON 4-pixel store via vdupq_n_u32 + vst1q_u32.
+        // Gate on std::arch::is_aarch64_feature_detected!("neon") (which
+        // is always true on aarch64-unknown-linux-gnu) and add the
+        // SAFETY: comment + UNSAFE-CONTRACTS.md row.
+    }
     row.fill(pixel);
 }
 

@@ -32,8 +32,17 @@ core
 *.db-wal
 
 ## Fuzzing outputs -------------------------------------------------------
+# fuzz/artifacts/ holds crash inputs found by libfuzzer; never tracked.
+# fuzz/corpus/<target>/ is the cargo-fuzz convention for both committed
+# seeds AND the auto-extended runtime corpus. We track committed seeds
+# (small files for bootstrap) and ignore everything else libfuzzer adds.
+# Pattern: track files matching NN_*.* (numbered seeds we author) and
+# README.md; ignore any other auto-discovered artefact.
 /fuzz/artifacts/
-/fuzz/corpus/
+/fuzz/corpus/*/*
+!/fuzz/corpus/*/[0-9][0-9]_*.*
+!/fuzz/corpus/*/README.md
+!/fuzz/corpus/README.md
 /fuzz_in/
 /fuzz_in_css/
 /fuzz_out/

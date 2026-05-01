@@ -3,7 +3,8 @@ name = "silksurf-fuzz"
 version = "0.0.0"
 publish = false
 edition = "2024"
-rust-version = "1.96.0"
+# MSRV pinned to match workspace.package.rust-version (see ADR-008).
+rust-version = "1.94.1"
 
 [package.metadata]
 cargo-fuzz = true
