@@ -25,6 +25,7 @@ fn main() {
     let mut list_features = false;
     let mut test262_path = PathBuf::from("test262");
     let mut test_path = String::new();
+    let mut scorecard_path: Option<PathBuf> = None;
 
     let mut i = 1;
     while i < args.len() {
@@ -35,6 +36,12 @@ fn main() {
                 i += 1;
                 if i < args.len() {
                     test262_path = PathBuf::from(&args[i]);
+                }
+            }
+            "--scorecard" => {
+                i += 1;
+                if i < args.len() {
+                    scorecard_path = Some(PathBuf::from(&args[i]));
                 }
             }
             "-h" | "--help" => {
@@ -96,9 +103,69 @@ fn main() {
     println!("Skipped: {}", results.skipped);
     println!("Time:    {:.2}s", duration.as_secs_f64());
 
+    if let Some(path) = scorecard_path {
+        if let Err(e) = emit_scorecard(&path, &results, &test_dir, &test_path, duration) {
+            eprintln!("WARN: failed to write scorecard {path:?}: {e}");
+        } else {
+            println!("Scorecard written: {path:?}");
+        }
+    }
+
     if results.failed > 0 {
         std::process::exit(1);
     }
+}
+
+/// Emit a JSON scorecard summarising the test262 run.
+///
+/// WHY: gives the SNAZZY-WAFFLE roadmap a stable artefact for cross-run
+/// regression tracking. The shape is intentionally minimal -- additional
+/// fields are appended without removing existing ones to keep parsers
+/// forward-compatible.
+fn emit_scorecard(
+    path: &std::path::Path,
+    results: &TestResults,
+    test_dir: &std::path::Path,
+    test_path: &str,
+    duration: std::time::Duration,
+) -> std::io::Result<()> {
+    use std::io::Write;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let mut f = std::fs::File::create(path)?;
+    writeln!(f, "{{")?;
+    writeln!(f, "  \"runner\": \"silksurf-js test262 (lexer-only)\",")?;
+    writeln!(f, "  \"runner_version\": \"0.1.0\",")?;
+    writeln!(f, "  \"unix_timestamp\": {now},")?;
+    writeln!(
+        f,
+        "  \"test262_root\": {:?},",
+        test_dir.display().to_string()
+    )?;
+    let path_field = if test_path.is_empty() {
+        "<all>".to_string()
+    } else {
+        test_path.to_string()
+    };
+    writeln!(f, "  \"path_filter\": {path_field:?},")?;
+    writeln!(f, "  \"total\": {},", results.total)?;
+    writeln!(f, "  \"passed\": {},", results.passed)?;
+    writeln!(f, "  \"failed\": {},", results.failed)?;
+    writeln!(f, "  \"skipped\": {},", results.skipped)?;
+    writeln!(f, "  \"pass_rate_pct\": {:.2},", results.pass_rate())?;
+    writeln!(f, "  \"duration_secs\": {:.3},", duration.as_secs_f64())?;
+    writeln!(f, "  \"runner_kind\": \"lexer\",")?;
+    writeln!(
+        f,
+        "  \"runner_kind_upgrade_path\": \"vm (queued in SNAZZY-WAFFLE roadmap P7 + P5.S1 evaluation work)\","
+    )?;
+    writeln!(
+        f,
+        "  \"notes\": \"This runner only validates that each test262 file lexes; it does not parse, compile, or evaluate. The pass/fail counts therefore reflect tokeniser behaviour, not language conformance.\"\n}}"
+    )?;
+    Ok(())
 }
 
 fn print_help() {

@@ -1,0 +1,16 @@
+{
+  "runner": "silksurf-js test262 (lexer-only)",
+  "runner_version": "0.1.0",
+  "unix_timestamp": 1777602125,
+  "test262_root": "silksurf-js/test262/test/language/literals/numeric",
+  "path_filter": "language/literals/numeric",
+  "total": 157,
+  "passed": 104,
+  "failed": 53,
+  "skipped": 0,
+  "pass_rate_pct": 66.24,
+  "duration_secs": 0.031,
+  "runner_kind": "lexer",
+  "runner_kind_upgrade_path": "vm (queued in SNAZZY-WAFFLE roadmap P7 + P5.S1 evaluation work)",
+  "notes": "This runner only validates that each test262 file lexes; it does not parse, compile, or evaluate. The pass/fail counts therefore reflect tokeniser behaviour, not language conformance."
+}
