@@ -1,38 +1,56 @@
+# silksurf .gitignore -- one entry per line, alphabetised within sections.
+# See docs/REPO-LAYOUT.md for the full directory inventory.
 
-*.a
-# Binaries and objects
-/build-*/
+## Build trees -----------------------------------------------------------
 /build/
+/build-*/
 build-fuzz/
-# Build outputs
-/.claude/settings.local.json
-# Cleanroom reference checkouts (not tracked)
-/core
-/core.*
-# Crash dumps (root-only)
-*.data
-# Databases and profiling artifacts
-*.db
-*.db-shm
-*.db-wal
+/target
+/**/target/
+*.a
 *.dll
 *.dylib
 *.exe
-/fuzz/artifacts/
-/fuzz/corpus/
-# Fuzzing outputs
-/fuzz_out/
-/fuzz_out_css/
-/infer-out/
-# Local tooling settings
+*.o
+*.so
+
+## Coverage / profiling --------------------------------------------------
+*.profraw
+/perf/results/
+
+## Crash dumps -----------------------------------------------------------
+*.data
+core
+/core
+/core.*
 /logs/
 /logs/cores/
-*.o
-/perf/results/
-*.profraw
+
+## Databases (test/profiling artifacts) ---------------------------------
+*.db
+*.db-shm
+*.db-wal
+
+## Fuzzing outputs -------------------------------------------------------
+/fuzz/artifacts/
+/fuzz/corpus/
+/fuzz_in/
+/fuzz_in_css/
+/fuzz_out/
+/fuzz_out_css/
+
+## Static analysis -------------------------------------------------------
+/infer-out/
+
+## Tool / IDE / per-user state ------------------------------------------
+/.claude/settings.local.json
 /silksurf-extras/
 /silksurf-js/test262/
-*.so
-# Static analysis and logs
-/**/target/
-/target
+
+## Accidental artifacts --------------------------------------------------
+# `~/` is created by tools that write to "$HOME" without expanding the tilde.
+/~/
+
+## TLA+ scratch ----------------------------------------------------------
+# TLC writes state-graph artefacts here; the .tla model itself is tracked.
+/states/
