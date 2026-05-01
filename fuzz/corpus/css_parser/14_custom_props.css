@@ -1,0 +1,1 @@
+:root { --x: red; } a { color: var(--x); }
