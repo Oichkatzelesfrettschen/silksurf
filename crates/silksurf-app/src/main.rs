@@ -244,6 +244,9 @@ fn main() {
     let stylesheet = dom
         .with_interner_mut(|interner| renderer.get_or_parse_stylesheet(&css_text, interner))
         .unwrap_or_else(|| {
+            // UNWRAP-OK: parse_stylesheet_with_interner on the empty string can only fail on
+            // tokenizer errors; the empty input has none. This is the canonical empty-stylesheet
+            // construction.
             silksurf_css::parse_stylesheet_with_interner(
                 "",
                 &mut silksurf_core::SilkInterner::new(),
@@ -594,6 +597,8 @@ fn main() {
                                 renderer.get_or_parse_stylesheet(&css_text, interner)
                             })
                             .unwrap_or_else(|| {
+                                // UNWRAP-OK: parsing the empty string cannot fail; canonical
+                                // empty-stylesheet construction.
                                 silksurf_css::parse_stylesheet_with_interner(
                                     "",
                                     &mut silksurf_core::SilkInterner::new(),

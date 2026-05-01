@@ -18,6 +18,12 @@ pub enum TreeBuildError {
     UnexpectedEndTag(String),
 }
 
+impl From<TreeBuildError> for silksurf_core::SilkError {
+    fn from(e: TreeBuildError) -> Self {
+        silksurf_core::SilkError::HtmlTreeBuild(format!("{e:?}"))
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum InsertionMode {
     Initial,

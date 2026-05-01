@@ -92,6 +92,12 @@ pub struct NetError {
     pub message: String,
 }
 
+impl From<NetError> for silksurf_core::SilkError {
+    fn from(e: NetError) -> Self {
+        silksurf_core::SilkError::Net(e.message)
+    }
+}
+
 impl NetError {
     fn new(msg: impl Into<String>) -> Self {
         Self {
@@ -260,6 +266,7 @@ impl BasicClient {
             let h2_reqs: Vec<h2_client::H2Request> = requests
                 .iter()
                 .map(|r| {
+                    // UNWRAP-OK: "https://localhost/" is a static, syntactically valid URL.
                     let parsed = url::Url::parse(&r.url)
                         .unwrap_or_else(|_| url::Url::parse("https://localhost/").unwrap());
                     h2_client::H2Request {

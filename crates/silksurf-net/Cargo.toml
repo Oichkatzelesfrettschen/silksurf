@@ -6,6 +6,7 @@ rust-version = "1.94.1"
 publish = false
 
 [dependencies]
+silksurf-core = { path = "../silksurf-core" }
 silksurf-tls = { path = "../silksurf-tls" }
 serde = { workspace = true }
 serde_json = { workspace = true }

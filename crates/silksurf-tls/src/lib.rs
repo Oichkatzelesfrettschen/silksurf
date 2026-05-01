@@ -33,6 +33,12 @@ pub enum TlsConfigError {
     NoUsableCertificates { path: PathBuf, rejected: usize },
 }
 
+impl From<TlsConfigError> for silksurf_core::SilkError {
+    fn from(e: TlsConfigError) -> Self {
+        silksurf_core::SilkError::Tls(e.to_string())
+    }
+}
+
 impl fmt::Display for TlsConfigError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

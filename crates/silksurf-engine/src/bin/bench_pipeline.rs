@@ -171,8 +171,8 @@ fn main() {
     );
     println!(
         "  CascadeEntry:    {} bytes  ({:.1} cache lines)",
-        std::mem::size_of::<silksurf_css::cascade_view::CascadeEntry>(),
-        std::mem::size_of::<silksurf_css::cascade_view::CascadeEntry>() as f64 / 64.0
+        std::mem::size_of::<silksurf_css::CascadeEntry>(),
+        std::mem::size_of::<silksurf_css::CascadeEntry>() as f64 / 64.0
     );
     println!(
         "  SelectorIdent:   {} bytes",

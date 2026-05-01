@@ -62,6 +62,15 @@ pub struct TokenizeError {
     pub message: String,
 }
 
+impl From<TokenizeError> for silksurf_core::SilkError {
+    fn from(e: TokenizeError) -> Self {
+        silksurf_core::SilkError::HtmlTokenize {
+            offset: e.offset,
+            message: e.message,
+        }
+    }
+}
+
 pub struct Tokenizer {
     buffer: String,
     cursor: usize,

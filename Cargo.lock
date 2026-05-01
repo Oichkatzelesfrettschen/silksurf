@@ -2322,6 +2322,7 @@ version = "0.1.0"
 dependencies = [
  "memchr",
  "serde_json",
+ "silksurf-core",
  "silksurf-dom",
 ]
 
@@ -2382,6 +2383,7 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
+ "silksurf-core",
  "silksurf-tls",
  "tokio",
  "tokio-rustls",
@@ -2408,6 +2410,7 @@ dependencies = [
  "rustls-native-certs",
  "rustls-pemfile",
  "rustls-platform-verifier",
+ "silksurf-core",
  "webpki-roots",
 ]
 

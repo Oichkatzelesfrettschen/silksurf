@@ -32,7 +32,7 @@
  */
 
 use silksurf_css::{
-    CascadeWorkspace, ComputedStyle, Display, StyleIndex, Stylesheet, cascade_view::CascadeView,
+    CascadeView, CascadeWorkspace, ComputedStyle, Display, StyleIndex, Stylesheet,
     compute_style_for_node_with_workspace,
 };
 use silksurf_dom::{Dom, NodeId, NodeKind};
