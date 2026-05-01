@@ -19,8 +19,10 @@ pub fn install(global: &mut Object) {
     // create a Promise and store its settle callbacks for later use,
     // without wrapping everything in a `new Promise(executor)` constructor.
     if let Value::Object(ctor) = &promise_constructor {
-        ctor.borrow_mut()
-            .set_by_str("withResolvers", native_fn("Promise.withResolvers", promise_with_resolvers));
+        ctor.borrow_mut().set_by_str(
+            "withResolvers",
+            native_fn("Promise.withResolvers", promise_with_resolvers),
+        );
     }
     global.set_by_str("Promise", promise_constructor);
 }
@@ -120,28 +122,24 @@ fn promise_with_resolvers(_args: &[Value]) -> Value {
     let p = Promise::new();
 
     let p_resolve = Rc::clone(&p);
-    let resolve_fn = Value::NativeFunction(Rc::new(NativeFunction::new(
-        "resolve",
-        move |args: &[Value]| {
+    let resolve_fn =
+        Value::NativeFunction(Rc::new(NativeFunction::new("resolve", move |args: &[Value]| {
             let value = args.first().cloned().unwrap_or(Value::Undefined);
             let mut queue = MicrotaskQueue::new();
             Promise::resolve(&p_resolve, value, &mut queue);
             queue.drain();
             Value::Undefined
-        },
-    )));
+        })));
 
     let p_reject = Rc::clone(&p);
-    let reject_fn = Value::NativeFunction(Rc::new(NativeFunction::new(
-        "reject",
-        move |args: &[Value]| {
+    let reject_fn =
+        Value::NativeFunction(Rc::new(NativeFunction::new("reject", move |args: &[Value]| {
             let reason = args.first().cloned().unwrap_or(Value::Undefined);
             let mut queue = MicrotaskQueue::new();
             Promise::reject(&p_reject, reason, &mut queue);
             queue.drain();
             Value::Undefined
-        },
-    )));
+        })));
 
     let result = Object::new();
     let result_rc = Rc::new(RefCell::new(result));

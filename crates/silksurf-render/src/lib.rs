@@ -423,8 +423,10 @@ pub fn rasterize_parallel_into(
             // Clip to tile bounds
             let x0 = (item_r.x.max(tile_x0 as f32).floor() as i32).max(0);
             let y0 = (item_r.y.max(tile_y0 as f32).floor() as i32).max(0);
-            let x1 = ((item_r.x + item_r.width).min(tile_x1 as f32).ceil() as i32).min(width as i32);
-            let y1 = ((item_r.y + item_r.height).min(tile_y1 as f32).ceil() as i32).min(height as i32);
+            let x1 =
+                ((item_r.x + item_r.width).min(tile_x1 as f32).ceil() as i32).min(width as i32);
+            let y1 =
+                ((item_r.y + item_r.height).min(tile_y1 as f32).ceil() as i32).min(height as i32);
 
             if x0 >= x1 || y0 >= y1 {
                 continue;
@@ -439,10 +441,7 @@ pub fn rasterize_parallel_into(
                 if row_offset + row_len <= shared.1 {
                     // SAFETY: disjoint tile regions guarantee no data race
                     unsafe {
-                        let row = std::slice::from_raw_parts_mut(
-                            shared.0.add(row_offset),
-                            row_len,
-                        );
+                        let row = std::slice::from_raw_parts_mut(shared.0.add(row_offset), row_len);
                         for pixel in row.chunks_exact_mut(4) {
                             pixel.copy_from_slice(&pixel_bytes);
                         }

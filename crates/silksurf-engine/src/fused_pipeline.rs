@@ -33,12 +33,233 @@
 
 use silksurf_css::{
     CascadeWorkspace, ComputedStyle, Display, StyleIndex, Stylesheet,
+    cascade_view::CascadeView,
     compute_style_for_node_with_workspace,
 };
 use silksurf_dom::{Dom, NodeId, NodeKind};
-use silksurf_layout::neighbor_table::LayoutNeighborTable;
 use silksurf_layout::Rect;
+use silksurf_layout::neighbor_table::LayoutNeighborTable;
 use silksurf_render::DisplayItem;
+
+/*
+ * FusedWorkspace -- pre-allocated scratch for zero-alloc steady-state renders.
+ *
+ * WHY: fused_style_layout_paint allocates fresh on every call:
+ *   - LayoutNeighborTable: 1 FxHashMap + 4 Vecs (bfs_order, parent_idx,
+ *     child_count, level_starts) + FxHashMap insertions for N nodes
+ *   - CascadeWorkspace: 3 Vecs (matched_by_rule, candidates, seen)
+ *   - Output Vecs: styles, node_rects, block_cursors, display_items
+ *
+ * FusedWorkspace holds all of these as owned fields.  Each run() call clears
+ * them (O(1) capacity-preserving) and refills.  After the first call, no
+ * allocator traffic occurs for the same or smaller DOM.
+ *
+ * High-water-mark growth: all containers grow to the peak node count seen
+ * and never shrink.  Stable pages (cached re-renders) reach steady state
+ * after the first render and stay there.
+ *
+ * INVARIANT: styles, node_rects, display_items are valid only until the next
+ * run() call.  Callers must not hold references across run() calls.
+ *
+ * Usage:
+ *   let style_index = StyleIndex::new(&stylesheet); // cache externally
+ *   let mut ws = FusedWorkspace::default();
+ *   loop {
+ *       ws.run(&dom, &stylesheet, &style_index, root, viewport);
+ *       consume(&ws.display_items);
+ *   }
+ *
+ * See: fused_style_layout_paint for the allocating single-call version
+ * See: LayoutNeighborTable::rebuild for the in-place BFS reuse
+ * See: CascadeWorkspace for cascade scratch reuse semantics
+ */
+pub struct FusedWorkspace {
+    /// BFS traversal table -- rebuilt only when DOM generation changes.
+    table: LayoutNeighborTable,
+    /// SoA cascade view -- materialized only when DOM generation changes.
+    cascade_view: CascadeView,
+    /// Cascade scratch -- grows to peak rule count, never shrinks.
+    cascade_ws: CascadeWorkspace,
+    /// Block-flow cursor per node (internal layout temp, not exposed).
+    block_cursors: Vec<f32>,
+    /// Computed style per BFS-indexed node (valid after run()).
+    pub styles: Vec<Option<ComputedStyle>>,
+    /// Content rect per BFS-indexed node (valid after run()).
+    pub node_rects: Vec<Rect>,
+    /// Paint commands (valid after run(); order is BFS paint order).
+    pub display_items: Vec<DisplayItem>,
+    /// Cached DOM generation to skip rebuild when DOM unchanged.
+    dom_generation: u64,
+}
+
+impl Default for FusedWorkspace {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FusedWorkspace {
+    /*
+     * new -- create an empty workspace.
+     *
+     * All internal containers start empty (zero allocation beyond struct
+     * overhead).  The first run() call allocates to fit the given DOM.
+     * Subsequent calls with the same or smaller DOM are zero-alloc.
+     */
+    pub fn new() -> Self {
+        Self {
+            table: LayoutNeighborTable::default(),
+            cascade_view: CascadeView::new(),
+            cascade_ws: CascadeWorkspace::new(0),
+            block_cursors: Vec::new(),
+            styles: Vec::new(),
+            node_rects: Vec::new(),
+            display_items: Vec::new(),
+            dom_generation: u64::MAX, // force first rebuild
+        }
+    }
+
+    /*
+     * run -- execute fused style+layout+paint, filling workspace output fields.
+     *
+     * Takes `style_index` as a parameter to allow the caller to cache it
+     * across calls when the stylesheet does not change.  Building StyleIndex
+     * is O(rules) -- for 13 rules it is trivial; for ChatGPT-scale stylesheets
+     * (hundreds of rules) the caller should build it once and reuse it.
+     *
+     * After run() returns:
+     *   ws.display_items -- paint commands in BFS order
+     *   ws.styles        -- per-node ComputedStyle (BFS indexed)
+     *   ws.node_rects    -- per-node content rect (BFS indexed)
+     *
+     * Complexity: O(N * R_avg) where N=nodes, R_avg=matching rules per node
+     * Allocations: 0 after first call on same or smaller DOM
+     *
+     * See: fused_style_layout_paint for context on algorithm
+     */
+    pub fn run(
+        &mut self,
+        dom: &Dom,
+        stylesheet: &Stylesheet,
+        style_index: &StyleIndex,
+        root: NodeId,
+        viewport: Rect,
+    ) {
+        /*
+         * Conditional rebuild: skip BFS table and CascadeView materialization
+         * when the DOM has not changed since the last run(). This hoists ~2us
+         * of rebuild cost out of the steady-state re-render path (e.g., hover
+         * state changes, media query re-evaluation on the same DOM).
+         *
+         * The DOM's mutation_generation increments on end_mutation_batch() and
+         * materialize_resolve_table(). If it matches our cached value, the
+         * topology and attribute data are identical -- skip rebuild.
+         */
+        let dom_gen = dom.generation();
+        if dom_gen != self.dom_generation {
+            self.table.rebuild(dom, root);
+            self.cascade_view.rebuild(dom);
+            self.dom_generation = dom_gen;
+        }
+        let n = self.table.len();
+
+        // Resize output/temp Vecs to n.  clear() retains heap allocation when
+        // n <= previous capacity (the common case for stable pages).
+        self.styles.clear();
+        self.styles.resize(n, None);
+        self.node_rects.clear();
+        self.node_rects.resize(n, viewport);
+        self.block_cursors.clear();
+        self.block_cursors.resize(n, viewport.y);
+        self.display_items.clear();
+
+        for (i, &node) in self.table.bfs_order.iter().enumerate() {
+            let pidx = self.table.parent_idx[i];
+
+            let (parent_style, parent_rect, cursor) = if pidx == u32::MAX {
+                (None, viewport, viewport.y)
+            } else {
+                let p = pidx as usize;
+                (self.styles[p].as_ref(), self.node_rects[p], self.block_cursors[p])
+            };
+
+            let style = compute_style_for_node_with_workspace(
+                dom,
+                node,
+                stylesheet,
+                style_index,
+                parent_style,
+                &mut self.cascade_ws,
+                Some(&self.cascade_view),
+            );
+
+            if style.display == Display::None {
+                self.styles[i] = Some(style);
+                continue;
+            }
+
+            let margin_top = length_px(style.margin.top);
+            let padding_top = length_px(style.padding.top);
+            let border_top = length_px(style.border.top);
+
+            let x = parent_rect.x
+                + length_px(style.margin.left)
+                + length_px(style.padding.left)
+                + length_px(style.border.left);
+            let y = cursor + margin_top + padding_top + border_top;
+            let width = parent_rect.width
+                - length_px(style.margin.left)
+                - length_px(style.margin.right)
+                - length_px(style.padding.left)
+                - length_px(style.padding.right)
+                - length_px(style.border.left)
+                - length_px(style.border.right);
+            let height = length_px(style.line_height);
+
+            let content_rect = Rect { x, y, width, height };
+            self.node_rects[i] = content_rect;
+
+            if pidx != u32::MAX {
+                self.block_cursors[pidx as usize] = y
+                    + height
+                    + length_px(style.padding.bottom)
+                    + length_px(style.border.bottom)
+                    + length_px(style.margin.bottom);
+            }
+            self.block_cursors[i] = y;
+
+            if style.background_color.a > 0 {
+                self.display_items.push(DisplayItem::SolidColor {
+                    rect: content_rect,
+                    color: style.background_color,
+                });
+            }
+
+            if let Ok(dom_node) = dom.node(node)
+                && let NodeKind::Text { text } = dom_node.kind()
+            {
+                self.display_items.push(DisplayItem::Text {
+                    rect: content_rect,
+                    node,
+                    text_len: text.len() as u32,
+                    color: style.color,
+                });
+            }
+
+            self.styles[i] = Some(style);
+        }
+    }
+
+    /// Number of BFS-ordered nodes from the last run() call.
+    pub fn node_count(&self) -> usize {
+        self.table.len()
+    }
+
+    /// BFS traversal table from the last run() call.
+    pub fn table(&self) -> &LayoutNeighborTable {
+        &self.table
+    }
+}
 
 /*
  * FusedResult -- output of the single-pass pipeline.
@@ -49,6 +270,22 @@ use silksurf_render::DisplayItem;
  * WHY Vec over FxHashMap: O(1) array index vs O(1)-amortised hash with higher
  * constant -- no hashing, no collision chains, contiguous cache lines.
  * For 50 nodes this is ~3x faster in the parent lookup hot path.
+ */
+/*
+ * FusedResult -- output of the single-pass pipeline.
+ *
+ * All per-node arrays are indexed by BFS order (same as table.bfs_order[i]).
+ * To look up a specific node by NodeId, use table.node_to_bfs_idx[&node_id].
+ *
+ * WHY Vec over FxHashMap: O(1) array index vs O(1)-amortised hash with higher
+ * constant -- no hashing, no collision chains, contiguous cache lines.
+ * For 50 nodes this is ~3x faster in the parent lookup hot path.
+ *
+ * WHY no StyleSoA field: building StyleSoA unconditionally costs ~4us for
+ * 50 nodes (FxHashMap insertions + 25 Vec pushes) and eliminates the fused
+ * pipeline's speedup advantage over the 3-pass baseline.  Instead, callers
+ * that need column-oriented access call StyleSoA::from_bfs on demand.
+ * See: silksurf_css::style_soa::StyleSoA::from_bfs
  */
 pub struct FusedResult {
     /// Style per node in BFS order. None for display:none or skipped nodes.
@@ -87,9 +324,9 @@ pub fn fused_style_layout_paint(
     let style_index = StyleIndex::new(stylesheet);
     /*
      * Shared CascadeWorkspace: allocated once, reused for every node in the
-     * BFS traversal. Eliminates 3 heap allocations per node (matched_by_rule
-     * Vec, candidates Vec, seen FxHashSet) -- ~150 allocs for a 50-node page.
-     * See: silksurf_css::CascadeWorkspace for lifecycle details.
+     * BFS traversal. Eliminates per-node allocations (matched_by_rule Vec,
+     * candidates Vec, seen_bits bitvec, class_keys Vec) -- ~200 allocs saved
+     * for a 50-node page. See: silksurf_css::CascadeWorkspace for lifecycle.
      */
     let mut cascade_ws = CascadeWorkspace::new(stylesheet.rules.len());
     let table = LayoutNeighborTable::build(dom, root);
@@ -125,7 +362,13 @@ pub fn fused_style_layout_paint(
 
         // 1. CASCADE: reuses pre-built index and shared workspace (zero alloc after first node)
         let style = compute_style_for_node_with_workspace(
-            dom, node, stylesheet, &style_index, parent_style, &mut cascade_ws,
+            dom,
+            node,
+            stylesheet,
+            &style_index,
+            parent_style,
+            &mut cascade_ws,
+            None, // no CascadeView in cold path
         );
 
         // Skip display:none; still store style for child inheritance
@@ -145,14 +388,22 @@ pub fn fused_style_layout_paint(
             + length_px(style.border.left);
         let y = cursor + margin_top + padding_top + border_top;
         let width = parent_rect.width
-            - length_px(style.margin.left) - length_px(style.margin.right)
-            - length_px(style.padding.left) - length_px(style.padding.right)
-            - length_px(style.border.left) - length_px(style.border.right);
+            - length_px(style.margin.left)
+            - length_px(style.margin.right)
+            - length_px(style.padding.left)
+            - length_px(style.padding.right)
+            - length_px(style.border.left)
+            - length_px(style.border.right);
 
         // Estimate height from line-height
         let height = length_px(style.line_height);
 
-        let content_rect = Rect { x, y, width, height };
+        let content_rect = Rect {
+            x,
+            y,
+            width,
+            height,
+        };
         node_rects[i] = content_rect;
 
         // Advance parent's block cursor past this node
@@ -174,15 +425,15 @@ pub fn fused_style_layout_paint(
             });
         }
 
-        if let Ok(dom_node) = dom.node(node) {
-            if let NodeKind::Text { text } = dom_node.kind() {
-                display_items.push(DisplayItem::Text {
-                    rect: content_rect,
-                    node,
-                    text_len: text.len() as u32,
-                    color: style.color,
-                });
-            }
+        if let Ok(dom_node) = dom.node(node)
+            && let NodeKind::Text { text } = dom_node.kind()
+        {
+            display_items.push(DisplayItem::Text {
+                rect: content_rect,
+                node,
+                text_len: text.len() as u32,
+                color: style.color,
+            });
         }
 
         styles[i] = Some(style);
@@ -212,7 +463,12 @@ mod tests {
         let mut dom = Dom::new();
         let root = dom.create_document();
         let stylesheet = silksurf_css::parse_stylesheet("").unwrap();
-        let viewport = Rect { x: 0.0, y: 0.0, width: 1280.0, height: 800.0 };
+        let viewport = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 1280.0,
+            height: 800.0,
+        };
 
         let result = fused_style_layout_paint(&dom, &stylesheet, root, viewport);
         // BFS index 0 is always the root node; its style must be computed.

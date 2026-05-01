@@ -21,15 +21,13 @@ fn find_layout_box<'a>(layout: &'a LayoutBox<'a>, target: NodeId) -> Option<&'a 
 }
 
 fn find_element_by_id(dom: &Dom, node: NodeId, id: &str) -> Option<NodeId> {
-    if dom.element_name(node).ok().flatten().is_some() {
-        if let Ok(attrs) = dom.attributes(node) {
-            if attrs
-                .iter()
-                .any(|attr| attr.name == AttributeName::Id && attr.value.as_str() == id)
-            {
-                return Some(node);
-            }
-        }
+    if dom.element_name(node).ok().flatten().is_some()
+        && let Ok(attrs) = dom.attributes(node)
+        && attrs
+            .iter()
+            .any(|attr| attr.name == AttributeName::Id && attr.value.as_str() == id)
+    {
+        return Some(node);
     }
     let children = dom.children(node).ok()?;
     for child in children {
@@ -74,7 +72,7 @@ fn applies_styles_and_skips_display_none() {
     let main_style = output.styles.get(&main).expect("main style");
 
     assert_eq!(main_style.margin.top, Length::Px(12.0));
-    assert!(find_layout_box(&output.layout.root, gone).is_none());
+    assert!(find_layout_box(output.layout.root, gone).is_none());
 }
 
 #[test]

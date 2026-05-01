@@ -10,10 +10,3 @@ silksurf-core = { path = "../silksurf-core" }
 silksurf-css = { path = "../silksurf-css" }
 silksurf-dom = { path = "../silksurf-dom" }
 rustc-hash = { workspace = true }
-aligned-vec = { workspace = true, optional = true }
-rayon = { workspace = true, optional = true }
-
-[features]
-default = []
-parallel = ["rayon"]
-soa = ["aligned-vec"]

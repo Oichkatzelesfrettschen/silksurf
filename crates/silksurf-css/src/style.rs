@@ -24,11 +24,13 @@
  * See: custom_properties.rs for CSS var() resolution
  * See: calc.rs for calc() expression evaluation
  */
-use crate::matching::{Specificity, matches_selector, selector_specificity};
+use crate::matching::{Specificity, matches_selector, matches_selector_with_view, selector_specificity};
 use crate::selector::{Selector, SelectorIdent, SelectorModifier, TypeSelector};
 use crate::{CssToken, Declaration, Rule, Stylesheet};
 use rustc_hash::{FxHashMap, FxHashSet};
 use silksurf_dom::{AttributeName, Dom, NodeId, NodeKind, TagName};
+use smallvec::SmallVec;
+use smol_str::SmolStr;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -225,7 +227,7 @@ pub struct ComputedStyle {
     pub background_color: Color,
     pub font_size: Length,
     pub line_height: Length,
-    pub font_family: Vec<String>,
+    pub font_family: SmallVec<[SmolStr; 2]>,
     pub margin: Edges,
     pub padding: Edges,
     pub border: Edges,
@@ -255,7 +257,11 @@ impl Default for ComputedStyle {
             background_color: Color::transparent(),
             font_size: Length::Px(16.0),
             line_height: Length::Px(16.0),
-            font_family: vec!["sans-serif".to_string()],
+            font_family: {
+                let mut v = SmallVec::<[SmolStr; 2]>::new();
+                v.push(SmolStr::new_static("sans-serif"));
+                v
+            },
             margin: Edges::all(Length::zero()),
             padding: Edges::all(Length::zero()),
             border: Edges::all(Length::zero()),
@@ -301,7 +307,7 @@ struct CascadedStyle {
     background_color: Option<ResolvedProperty<Color>>,
     font_size: Option<ResolvedProperty<Length>>,
     line_height: Option<ResolvedProperty<Length>>,
-    font_family: Option<ResolvedProperty<Vec<String>>>,
+    font_family: Option<ResolvedProperty<SmallVec<[SmolStr; 2]>>>,
     margin: Option<ResolvedProperty<Edges>>,
     padding: Option<ResolvedProperty<Edges>>,
     border: Option<ResolvedProperty<Edges>>,
@@ -334,8 +340,19 @@ struct CascadedStyle {
 }
 
 impl CascadedStyle {
+    /*
+     * resolve -- produce final ComputedStyle from cascaded values + parent inheritance.
+     *
+     * WHY static FALLBACK: Previously constructed ComputedStyle::default() per
+     * call (61 times per render). Each construction built a SmallVec + SmolStr.
+     * With LazyLock, the default is constructed once and reused via reference.
+     * Copy fields use the static directly; non-Copy (font_family) clones only
+     * when needed (rare: only when no cascade value and no parent inheritance).
+     */
     fn resolve(self, parent: Option<&ComputedStyle>) -> ComputedStyle {
-        let fallback = ComputedStyle::default();
+        static FALLBACK: std::sync::LazyLock<ComputedStyle> =
+            std::sync::LazyLock::new(ComputedStyle::default);
+        let fallback = &*FALLBACK;
         let resolved_font_size = self
             .font_size
             .map(|entry| entry.value)
@@ -365,7 +382,7 @@ impl CascadedStyle {
                 .font_family
                 .map(|entry| entry.value)
                 .or_else(|| parent.map(|style| style.font_family.clone()))
-                .unwrap_or(fallback.font_family),
+                .unwrap_or_else(|| fallback.font_family.clone()),
             margin: self
                 .margin
                 .map(|entry| entry.value)
@@ -432,11 +449,19 @@ fn apply_property<T: Clone>(
     }
 }
 
+/*
+ * IndexedSelector -- pre-indexed selector entry for cascade candidate lookup.
+ *
+ * pair_id: sequential index assigned by StyleIndex::new(), unique per
+ * (rule_index, selector_index) pair. Used as a bit index into the
+ * CascadeWorkspace::seen_bits bitvec for O(1) dedup with zero hashing.
+ */
 #[derive(Clone)]
 struct IndexedSelector {
     rule_index: usize,
     selector_index: usize,
     specificity: Specificity,
+    pair_id: u32,
 }
 
 /*
@@ -465,6 +490,9 @@ pub struct StyleIndex {
     id_rules: FxHashMap<SelectorIdent, Vec<IndexedSelector>>,
     class_rules: FxHashMap<SelectorIdent, Vec<IndexedSelector>>,
     universal_rules: Vec<IndexedSelector>,
+    /// Total number of unique (rule, selector) pairs. Used to size the
+    /// CascadeWorkspace::seen_bits bitvec for O(1) dedup without hashing.
+    pub total_selector_pairs: usize,
 }
 
 impl StyleIndex {
@@ -474,7 +502,9 @@ impl StyleIndex {
             id_rules: FxHashMap::default(),
             class_rules: FxHashMap::default(),
             universal_rules: Vec::new(),
+            total_selector_pairs: 0,
         };
+        let mut pair_id: u32 = 0;
         for (rule_index, rule) in stylesheet.rules.iter().enumerate() {
             let Rule::Style(rule) = rule else {
                 continue;
@@ -484,7 +514,9 @@ impl StyleIndex {
                     rule_index,
                     selector_index,
                     specificity: selector_specificity(selector),
+                    pair_id,
                 };
+                pair_id += 1;
                 match selector_key(selector) {
                     SelectorKey::Tag(tag) => {
                         index.tag_rules.entry(tag).or_default().push(entry);
@@ -499,6 +531,7 @@ impl StyleIndex {
                 }
             }
         }
+        index.total_selector_pairs = pair_id as usize;
         index
     }
 }
@@ -526,7 +559,7 @@ fn selector_key(selector: &Selector) -> SelectorKey {
             SelectorModifier::Class(name) if class_key.is_none() => {
                 class_key = Some(name.clone());
             }
-            _=> {}
+            _ => {}
         }
     }
     if let Some(id) = id_key {
@@ -541,36 +574,63 @@ fn selector_key(selector: &Selector) -> SelectorKey {
     }
 }
 
-fn node_tag(dom: &Dom, node: NodeId) -> Option<TagName> {
-    let Ok(node) = dom.node(node) else {
-        return None;
+/*
+ * node_tag_id_class -- fused DOM access: tag name, id key, and class keys.
+ *
+ * WHY: The previous two functions (node_tag, node_id_class_keys) each
+ * called dom.node() and iterated attributes separately -- two lookups and
+ * two attribute scans per node. This fuses them into one dom.node() call.
+ *
+ * Fix 3: Uses attr.class_strings (pre-resolved at set_attribute time)
+ * instead of dom.resolve(atom) + RwLock acquire per class token.
+ * For id: attr.value already holds the raw string, no resolve needed.
+ *
+ * Fix 2: class_keys is a &mut Vec from the workspace, reused across nodes.
+ * Previously a fresh Vec was allocated per call (~303ns overhead at 61 nodes).
+ *
+ * Fix F: Single dom.node() call replaces two (node_tag + node_id_class_keys).
+ *
+ * Complexity: O(attributes) per node -- typically 1-3 attributes.
+ */
+fn node_tag_id_class(
+    dom: &Dom,
+    node: NodeId,
+    class_keys: &mut Vec<SelectorIdent>,
+) -> (Option<TagName>, Option<SelectorIdent>) {
+    class_keys.clear();
+    let Ok(node_ref) = dom.node(node) else {
+        return (None, None);
     };
-    match node.kind() {
-        NodeKind::Element { name, .. } => Some(name.clone()),
-        _ => None,
-    }
-}
-
-fn node_id_class_keys(dom: &Dom, node: NodeId) -> (Option<SelectorIdent>, Vec<SelectorIdent>) {
-    let attrs = match dom.attributes(node) {
-        Ok(attrs) => attrs,
-        Err(_) => return (None, Vec::new()),
+    let (tag, attributes) = match node_ref.kind() {
+        NodeKind::Element {
+            name, attributes, ..
+        } => (Some(name.clone()), attributes.as_slice()),
+        _ => return (None, None),
     };
     let mut id_key = None;
-    let mut class_keys = Vec::new();
-    for attr in attrs {
+    for attr in attributes {
         match attr.name {
             AttributeName::Id => {
                 if let Some(atom) = attr.value_atom {
-                    id_key = Some(SelectorIdent::new_with_atom(dom.resolve(atom), atom));
-                } else {
+                    id_key = Some(SelectorIdent::new_with_atom(attr.value.clone(), atom));
+                } else if !attr.value.is_empty() {
                     id_key = Some(SelectorIdent::from(attr.value.clone()));
                 }
             }
             AttributeName::Class => {
-                if !attr.value_atoms.is_empty() {
-                    for atom in &attr.value_atoms {
-                        class_keys.push(SelectorIdent::new_with_atom(dom.resolve(*atom), *atom));
+                if !attr.class_strings.is_empty() {
+                    for (s, &atom) in attr.class_strings.iter().zip(attr.value_atoms.iter()) {
+                        class_keys.push(SelectorIdent::new_with_atom(s.clone(), atom));
+                    }
+                } else if !attr.value_atoms.is_empty() {
+                    // Fallback: atoms without pre-resolved class_strings.
+                    // Uses resolve_fast (lock-free array index) instead of
+                    // resolve (RwLock acquire) when resolve table is materialized.
+                    for &atom in &attr.value_atoms {
+                        class_keys.push(SelectorIdent::new_with_atom(
+                            dom.resolve_fast(atom).clone(),
+                            atom,
+                        ));
                     }
                 } else {
                     for part in attr.value.as_str().split_whitespace() {
@@ -581,7 +641,7 @@ fn node_id_class_keys(dom: &Dom, node: NodeId) -> (Option<SelectorIdent>, Vec<Se
             _ => {}
         }
     }
-    (id_key, class_keys)
+    (tag, id_key)
 }
 
 /*
@@ -595,7 +655,14 @@ fn node_id_class_keys(dom: &Dom, node: NodeId) -> (Option<SelectorIdent>, Vec<Se
  * For N nodes that is 3*N allocations. With a shared workspace passed
  * through the traversal, all post-first-call allocations are eliminated:
  * prepare() zero-fills matched_by_rule in-place (O(rules)), candidates
- * and seen are cleared (O(1) capacity retained, no heap traffic).
+ * and seen_bits are cleared (O(1) capacity retained, no heap traffic).
+ *
+ * Fix D: FxHashSet<(usize,usize)> replaced with Vec<u64> bitvec indexed
+ * by IndexedSelector::pair_id. For 159 pairs: 3 u64 words = 24 bytes
+ * cleared via fill(0) (memset) vs FxHashSet bucket traversal. Saves ~1.5us.
+ *
+ * Fix 2: class_keys Vec<SelectorIdent> is reused across nodes instead
+ * of allocating a new Vec per node_id_class_keys call. Saves ~0.3us.
  *
  * High-water-mark growth: the workspace capacity grows to the largest
  * rule count / candidate count seen and never shrinks. After the first
@@ -608,7 +675,11 @@ fn node_id_class_keys(dom: &Dom, node: NodeId) -> (Option<SelectorIdent>, Vec<Se
 pub struct CascadeWorkspace {
     matched_by_rule: Vec<Option<Specificity>>,
     candidates: Vec<IndexedSelector>,
-    seen: FxHashSet<(usize, usize)>,
+    /// Bitvec tracking visited (rule, selector) pairs via pair_id.
+    /// Word i covers pair_ids [64*i..64*(i+1)). Cleared via fill(0) in prepare().
+    seen_bits: Vec<u64>,
+    /// Reusable scratch for class key collection per node (Fix 2).
+    class_keys: Vec<SelectorIdent>,
 }
 
 impl CascadeWorkspace {
@@ -616,25 +687,33 @@ impl CascadeWorkspace {
         Self {
             matched_by_rule: vec![None; rules_len],
             candidates: Vec::with_capacity(32),
-            seen: FxHashSet::default(),
+            seen_bits: Vec::new(),
+            class_keys: Vec::with_capacity(8),
         }
     }
 
     /*
      * prepare -- reset scratch buffers for the next node, no allocation.
      *
-     * Zero-fills only matched_by_rule[..rules_len] (not the full Vec if
-     * it has grown beyond rules_len from a previous larger stylesheet).
-     * candidates and seen are cleared with O(1) capacity-preserving clear().
+     * Zero-fills matched_by_rule[..rules_len] and seen_bits[..words_needed].
+     * Both use high-water-mark growth: if the new stylesheet has more rules
+     * or selector pairs, the Vecs grow; otherwise they reuse existing capacity.
+     * candidates and class_keys are cleared with O(1) capacity-preserving clear().
      */
-    fn prepare(&mut self, rules_len: usize) {
+    fn prepare(&mut self, rules_len: usize, total_selector_pairs: usize) {
         if self.matched_by_rule.len() < rules_len {
             self.matched_by_rule.resize(rules_len, None);
         } else {
             self.matched_by_rule[..rules_len].fill(None);
         }
+        let words_needed = (total_selector_pairs + 63) / 64;
+        if self.seen_bits.len() < words_needed {
+            self.seen_bits.resize(words_needed, 0);
+        } else if words_needed > 0 {
+            self.seen_bits[..words_needed].fill(0);
+        }
         self.candidates.clear();
-        self.seen.clear();
+        self.class_keys.clear();
     }
 }
 
@@ -663,7 +742,15 @@ pub fn compute_styles(
     let index = StyleIndex::new(stylesheet);
     let mut workspace = CascadeWorkspace::new(stylesheet.rules.len());
     let mut styles = FxHashMap::default();
-    compute_styles_recursive(dom, root, stylesheet, &index, None, &mut styles, &mut workspace);
+    compute_styles_recursive(
+        dom,
+        root,
+        stylesheet,
+        &index,
+        None,
+        &mut styles,
+        &mut workspace,
+    );
     styles
 }
 
@@ -796,7 +883,7 @@ pub fn compute_style_for_node(
 ) -> ComputedStyle {
     let index = StyleIndex::new(stylesheet);
     let mut workspace = CascadeWorkspace::new(stylesheet.rules.len());
-    compute_style_for_node_with_workspace(dom, node, stylesheet, &index, parent, &mut workspace)
+    compute_style_for_node_with_workspace(dom, node, stylesheet, &index, parent, &mut workspace, None)
 }
 
 pub fn compute_style_for_node_with_index(
@@ -807,7 +894,7 @@ pub fn compute_style_for_node_with_index(
     parent: Option<&ComputedStyle>,
 ) -> ComputedStyle {
     let mut workspace = CascadeWorkspace::new(stylesheet.rules.len());
-    compute_style_for_node_with_workspace(dom, node, stylesheet, index, parent, &mut workspace)
+    compute_style_for_node_with_workspace(dom, node, stylesheet, index, parent, &mut workspace, None)
 }
 
 /*
@@ -828,11 +915,12 @@ pub fn compute_style_for_node_with_workspace(
     index: &StyleIndex,
     parent: Option<&ComputedStyle>,
     workspace: &mut CascadeWorkspace,
+    cascade_view: Option<&crate::cascade_view::CascadeView>,
 ) -> ComputedStyle {
     if dom.element_name(node).ok().flatten().is_none() {
         return parent.cloned().unwrap_or_default();
     }
-    cascade_for_node(dom, node, stylesheet, index, workspace).resolve(parent)
+    cascade_for_node(dom, node, stylesheet, index, workspace, cascade_view).resolve(parent)
 }
 
 fn compute_styles_recursive(
@@ -845,7 +933,7 @@ fn compute_styles_recursive(
     workspace: &mut CascadeWorkspace,
 ) {
     let style =
-        compute_style_for_node_with_workspace(dom, node, stylesheet, index, parent, workspace);
+        compute_style_for_node_with_workspace(dom, node, stylesheet, index, parent, workspace, None);
     styles.insert(node, style.clone());
     if let Ok(children) = dom.children(node) {
         for child in children {
@@ -893,49 +981,91 @@ fn cascade_for_node(
     stylesheet: &Stylesheet,
     index: &StyleIndex,
     workspace: &mut CascadeWorkspace,
+    cascade_view: Option<&crate::cascade_view::CascadeView>,
 ) -> CascadedStyle {
     /*
-     * Prepare workspace: zero-fill matched_by_rule, clear candidates/seen.
-     * No heap allocation after the first call (capacity retained).
+     * Prepare workspace: zero-fill matched_by_rule, zero seen_bits, clear
+     * candidates and class_keys. No heap allocation after steady state.
      * See: CascadeWorkspace::prepare() for invariant details.
      */
-    workspace.prepare(stylesheet.rules.len());
+    workspace.prepare(stylesheet.rules.len(), index.total_selector_pairs);
 
     let mut cascaded = CascadedStyle::default();
     let mut order = 0usize;
 
-    if let Some(tag) = node_tag(dom, node) {
-        if let Some(entries) = index.tag_rules.get(&tag) {
+    /*
+     * Candidate collection: two paths depending on whether CascadeView
+     * is available.
+     *
+     * CascadeView path (SoA, single cache line per node):
+     *   Reads CascadeEntry (36 bytes) + pre-constructed SelectorIdents
+     *   from flat array. No dom.node() call, no attribute iteration,
+     *   no SelectorIdent construction. Each node touches 1 cache line
+     *   for the entry + sequential ident reads.
+     *
+     * Fallback path (AoS, 2.6 cache lines per node):
+     *   Calls node_tag_id_class -> dom.node() -> pattern match -> attr scan.
+     *   Used when CascadeView is not materialized (e.g., compute_styles
+     *   without FusedWorkspace).
+     */
+    if let Some(view) = cascade_view {
+        let entry = &view.entries[node.raw()];
+        if let Some(entries) = index.tag_rules.get(&entry.tag) {
             workspace.candidates.extend_from_slice(entries);
         }
-    }
-    let (id_key, class_keys) = node_id_class_keys(dom, node);
-    if let Some(id_key) = id_key {
-        if let Some(entries) = index.id_rules.get(&id_key) {
-            workspace.candidates.extend_from_slice(entries);
+        if let Some(id_ident) = view.id_ident(entry) {
+            if let Some(entries) = index.id_rules.get(id_ident) {
+                workspace.candidates.extend_from_slice(entries);
+            }
+        }
+        for class_ident in view.class_idents(entry) {
+            if let Some(entries) = index.class_rules.get(class_ident) {
+                workspace.candidates.extend_from_slice(entries);
+            }
+        }
+    } else {
+        let (tag, id_key) = node_tag_id_class(dom, node, &mut workspace.class_keys);
+        if let Some(tag) = tag {
+            if let Some(entries) = index.tag_rules.get(&tag) {
+                workspace.candidates.extend_from_slice(entries);
+            }
+        }
+        if let Some(ref id_key) = id_key {
+            if let Some(entries) = index.id_rules.get(id_key) {
+                workspace.candidates.extend_from_slice(entries);
+            }
+        }
+        for class_key in &workspace.class_keys {
+            if let Some(entries) = index.class_rules.get(class_key) {
+                workspace.candidates.extend_from_slice(entries);
+            }
         }
     }
-    for class_key in class_keys {
-        if let Some(entries) = index.class_rules.get(&class_key) {
-            workspace.candidates.extend_from_slice(entries);
-        }
-    }
-    workspace.candidates.extend_from_slice(&index.universal_rules);
+    workspace
+        .candidates
+        .extend_from_slice(&index.universal_rules);
 
     /*
-     * Take candidates and seen out of workspace so we can mutate
+     * Take candidates and seen_bits out of workspace so we can mutate
      * workspace.matched_by_rule inside the loop without borrow conflicts.
-     * mem::take leaves empty Vecs/HashSets behind (zero allocation -- the
-     * original allocation is now owned by `candidates` / `seen` locals).
-     * We return them to the workspace after the loop for reuse next call.
+     * mem::take leaves empty Vecs behind (zero allocation -- the original
+     * allocation is now owned by the locals). Returned after the loop.
+     *
+     * Fix D: seen_bits bitvec replaces FxHashSet for O(1) dedup via pair_id.
+     * fill(0) in prepare() is 3 stores (24 bytes) vs FxHashSet clear.
+     * Bit test+set is branchless shift+mask vs hash+probe+insert.
      */
     let mut candidates = std::mem::take(&mut workspace.candidates);
-    let mut seen = std::mem::take(&mut workspace.seen);
+    let mut seen_bits = std::mem::take(&mut workspace.seen_bits);
 
     for candidate in candidates.drain(..) {
-        if !seen.insert((candidate.rule_index, candidate.selector_index)) {
+        let word = (candidate.pair_id / 64) as usize;
+        let bit = 1u64 << (candidate.pair_id % 64);
+        if seen_bits[word] & bit != 0 {
             continue;
         }
+        seen_bits[word] |= bit;
+
         let Some(rule) = stylesheet.rules.get(candidate.rule_index) else {
             continue;
         };
@@ -945,7 +1075,12 @@ fn cascade_for_node(
         let Some(selector) = rule.selectors.selectors.get(candidate.selector_index) else {
             continue;
         };
-        if matches_selector(dom, node, selector) {
+        let matched = if let Some(view) = cascade_view {
+            matches_selector_with_view(dom, node, selector, view)
+        } else {
+            matches_selector(dom, node, selector)
+        };
+        if matched {
             if let Some(slot) = workspace.matched_by_rule.get_mut(candidate.rule_index) {
                 match slot {
                     Some(existing) => {
@@ -963,10 +1098,13 @@ fn cascade_for_node(
 
     // Return scratch buffers to workspace (retain allocations for next call)
     workspace.candidates = candidates;
-    workspace.seen = seen;
+    workspace.seen_bits = seen_bits;
 
     for (rule_index, rule) in stylesheet.rules.iter().enumerate() {
-        let Some(specificity) = workspace.matched_by_rule.get(rule_index).and_then(|spec| *spec)
+        let Some(specificity) = workspace
+            .matched_by_rule
+            .get(rule_index)
+            .and_then(|spec| *spec)
         else {
             continue;
         };
@@ -1632,20 +1770,31 @@ fn parse_edges(tokens: &[CssToken]) -> Option<Edges> {
     }
 }
 
-fn parse_font_family(tokens: &[CssToken]) -> Option<Vec<String>> {
-    let mut families = Vec::new();
-    let mut current = Vec::new();
+/*
+ * parse_font_family -- parse CSS font-family declaration tokens.
+ *
+ * WHY SmallVec<[SmolStr; 2]>: Typical font stacks have 1-2 entries
+ * ("Helvetica", "sans-serif"). SmallVec inlines up to 2 on the stack.
+ * SmolStr inlines strings <=23 bytes (all common font names) -- zero
+ * heap allocation for the common case of 1-2 short font names.
+ *
+ * This replaces Vec<String> which allocated 1 Vec + N Strings per call.
+ * For 61 nodes x 1 font-family each = 61 saved Vec+String allocations.
+ */
+fn parse_font_family(tokens: &[CssToken]) -> Option<SmallVec<[SmolStr; 2]>> {
+    let mut families = SmallVec::<[SmolStr; 2]>::new();
+    let mut current = Vec::<&str>::new();
     for token in tokens {
         match token {
             CssToken::Ident(value) => {
-                current.push(value.to_string());
+                current.push(value.as_str());
             }
             CssToken::String(value) => {
-                current.push(value.clone());
+                current.push(value.as_str());
             }
             CssToken::Comma => {
                 if !current.is_empty() {
-                    families.push(current.join(" "));
+                    families.push(SmolStr::new(current.join(" ")));
                     current.clear();
                 }
             }
@@ -1653,7 +1802,7 @@ fn parse_font_family(tokens: &[CssToken]) -> Option<Vec<String>> {
         }
     }
     if !current.is_empty() {
-        families.push(current.join(" "));
+        families.push(SmolStr::new(current.join(" ")));
     }
     if families.is_empty() {
         None

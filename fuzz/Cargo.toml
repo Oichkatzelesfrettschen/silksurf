@@ -5,8 +5,49 @@ publish = false
 edition = "2024"
 rust-version = "1.96.0"
 
+[package.metadata]
+cargo-fuzz = true
+
 [dependencies]
 libfuzzer-sys = "0.4.10"
 silksurf-css = { path = "../crates/silksurf-css" }
 silksurf-engine = { path = "../crates/silksurf-engine" }
 silksurf-html = { path = "../crates/silksurf-html" }
+
+[[bin]]
+name = "html_tokenizer"
+path = "fuzz_targets/html_tokenizer.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "html_tree_builder"
+path = "fuzz_targets/html_tree_builder.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "css_tokenizer"
+path = "fuzz_targets/css_tokenizer.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "css_parser"
+path = "fuzz_targets/css_parser.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "js_runtime"
+path = "fuzz_targets/js_runtime.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]
