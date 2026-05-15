@@ -197,6 +197,35 @@ impl TreeBuilder {
             return Ok(());
         }
         if self.insertion_mode != InsertionMode::InBody {
+            /*
+             * If the current open element is a content-bearing head
+             * descendant (title, script, style, textarea, etc.), the
+             * character data belongs to it -- not to an implicit body.
+             *
+             * The earlier behaviour unconditionally called
+             * ensure_body_element() here, which had two bad effects:
+             *   1. Text like "T" inside <title>T</title> was relocated
+             *      into <body>, leaving <title> empty.
+             *   2. The implicit <body> was pushed onto the open-elements
+             *      stack while we were still nominally InHead, so a
+             *      later </body> end tag found body absent from the
+             *      stack and raised UnexpectedEndTag.
+             *
+             * Per HTML5 8.2.5.4.4 ("in head" insertion mode), character
+             * data inside <title>/<script>/<style> is appended to the
+             * current node verbatim. We approximate that by checking
+             * whether current_node is one of doc/html/head -- the only
+             * positions where stray text really requires foster-parenting
+             * into body.
+             */
+            let current = self.current_node();
+            let goes_to_current = !self.is_doc_html_or_head(current);
+            if goes_to_current {
+                self.dom
+                    .append_text(current, data)
+                    .map_err(TreeBuildError::Dom)?;
+                return Ok(());
+            }
             if data.trim().is_empty() {
                 return Ok(());
             }
@@ -216,6 +245,35 @@ impl TreeBuilder {
             .append_text(parent, data)
             .map_err(TreeBuildError::Dom)?;
         Ok(())
+    }
+
+    /*
+     * is_doc_html_or_head -- true iff the given node is the document
+     * itself, the root <html> element, or the <head> element.
+     *
+     * WHY: handle_text uses this to decide whether character data should
+     * trigger implicit-body insertion (only when the text would land in
+     * one of these structural positions) or be appended directly to a
+     * deeper content element such as <title> or <style>.
+     */
+    fn is_doc_html_or_head(&self, node: NodeId) -> bool {
+        if node == self.document {
+            return true;
+        }
+        if Some(node) == self.html_element {
+            return true;
+        }
+        if Some(node) == self.head_element {
+            return true;
+        }
+        let Ok(node_ref) = self.dom.node(node) else {
+            return false;
+        };
+        if let NodeKind::Element { name, .. } = node_ref.kind() {
+            matches!(name.as_str(), "html" | "head")
+        } else {
+            true
+        }
     }
 
     fn handle_comment(&mut self, data: &str) -> Result<(), TreeBuildError> {
@@ -265,7 +323,19 @@ impl TreeBuilder {
                 .set_attribute(element, &attr.name, value)
                 .map_err(TreeBuildError::Dom)?;
         }
-        if !self_closing {
+        /*
+         * HTML5 8.1.2: void elements have no end tag and accept no
+         * children. They must never be pushed onto the open-elements
+         * stack regardless of whether the source used the XHTML-style
+         * "<br />" self-closing slash. Doing otherwise causes following
+         * siblings (e.g. a <button> after an <input>) to be misparented
+         * as descendants of the void element.
+         *
+         * Spec list: area, base, br, col, embed, hr, img, input, link,
+         * meta, source, track, wbr (HTML Living Standard "void elements"
+         * definition). Keep this in sync with is_void_element below.
+         */
+        if !self_closing && !is_void_element(name) {
             self.open_elements.push(element);
         }
         Ok(element)
@@ -410,5 +480,36 @@ fn is_head_element(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
         "base" | "link" | "meta" | "title" | "style" | "script"
+    )
+}
+
+/*
+ * is_void_element -- HTML5 Living Standard "void elements" predicate.
+ *
+ * WHY: void elements terminate without an end tag and never accept
+ * children. The tree builder must NOT push them onto the open-elements
+ * stack, otherwise sibling tags (e.g. a <button> following an <input>)
+ * become misparented as descendants of the void element.
+ *
+ * Source: https://html.spec.whatwg.org/multipage/syntax.html#void-elements
+ *
+ * Keep this list in sync with insert_element's gating logic.
+ */
+fn is_void_element(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "area"
+            | "base"
+            | "br"
+            | "col"
+            | "embed"
+            | "hr"
+            | "img"
+            | "input"
+            | "link"
+            | "meta"
+            | "source"
+            | "track"
+            | "wbr"
     )
 }
