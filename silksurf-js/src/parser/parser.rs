@@ -108,11 +108,31 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         let start = self.current.span.start;
 
         while !self.is_at_end() {
+            /*
+             * Forward-progress guard: if parse_statement fails AND the
+             * synchronization point happens to coincide with the failing
+             * token (e.g. parse_expression_statement chokes on a stray `}`,
+             * which is itself a Statement sync point), the next iteration
+             * would re-enter parse_statement on the same token and loop
+             * forever. Snapshot the position before the attempt; if neither
+             * parse nor synchronize advanced the cursor, force one
+             * advance so the outer loop is guaranteed to terminate.
+             *
+             * This came up with the test262 typeof_basic.js fixture: the
+             * lexer reserves `undefined` as a keyword that the parser
+             * (before the dedicated handler above) could not start an
+             * expression on, so `if (typeof undefined ...)` raised a parse
+             * error and left the cursor on the if-body's `}` indefinitely.
+             */
+            let cursor_before = self.current.span.start;
             match self.parse_statement() {
                 Ok(stmt) => body.push(stmt),
                 Err(e) => {
                     self.errors.push(e);
                     self.synchronize(SyncPoint::Statement);
+                    if self.current.span.start == cursor_before && !self.is_at_end() {
+                        self.advance();
+                    }
                 }
             }
         }
@@ -1070,11 +1090,20 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         // Typical block has 3-8 statements
         let mut body = AstVecBuilder::with_capacity(4);
         while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
+            // See parse(): forward-progress guard against a parse error that
+            // leaves the cursor on a token which is itself a sync point.
+            let cursor_before = self.current.span.start;
             match self.parse_statement() {
                 Ok(stmt) => body.push(stmt),
                 Err(e) => {
                     self.errors.push(e);
                     self.synchronize(SyncPoint::Statement);
+                    if self.current.span.start == cursor_before
+                        && !self.check(&TokenKind::RightBrace)
+                        && !self.is_at_end()
+                    {
+                        self.advance();
+                    }
                 }
             }
         }
@@ -1543,6 +1572,35 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             TokenKind::Null => {
                 let span = self.advance().span;
                 Ok(Expression::Literal(Literal::Null(span)))
+            }
+            /*
+             * `undefined` -- per ECMA-262, `undefined` is NOT a reserved word;
+             * it is a writable-but-non-configurable property of the global
+             * object that holds the undefined value. The lexer classifies it
+             * as a keyword (TokenKind::Undefined) for ergonomic dispatch, but
+             * here we synthesize an Identifier expression so it flows through
+             * the normal identifier path: lookup_var misses (no local
+             * `undefined`), the compiler emits GetGlobal "undefined", and the
+             * VM's global object (initialised in builtins/globals.rs to
+             * Value::Undefined) returns the right value.
+             *
+             * WHY synthesize instead of a Literal::Undefined variant: the
+             * compiler already has the identifier->global path; adding a new
+             * literal variant would require changes in compile_literal and
+             * every AST consumer. Synthesizing an Identifier reuses the
+             * existing global-shadowing semantics (a local `var undefined`
+             * still works because lookup_var resolves it before falling
+             * through to GetGlobal).
+             */
+            TokenKind::Undefined => {
+                let token = self.advance();
+                let raw = self.text(token.span);
+                let name = self.lexer.interner_mut().intern(raw);
+                Ok(Expression::Identifier(Identifier {
+                    name,
+                    raw,
+                    span: token.span,
+                }))
             }
             TokenKind::RegExp(_) => self.parse_regexp_literal(),
 

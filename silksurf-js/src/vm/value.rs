@@ -401,23 +401,33 @@ impl std::fmt::Debug for NativeFunction {
 }
 
 /// JavaScript function
+///
+/// `captures` uses interior mutability so the compiler can emit
+/// `BindCapture` instructions immediately after `NewFunction` to fill in
+/// upvalue values (parent scope locals at the moment the inner function
+/// is created). Once construction is done the closure carries those values
+/// for the rest of its lifetime; subsequent reads/writes (inside the
+/// closure body) go through CallFrame.captures, not back here.
 #[derive(Debug)]
 pub struct JsFunction {
     /// Bytecode chunk index
     pub chunk_idx: u32,
-    /// Captured variables (closures)
-    pub captures: Vec<Value>,
+    /// Captured upvalues. Filled by `BindCapture` after `NewFunction`;
+    /// indexed by the captures-slot the inner function was compiled
+    /// against. Wrapped in `RefCell` because the VM mutates it through
+    /// the `Rc<JsFunction>` stored in a register.
+    pub captures: RefCell<Vec<Value>>,
     /// Name (interned string index, None for anonymous)
     pub name: Option<u32>,
 }
 
 impl JsFunction {
-    /// Create new function
+    /// Create new function with empty captures.
     #[must_use]
     pub fn new(chunk_idx: u32) -> Self {
         Self {
             chunk_idx,
-            captures: Vec::new(),
+            captures: RefCell::new(Vec::new()),
             name: None,
         }
     }

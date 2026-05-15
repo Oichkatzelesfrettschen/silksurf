@@ -254,14 +254,14 @@ impl Chunk {
         };
 
         use Opcode::{
-            Add, BitAnd, BitNot, BitOr, BitXor, Call, CallMethod, Debugger, Dec, DeleteElem,
-            DeleteProp, Div, Eq, Ge, GetCapture, GetElem, GetGlobal, GetLocal, GetProp, Gt, Halt,
-            In, Inc, Instanceof, Jmp, JmpFalse, JmpNotNullish, JmpNullish, JmpTrue, Le, LoadConst,
-            LoadFalse, LoadMinusOne, LoadNull, LoadOne, LoadSmi, LoadTrue, LoadUndefined, LoadZero,
-            Lt, Mod, Mov, Mul, Ne, Neg, NewArray, NewArrow, NewAsync, NewClass, NewFunction,
-            NewGenerator, NewObject, NewRegExp, Nop, Not, Pow, Ret, RetUndefined, SetCapture,
-            SetElem, SetGlobal, SetLocal, SetProp, Shl, Shr, StrictEq, StrictNe, Sub, TailCall,
-            Throw, Typeof, Ushr,
+            Add, BindCapture, BitAnd, BitNot, BitOr, BitXor, Call, CallMethod, Debugger, Dec,
+            DeleteElem, DeleteProp, Div, Eq, Ge, GetCapture, GetElem, GetGlobal, GetLocal, GetProp,
+            Gt, Halt, In, Inc, Instanceof, Jmp, JmpFalse, JmpNotNullish, JmpNullish, JmpTrue, Le,
+            LoadConst, LoadFalse, LoadMinusOne, LoadNull, LoadOne, LoadSmi, LoadTrue,
+            LoadUndefined, LoadZero, Lt, Mod, Mov, Mul, Ne, Neg, NewArray, NewArrow, NewAsync,
+            NewClass, NewFunction, NewGenerator, NewObject, NewRegExp, Nop, Not, Pow, Ret,
+            RetUndefined, SetCapture, SetElem, SetGlobal, SetLocal, SetProp, Shl, Shr, StrictEq,
+            StrictNe, Sub, TailCall, Throw, Typeof, Ushr,
         };
         match op {
             // No operands
@@ -293,6 +293,7 @@ impl Chunk {
             Not => format!("NOT r{}, r{}", instr.dst(), instr.src1()),
             BitNot => format!("BITNOT r{}, r{}", instr.dst(), instr.src1()),
             Typeof => format!("TYPEOF r{}, r{}", instr.dst(), instr.src1()),
+            BindCapture => format!("BIND_CAPTURE r{}, r{}", instr.dst(), instr.src1()),
 
             // 3 registers (arithmetic)
             Add => format!("ADD r{}, r{}, r{}", instr.dst(), instr.src1(), instr.src2()),

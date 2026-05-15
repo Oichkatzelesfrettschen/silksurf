@@ -79,6 +79,17 @@ struct LoopContext {
     continue_targets: Vec<JumpLabel>,
 }
 
+/// Description of one upvalue captured by an inner function from its
+/// enclosing function. `parent_slot` is the source register (in the
+/// parent's frame) the parent will read at `BindCapture` time. `name`
+/// is kept for lookup deduplication so re-referencing the same
+/// captured variable does not allocate a new slot.
+#[derive(Debug, Clone, Copy)]
+struct UpvalueDesc {
+    name: Symbol,
+    parent_slot: u8,
+}
+
 /// Bytecode compiler
 pub struct Compiler<'src, 'arena> {
     chunk: Chunk,
@@ -94,6 +105,35 @@ pub struct Compiler<'src, 'arena> {
     max_register: u8,
     loop_stack: Vec<LoopContext>,
     strict: bool,
+    /*
+     * parent_locals -- snapshot of the enclosing function's local slots.
+     *
+     * WHY: A child Compiler (inner function body) needs to detect when an
+     * identifier reference resolves to a binding in an enclosing function
+     * scope so it can register that binding as an upvalue. The `scopes`
+     * field only covers this Compiler's own block scopes (which never
+     * cross function boundaries), so we capture the parent's
+     * symbol-to-slot map at construction time and consult it on lookup
+     * miss before falling through to GetGlobal.
+     *
+     * Top-level Compilers leave this empty.
+     */
+    parent_locals: HashMap<Symbol, u8>,
+    /*
+     * upvalues -- ordered list of captured-from-parent slot indices.
+     *
+     * WHY: When the child references `parent_locals[sym]`, we record the
+     * parent slot here and use this Vec's index as the runtime
+     * captures-array index. The compiler emits GetCapture(reg, depth=0,
+     * captures_idx) for reads and a matching SetCapture for writes,
+     * relying on `op_get_capture`'s depth==0 mode to read from
+     * CallFrame.captures (seeded by op_call from JsFunction.captures).
+     *
+     * The parent emits one BindCapture(func_reg, parent_slot) instruction
+     * per entry, in this exact order, immediately after NewFunction so
+     * the inner closure carries its upvalues from creation time.
+     */
+    upvalues: Vec<UpvalueDesc>,
     /*
      * is_async_function -- true when compiling the body of an async function
      * or async arrow.
@@ -140,6 +180,23 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
      * See: compile_with_children for how the unified pool is returned
      */
     fn new_with_pool(pool: HashMap<String, u32>, next_id: u32) -> Self {
+        Self::new_with_pool_and_parent(pool, next_id, HashMap::new())
+    }
+
+    /*
+     * new_with_pool_and_parent -- create a child compiler that knows about
+     * its enclosing function's local bindings.
+     *
+     * WHY: Closure detection. The child compiler's `lookup_var` first
+     * walks its own scopes (block scopes within the child function); on
+     * miss, it consults `parent_locals` to find variables that should be
+     * promoted to upvalues. Pass an empty map for the top-level Compiler.
+     */
+    fn new_with_pool_and_parent(
+        pool: HashMap<String, u32>,
+        next_id: u32,
+        parent_locals: HashMap<Symbol, u8>,
+    ) -> Self {
         let scopes = vec![Scope::new(None, 0)];
         Self {
             chunk: Chunk::new(),
@@ -154,8 +211,36 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
             strict: false,
             is_async_function: false,
             errors: Vec::new(),
+            parent_locals,
+            upvalues: Vec::new(),
             _phantom: std::marker::PhantomData,
         }
+    }
+
+    /*
+     * collect_locals_snapshot -- export the current scope chain as a
+     * symbol-to-slot map for a child compiler's parent_locals.
+     *
+     * WHY: The child only needs symbol -> slot mapping for upvalue
+     * resolution; it does not need access to the parent's mutable
+     * Compiler. We flatten ALL active scopes (innermost wins on
+     * collision, matching ES lexical lookup).
+     */
+    fn collect_locals_snapshot(&self) -> HashMap<Symbol, u8> {
+        let mut snapshot: HashMap<Symbol, u8> = HashMap::new();
+        // Walk from the outermost scope inward so inner shadowing wins.
+        let mut chain: Vec<usize> = Vec::new();
+        let mut idx = Some(self.current_scope);
+        while let Some(i) = idx {
+            chain.push(i);
+            idx = self.scopes[i].parent;
+        }
+        for scope_idx in chain.iter().rev() {
+            for (sym, binding) in &self.scopes[*scope_idx].bindings {
+                snapshot.insert(*sym, binding.slot);
+            }
+        }
+        snapshot
     }
 
     /*
@@ -233,13 +318,22 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
      *
      * Returns: (main_chunk, nested_chunks, string_pool, next_string_id)
      */
-    fn into_parts(mut self) -> (Chunk, Vec<Chunk>, HashMap<String, u32>, u32) {
+    fn into_parts(
+        mut self,
+    ) -> (
+        Chunk,
+        Vec<Chunk>,
+        HashMap<String, u32>,
+        u32,
+        Vec<UpvalueDesc>,
+    ) {
         self.chunk.register_count = self.max_register + 1;
         (
             self.chunk,
             self.child_chunks,
             self.string_pool,
             self.next_string_id,
+            self.upvalues,
         )
     }
 
@@ -286,28 +380,125 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
         }
     }
 
+    /*
+     * collect_declarations -- gather all `var` and function declarations in a
+     * function-scope-rooted statement list and pre-bind their slots.
+     *
+     * WHY: ECMA-262 hoists `var` and function declarations to the nearest
+     * enclosing function (or script) scope, regardless of how deeply nested
+     * they appear inside blocks, if/else arms, for/while bodies, try/catch,
+     * switch cases, etc. Without recursive traversal, a `var i = 0` inside
+     * `for (var i = 0; ...)` would never get a binding in the enclosing
+     * scope, causing every read of `i` from the loop body to fall through
+     * to GetGlobal "i" (returning Undefined) instead of GetLocal slot=N.
+     *
+     * The recursion stops at function/arrow/class boundaries: those introduce
+     * their own function scope and are responsible for calling
+     * collect_declarations on their own bodies (see compile_function_body and
+     * the function-expression compile paths).
+     *
+     * For-loop init declarations ARE walked even though the for-loop wraps
+     * its body in a fresh lexical scope at compile time -- `var` ignores
+     * lexical scopes, and the for-init `var` must hoist to the function
+     * scope so that the body, the test, and the update all see the same
+     * binding.
+     */
     fn collect_declarations(&mut self, stmts: &[Statement<'src, 'arena>]) {
         for stmt in stmts {
-            match stmt {
-                Statement::VariableDeclaration(decl) => {
-                    if decl.kind == VariableKind::Var {
-                        for declarator in decl.declarations {
-                            if let crate::parser::Pattern::Identifier(id) = &declarator.id {
-                                self.declare_var(id.name, VariableKind::Var, false);
-                            }
-                        }
+            self.collect_declarations_in_stmt(stmt);
+        }
+    }
+
+    fn collect_declarations_in_stmt(&mut self, stmt: &Statement<'src, 'arena>) {
+        match stmt {
+            Statement::VariableDeclaration(decl) => {
+                if decl.kind == VariableKind::Var {
+                    self.collect_var_declaration(decl);
+                }
+            }
+            // Hoist function declarations: pre-allocate their slots so the
+            // function is available before its textual position.
+            // Do NOT descend into the function body -- it is its own scope.
+            Statement::FunctionDeclaration(func) => {
+                if let Some(ref id) = func.id
+                    && self.lookup_var(id.name).is_none()
+                {
+                    self.declare_var(id.name, VariableKind::Var, false);
+                }
+            }
+            Statement::Block(block) => {
+                for s in block.body {
+                    self.collect_declarations_in_stmt(s);
+                }
+            }
+            Statement::If(if_stmt) => {
+                self.collect_declarations_in_stmt(if_stmt.consequent);
+                if let Some(alt) = if_stmt.alternate.as_ref() {
+                    self.collect_declarations_in_stmt(alt);
+                }
+            }
+            Statement::While(w) => self.collect_declarations_in_stmt(w.body),
+            Statement::DoWhile(dw) => self.collect_declarations_in_stmt(dw.body),
+            Statement::For(for_stmt) => {
+                if let Some(crate::parser::ForInit::VariableDeclaration(decl)) =
+                    for_stmt.init.as_ref()
+                    && decl.kind == VariableKind::Var
+                {
+                    self.collect_var_declaration(decl);
+                }
+                self.collect_declarations_in_stmt(for_stmt.body);
+            }
+            Statement::ForIn(for_in) => {
+                if let crate::parser::ForInLeft::VariableDeclaration(decl) = &for_in.left
+                    && decl.kind == VariableKind::Var
+                {
+                    self.collect_var_declaration(decl);
+                }
+                self.collect_declarations_in_stmt(for_in.body);
+            }
+            Statement::ForOf(for_of) => {
+                if let crate::parser::ForInLeft::VariableDeclaration(decl) = &for_of.left
+                    && decl.kind == VariableKind::Var
+                {
+                    self.collect_var_declaration(decl);
+                }
+                self.collect_declarations_in_stmt(for_of.body);
+            }
+            Statement::Try(try_stmt) => {
+                for s in try_stmt.block.body {
+                    self.collect_declarations_in_stmt(s);
+                }
+                if let Some(catch) = &try_stmt.handler {
+                    for s in catch.body.body {
+                        self.collect_declarations_in_stmt(s);
                     }
                 }
-                // Hoist function declarations: pre-allocate their slots so the
-                // function is available before its textual position.
-                Statement::FunctionDeclaration(func) => {
-                    if let Some(ref id) = func.id
-                        && self.lookup_var(id.name).is_none()
-                    {
-                        self.declare_var(id.name, VariableKind::Var, false);
+                if let Some(finalizer) = &try_stmt.finalizer {
+                    for s in finalizer.body {
+                        self.collect_declarations_in_stmt(s);
                     }
                 }
-                _ => {}
+            }
+            Statement::Switch(sw) => {
+                for case in sw.cases {
+                    for s in case.consequent {
+                        self.collect_declarations_in_stmt(s);
+                    }
+                }
+            }
+            Statement::Labeled(lab) => self.collect_declarations_in_stmt(lab.body),
+            Statement::With(w) => self.collect_declarations_in_stmt(w.body),
+            // Other statements cannot host hoisted var/function declarations.
+            _ => {}
+        }
+    }
+
+    fn collect_var_declaration(&mut self, decl: &VariableDeclaration<'src, 'arena>) {
+        for declarator in decl.declarations {
+            if let crate::parser::Pattern::Identifier(id) = &declarator.id
+                && self.lookup_var(id.name).is_none()
+            {
+                self.declare_var(id.name, VariableKind::Var, false);
             }
         }
     }
@@ -388,6 +579,33 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
             }
         }
         None
+    }
+
+    /*
+     * resolve_upvalue -- check whether `name` is a captured-from-parent
+     * binding and, if so, return its captures-array slot, allocating a
+     * new entry on first reference.
+     *
+     * WHY: Called by compile_identifier (and the SetLocal-vs-SetCapture
+     * choice in compile_assignment / compile_var_declaration) after
+     * `lookup_var` has missed the local scope chain. If the parent
+     * function has a binding with this name, we promote it to an upvalue,
+     * cache the slot in `upvalues`, and return the slot index. The
+     * compiler then emits GetCapture/SetCapture with depth=0 and slot =
+     * captures index, and the parent emits one BindCapture per upvalue
+     * after NewFunction.
+     *
+     * Returns None if the name is not in the parent's local set (the
+     * caller falls through to a global lookup).
+     */
+    fn resolve_upvalue(&mut self, name: Symbol) -> Option<u8> {
+        if let Some(existing) = self.upvalues.iter().position(|u| u.name == name) {
+            return Some(existing as u8);
+        }
+        let parent_slot = *self.parent_locals.get(&name)?;
+        let idx = self.upvalues.len() as u8;
+        self.upvalues.push(UpvalueDesc { name, parent_slot });
+        Some(idx)
     }
 
     fn enter_scope(&mut self) {
@@ -760,8 +978,12 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
              */
             Statement::FunctionDeclaration(func) => {
                 if let Some(ref id) = func.id {
-                    let mut child =
-                        Compiler::new_with_pool(self.string_pool.clone(), self.next_string_id);
+                    let parent_locals = self.collect_locals_snapshot();
+                    let mut child = Compiler::new_with_pool_and_parent(
+                        self.string_pool.clone(),
+                        self.next_string_id,
+                        parent_locals,
+                    );
                     // Propagate the async marker so Statement::Return inside
                     // the body emits AsyncReturn instead of Ret.
                     child.is_async_function = func.is_async;
@@ -818,7 +1040,8 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                     } else {
                         child.chunk.emit(Instruction::new(Opcode::RetUndefined));
                     }
-                    let (mut child_chunk, nested, merged_pool, merged_next) = child.into_parts();
+                    let (mut child_chunk, nested, merged_pool, merged_next, child_upvalues) =
+                        child.into_parts();
                     self.string_pool = merged_pool;
                     self.next_string_id = merged_next;
                     let base_offset = self.child_chunks.len() as u32;
@@ -840,6 +1063,16 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                         func_reg.0,
                         const_idx,
                     ));
+                    // Bind upvalues into the closure: one BindCapture per
+                    // captured outer variable, in the same order the inner
+                    // function compiled them. See Vm::op_bind_capture.
+                    for upvalue in &child_upvalues {
+                        self.emit(Instruction::new_rr(
+                            Opcode::BindCapture,
+                            func_reg.0,
+                            upvalue.parent_slot,
+                        ));
+                    }
                     // Store into the pre-hoisted slot
                     if let Some((depth, slot)) = self.lookup_var(id.name) {
                         if depth == 0 {
@@ -1427,8 +1660,12 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
              */
             Expression::Function(func) => {
                 let result_reg = self.alloc_register();
-                let mut child =
-                    Compiler::new_with_pool(self.string_pool.clone(), self.next_string_id);
+                let parent_locals = self.collect_locals_snapshot();
+                let mut child = Compiler::new_with_pool_and_parent(
+                    self.string_pool.clone(),
+                    self.next_string_id,
+                    parent_locals,
+                );
                 // Propagate the async marker so Statement::Return inside the
                 // body emits AsyncReturn instead of Ret.
                 child.is_async_function = func.is_async;
@@ -1464,7 +1701,8 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 } else {
                     child.chunk.emit(Instruction::new(Opcode::RetUndefined));
                 }
-                let (mut child_chunk, nested, merged_pool, merged_next) = child.into_parts();
+                let (mut child_chunk, nested, merged_pool, merged_next, child_upvalues) =
+                    child.into_parts();
                 // Merge child string pool additions back into parent
                 self.string_pool = merged_pool;
                 self.next_string_id = merged_next;
@@ -1490,6 +1728,14 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                     result_reg.0,
                     const_idx,
                 ));
+                // BindCapture per upvalue -- see FunctionDeclaration for rationale.
+                for upvalue in &child_upvalues {
+                    self.emit(Instruction::new_rr(
+                        Opcode::BindCapture,
+                        result_reg.0,
+                        upvalue.parent_slot,
+                    ));
+                }
                 Ok(result_reg)
             }
             /*
@@ -1499,8 +1745,12 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
              */
             Expression::Arrow(arrow) => {
                 let result_reg = self.alloc_register();
-                let mut child =
-                    Compiler::new_with_pool(self.string_pool.clone(), self.next_string_id);
+                let parent_locals = self.collect_locals_snapshot();
+                let mut child = Compiler::new_with_pool_and_parent(
+                    self.string_pool.clone(),
+                    self.next_string_id,
+                    parent_locals,
+                );
                 // Propagate the async marker so Statement::Return inside the
                 // body emits AsyncReturn, and so the implicit fall-off-the-end
                 // return wraps the value in Promise.resolve.
@@ -1548,7 +1798,8 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                         }
                     }
                 }
-                let (mut child_chunk, nested, merged_pool, merged_next) = child.into_parts();
+                let (mut child_chunk, nested, merged_pool, merged_next, child_upvalues) =
+                    child.into_parts();
                 self.string_pool = merged_pool;
                 self.next_string_id = merged_next;
                 let base_offset = self.child_chunks.len() as u32;
@@ -1569,6 +1820,15 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                     result_reg.0,
                     const_idx,
                 ));
+                // BindCapture per upvalue -- arrow closures capture lexical
+                // scope identically to function expressions for our purposes.
+                for upvalue in &child_upvalues {
+                    self.emit(Instruction::new_rr(
+                        Opcode::BindCapture,
+                        result_reg.0,
+                        upvalue.parent_slot,
+                    ));
+                }
                 Ok(result_reg)
             }
             /*
@@ -1840,6 +2100,13 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                     id.span,
                 );
             }
+        } else if let Some(captures_idx) = self.resolve_upvalue(id.name) {
+            // depth=0 dispatches op_get_capture into its upvalue mode and
+            // reads CallFrame.captures[captures_idx].
+            self.emit_at(
+                Instruction::new_rrr(Opcode::GetCapture, reg.0, 0, captures_idx),
+                id.span,
+            );
         } else {
             let str_id = self.intern_string(id.raw);
             let name_idx = self.chunk.add_constant(Constant::String(str_id));
@@ -2052,6 +2319,15 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                             final_value.0,
                         ));
                     }
+                } else if let Some(captures_idx) = self.resolve_upvalue(id.name) {
+                    // depth=0 selects op_set_capture's upvalue mode, which
+                    // writes into CallFrame.captures[captures_idx].
+                    self.emit(Instruction::new_rrr(
+                        Opcode::SetCapture,
+                        0,
+                        captures_idx,
+                        final_value.0,
+                    ));
                 } else {
                     let str_id = self.intern_string(id.raw);
                     let name_idx = self.chunk.add_constant(Constant::String(str_id));
