@@ -38,6 +38,15 @@ use silksurf_css::{Color, ComputedStyle};
 use silksurf_dom::{Dom, NodeId, NodeKind};
 use silksurf_layout::{LayoutTree, Rect};
 
+/// Type-batched rasterization (feature "batched-raster").
+///
+/// WHY: Separating DisplayList items by type into two typed sub-lists lets
+/// each rasterization pass iterate without per-element variant dispatch,
+/// enabling branch-free inner loops and better auto-vectorization.
+/// See display_list_batched.rs for the full design note.
+#[cfg(feature = "batched-raster")]
+pub mod display_list_batched;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct DisplayList {
     pub items: Vec<DisplayItem>,

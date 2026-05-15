@@ -31,6 +31,14 @@
 pub mod flex;
 pub mod neighbor_table;
 
+// dim-soa: SoA layout for Dimensions -- cache-friendly reflow support.
+// Exposed as pub so integration tests can reach it via the full path
+// silksurf_layout::dimensions_soa::DimensionsSoA.  Not re-exported at the
+// crate root, so it remains invisible to callers using glob imports or the
+// top-level crate API.
+#[cfg(feature = "dim-soa")]
+pub mod dimensions_soa;
+
 // unicode-bidi (UAX #9) and unicode-linebreak (UAX #14) are consumed by
 // bidi_level() and linebreak_opportunities() below.  Full integration into
 // the render pipeline is deferred to the typography phase (AD-023).

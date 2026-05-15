@@ -5,6 +5,13 @@ edition = "2024"
 rust-version = "1.94.1"
 publish = false
 
+[features]
+# dim-soa: Structure-of-Arrays layout for Dimensions.
+#
+# WHY: Improves cache utilisation during reflow passes that read one field
+# across many nodes.  Off by default; opt in per-binary with --features dim-soa.
+dim-soa = []
+
 [dependencies]
 silksurf-core = { path = "../silksurf-core" }
 silksurf-css = { path = "../silksurf-css" }

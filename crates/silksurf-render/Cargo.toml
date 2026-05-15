@@ -15,5 +15,6 @@ rayon = { workspace = true, optional = true }
 [features]
 default = []
 parallel = ["rayon"]
+batched-raster = []
 [dev-dependencies]
 silksurf-core = { path = "../silksurf-core" }
