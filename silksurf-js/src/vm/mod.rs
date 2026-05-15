@@ -135,6 +135,20 @@ pub struct CallFrame {
     pub pc: usize,
     pub base: usize,
     pub return_reg: u8,
+    /*
+     * captures -- snapshot of the executing function's upvalues.
+     *
+     * WHY: Closures need to read/write the values of variables captured
+     * from enclosing function scopes. JsFunction owns the captures Vec;
+     * each call clones the (cheap) Rc into the new frame so
+     * `op_get_capture` and `op_set_capture` can resolve `depth=0`
+     * reads/writes against the running function's upvalues without
+     * walking back through the call stack.
+     *
+     * Top-level frames and frames pushed for native call paths leave
+     * this empty -- they have no enclosing function scope to capture.
+     */
+    pub captures: Rc<RefCell<Vec<Value>>>,
 }
 
 /*
@@ -368,6 +382,7 @@ static DISPATCH_TABLE: [OpHandler; 256] = {
     table[Opcode::NewObject as usize] = op_new_object;
     table[Opcode::NewArray as usize] = op_new_array;
     table[Opcode::NewFunction as usize] = op_new_function;
+    table[Opcode::BindCapture as usize] = op_bind_capture;
 
     // Scope
     table[Opcode::GetLocal as usize] = op_get_local;
@@ -504,12 +519,14 @@ impl Vm {
             return Err(VmError::OutOfBounds);
         }
 
-        // Push initial call frame
+        // Push initial call frame. Top-level scripts have no enclosing
+        // function, so the captures vec is empty (and shared cheaply).
         self.call_stack.push(CallFrame {
             chunk_idx,
             pc: 0,
             base: 0,
             return_reg: 0,
+            captures: Rc::new(RefCell::new(Vec::new())),
         });
 
         // Main execution loop
@@ -1042,11 +1059,21 @@ fn op_call(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
             if needed > vm.registers.len() {
                 vm.registers.resize(needed, Value::Undefined);
             }
+            // Snapshot the closure's captures into the new frame. We
+            // copy values rather than alias the JsFunction's RefCell so
+            // each invocation has its own activation: SetCapture inside
+            // the body mutates only this frame, not the function object
+            // shared between callers. (Multi-closure shared bindings -- the
+            // counter pattern across sibling closures -- are out of scope
+            // for this fix; the snapshot model is correct for the common
+            // case of read-only captured parameters.)
+            let captures = Rc::new(RefCell::new(func.captures.borrow().clone()));
             vm.call_stack.push(CallFrame {
                 chunk_idx,
                 pc: 0,
                 base: new_base,
                 return_reg: instr.dst(),
+                captures,
             });
             Ok(())
         }
@@ -1484,11 +1511,15 @@ fn op_spread_call(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
             if vm.call_stack.len() >= vm.max_stack_depth {
                 return Err(VmError::StackOverflow);
             }
+            // Snapshot the closure's captures into the new frame; same
+            // semantics as op_call's Value::Function arm.
+            let captures = Rc::new(RefCell::new(func.captures.borrow().clone()));
             vm.call_stack.push(CallFrame {
                 chunk_idx,
                 pc: 0,
                 base: new_base,
                 return_reg: instr.dst(),
+                captures,
             });
             Ok(())
         }
@@ -2286,7 +2317,24 @@ fn op_set_elem(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     let value = vm.get_reg(instr.src2()).clone();
     let obj = vm.get_reg(instr.dst());
     if let Value::Object(o) = obj {
-        o.borrow_mut().set(key, value);
+        let mut borrow = o.borrow_mut();
+        borrow.set(key, value);
+        /*
+         * ECMA-262 OrdinaryDefineOwnProperty for arrays:
+         * when defining own integer-indexed property P, if Uint32(P)
+         * >= length, set length = P + 1. We approximate the spec's
+         * "is the receiver an Array" test by checking whether the
+         * object already carries a numeric `length` property -- which
+         * is true exactly for the literal `[]`, NewArray-built rests,
+         * and template-string strings arrays. Plain objects keep the
+         * old behaviour (no length bump).
+         */
+        if let Value::Number(current) = borrow.get_by_str("length") {
+            let needed = f64::from(key) + 1.0;
+            if needed > current {
+                borrow.set_by_str("length", Value::Number(needed));
+            }
+        }
     }
     Ok(())
 }
@@ -2314,12 +2362,21 @@ fn op_new_object(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
  * is_array_like(). Without it, `$RB.push(a,b)` returns Undefined
  * because $RB doesn't look like an array.
  *
- * This was the root cause of Script 6's TypeError: `$RB=[]` created
- * an Object without length, so later `$RB.push(...)` failed.
+ * The compiler encodes the literal element count in const_idx (16-bit
+ * field shared with property indices). compile_array uses this to
+ * pre-size `length`, mirroring the semantics of `[1,2,3,4]` in spec
+ * terms: the array's length property is established by the literal,
+ * not by the subsequent SetElem stores. Pre-sizing also lets later
+ * SetElem stores at i < length skip the length-bump path.
+ *
+ * For dynamic-growth arrays (push, splice, manual `arr[i] = v`), the
+ * `op_set_elem` handler is responsible for keeping `length` consistent:
+ * see that handler's comment for the spec rule.
  */
 fn op_new_array(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     let obj = Rc::new(RefCell::new(Object::new()));
-    obj.borrow_mut().set_by_str("length", Value::Number(0.0));
+    let len = f64::from(instr.const_idx());
+    obj.borrow_mut().set_by_str("length", Value::Number(len));
     vm.set_reg(instr.dst(), Value::Object(obj));
     Ok(())
 }
@@ -2346,6 +2403,30 @@ fn op_new_function(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     };
     let func = Rc::new(JsFunction::new(chunk_idx));
     vm.set_reg(instr.dst(), Value::Function(func));
+    Ok(())
+}
+
+/*
+ * op_bind_capture -- append `r[src]` to the JsFunction in `r[dst]`.
+ *
+ * WHY: Closures need to carry the values of variables from their
+ * enclosing scope. The compiler emits one BindCapture instruction per
+ * upvalue, immediately after NewFunction, in the same order the inner
+ * function expects them in its captures slot indices. This runs at the
+ * outer function's execution time, so the captured values are exactly
+ * the locals' current values at the moment the inner function is
+ * created -- matching ECMA-262 closure semantics for the common case.
+ *
+ * Encoding: dst = function register, src1 = source local register.
+ *
+ * See: op_get_capture (depth=0 mode) for the read side.
+ * See: compile_expression Expression::Function for emission.
+ */
+fn op_bind_capture(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
+    let value = vm.get_reg(instr.src1()).clone();
+    if let Value::Function(func) = vm.get_reg(instr.dst()) {
+        func.captures.borrow_mut().push(value);
+    }
     Ok(())
 }
 
@@ -2387,37 +2468,74 @@ fn op_set_local(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
  */
 fn op_get_capture(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     /*
-     * Read a captured variable from an enclosing block scope within the
-     * SAME function frame.
+     * GetCapture has TWO modes selected by the depth operand:
      *
-     * WHY: The compiler's child Compiler starts with no parent-scope linkage
-     * (new_with_pool creates scopes = [Scope::new(None, 0)]), so lookup_var
-     * CANNOT cross function boundaries. GetCapture(depth > 0) is only ever
-     * emitted for multi-level block-scope access within the same function,
-     * e.g. a variable declared in an outer block and read from an inner block.
+     *   depth == 0  -- TRUE upvalue from the current closure's captures.
+     *                  `slot` indexes into CallFrame.captures, which the
+     *                  caller seeded from JsFunction.captures at op_call.
+     *                  This is what makes `function f(x){return function(){return x}}`
+     *                  work: the inner function reads x even though x lives
+     *                  in a defunct call frame.
      *
-     * The `slot` field is therefore a FRAME-RELATIVE register index, not an
-     * absolute one. With frame-relative addressing (base != 0 for nested
-     * calls), we must use get_reg so the base is applied correctly.
+     *   depth >= 1  -- intra-function block-scope lookup. The compiler's
+     *                  child Compiler walks scopes BUT cannot cross function
+     *                  boundaries, so depth > 0 only happens when the
+     *                  reference and the binding live in the SAME function
+     *                  but in different lexical block scopes (for-loop init
+     *                  read from the for-body, etc.). `slot` is then a
+     *                  frame-relative register index; get_reg applies the
+     *                  current frame's base.
      *
      * See: op_set_capture for the symmetric write path
      * See: lookup_var in compiler.rs for how depth/slot are computed
+     * See: JsFunction.captures and BindCapture for upvalue construction
      */
-    let slot = instr.src2(); // frame-relative register index within current function
-    let value = vm.get_reg(slot).clone();
+    let depth = instr.src1();
+    let slot = instr.src2();
+    let value = if depth == 0 {
+        if let Some(frame) = vm.call_stack.last() {
+            let cap = frame.captures.borrow();
+            cap.get(slot as usize).cloned().unwrap_or(Value::Undefined)
+        } else {
+            Value::Undefined
+        }
+    } else {
+        vm.get_reg(slot).clone()
+    };
     vm.set_reg(instr.dst(), value);
     Ok(())
 }
 
 fn op_set_capture(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     /*
-     * Write a captured variable in an enclosing block scope within the
-     * SAME function frame.
-     * See: op_get_capture for the WHY of frame-relative addressing.
+     * Write a captured variable. See op_get_capture for the depth=0
+     * vs depth>=1 dispatch rationale.
+     *
+     * Encoding here matches the compiler emission:
+     *   `Instruction::new_rrr(SetCapture, depth, slot, src)`
+     * so dst()=depth, src1()=slot, src2()=src.
      */
-    let slot = instr.src1(); // frame-relative register index within current function
+    let depth = instr.dst();
+    let slot = instr.src1();
     let value = vm.get_reg(instr.src2()).clone();
-    vm.set_reg(slot, value);
+    if depth == 0 {
+        if let Some(frame) = vm.call_stack.last() {
+            let mut cap = frame.captures.borrow_mut();
+            if (slot as usize) < cap.len() {
+                cap[slot as usize] = value;
+            } else {
+                // Defensive: extend with Undefined if compiler emitted a
+                // slot beyond captures.len(). This should not happen in
+                // well-formed bytecode but avoids silent loss.
+                while cap.len() < slot as usize {
+                    cap.push(Value::Undefined);
+                }
+                cap.push(value);
+            }
+        }
+    } else {
+        vm.set_reg(slot, value);
+    }
     Ok(())
 }
 

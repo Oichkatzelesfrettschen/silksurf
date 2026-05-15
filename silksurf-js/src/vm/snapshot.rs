@@ -326,6 +326,7 @@ mod tests {
             pc: 100,
             base: 256,
             return_reg: 7,
+            captures: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
         };
 
         let snapshot_frame = SnapshotCallFrame::from(&frame);

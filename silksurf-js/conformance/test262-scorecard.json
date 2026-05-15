@@ -1,12 +1,12 @@
 {
   "total": 28,
-  "pass": 24,
-  "fail": 4,
+  "pass": 28,
+  "fail": 0,
   "skip": 0,
-  "rate": 0.8571,
-  "timestamp": "2026-05-15T13:59:10Z",
+  "rate": 1.0000,
+  "timestamp": "2026-05-15T14:29:26Z",
   "runner_version": "synthetic-fixture-v1",
   "runner_kind": "vm",
   "fixture_dir": "silksurf-js/conformance/test262/fixtures/",
-  "duration_secs": 5.004
+  "duration_secs": 0.004
 }

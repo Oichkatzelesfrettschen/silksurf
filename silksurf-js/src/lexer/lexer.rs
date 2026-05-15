@@ -74,6 +74,18 @@ impl<'src> Lexer<'src> {
         &self.interner
     }
 
+    /// Get mutable interner (for parser-side synthetic identifiers).
+    ///
+    /// WHY: Some parse paths need to fabricate Identifier nodes for tokens
+    /// that the lexer classified as keywords but the spec actually treats as
+    /// identifiers (e.g. `undefined`, which is a property of the global
+    /// object, not a reserved word). The parser owns the Lexer, so this is
+    /// the only path to intern a symbol after lexing has already produced
+    /// the keyword token.
+    pub fn interner_mut(&mut self) -> &mut Interner {
+        &mut self.interner
+    }
+
     /// Consume the lexer and return the interner
     #[must_use]
     pub fn into_interner(self) -> Interner {

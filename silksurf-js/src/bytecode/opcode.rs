@@ -216,6 +216,11 @@ pub enum Opcode {
     PushScope = 0x78,
     /// Pop scope
     PopScope = 0x79,
+    /// Bind a captured upvalue into a freshly created Function:
+    /// `r[dst].captures.push(r[src])`. Emitted once per upvalue
+    /// immediately after `NewFunction` so the closure carries the
+    /// current values of its enclosing locals at construction time.
+    BindCapture = 0x7A,
 
     // ========================================
     // Iterators/Generators (0x80-0x8F)
@@ -363,6 +368,7 @@ pub static OPCODE_META: [OpcodeMeta; 256] = {
         NewRegExp,
         CheckTdz,
         CreateBinding,
+        BindCapture,
         Wide
     );
 
@@ -445,7 +451,7 @@ impl Opcode {
             | 0x40..=0x4B
             | 0x50..=0x58
             | 0x60..=0x6C
-            | 0x70..=0x79
+            | 0x70..=0x7A
             | 0x80..=0x88
             | 0x90..=0x95
             | 0xF0..=0xF1
