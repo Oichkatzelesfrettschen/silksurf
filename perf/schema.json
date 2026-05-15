@@ -1,0 +1,71 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/eirikr/silksurf/perf/schema.json",
+  "title": "SilkSurf bench history record",
+  "description": "Schema for one entry (one line) in perf/history.ndjson. The history file is newline-delimited JSON: each line is one independent JSON object that conforms to this schema. Records are append-only and ordered by timestamp.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "git_sha",
+    "timestamp",
+    "rust_version",
+    "profile",
+    "metrics"
+  ],
+  "properties": {
+    "git_sha": {
+      "type": "string",
+      "description": "Full 40-character lowercase hex git commit SHA the run was built from.",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "description": "ISO-8601 UTC timestamp of the run, e.g. 2026-05-14T10:30:00Z. Must end in Z (Zulu / UTC).",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
+    },
+    "rust_version": {
+      "type": "string",
+      "description": "Rust toolchain version string, normally the second whitespace-separated field from `rustc --version` output (e.g. 1.94.1).",
+      "minLength": 1
+    },
+    "profile": {
+      "type": "string",
+      "description": "Cargo build profile under which the bench binary was built.",
+      "enum": ["release", "debug"]
+    },
+    "metrics": {
+      "type": "object",
+      "description": "Steady-state per-iteration measurements from the bench harness. All durations are microseconds (us) unless explicitly suffixed otherwise. Additional metric keys are allowed for forward compatibility; numeric type required where present.",
+      "required": [
+        "fused_pipeline_us",
+        "css_cache_hit_us",
+        "full_render_us"
+      ],
+      "additionalProperties": {
+        "type": "number"
+      },
+      "properties": {
+        "fused_pipeline_us": {
+          "type": "number",
+          "description": "Steady-state per-iteration time of the fused HTML+CSS+layout+display-list pipeline in microseconds.",
+          "minimum": 0
+        },
+        "css_cache_hit_us": {
+          "type": "number",
+          "description": "Per-iteration time of a CSS parse/cache-hit lookup in microseconds.",
+          "minimum": 0
+        },
+        "full_render_us": {
+          "type": "number",
+          "description": "Per-iteration time of a full render (pipeline + paint) in microseconds.",
+          "minimum": 0
+        }
+      }
+    },
+    "notes": {
+      "type": "string",
+      "description": "Optional free-text annotation, e.g. environment notes, regression context, or experiment label."
+    }
+  }
+}
