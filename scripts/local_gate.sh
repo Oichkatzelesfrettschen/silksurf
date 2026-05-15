@@ -46,6 +46,11 @@ run_fast_gate() {
         echo "==> lint_unsafe (SAFETY-comment requirement)"
         scripts/lint_unsafe.sh
     fi
+
+    if [ -x "scripts/lint_glossary.sh" ]; then
+        echo "==> lint_glossary (advisory: public names vs GLOSSARY.md)"
+        scripts/lint_glossary.sh
+    fi
 }
 
 run_full_gate() {
