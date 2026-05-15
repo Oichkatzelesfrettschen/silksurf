@@ -128,7 +128,10 @@ mod tests {
     #[test]
     fn test_cache_insert_get() {
         let mut cache = CodeCache::new();
+        // UNWRAP-OK: fresh empty cache, two inserts under MAX_CACHED_FUNCTIONS;
+        // CodeCache::insert returns Err only on cache full (unreachable here).
         cache.insert(0, make_func(0, 100)).unwrap();
+        // UNWRAP-OK: same as above; cache size 1 << MAX_CACHED_FUNCTIONS.
         cache.insert(1, make_func(1, 200)).unwrap();
 
         assert!(cache.contains(0));
@@ -142,11 +145,14 @@ mod tests {
     #[test]
     fn test_cache_remove() {
         let mut cache = CodeCache::new();
+        // UNWRAP-OK: fresh empty cache, well under MAX_CACHED_FUNCTIONS.
         cache.insert(0, make_func(0, 100)).unwrap();
+        // UNWRAP-OK: cache size 1, far below MAX_CACHED_FUNCTIONS.
         cache.insert(1, make_func(1, 200)).unwrap();
 
         let removed = cache.remove(0);
         assert!(removed.is_some());
+        // UNWRAP-OK: assert!(removed.is_some()) above guarantees Some.
         assert_eq!(removed.unwrap().chunk_idx, 0);
 
         assert!(!cache.contains(0));
@@ -158,7 +164,9 @@ mod tests {
     #[test]
     fn test_cache_clear() {
         let mut cache = CodeCache::new();
+        // UNWRAP-OK: fresh empty cache, well under MAX_CACHED_FUNCTIONS.
         cache.insert(0, make_func(0, 100)).unwrap();
+        // UNWRAP-OK: cache size 1, well under MAX_CACHED_FUNCTIONS.
         cache.insert(1, make_func(1, 200)).unwrap();
 
         cache.clear();
@@ -174,6 +182,7 @@ mod tests {
 
         // Fill the cache (note: MAX_CACHED_FUNCTIONS is 1024, so this test is conceptual)
         for i in 0..5 {
+            // UNWRAP-OK: only 5 inserts; far below MAX_CACHED_FUNCTIONS=1024.
             cache.insert(i, make_func(i, 10)).unwrap();
         }
 

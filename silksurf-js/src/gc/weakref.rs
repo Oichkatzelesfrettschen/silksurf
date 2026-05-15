@@ -474,6 +474,8 @@ mod tests {
     #[test]
     fn test_weak_entry() {
         let mut heap = Heap::new();
+        // UNWRAP-OK: fresh Heap with default 1MB threshold trivially fits a
+        // 32-byte object; alloc only returns None on system-alloc failure.
         let obj = heap.alloc(TypeTag::Object, 32).unwrap();
 
         let mut entry = WeakEntry::new(obj, 0);
@@ -488,6 +490,8 @@ mod tests {
     #[test]
     fn test_weak_table_register() {
         let mut heap = Heap::new();
+        // UNWRAP-OK: fresh Heap, alloc of a 32-byte object cannot fail under
+        // normal test conditions.
         let obj = heap.alloc(TypeTag::Object, 32).unwrap();
 
         let mut table = WeakTable::new();
@@ -500,6 +504,8 @@ mod tests {
     #[test]
     fn test_weak_table_clear_target() {
         let mut heap = Heap::new();
+        // UNWRAP-OK: fresh Heap, alloc of a 32-byte object cannot fail under
+        // normal test conditions.
         let obj = heap.alloc(TypeTag::Object, 32).unwrap();
 
         let mut table = WeakTable::new();
@@ -519,6 +525,8 @@ mod tests {
     #[test]
     fn test_weak_table_unregister() {
         let mut heap = Heap::new();
+        // UNWRAP-OK: fresh Heap, alloc of a 32-byte object cannot fail under
+        // normal test conditions.
         let obj = heap.alloc(TypeTag::Object, 32).unwrap();
 
         let mut table = WeakTable::new();
@@ -532,6 +540,8 @@ mod tests {
     #[test]
     fn test_finalization_registry_register() {
         let mut heap = Heap::new();
+        // UNWRAP-OK: fresh Heap, alloc of a 32-byte object cannot fail under
+        // normal test conditions.
         let obj = heap.alloc(TypeTag::Object, 32).unwrap();
 
         let mut registry = FinalizationRegistry::new();
@@ -544,6 +554,8 @@ mod tests {
     #[test]
     fn test_finalization_registry_collect() {
         let mut heap = Heap::new();
+        // UNWRAP-OK: fresh Heap, alloc of a 32-byte object cannot fail under
+        // normal test conditions.
         let obj = heap.alloc(TypeTag::Object, 32).unwrap();
 
         let mut registry = FinalizationRegistry::new();
@@ -558,6 +570,8 @@ mod tests {
     #[test]
     fn test_finalization_registry_unregister() {
         let mut heap = Heap::new();
+        // UNWRAP-OK: fresh Heap, alloc of a 32-byte object cannot fail under
+        // normal test conditions.
         let obj = heap.alloc(TypeTag::Object, 32).unwrap();
 
         let mut registry = FinalizationRegistry::new();

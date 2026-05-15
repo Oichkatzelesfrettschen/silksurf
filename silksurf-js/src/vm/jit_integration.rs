@@ -173,6 +173,8 @@ mod tests {
 
     #[test]
     fn test_jit_threshold_trigger() {
+        // UNWRAP-OK: with_jit() only fails if Cranelift backend init fails, which is
+        // tested separately; this happy-path test asserts the backend is available.
         let mut tracker = HotFunctionTracker::with_jit().unwrap();
         let chunk = make_hot_chunk();
 
@@ -190,6 +192,8 @@ mod tests {
 
     #[test]
     fn test_jit_execute() {
+        // UNWRAP-OK: with_jit() only fails if Cranelift backend init fails, which is
+        // tested separately; this happy-path test asserts the backend is available.
         let mut tracker = HotFunctionTracker::with_jit().unwrap();
         let chunk = make_hot_chunk();
 
@@ -198,13 +202,16 @@ mod tests {
             tracker.record_call(0, &chunk);
         }
 
-        // Execute JIT-compiled code
+        // SAFETY: chunk was just compiled via record_call up to JIT_THRESHOLD above,
+        // so try_execute's contract (chunk matches what was compiled) is satisfied.
         let result = unsafe { tracker.try_execute(0) };
         assert_eq!(result, Some(42));
     }
 
     #[test]
     fn test_stats() {
+        // UNWRAP-OK: with_jit() only fails if Cranelift backend init fails, which is
+        // tested separately; this happy-path test asserts the backend is available.
         let mut tracker = HotFunctionTracker::with_jit().unwrap();
         let chunk = make_hot_chunk();
 

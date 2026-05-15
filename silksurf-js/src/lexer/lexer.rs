@@ -228,6 +228,7 @@ impl<'src> Lexer<'src> {
             return Token::new(TokenKind::Eof, self.make_span());
         }
 
+        // UNWRAP-OK: is_at_end() above returned false, so peek() yields Some(u8).
         let byte = self.peek().unwrap();
 
         // Try BPE pattern match first (for keywords and multi-char operators)
@@ -288,6 +289,8 @@ impl<'src> Lexer<'src> {
 
     /// Scan a single token (when BPE didn't match)
     fn scan_token(&mut self) -> Token<'src> {
+        // UNWRAP-OK: caller next_token() verified !is_at_end() before dispatch,
+        // and BPE branch did not consume bytes; advance() returns Some.
         let byte = self.advance().unwrap();
 
         match byte {
@@ -588,6 +591,9 @@ impl<'src> Lexer<'src> {
     fn scan_number(&mut self) -> Token<'src> {
         // Back up to include the first digit
         self.pos = self.start;
+        // UNWRAP-OK: caller dispatched here from scan_token() because byte at
+        // self.start was a digit (or '.'); rewinding to self.start and advancing
+        // returns Some(byte) by construction.
         let first = self.advance().unwrap();
 
         let mut is_float = first == b'.';

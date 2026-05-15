@@ -287,10 +287,14 @@ mod tests {
 
     #[test]
     fn test_infix_operators() {
+        // UNWRAP-OK: TokenKind::Plus has an entry in infix_binding_power
+        // (Additive case) that always returns Some.
         // Addition is left-associative
         let (left, right) = infix_binding_power(&TokenKind::Plus).unwrap();
         assert!(left < right);
 
+        // UNWRAP-OK: TokenKind::StarStar has an entry in infix_binding_power
+        // (Exponentiation case) that always returns Some.
         // Exponentiation is right-associative
         let (left, right) = infix_binding_power(&TokenKind::StarStar).unwrap();
         assert!(left > right);

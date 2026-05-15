@@ -165,11 +165,17 @@ impl AstArena {
     ///
     /// Returns a reference valid until arena reset.
     pub fn alloc<T>(&self, value: T) -> &T {
-        // SAFETY: We're returning a reference that borrows self,
-        // so the reference cannot outlive the arena.
-        // The RefCell borrow is temporary (just for the alloc call).
         let arena = self.inner.borrow();
         let ptr = std::ptr::from_ref(arena.alloc(value));
+        // ptr points into the bumpalo arena owned by self.inner.
+        // The returned reference is bound to &self lifetime, so it cannot
+        // outlive the AstArena. Bumpalo never moves or frees individual
+        // allocations -- they live until reset() is called, and reset()
+        // takes &mut, which is unreachable while this borrow is live.
+        // The temporary RefCell borrow ends with `arena`; the resulting
+        // pointer remains valid because the underlying memory is owned by
+        // the RefCell, not the borrow guard.
+        // SAFETY: ptr is non-null and valid for &self lifetime (see above).
         unsafe { &*ptr }
     }
 
@@ -177,6 +183,10 @@ impl AstArena {
     pub fn alloc_str(&self, s: &str) -> &str {
         let arena = self.inner.borrow();
         let ptr = std::ptr::from_ref(arena.alloc_str(s));
+        // SAFETY: same invariant as alloc(): ptr points into the bumpalo
+        // arena, output lifetime is tied to &self, and bumpalo retains the
+        // bytes until reset() (which requires &mut, unreachable while a
+        // shared borrow exists).
         unsafe { &*ptr }
     }
 
@@ -188,6 +198,10 @@ impl AstArena {
     {
         let arena = self.inner.borrow();
         let ptr = std::ptr::from_ref(arena.alloc_slice_fill_iter(iter));
+        // SAFETY: same invariant as alloc(): the slice lives in the bumpalo
+        // arena, the returned reference borrows from &self, and reset()
+        // requires &mut (so the slice memory cannot be reclaimed for the
+        // lifetime of the returned reference).
         unsafe { &*ptr }
     }
 

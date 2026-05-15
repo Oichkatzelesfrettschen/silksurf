@@ -490,10 +490,14 @@ impl Vm {
             // Dispatch via function pointer table
             let opcode = instr.opcode() as usize;
             debug_assert!(opcode < DISPATCH_TABLE.len());
+            // SAFETY: opcode is a u8 cast to usize (range 0..=255), and DISPATCH_TABLE
+            // is a static [OpHandler; 256], so the index is always in bounds.
             let handler = unsafe { *DISPATCH_TABLE.get_unchecked(opcode) };
             match handler(self, instr) {
                 Ok(()) => {}
                 Err(VmError::Halted) => {
+                    // SAFETY: Vm::new() initializes registers with 256 Value::Undefined
+                    // entries and the array only ever grows, so index 0 is always valid.
                     return Ok(unsafe { self.registers.get_unchecked(0) }.clone());
                 }
                 Err(VmError::Exception(value)) => {
@@ -612,6 +616,8 @@ impl Vm {
     /// Get current chunk
     #[inline]
     fn current_chunk(&self) -> &Chunk {
+        // UNWRAP-OK: only called from opcode handlers that run inside execute(),
+        // which always pushes an initial frame before dispatching, so call_stack is non-empty.
         let frame = self.call_stack.last().unwrap();
         &self.chunks[frame.chunk_idx]
     }
@@ -619,12 +625,16 @@ impl Vm {
     /// Get current program counter
     #[inline]
     fn current_pc(&self) -> usize {
+        // UNWRAP-OK: only called from opcode handlers within an active execute() loop,
+        // which guarantees a current frame on the call stack.
         self.call_stack.last().unwrap().pc
     }
 
     /// Modify program counter (for jumps)
     #[inline]
     fn jump(&mut self, offset: i32) {
+        // UNWRAP-OK: jump is only invoked from opcode handlers during execute(),
+        // which guarantees an active frame on the call stack.
         let frame = self.call_stack.last_mut().unwrap();
         frame.pc = ((frame.pc as i32) + offset) as usize;
     }
@@ -2271,6 +2281,7 @@ mod tests {
         chunk.emit(Instruction::new_r(Opcode::Ret, 2));
 
         let idx = vm.add_chunk(chunk);
+        // UNWRAP-OK: test executes a hand-built well-formed chunk; failure indicates a VM bug.
         let result = vm.execute(idx).unwrap();
 
         if let Value::Number(n) = result {
@@ -2295,6 +2306,7 @@ mod tests {
         chunk.emit(Instruction::new_r(Opcode::Ret, 2));
 
         let idx = vm.add_chunk(chunk);
+        // UNWRAP-OK: test executes a hand-built well-formed chunk; failure indicates a VM bug.
         let result = vm.execute(idx).unwrap();
 
         assert!(matches!(result, Value::Boolean(true)));
@@ -2319,6 +2331,7 @@ mod tests {
         chunk.emit(Instruction::new_r(Opcode::Ret, 1));
 
         let idx = vm.add_chunk(chunk);
+        // UNWRAP-OK: test executes a hand-built well-formed chunk; failure indicates a VM bug.
         let result = vm.execute(idx).unwrap();
 
         if let Value::Number(n) = result {
@@ -2343,6 +2356,7 @@ mod tests {
         chunk.emit(Instruction::new_r(Opcode::Ret, 2));
 
         let idx = vm.add_chunk(chunk);
+        // UNWRAP-OK: test executes a hand-built well-formed chunk; failure indicates a VM bug.
         let result = vm.execute(idx).unwrap();
 
         if let Value::Number(n) = result {
@@ -2367,6 +2381,7 @@ mod tests {
         chunk.emit(Instruction::new_r(Opcode::Ret, 1));
 
         let idx = vm.add_chunk(chunk);
+        // UNWRAP-OK: test executes a hand-built well-formed chunk; failure indicates a VM bug.
         let result = vm.execute(idx).unwrap();
 
         if let Value::Number(n) = result {
@@ -2431,6 +2446,7 @@ mod tests {
     #[test]
     fn test_e2e_simple_assignment() {
         let mut vm = Vm::new();
+        // UNWRAP-OK: input script is a well-formed literal that this test asserts must run.
         run_script(&mut vm, "var x = 42;").unwrap();
     }
 
@@ -2438,18 +2454,21 @@ mod tests {
     fn test_e2e_global_array_assignment() {
         let mut vm = Vm::new();
         // This is the pattern from ChatGPT script 6
+        // UNWRAP-OK: input script is a well-formed literal that this test asserts must run.
         run_script(&mut vm, "$RB = [];").unwrap();
     }
 
     #[test]
     fn test_e2e_global_function_assignment() {
         let mut vm = Vm::new();
+        // UNWRAP-OK: input script is a well-formed literal that this test asserts must run.
         run_script(&mut vm, "$RV = function(a) {};").unwrap();
     }
 
     #[test]
     fn test_e2e_iife_with_try_catch() {
         let mut vm = Vm::new();
+        // UNWRAP-OK: input script is a well-formed literal that this test asserts must run.
         run_script(&mut vm, "!function(){ try { var x = 1; } catch(e) {} }();").unwrap();
     }
 
@@ -2597,6 +2616,7 @@ mod tests {
     #[test]
     fn test_run_and_get_result_basic() {
         // Sanity check: run_and_get_result works for a plain function call
+        // UNWRAP-OK: script is a well-formed literal that this test asserts must run.
         let v =
             run_and_get_result("function add(x, y) { return x + y; } window.result = add(3, 4);")
                 .expect("script failed");
@@ -2608,6 +2628,7 @@ mod tests {
 
     #[test]
     fn test_destruct_object_param() {
+        // UNWRAP-OK: script is a well-formed literal that this test asserts must run.
         let v = run_and_get_result(
             "function add({x, y}) { return x + y; } window.result = add({x: 3, y: 4});",
         )
@@ -2620,6 +2641,7 @@ mod tests {
 
     #[test]
     fn test_destruct_array_param() {
+        // UNWRAP-OK: script is a well-formed literal that this test asserts must run.
         let v = run_and_get_result(
             "function sum([a, b]) { return a + b; } window.result = sum([10, 20]);",
         )
@@ -2633,6 +2655,7 @@ mod tests {
     #[test]
     fn test_destruct_default_param() {
         // {role = "user"} should use the default when the property is absent
+        // UNWRAP-OK: script is a well-formed literal that this test asserts must run.
         let v = run_and_get_result(
             "function label({name, role = \"user\"}) { return name + \":\" + role; }\
              window.result = label({name: \"Bob\"});",
@@ -2648,6 +2671,7 @@ mod tests {
     #[test]
     fn test_destruct_mixed_params() {
         // Mix of identifier and destructured params
+        // UNWRAP-OK: script is a well-formed literal that this test asserts must run.
         let v = run_and_get_result(
             "function f(n, {a, b}) { return n + a + b; } window.result = f(1, {a: 2, b: 3});",
         )

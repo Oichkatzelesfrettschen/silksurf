@@ -133,6 +133,8 @@ impl TimerQueue {
             if entry.deadline > now {
                 break;
             }
+            // UNWRAP-OK: peek() returned Some on the line above, so the heap is non-empty
+            // and pop() is guaranteed to return Some.
             let entry = self.heap.pop().unwrap();
             if entry.cancelled {
                 continue;

@@ -198,6 +198,11 @@ impl JitCompiler {
 
 impl Default for JitCompiler {
     fn default() -> Self {
+        // UNWRAP-OK: Default::default() has no Result return; if the host
+        // platform cannot construct a Cranelift JIT module (no native ISA,
+        // failed flag config), there is nothing sensible to fall back to,
+        // so we panic loudly. Production callers should use JitCompiler::new()
+        // directly to handle the Result.
         Self::new().expect("Failed to create JIT compiler")
     }
 }
@@ -224,6 +229,8 @@ mod tests {
 
     #[test]
     fn test_jit_stats() {
+        // UNWRAP-OK: native test host always has a working ISA + Cranelift
+        // JIT module; failure indicates a broken developer environment.
         let compiler = JitCompiler::new().unwrap();
         let stats = compiler.stats();
         assert_eq!(stats.compiled_functions, 0);
@@ -231,6 +238,8 @@ mod tests {
 
     #[test]
     fn test_jit_compile_simple() {
+        // UNWRAP-OK: native test host always has a working ISA + Cranelift
+        // JIT module; failure indicates a broken developer environment.
         let mut compiler = JitCompiler::new().unwrap();
 
         // Create a simple chunk that returns 42
@@ -246,6 +255,7 @@ mod tests {
         let result = compiler.compile(&chunk, 0);
         assert!(result.is_ok(), "Compilation should succeed");
 
+        // UNWRAP-OK: assert!(result.is_ok()) on the previous line guarantees Ok.
         let compiled = result.unwrap();
         assert_eq!(compiled.chunk_idx, 0);
         assert!(!compiled.ptr.is_null());
@@ -253,6 +263,8 @@ mod tests {
 
     #[test]
     fn test_jit_compile_arithmetic() {
+        // UNWRAP-OK: native test host always has a working ISA + Cranelift
+        // JIT module; failure indicates a broken developer environment.
         let mut compiler = JitCompiler::new().unwrap();
 
         // LoadSmi r0, 10
@@ -278,6 +290,8 @@ mod tests {
 
     #[test]
     fn test_jit_execute_simple() {
+        // UNWRAP-OK: native test host always has a working ISA + Cranelift
+        // JIT module; failure indicates a broken developer environment.
         let mut compiler = JitCompiler::new().unwrap();
 
         // LoadSmi r0, 42
@@ -289,8 +303,14 @@ mod tests {
         chunk.instructions.push(Instruction::new_r(Opcode::Ret, 0));
         chunk.register_count = 1;
 
+        // UNWRAP-OK: chunk uses only LoadSmi + Ret (both supported); compile
+        // never returns Err for this trivial input on a working host.
         let compiled = compiler.compile(&chunk, 2).unwrap();
 
+        // SAFETY: compiled.ptr was just produced by JitCompiler::compile() above
+        // and lives inside compiler's JITModule (not yet dropped). The chunk
+        // returns i64 and takes no args, matching the fn() -> i64 transmute
+        // inside CompiledFunction::call.
         // Execute the compiled function
         let result = unsafe { compiled.call() };
         assert_eq!(result, 42, "JIT should return 42");
@@ -298,6 +318,8 @@ mod tests {
 
     #[test]
     fn test_jit_execute_arithmetic() {
+        // UNWRAP-OK: native test host always has a working ISA + Cranelift
+        // JIT module; failure indicates a broken developer environment.
         let mut compiler = JitCompiler::new().unwrap();
 
         // LoadSmi r0, 10
@@ -317,14 +339,21 @@ mod tests {
         chunk.instructions.push(Instruction::new_r(Opcode::Ret, 2));
         chunk.register_count = 3;
 
+        // UNWRAP-OK: chunk uses only LoadSmi + Add + Ret (all supported);
+        // compile cannot return Err for this trivial input on a working host.
         let compiled = compiler.compile(&chunk, 3).unwrap();
 
+        // SAFETY: compiled.ptr was just produced by JitCompiler::compile() above
+        // and lives inside compiler's JITModule. The chunk returns i64 and takes
+        // no args, matching the fn() -> i64 transmute in CompiledFunction::call.
         let result = unsafe { compiled.call() };
         assert_eq!(result, 42, "10 + 32 should equal 42");
     }
 
     #[test]
     fn test_jit_cache() {
+        // UNWRAP-OK: native test host always has a working ISA + Cranelift
+        // JIT module; failure indicates a broken developer environment.
         let mut compiler = JitCompiler::new().unwrap();
 
         let mut chunk = Chunk::default();
@@ -334,10 +363,13 @@ mod tests {
         chunk.instructions.push(Instruction::new_r(Opcode::Ret, 0));
         chunk.register_count = 1;
 
+        // UNWRAP-OK: trivial chunk (LoadSmi + Ret), supported opcodes only.
         // First compile
         compiler.compile(&chunk, 10).unwrap();
         assert!(compiler.is_compiled(10));
 
+        // UNWRAP-OK: second call hits the cache and returns Ok unconditionally
+        // (existing entry path in JitCompiler::compile).
         // Second compile should hit cache
         compiler.compile(&chunk, 10).unwrap();
         assert_eq!(compiler.stats().compiled_functions, 1);

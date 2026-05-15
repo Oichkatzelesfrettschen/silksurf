@@ -25,11 +25,6 @@ cd "$REPO_ROOT"
 # crates/*/tests/ (separate dir) so the find scope already excludes them;
 # /bin/ subdirs hold per-binary code that is conventionally allowed to
 # unwrap on user-input failure.
-## NOTE: silksurf-js/src is intentionally NOT scanned in this round. It has
-## ~118 unannotated unwrap/expect sites concentrated in vm/, parser/,
-## bytecode/, and gc/. Annotating them is its own batch in the
-## SNAZZY-WAFFLE roadmap (P1 follow-up, tracked as a task). Re-include
-## silksurf-js/src here when that batch lands.
 mapfile -t SOURCES < <(find \
     crates/silksurf-app/src \
     crates/silksurf-core/src \
@@ -42,6 +37,7 @@ mapfile -t SOURCES < <(find \
     crates/silksurf-net/src \
     crates/silksurf-render/src \
     crates/silksurf-tls/src \
+    silksurf-js/src \
     -type f -name '*.rs' \
     -not -path '*/bin/*' \
     -not -path '*/tests/*' \
@@ -84,7 +80,7 @@ for src in "${SOURCES[@]}"; do
         {
             ctx[NR % 8] = $0
         }
-        /\.unwrap\(\)|\.expect\(/ {
+        /\.unwrap\(\)|\.expect\("/ {
             # Skip comment lines (//, ///, //!, * within block comments).
             if ($0 ~ /^[[:space:]]*(\/\/|\*)/) next
             # Allow lines that contain UNWRAP-OK on the same line.
