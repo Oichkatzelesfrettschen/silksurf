@@ -109,7 +109,9 @@ fn invalid_host_terminates_cleanly_and_emits_branding() {
     );
     assert!(
         combined.to_ascii_lowercase().contains("fetch")
-            || combined.to_ascii_lowercase().contains("silksurf-test.invalid"),
+            || combined
+                .to_ascii_lowercase()
+                .contains("silksurf-test.invalid"),
         "expected fetch attempt or invalid host echoed, got:\nstdout={stdout}\nstderr={stderr}"
     );
     // The current binary returns from main on fetch failure rather
@@ -170,11 +172,8 @@ fn invalid_tls_ca_file_produces_specific_error_message() {
     let bogus_ca = "/tmp/silksurf-test-nonexistent-ca.pem";
     let _ = std::fs::remove_file(bogus_ca);
 
-    let (stdout, stderr, code) = run_with_args(&[
-        "--tls-ca-file",
-        bogus_ca,
-        "http://silksurf-test.invalid/",
-    ]);
+    let (stdout, stderr, code) =
+        run_with_args(&["--tls-ca-file", bogus_ca, "http://silksurf-test.invalid/"]);
 
     let combined = format!("{stdout}{stderr}");
     assert!(
@@ -223,8 +222,7 @@ fn binary_path_is_executable_and_output_is_consistent() {
         bin.display()
     );
 
-    let (stdout, stderr, _code) =
-        run_with_args(&["http://silksurf-test-consistency.invalid/"]);
+    let (stdout, stderr, _code) = run_with_args(&["http://silksurf-test-consistency.invalid/"]);
     let combined = format!("{stdout}{stderr}");
 
     assert!(

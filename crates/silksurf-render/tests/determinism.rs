@@ -37,13 +37,7 @@ const COUNTS: &[usize] = &[3, 16, 4001];
 //   0x12345678 -- four distinct nibble values; byte-order bugs produce a
 //                 permuted value that differs from the scalar path.
 // ---------------------------------------------------------------------------
-const COLORS: &[u32] = &[
-    0x00000000,
-    0xFFFFFFFF,
-    0xFF0000FF,
-    0x80808080,
-    0x12345678,
-];
+const COLORS: &[u32] = &[0x00000000, 0xFFFFFFFF, 0xFF0000FF, 0x80808080, 0x12345678];
 
 fn make_buf(len: usize) -> Vec<u32> {
     vec![0xDEADBEEF_u32; len]
@@ -118,7 +112,10 @@ fn simd_scalar_identical_empty() {
         let mut simd_buf: Vec<u32> = Vec::new();
         fill_scalar(&mut scalar_buf, color);
         fill_simd(&mut simd_buf, color);
-        assert_eq!(scalar_buf, simd_buf, "empty buffer mismatch for color=0x{color:08X}");
+        assert_eq!(
+            scalar_buf, simd_buf,
+            "empty buffer mismatch for color=0x{color:08X}"
+        );
     }
 }
 
