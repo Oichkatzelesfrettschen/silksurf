@@ -11,6 +11,40 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+/*
+ * MAX_TLS_HANDSHAKE_SECS -- DoS bound on a single TLS handshake.
+ *
+ * WHY: A slow or malicious peer can stall TLS negotiation indefinitely
+ * (incomplete ClientHello, dribble-feeding handshake records, never
+ * acknowledging Finished). Without an enforced upper bound the calling
+ * thread blocks forever inside conn.complete_io(...). Surfacing the
+ * bound as a public constant lets the silksurf-net layer apply a
+ * matching std::net::TcpStream::set_read_timeout / set_write_timeout
+ * around the handshake loop, converting a stall into a recoverable
+ * NetError.
+ *
+ * Default 30 seconds. The 95th-percentile real-world TLS 1.3 handshake
+ * over the public Internet completes in <1 s; 30 s leaves generous
+ * headroom for high-RTT mobile links and PQ-hybrid handshakes
+ * (X25519MLKEM768 ClientHello can exceed an MTU and need extra
+ * round-trips) while still firing fast enough that an attacker cannot
+ * tie up a renderer thread for minutes.
+ *
+ * GAP: rustls itself does not expose a handshake-level timeout API
+ * (its design is I/O-agnostic -- the consumer drives reads/writes).
+ * Enforcement therefore happens at the I/O boundary in silksurf-net's
+ * BasicClient::fetch where we already call
+ * tcp.set_read_timeout(Some(Duration::from_secs(30))) before draining
+ * the handshake. This constant centralises that 30 s value so future
+ * changes do not require touching multiple files. Once a richer
+ * silksurf-tls handshake driver lands (P5.S4), it should consume this
+ * constant directly via TlsConfig builder options.
+ *
+ * See: SNAZZY-WAFFLE roadmap P8.S8 (DoS bounds per crate).
+ * See: silksurf-net::BasicClient::fetch for the current enforcement site.
+ */
+pub const MAX_TLS_HANDSHAKE_SECS: u64 = 30;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RootStoreDiagnostics {
     pub mozilla_roots: usize,

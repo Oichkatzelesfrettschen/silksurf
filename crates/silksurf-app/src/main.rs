@@ -29,6 +29,38 @@ use silksurf_js::vm::dom_bridge;
 use silksurf_layout::Rect;
 
 fn main() {
+    /*
+     * P8.S6 -- observability bootstrap.
+     *
+     * Order matters: the subscriber is installed before the panic hook so
+     * that a panic during early arg parsing is captured by the structured
+     * logger.  Once the subscriber is up we replace the default panic hook
+     * with one that emits a `tracing::error!` event before delegating to
+     * the original hook (so the standard backtrace path still runs).
+     *
+     * Default filter level: warn for everything, info for the `silksurf`
+     * span tree.  Override at runtime with `RUST_LOG=silksurf=debug` etc.
+     *
+     * OOM hook: alloc_error_hook is nightly-only
+     * (alloc::alloc::set_alloc_error_hook).  silksurf-app uses mimalloc
+     * which aborts on OOM natively in release builds.  Nightly OOM hook
+     * deferred to when the feature stabilises.
+     */
+    // UNWRAP-OK: "silksurf=info" is a valid tracing directive literal; parse() is infallible here.
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive("silksurf=info".parse().unwrap()),
+        )
+        .with_writer(std::io::stderr)
+        .init();
+
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        tracing::error!(panic = %info, "process panicking");
+        default_hook(info);
+    }));
+
     let args: Vec<String> = std::env::args().collect();
     let insecure = args.iter().any(|a| a == "--insecure" || a == "-k");
     let platform_verifier = args.iter().any(|a| a == "--platform-verifier");

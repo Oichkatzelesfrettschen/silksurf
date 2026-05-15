@@ -2255,6 +2255,8 @@ dependencies = [
  "silksurf-render",
  "silksurf-tls",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
  "url",
 ]
 
@@ -2307,6 +2309,7 @@ dependencies = [
  "silksurf-net",
  "silksurf-render",
  "silksurf-tls",
+ "tracing",
 ]
 
 [[package]]

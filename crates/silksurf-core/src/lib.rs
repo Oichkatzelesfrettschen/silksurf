@@ -3,6 +3,10 @@ mod error;
 mod interner;
 mod span;
 
+/// Forensics-grade primitives (deterministic clock + seedable PRNG)
+/// for reproducible tests. See [`testing::Clock`] and [`testing::Rng`].
+pub mod testing;
+
 pub use arena::SilkArena;
 pub use error::{SilkError, SilkResult};
 pub use interner::{Atom, SilkInterner, should_intern_identifier};

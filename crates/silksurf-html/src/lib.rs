@@ -12,6 +12,25 @@ mod tree_builder;
 pub use tree_builder::TreeBuildError;
 pub use tree_builder::TreeBuilder;
 
+/*
+ * MAX_TOKENS_PER_FEED -- DoS bound on Tokenizer::feed output size.
+ *
+ * WHY: A pathological HTML payload (millions of empty tags or character
+ * runs) can drive Tokenizer::feed to allocate an unbounded Vec<Token>,
+ * exhausting RAM long before the parser sees the result. Capping the
+ * token count per call gives the embedder a deterministic upper bound
+ * on memory and CPU per feed batch, and converts the OOM into a
+ * recoverable HtmlTokenize SilkError.
+ *
+ * Default 1_000_000 tokens: large enough that real-world HTML (the
+ * largest pages observed are <500_000 tokens) parses in one feed without
+ * truncation, small enough to stay below ~120 MiB of token Vec
+ * (Token enum is ~96 B with String payloads on 64-bit).
+ *
+ * See: SNAZZY-WAFFLE roadmap P8.S8 (DoS bounds per crate).
+ */
+pub const MAX_TOKENS_PER_FEED: usize = 1_000_000;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
     Doctype {
@@ -95,6 +114,23 @@ impl Tokenizer {
         loop {
             if self.cursor >= self.buffer.len() {
                 break;
+            }
+
+            /*
+             * DoS bound (P8.S8): cap tokens emitted per feed() call.
+             *
+             * Checked once per outer loop iteration (not inside parse_tag's
+             * tight inner loops) to keep the hot path branch-free per byte.
+             * The cap is exposed as MAX_TOKENS_PER_FEED so embedders can
+             * tune it; exceeding it returns a recoverable TokenizeError
+             * rather than OOM-ing the process.
+             */
+            if tokens.len() >= MAX_TOKENS_PER_FEED {
+                return Err(self.error(
+                    State::Data,
+                    self.cursor,
+                    "token count exceeded MAX_TOKENS_PER_FEED",
+                ));
             }
 
             if self.raw_text_tag.is_some() {

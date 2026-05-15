@@ -43,6 +43,29 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::Arc;
 
+/*
+ * MAX_RESPONSE_BODY_BYTES -- DoS bound on a single HTTP response body.
+ *
+ * WHY: Without a hard cap, a malicious or misconfigured server can
+ * stream an unbounded body and OOM the renderer. The original code
+ * hard-coded 16 MiB inline in read_response(); promoting it to a public
+ * constant lets embedders raise/lower the bound, lets tests reference
+ * it explicitly, and lets the documentation site list the active value.
+ *
+ * Default 16 MiB. Page weight at the 95th percentile in HTTP Archive's
+ * 2026 corpus is ~12 MiB across all subresources, but a single HTML
+ * document or stylesheet is typically <1 MiB. 16 MiB covers very large
+ * Wikipedia talk pages and a few pathological CSS bundles while still
+ * fitting comfortably in a renderer's address space.
+ *
+ * Enforced inside read_response(): when the in-flight response Vec<u8>
+ * grows past this value the read returns NetError, the connection is
+ * dropped, and the caller sees a recoverable failure instead of OOM.
+ *
+ * See: SNAZZY-WAFFLE roadmap P8.S8 (DoS bounds per crate).
+ */
+pub const MAX_RESPONSE_BODY_BYTES: usize = 16 * 1024 * 1024;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HttpMethod {
     Get,
@@ -186,8 +209,13 @@ impl NetClient for BasicClient {
             let addr = format!("{host}:{port}");
             let mut tcp = TcpStream::connect(&addr)
                 .map_err(|e| NetError::new(format!("TCP connect to {addr}: {e}")))?;
-            tcp.set_read_timeout(Some(std::time::Duration::from_secs(30)))
-                .ok();
+            // DoS bound (P8.S8): cap stalls during handshake/read. Aligned
+            // with silksurf_tls::MAX_TLS_HANDSHAKE_SECS so handshake
+            // exhaustion attacks become recoverable NetError.
+            tcp.set_read_timeout(Some(std::time::Duration::from_secs(
+                silksurf_tls::MAX_TLS_HANDSHAKE_SECS,
+            )))
+            .ok();
 
             // Send request and read response
             let response_bytes = if is_https {
@@ -343,9 +371,12 @@ fn read_response(stream: &mut dyn Read) -> Result<Vec<u8>, NetError> {
             Ok(0) => break,
             Ok(n) => {
                 buf.extend_from_slice(&chunk[..n]);
-                // Safety limit: 16MB
-                if buf.len() > 16 * 1024 * 1024 {
-                    return Err(NetError::new("Response exceeds 16MB limit"));
+                // DoS bound (P8.S8): cap response body at MAX_RESPONSE_BODY_BYTES.
+                if buf.len() > MAX_RESPONSE_BODY_BYTES {
+                    return Err(NetError::new(format!(
+                        "Response exceeds MAX_RESPONSE_BODY_BYTES ({} bytes)",
+                        MAX_RESPONSE_BODY_BYTES
+                    )));
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
