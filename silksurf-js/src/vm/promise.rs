@@ -37,7 +37,7 @@ pub enum PromiseState {
     Rejected,
 }
 
-/// A single reaction (callback pair) attached via .then()
+/// A single reaction (callback pair) attached via .`then()`
 #[derive(Clone)]
 pub(crate) struct PromiseReaction {
     on_fulfilled: Option<Value>, // callback or None (identity)
@@ -64,6 +64,7 @@ impl std::fmt::Debug for Promise {
 
 impl Promise {
     /// Create a new pending promise.
+    #[must_use]
     pub fn new() -> Rc<RefCell<Self>> {
         Rc::new(RefCell::new(Self {
             state: PromiseState::Pending,
@@ -110,7 +111,7 @@ impl Promise {
         }
     }
 
-    /// Attach a .then() reaction. Returns the chained promise.
+    /// Attach a .`then()` reaction. Returns the chained promise.
     pub fn then(
         this: &Rc<RefCell<Self>>,
         on_fulfilled: Option<Value>,
@@ -187,6 +188,7 @@ pub struct MicrotaskQueue {
 }
 
 impl MicrotaskQueue {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             queue: VecDeque::new(),
@@ -201,10 +203,12 @@ impl MicrotaskQueue {
         self.queue.pop_front()
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.queue.is_empty()
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.queue.len()
     }
@@ -228,11 +232,11 @@ impl MicrotaskQueue {
                     settled_value,
                     was_fulfilled,
                 } => {
-                    execute_promise_reaction(reaction, settled_value, was_fulfilled, self);
+                    execute_promise_reaction(&reaction, settled_value, was_fulfilled, self);
                 }
                 Microtask::Callback(callback) => {
                     if let Value::NativeFunction(func) = &callback {
-                        func.call(&[]);
+                        let _ = func.call(&[]);
                     }
                 }
             }
@@ -243,7 +247,7 @@ impl MicrotaskQueue {
 
 /// Execute a promise reaction and resolve/reject the chained promise.
 fn execute_promise_reaction(
-    reaction: PromiseReaction,
+    reaction: &PromiseReaction,
     settled_value: Value,
     was_fulfilled: bool,
     queue: &mut MicrotaskQueue,
@@ -336,7 +340,7 @@ pub fn promise_to_value(promise: &Rc<RefCell<Promise>>) -> Value {
         let on_fulfilled = cb_fulfilled.map(|cb| {
             Value::NativeFunction(Rc::new(NativeFunction::new("finally_wrap", move |_args| {
                 if let Value::NativeFunction(f) = &cb {
-                    f.call(&[]);
+                    let _ = f.call(&[]);
                 }
                 Value::Undefined
             })))
@@ -344,7 +348,7 @@ pub fn promise_to_value(promise: &Rc<RefCell<Promise>>) -> Value {
         let on_rejected = cb_rejected.map(|cb| {
             Value::NativeFunction(Rc::new(NativeFunction::new("finally_wrap", move |_args| {
                 if let Value::NativeFunction(f) = &cb {
-                    f.call(&[]);
+                    let _ = f.call(&[]);
                 }
                 Value::Undefined
             })))
@@ -357,9 +361,9 @@ pub fn promise_to_value(promise: &Rc<RefCell<Promise>>) -> Value {
 
     {
         let mut o = obj_rc.borrow_mut();
-        o.set_by_key(PropertyKey::from_str("then"), then_fn);
-        o.set_by_key(PropertyKey::from_str("catch"), catch_fn);
-        o.set_by_key(PropertyKey::from_str("finally"), finally_fn);
+        o.set_by_key(PropertyKey::string_key("then"), then_fn);
+        o.set_by_key(PropertyKey::string_key("catch"), catch_fn);
+        o.set_by_key(PropertyKey::string_key("finally"), finally_fn);
     }
 
     Value::Object(obj_rc)
@@ -379,7 +383,11 @@ mod tests {
         let mut queue = MicrotaskQueue::new();
         Promise::resolve(&p, Value::Number(42.0), &mut queue);
         assert_eq!(p.borrow().state, PromiseState::Fulfilled);
-        assert!(matches!(p.borrow().result, Value::Number(n) if n == 42.0));
+        if let Value::Number(n) = p.borrow().result {
+            assert!((n - 42.0).abs() < f64::EPSILON);
+        } else {
+            panic!("expected Number(42.0)");
+        }
     }
 
     #[test]
@@ -400,7 +408,11 @@ mod tests {
         let called_clone = Rc::clone(&called);
         let callback = Value::NativeFunction(Rc::new(NativeFunction::new("test", move |args| {
             *called_clone.borrow_mut() = true;
-            assert!(matches!(args.first(), Some(Value::Number(n)) if *n == 1.0));
+            if let Some(Value::Number(n)) = args.first() {
+                assert!((*n - 1.0).abs() < f64::EPSILON);
+            } else {
+                panic!("expected Number(1.0) as first arg");
+            }
             Value::Number(2.0)
         })));
 
@@ -435,7 +447,9 @@ mod tests {
         let mut queue = MicrotaskQueue::new();
 
         let double = Value::NativeFunction(Rc::new(NativeFunction::new("double", |args| {
-            let n = args.first().map_or(0.0, |v| v.to_number());
+            let n = args
+                .first()
+                .map_or(0.0, super::super::value::Value::to_number);
             Value::Number(n * 2.0)
         })));
 
@@ -445,7 +459,11 @@ mod tests {
         queue.drain();
 
         assert_eq!(p2.borrow().state, PromiseState::Fulfilled);
-        assert!(matches!(p2.borrow().result, Value::Number(n) if n == 10.0));
+        if let Value::Number(n) = p2.borrow().result {
+            assert!((n - 10.0).abs() < f64::EPSILON);
+        } else {
+            panic!("expected Number(10.0)");
+        }
     }
 
     #[test]
@@ -475,6 +493,10 @@ mod tests {
         let mut queue = MicrotaskQueue::new();
         Promise::resolve(&p, Value::Number(1.0), &mut queue);
         Promise::resolve(&p, Value::Number(2.0), &mut queue); // Ignored
-        assert!(matches!(p.borrow().result, Value::Number(n) if n == 1.0));
+        if let Value::Number(n) = p.borrow().result {
+            assert!((n - 1.0).abs() < f64::EPSILON);
+        } else {
+            panic!("expected Number(1.0)");
+        }
     }
 }

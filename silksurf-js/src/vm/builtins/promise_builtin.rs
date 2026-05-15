@@ -78,7 +78,7 @@ fn promise_all(args: &[Value]) -> Value {
 
     // For now, resolve immediately with the array of values
     // (Real impl would wait for all promises to settle)
-    let arr = crate::vm::builtins::array::create_array(items);
+    let arr = crate::vm::builtins::array::create_array(&items);
     Promise::resolve(&result, arr, &mut queue);
     queue.drain();
     promise::promise_to_value(&result)

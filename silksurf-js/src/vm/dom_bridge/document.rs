@@ -1,4 +1,4 @@
-//! `document` HostObject -- exposes DOM document to JavaScript.
+//! `document` `HostObject` -- exposes DOM document to JavaScript.
 
 use std::any::Any;
 use std::rc::Rc;
@@ -9,7 +9,7 @@ use super::{SharedDom, node_to_js_value};
 use crate::vm::host::HostObject;
 use crate::vm::value::{NativeFunction, Value};
 
-/// JS `document` object backed by silksurf_dom::Dom.
+/// JS `document` object backed by `silksurf_dom::Dom`.
 pub struct DocumentHost {
     dom: SharedDom,
     document_node: NodeId,
@@ -55,28 +55,25 @@ impl HostObject for DocumentHost {
         match name {
             "body" => self
                 .find_body()
-                .map(|n| node_to_js_value(dom_ref, n))
-                .unwrap_or(Value::Null),
+                .map_or(Value::Null, |n| node_to_js_value(dom_ref, n)),
             "head" => self
                 .find_head()
-                .map(|n| node_to_js_value(dom_ref, n))
-                .unwrap_or(Value::Null),
+                .map_or(Value::Null, |n| node_to_js_value(dom_ref, n)),
             "documentElement" => self
                 .find_document_element()
-                .map(|n| node_to_js_value(dom_ref, n))
-                .unwrap_or(Value::Null),
+                .map_or(Value::Null, |n| node_to_js_value(dom_ref, n)),
             "createElement" => {
                 let dom = Rc::clone(dom_ref);
                 Value::NativeFunction(Rc::new(NativeFunction::new(
                     "document.createElement",
                     move |args| {
-                        let tag = args
-                            .first()
-                            .map(|v| {
+                        let tag = args.first().map_or_else(
+                            || "div".to_string(),
+                            |v| {
                                 let s = v.to_js_string();
                                 s.as_str().unwrap_or("div").to_string()
-                            })
-                            .unwrap_or_else(|| "div".to_string());
+                            },
+                        );
                         let node_id = dom.borrow_mut().create_element(tag);
                         node_to_js_value(&dom, node_id)
                     },
@@ -113,12 +110,10 @@ impl HostObject for DocumentHost {
                             })
                             .unwrap_or_default();
                         let dom_borrow = dom.borrow();
-                        find_by_id_recursive(&dom_borrow, doc_node, &id)
-                            .map(|n| {
-                                drop(dom_borrow);
-                                node_to_js_value(&dom, n)
-                            })
-                            .unwrap_or(Value::Null)
+                        find_by_id_recursive(&dom_borrow, doc_node, &id).map_or(Value::Null, |n| {
+                            drop(dom_borrow);
+                            node_to_js_value(&dom, n)
+                        })
                     },
                 )))
             }
@@ -143,9 +138,7 @@ impl HostObject for DocumentHost {
                         let dom_borrow = dom.borrow();
                         let result = find_first_matching(&dom_borrow, doc_node, &selector);
                         drop(dom_borrow);
-                        result
-                            .map(|n| node_to_js_value(&dom, n))
-                            .unwrap_or(Value::Null)
+                        result.map_or(Value::Null, |n| node_to_js_value(&dom, n))
                     },
                 )))
             }
@@ -170,13 +163,13 @@ impl HostObject for DocumentHost {
                 Value::NativeFunction(Rc::new(NativeFunction::new(
                     "document.getElementsByTagName",
                     move |args| {
-                        let tag = args
-                            .first()
-                            .map(|v| {
+                        let tag = args.first().map_or_else(
+                            || "*".to_string(),
+                            |v| {
                                 let s = v.to_js_string();
                                 s.as_str().unwrap_or("*").to_lowercase()
-                            })
-                            .unwrap_or_else(|| "*".to_string());
+                            },
+                        );
                         let dom_borrow = dom.borrow();
                         let mut found = Vec::new();
                         collect_by_tag(&dom_borrow, doc_node, &tag, &mut found);
@@ -184,7 +177,7 @@ impl HostObject for DocumentHost {
                         use crate::vm::builtins::array::create_array;
                         let values: Vec<_> =
                             found.iter().map(|&n| node_to_js_value(&dom, n)).collect();
-                        create_array(values)
+                        create_array(&values)
                     },
                 )))
             }
@@ -213,7 +206,7 @@ impl HostObject for DocumentHost {
                         use crate::vm::builtins::array::create_array;
                         let values: Vec<_> =
                             found.iter().map(|&n| node_to_js_value(&dom, n)).collect();
-                        create_array(values)
+                        create_array(&values)
                     },
                 )))
             }
@@ -223,13 +216,13 @@ impl HostObject for DocumentHost {
                 Value::NativeFunction(Rc::new(NativeFunction::new(
                     "document.querySelectorAll",
                     move |args| {
-                        let selector_str = args
-                            .first()
-                            .map(|v| {
+                        let selector_str = args.first().map_or_else(
+                            || "*".to_string(),
+                            |v| {
                                 let s = v.to_js_string();
                                 s.as_str().unwrap_or("*").to_string()
-                            })
-                            .unwrap_or_else(|| "*".to_string());
+                            },
+                        );
                         let selector = parse_selector(&dom, &selector_str);
                         // Fall back to all elements if selector parse fails
                         let dom_borrow = dom.borrow();
@@ -243,7 +236,7 @@ impl HostObject for DocumentHost {
                         use crate::vm::builtins::array::create_array;
                         let values: Vec<_> =
                             found.iter().map(|&n| node_to_js_value(&dom, n)).collect();
-                        create_array(values)
+                        create_array(&values)
                     },
                 )))
             }
@@ -270,7 +263,7 @@ impl HostObject for DocumentHost {
         false // document properties are read-only
     }
 
-    fn class_name(&self) -> &str {
+    fn class_name(&self) -> &'static str {
         "HTMLDocument"
     }
 
@@ -285,12 +278,11 @@ impl HostObject for DocumentHost {
 
 /// Recursively find an element by tag name.
 fn find_tag_recursive(dom: &silksurf_dom::Dom, node: NodeId, target_tag: &str) -> Option<NodeId> {
-    if let Ok(name) = dom.element_name(node) {
-        if let Some(name) = name {
-            if name.eq_ignore_ascii_case(target_tag) {
-                return Some(node);
-            }
-        }
+    if let Ok(name) = dom.element_name(node)
+        && let Some(name) = name
+        && name.eq_ignore_ascii_case(target_tag)
+    {
+        return Some(node);
     }
     if let Ok(children) = dom.children(node) {
         for &child in children {
@@ -304,10 +296,10 @@ fn find_tag_recursive(dom: &silksurf_dom::Dom, node: NodeId, target_tag: &str) -
 
 /// Collect all elements whose tag name matches `target` (or all if `target == "*"`).
 fn collect_by_tag(dom: &silksurf_dom::Dom, node: NodeId, target: &str, out: &mut Vec<NodeId>) {
-    if let Ok(Some(name)) = dom.element_name(node) {
-        if target == "*" || name.eq_ignore_ascii_case(target) {
-            out.push(node);
-        }
+    if let Ok(Some(name)) = dom.element_name(node)
+        && (target == "*" || name.eq_ignore_ascii_case(target))
+    {
+        out.push(node);
     }
     if let Ok(children) = dom.children(node) {
         for &child in children {

@@ -146,9 +146,9 @@ pub fn install(global: &mut Object) {
 pub fn install_window_self(global: &Rc<RefCell<Object>>) {
     let window_ref = Value::Object(Rc::clone(global));
     let mut g = global.borrow_mut();
-    g.set_by_key(PropertyKey::from_str("window"), window_ref.clone());
-    g.set_by_key(PropertyKey::from_str("self"), window_ref.clone());
-    g.set_by_key(PropertyKey::from_str("globalThis"), window_ref);
+    g.set_by_key(PropertyKey::string_key("window"), window_ref.clone());
+    g.set_by_key(PropertyKey::string_key("self"), window_ref.clone());
+    g.set_by_key(PropertyKey::string_key("globalThis"), window_ref);
 }
 
 fn performance_now(_args: &[Value]) -> Value {

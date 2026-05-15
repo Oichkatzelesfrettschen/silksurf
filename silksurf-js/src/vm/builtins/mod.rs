@@ -76,7 +76,7 @@ fn make_object_with_methods(methods: Vec<(&str, Value)>) -> Value {
     {
         let mut o = obj_rc.borrow_mut();
         for (name, value) in methods {
-            o.set_by_key(PropertyKey::from_str(name), value);
+            o.set_by_key(PropertyKey::string_key(name), value);
         }
     }
     Value::Object(obj_rc)

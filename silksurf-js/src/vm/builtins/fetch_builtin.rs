@@ -1,4 +1,4 @@
-//! JS fetch() API -- returns a Promise that resolves to a Response object.
+//! JS `fetch()` API -- returns a Promise that resolves to a Response object.
 //!
 //! Runs the HTTP request on a background thread to avoid blocking the VM.
 //! Completion enqueues a microtask to resolve the Promise.
@@ -12,7 +12,7 @@ use super::native_fn;
 use crate::vm::promise::{self, MicrotaskQueue, Promise};
 use crate::vm::value::{NativeFunction, Object, PropertyKey, Value};
 
-/// Install the global fetch() function.
+/// Install the global `fetch()` function.
 pub fn install(global: &mut Object) {
     // Shared list of pending fetches for the event loop to poll
     // In a full impl, this would be on the Vm struct
@@ -34,7 +34,7 @@ fn fetch_fn(args: &[Value]) -> Value {
         .and_then(|opts| {
             if let Value::Object(o) = opts {
                 let m = o.borrow().get_by_str("method");
-                m.as_js_str().map(|s| s.to_string())
+                m.as_js_str().map(std::string::ToString::to_string)
             } else {
                 None
             }
@@ -101,15 +101,15 @@ fn make_response_object(response: silksurf_net::HttpResponse) -> Value {
     {
         let mut o = obj_rc.borrow_mut();
         o.set_by_key(
-            PropertyKey::from_str("status"),
+            PropertyKey::string_key("status"),
             Value::Number(f64::from(status)),
         );
         o.set_by_key(
-            PropertyKey::from_str("ok"),
+            PropertyKey::string_key("ok"),
             Value::Boolean((200..300).contains(&status)),
         );
         o.set_by_key(
-            PropertyKey::from_str("statusText"),
+            PropertyKey::string_key("statusText"),
             Value::string(match status {
                 200 => "OK",
                 301 => "Moved Permanently",
@@ -133,12 +133,15 @@ fn make_response_object(response: silksurf_net::HttpResponse) -> Value {
                 h.set_by_str(&name.to_ascii_lowercase(), Value::string(value));
             }
         }
-        o.set_by_key(PropertyKey::from_str("headers"), Value::Object(headers_rc));
+        o.set_by_key(
+            PropertyKey::string_key("headers"),
+            Value::Object(headers_rc),
+        );
 
         // .text() -> Promise<string>
         let body_for_text = body_bytes.clone();
         o.set_by_key(
-            PropertyKey::from_str("text"),
+            PropertyKey::string_key("text"),
             Value::NativeFunction(Rc::new(NativeFunction::new("text", move |_args| {
                 let text = String::from_utf8_lossy(&body_for_text).to_string();
                 // Return a resolved promise
@@ -153,7 +156,7 @@ fn make_response_object(response: silksurf_net::HttpResponse) -> Value {
         // .json() -> Promise<object>
         let body_for_json = body_bytes;
         o.set_by_key(
-            PropertyKey::from_str("json"),
+            PropertyKey::string_key("json"),
             Value::NativeFunction(Rc::new(NativeFunction::new("json", move |_args| {
                 let text = String::from_utf8_lossy(&body_for_json);
                 let p = Promise::new();

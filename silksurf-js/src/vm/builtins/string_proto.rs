@@ -1,6 +1,6 @@
 //! String prototype methods.
 //!
-//! Dispatched when accessing properties on string values in op_get_prop.
+//! Dispatched when accessing properties on string values in `op_get_prop`.
 
 use std::rc::Rc;
 
@@ -8,24 +8,29 @@ use crate::vm::builtins::array::create_array;
 use crate::vm::string::JsString;
 use crate::vm::value::{NativeFunction, Value};
 
-/// Look up a string method by name. Returns a NativeFunction Value if found.
+/// Box holding a string method implementation.
+///
+/// WHY: The raw type `Option<Box<dyn Fn(&[Value]) -> Value>>` is complex enough
+/// to trigger `clippy::type_complexity`.  Aliasing it keeps the match body readable.
+type StringMethod = Option<Box<dyn Fn(&[Value]) -> Value>>;
+
+/// Look up a string method by name. Returns a `NativeFunction` Value if found.
+#[must_use]
 pub fn get_string_method(s: &Rc<JsString>, name: &str) -> Option<Value> {
     let text = s.as_str().unwrap_or("").to_string();
-    let method: Option<Box<dyn Fn(&[Value]) -> Value>> = match name {
+    let method: StringMethod = match name {
         "length" => return Some(Value::Number(text.chars().count() as f64)),
         "charAt" => Some(Box::new(move |args: &[Value]| {
             let idx = args.first().map_or(0, |v| v.to_number() as usize);
             text.chars()
                 .nth(idx)
-                .map(|c| Value::string(&c.to_string()))
-                .unwrap_or_else(|| Value::string(""))
+                .map_or_else(|| Value::string(""), |c| Value::string(&c.to_string()))
         })),
         "charCodeAt" => Some(Box::new(move |args: &[Value]| {
             let idx = args.first().map_or(0, |v| v.to_number() as usize);
-            text.chars()
-                .nth(idx)
-                .map(|c| Value::Number(c as u32 as f64))
-                .unwrap_or(Value::Number(f64::NAN))
+            text.chars().nth(idx).map_or(Value::Number(f64::NAN), |c| {
+                Value::Number(f64::from(c as u32))
+            })
         })),
         "indexOf" => Some(Box::new(move |args: &[Value]| {
             let search = args
@@ -41,8 +46,9 @@ pub fn get_string_method(s: &Rc<JsString>, name: &str) -> Option<Value> {
             }
             text[from..]
                 .find(&search)
-                .map(|pos| Value::Number((pos + from) as f64))
-                .unwrap_or(Value::Number(-1.0))
+                .map_or(Value::Number(-1.0), |pos| {
+                    Value::Number((pos + from) as f64)
+                })
         })),
         "lastIndexOf" => Some(Box::new(move |args: &[Value]| {
             let search = args
@@ -53,8 +59,7 @@ pub fn get_string_method(s: &Rc<JsString>, name: &str) -> Option<Value> {
                 })
                 .unwrap_or_default();
             text.rfind(&search)
-                .map(|pos| Value::Number(pos as f64))
-                .unwrap_or(Value::Number(-1.0))
+                .map_or(Value::Number(-1.0), |pos| Value::Number(pos as f64))
         })),
         "includes" => Some(Box::new(move |args: &[Value]| {
             let search = args
@@ -162,13 +167,11 @@ pub fn get_string_method(s: &Rc<JsString>, name: &str) -> Option<Value> {
                     chars
                 }
             } else if let Some(limit) = limit {
-                text.splitn(limit, &*sep)
-                    .map(|part| Value::string(part))
-                    .collect()
+                text.splitn(limit, &*sep).map(Value::string).collect()
             } else {
-                text.split(&*sep).map(|part| Value::string(part)).collect()
+                text.split(&*sep).map(Value::string).collect()
             };
-            create_array(parts)
+            create_array(&parts)
         })),
         "replace" => Some(Box::new(move |args: &[Value]| {
             let search = args
@@ -221,13 +224,13 @@ pub fn get_string_method(s: &Rc<JsString>, name: &str) -> Option<Value> {
         })),
         "padStart" => Some(Box::new(move |args: &[Value]| {
             let target_len = args.first().map_or(0, |v| v.to_number().max(0.0) as usize);
-            let pad = args
-                .get(1)
-                .map(|v| {
+            let pad = args.get(1).map_or_else(
+                || " ".to_string(),
+                |v| {
                     let s = v.to_js_string();
                     s.as_str().unwrap_or(" ").to_string()
-                })
-                .unwrap_or_else(|| " ".to_string());
+                },
+            );
             if text.len() >= target_len || pad.is_empty() {
                 return Value::string(&text);
             }
@@ -237,13 +240,13 @@ pub fn get_string_method(s: &Rc<JsString>, name: &str) -> Option<Value> {
         })),
         "padEnd" => Some(Box::new(move |args: &[Value]| {
             let target_len = args.first().map_or(0, |v| v.to_number().max(0.0) as usize);
-            let pad = args
-                .get(1)
-                .map(|v| {
+            let pad = args.get(1).map_or_else(
+                || " ".to_string(),
+                |v| {
                     let s = v.to_js_string();
                     s.as_str().unwrap_or(" ").to_string()
-                })
-                .unwrap_or_else(|| " ".to_string());
+                },
+            );
             if text.len() >= target_len || pad.is_empty() {
                 return Value::string(&text);
             }
@@ -265,8 +268,7 @@ pub fn get_string_method(s: &Rc<JsString>, name: &str) -> Option<Value> {
             let idx = args.first().map_or(0, |v| v.to_number() as usize);
             text.chars()
                 .nth(idx)
-                .map(|c| Value::Number(c as u32 as f64))
-                .unwrap_or(Value::Undefined)
+                .map_or(Value::Undefined, |c| Value::Number(f64::from(c as u32)))
         })),
         "concat" => Some(Box::new(move |args: &[Value]| {
             let mut result = text.clone();

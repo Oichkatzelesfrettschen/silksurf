@@ -273,7 +273,7 @@ mod tests {
 
         // Primitives have no references
         42i32.trace(&mut tracer);
-        3.14f64.trace(&mut tracer);
+        std::f64::consts::PI.trace(&mut tracer);
         true.trace(&mut tracer);
 
         assert_eq!(tracer.count, 0);

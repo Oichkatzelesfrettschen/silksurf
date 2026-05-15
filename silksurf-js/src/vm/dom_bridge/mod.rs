@@ -1,7 +1,7 @@
-//! JS-DOM bridge: exposes silksurf_dom to JavaScript via HostObject.
+//! JS-DOM bridge: exposes `silksurf_dom` to JavaScript via `HostObject`.
 //!
 //! Architecture:
-//! - `DocumentHost` wraps `Rc<RefCell<Dom>>` as a HostObject
+//! - `DocumentHost` wraps `Rc<RefCell<Dom>>` as a `HostObject`
 //! - `ElementHost` wraps a `NodeId` + `Rc<RefCell<Dom>>` reference
 //! - Both dispatch property access to the underlying DOM
 //! - The shared `Rc<RefCell<Dom>>` ensures JS mutations are visible to layout/render
@@ -22,7 +22,7 @@ use super::value::Value;
 /// Shared DOM reference used by all bridge objects.
 pub type SharedDom = Rc<RefCell<Dom>>;
 
-/// Create a JS Value wrapping a DOM node as an ElementHost.
+/// Create a JS Value wrapping a DOM node as an `ElementHost`.
 pub fn node_to_js_value(dom: &SharedDom, node_id: NodeId) -> Value {
     Value::HostObject(make_host_object(ElementHost::new(Rc::clone(dom), node_id)))
 }

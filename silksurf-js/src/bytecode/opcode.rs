@@ -509,8 +509,7 @@ mod tests {
             assert_eq!(
                 Opcode::from_byte(byte),
                 Opcode::from_byte_fast(byte),
-                "Mismatch at byte {:#x}",
-                byte
+                "Mismatch at byte {byte:#x}"
             );
         }
     }

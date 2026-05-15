@@ -35,9 +35,10 @@ pub fn install(global: &mut Object) {
      */
     global.set_by_str(
         "Object",
-        native_fn("Object", |args| match args.first() {
-            Some(Value::Object(o)) => Value::Object(std::rc::Rc::clone(o)),
-            _ => {
+        native_fn("Object", |args| {
+            if let Some(Value::Object(o)) = args.first() {
+                Value::Object(std::rc::Rc::clone(o))
+            } else {
                 let obj = Object::new();
                 Value::Object(std::rc::Rc::new(std::cell::RefCell::new(obj)))
             }
@@ -58,14 +59,14 @@ pub fn install(global: &mut Object) {
         "Array",
         native_fn("Array", |args| {
             use crate::vm::builtins::array::create_array;
-            if args.len() == 1 {
-                if let Value::Number(n) = args[0] {
-                    let n = n.max(0.0) as usize;
-                    let elements = vec![Value::Undefined; n.min(1_000_000)];
-                    return create_array(elements);
-                }
+            if args.len() == 1
+                && let Value::Number(n) = args[0]
+            {
+                let n = n.max(0.0) as usize;
+                let elements = vec![Value::Undefined; n.min(1_000_000)];
+                return create_array(&elements);
             }
-            create_array(args.to_vec())
+            create_array(args)
         }),
     );
     // undefined is already the default register value
@@ -162,10 +163,13 @@ pub fn install(global: &mut Object) {
 }
 
 fn parse_int(args: &[Value]) -> Value {
-    let s = args.first().map(|v| v.to_js_string()).unwrap_or_default();
+    let s = args
+        .first()
+        .map(super::super::value::Value::to_js_string)
+        .unwrap_or_default();
     let text = s.as_str().unwrap_or("").trim();
 
-    let radix = args.get(1).map(|v| v.to_number() as u32).unwrap_or(0);
+    let radix = args.get(1).map_or(0, |v| v.to_number() as u32);
 
     // Determine effective radix
     let (text, radix) = if radix == 0 || radix == 16 {
@@ -203,7 +207,9 @@ fn parse_int(args: &[Value]) -> Value {
             break;
         }
         found_digit = true;
-        result = result.wrapping_mul(radix as i64).wrapping_add(digit as i64);
+        result = result
+            .wrapping_mul(i64::from(radix))
+            .wrapping_add(i64::from(digit));
     }
 
     if !found_digit {
@@ -216,64 +222,73 @@ fn parse_int(args: &[Value]) -> Value {
 }
 
 fn parse_float(args: &[Value]) -> Value {
-    let s = args.first().map(|v| v.to_js_string()).unwrap_or_default();
+    let s = args
+        .first()
+        .map(super::super::value::Value::to_js_string)
+        .unwrap_or_default();
     let text = s.as_str().unwrap_or("").trim();
 
-    match text.parse::<f64>() {
-        Ok(n) => Value::Number(n),
-        Err(_) => {
-            // Try parsing prefix (e.g., "3.14abc" -> 3.14)
-            let mut end = 0;
-            let bytes = text.as_bytes();
-            // Skip sign
-            if end < bytes.len() && matches!(bytes[end], b'+' | b'-') {
-                end += 1;
-            }
-            // Integer part
+    if let Ok(n) = text.parse::<f64>() {
+        Value::Number(n)
+    } else {
+        // Try parsing prefix (e.g., "3.14abc" -> 3.14)
+        let mut end = 0;
+        let bytes = text.as_bytes();
+        // Skip sign
+        if end < bytes.len() && matches!(bytes[end], b'+' | b'-') {
+            end += 1;
+        }
+        // Integer part
+        while end < bytes.len() && bytes[end].is_ascii_digit() {
+            end += 1;
+        }
+        // Decimal part
+        if end < bytes.len() && bytes[end] == b'.' {
+            end += 1;
             while end < bytes.len() && bytes[end].is_ascii_digit() {
                 end += 1;
             }
-            // Decimal part
-            if end < bytes.len() && bytes[end] == b'.' {
+        }
+        // Exponent
+        if end < bytes.len() && matches!(bytes[end], b'e' | b'E') {
+            end += 1;
+            if end < bytes.len() && matches!(bytes[end], b'+' | b'-') {
                 end += 1;
-                while end < bytes.len() && bytes[end].is_ascii_digit() {
-                    end += 1;
-                }
             }
-            // Exponent
-            if end < bytes.len() && matches!(bytes[end], b'e' | b'E') {
+            while end < bytes.len() && bytes[end].is_ascii_digit() {
                 end += 1;
-                if end < bytes.len() && matches!(bytes[end], b'+' | b'-') {
-                    end += 1;
-                }
-                while end < bytes.len() && bytes[end].is_ascii_digit() {
-                    end += 1;
-                }
             }
-            if end == 0 || (end == 1 && matches!(bytes[0], b'+' | b'-')) {
-                Value::Number(f64::NAN)
-            } else {
-                text[..end]
-                    .parse::<f64>()
-                    .map(Value::Number)
-                    .unwrap_or(Value::Number(f64::NAN))
-            }
+        }
+        if end == 0 || (end == 1 && matches!(bytes[0], b'+' | b'-')) {
+            Value::Number(f64::NAN)
+        } else {
+            text[..end]
+                .parse::<f64>()
+                .map(Value::Number)
+                .unwrap_or(Value::Number(f64::NAN))
         }
     }
 }
 
 fn is_nan(args: &[Value]) -> Value {
-    let n = args.first().map_or(f64::NAN, |v| v.to_number());
+    let n = args
+        .first()
+        .map_or(f64::NAN, super::super::value::Value::to_number);
     Value::Boolean(n.is_nan())
 }
 
 fn is_finite(args: &[Value]) -> Value {
-    let n = args.first().map_or(f64::NAN, |v| v.to_number());
+    let n = args
+        .first()
+        .map_or(f64::NAN, super::super::value::Value::to_number);
     Value::Boolean(n.is_finite())
 }
 
 fn encode_uri_component(args: &[Value]) -> Value {
-    let s = args.first().map(|v| v.to_js_string()).unwrap_or_default();
+    let s = args
+        .first()
+        .map(super::super::value::Value::to_js_string)
+        .unwrap_or_default();
     let text = s.as_str().unwrap_or("");
     let mut result = String::with_capacity(text.len());
     for byte in text.bytes() {
@@ -294,18 +309,22 @@ fn encode_uri_component(args: &[Value]) -> Value {
 }
 
 fn decode_uri_component(args: &[Value]) -> Value {
-    let s = args.first().map(|v| v.to_js_string()).unwrap_or_default();
+    let s = args
+        .first()
+        .map(super::super::value::Value::to_js_string)
+        .unwrap_or_default();
     let text = s.as_str().unwrap_or("");
     let mut result = Vec::with_capacity(text.len());
     let bytes = text.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let (Some(hi), Some(lo)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
-                result.push((hi << 4) | lo);
-                i += 3;
-                continue;
-            }
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let (Some(hi), Some(lo)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2]))
+        {
+            result.push((hi << 4) | lo);
+            i += 3;
+            continue;
         }
         result.push(bytes[i]);
         i += 1;
@@ -315,7 +334,10 @@ fn decode_uri_component(args: &[Value]) -> Value {
 
 // encodeURI preserves more characters than encodeURIComponent
 fn encode_uri(args: &[Value]) -> Value {
-    let s = args.first().map(|v| v.to_js_string()).unwrap_or_default();
+    let s = args
+        .first()
+        .map(super::super::value::Value::to_js_string)
+        .unwrap_or_default();
     let text = s.as_str().unwrap_or("");
     let mut result = String::with_capacity(text.len());
     for byte in text.bytes() {
@@ -358,17 +380,24 @@ fn decode_uri(args: &[Value]) -> Value {
 }
 
 fn string_fn(args: &[Value]) -> Value {
-    let s = args.first().map(|v| v.to_js_string()).unwrap_or_default();
+    let s = args
+        .first()
+        .map(super::super::value::Value::to_js_string)
+        .unwrap_or_default();
     Value::String(s)
 }
 
 fn number_fn(args: &[Value]) -> Value {
-    let n = args.first().map_or(0.0, |v| v.to_number());
+    let n = args
+        .first()
+        .map_or(0.0, super::super::value::Value::to_number);
     Value::Number(n)
 }
 
 fn boolean_fn(args: &[Value]) -> Value {
-    let b = args.first().is_some_and(|v| v.is_truthy());
+    let b = args
+        .first()
+        .is_some_and(super::super::value::Value::is_truthy);
     Value::Boolean(b)
 }
 

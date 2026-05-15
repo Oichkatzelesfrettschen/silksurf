@@ -1,6 +1,6 @@
 //! localStorage and sessionStorage stubs.
 //!
-//! Backed by in-memory HashMap. Data does not persist across sessions.
+//! Backed by in-memory `HashMap`. Data does not persist across sessions.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -94,11 +94,11 @@ fn make_storage() -> Value {
 
     {
         let mut o = obj_rc.borrow_mut();
-        o.set_by_key(PropertyKey::from_str("getItem"), get_item);
-        o.set_by_key(PropertyKey::from_str("setItem"), set_item);
-        o.set_by_key(PropertyKey::from_str("removeItem"), remove_item);
-        o.set_by_key(PropertyKey::from_str("clear"), clear);
-        o.set_by_key(PropertyKey::from_str("length"), length);
+        o.set_by_key(PropertyKey::string_key("getItem"), get_item);
+        o.set_by_key(PropertyKey::string_key("setItem"), set_item);
+        o.set_by_key(PropertyKey::string_key("removeItem"), remove_item);
+        o.set_by_key(PropertyKey::string_key("clear"), clear);
+        o.set_by_key(PropertyKey::string_key("length"), length);
     }
 
     Value::Object(obj_rc)

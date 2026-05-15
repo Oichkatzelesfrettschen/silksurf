@@ -2283,7 +2283,7 @@ mod tests {
             program.body.len()
         );
         for e in &errors {
-            eprintln!("  Error: {:?}", e);
+            eprintln!("  Error: {e:?}");
         }
         assert!(
             elapsed.as_secs() < 5,
@@ -2349,7 +2349,7 @@ mod tests {
             program.body.len()
         );
         for e in errors.iter().take(3) {
-            eprintln!("  err: {:?}", e);
+            eprintln!("  err: {e:?}");
         }
         assert!(elapsed.as_secs() < 5, "Nested object should not hang");
     }

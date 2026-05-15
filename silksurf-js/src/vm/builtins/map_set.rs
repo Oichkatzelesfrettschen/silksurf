@@ -191,11 +191,13 @@ pub fn install(global: &mut Object) {
 fn map_key_eq(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Object(ra), Value::Object(rb)) => Rc::ptr_eq(ra, rb),
-        (Value::Number(x), Value::Number(y)) => x == y, // NaN != NaN
+        // JS SameValueZero: exact IEEE 754 comparison (NaN != NaN, +0 == -0).
+        // Epsilon comparison would violate ECMA-262 SameValueZero semantics.
+        #[allow(clippy::float_cmp)]
+        (Value::Number(x), Value::Number(y)) => x == y,
         (Value::String(x), Value::String(y)) => x == y,
         (Value::Boolean(x), Value::Boolean(y)) => x == y,
-        (Value::Null, Value::Null) => true,
-        (Value::Undefined, Value::Undefined) => true,
+        (Value::Null, Value::Null) | (Value::Undefined, Value::Undefined) => true,
         _ => false,
     }
 }
@@ -211,14 +213,14 @@ fn map_key_eq(a: &Value, b: &Value) -> bool {
  * If an iterable is provided (array of [key, value] pairs), pre-populate.
  */
 fn make_map(initial: Option<&Value>) -> Value {
-    let data: Rc<RefCell<Vec<(Value, Value)>>> = Rc::new(RefCell::new(Vec::new()));
+    let map_entries: Rc<RefCell<Vec<(Value, Value)>>> = Rc::new(RefCell::new(Vec::new()));
 
     // Pre-populate from initial entries array
     if let Some(Value::Object(entries_obj)) = initial {
         let entries_borrow = entries_obj.borrow();
         let entries = crate::vm::builtins::array::collect_elements_pub(&entries_borrow);
         drop(entries_borrow);
-        let mut store = data.borrow_mut();
+        let mut store = map_entries.borrow_mut();
         for entry in entries {
             if let Value::Object(pair) = entry {
                 let k = pair.borrow().get_by_key(&PropertyKey::Index(0));
@@ -232,7 +234,7 @@ fn make_map(initial: Option<&Value>) -> Value {
 
     // Map.prototype.get
     {
-        let d = Rc::clone(&data);
+        let d = Rc::clone(&map_entries);
         obj.borrow_mut().set_by_str(
             "get",
             Value::NativeFunction(Rc::new(NativeFunction::new("Map.get", move |args| {
@@ -250,7 +252,7 @@ fn make_map(initial: Option<&Value>) -> Value {
 
     // Map.prototype.set
     {
-        let d = Rc::clone(&data);
+        let d = Rc::clone(&map_entries);
         let obj_clone = Rc::clone(&obj);
         obj.borrow_mut().set_by_str(
             "set",
@@ -272,7 +274,7 @@ fn make_map(initial: Option<&Value>) -> Value {
 
     // Map.prototype.has
     {
-        let d = Rc::clone(&data);
+        let d = Rc::clone(&map_entries);
         obj.borrow_mut().set_by_str(
             "has",
             Value::NativeFunction(Rc::new(NativeFunction::new("Map.has", move |args| {
@@ -285,7 +287,7 @@ fn make_map(initial: Option<&Value>) -> Value {
 
     // Map.prototype.delete
     {
-        let d = Rc::clone(&data);
+        let d = Rc::clone(&map_entries);
         obj.borrow_mut().set_by_str(
             "delete",
             Value::NativeFunction(Rc::new(NativeFunction::new("Map.delete", move |args| {
@@ -300,7 +302,7 @@ fn make_map(initial: Option<&Value>) -> Value {
 
     // Map.prototype.clear
     {
-        let d = Rc::clone(&data);
+        let d = Rc::clone(&map_entries);
         obj.borrow_mut().set_by_str(
             "clear",
             Value::NativeFunction(Rc::new(NativeFunction::new("Map.clear", move |_| {
@@ -312,7 +314,7 @@ fn make_map(initial: Option<&Value>) -> Value {
 
     // Map.prototype.forEach
     {
-        let d = Rc::clone(&data);
+        let d = Rc::clone(&map_entries);
         obj.borrow_mut().set_by_str(
             "forEach",
             Value::NativeFunction(Rc::new(NativeFunction::new("Map.forEach", move |args| {
@@ -320,7 +322,7 @@ fn make_map(initial: Option<&Value>) -> Value {
                 if let Value::NativeFunction(f) = &cb {
                     let pairs: Vec<(Value, Value)> = d.borrow().clone();
                     for (k, v) in pairs {
-                        f.call(&[v, k]);
+                        let _ = f.call(&[v, k]);
                     }
                 }
                 Value::Undefined
@@ -330,38 +332,38 @@ fn make_map(initial: Option<&Value>) -> Value {
 
     // Map.prototype.keys / values / entries
     {
-        let d = Rc::clone(&data);
+        let d = Rc::clone(&map_entries);
         obj.borrow_mut().set_by_str(
             "keys",
             Value::NativeFunction(Rc::new(NativeFunction::new("Map.keys", move |_| {
                 let store = d.borrow();
                 let keys: Vec<Value> = store.iter().map(|(k, _)| k.clone()).collect();
-                create_array(keys)
+                create_array(&keys)
             }))),
         );
     }
     {
-        let d = Rc::clone(&data);
+        let d = Rc::clone(&map_entries);
         obj.borrow_mut().set_by_str(
             "values",
             Value::NativeFunction(Rc::new(NativeFunction::new("Map.values", move |_| {
                 let store = d.borrow();
                 let vals: Vec<Value> = store.iter().map(|(_, v)| v.clone()).collect();
-                create_array(vals)
+                create_array(&vals)
             }))),
         );
     }
     {
-        let d = Rc::clone(&data);
+        let d = Rc::clone(&map_entries);
         obj.borrow_mut().set_by_str(
             "entries",
             Value::NativeFunction(Rc::new(NativeFunction::new("Map.entries", move |_| {
                 let store = d.borrow();
                 let entries: Vec<Value> = store
                     .iter()
-                    .map(|(k, v)| create_array(vec![k.clone(), v.clone()]))
+                    .map(|(k, v)| create_array(&[k.clone(), v.clone()]))
                     .collect();
-                create_array(entries)
+                create_array(&entries)
             }))),
         );
     }
@@ -380,7 +382,7 @@ fn make_map(initial: Option<&Value>) -> Value {
     // most can tolerate a NativeFunction that returns a number).
     // We'll set size as a lazy-computed native function that reads the data vec.
     {
-        let d = Rc::clone(&data);
+        let d = Rc::clone(&map_entries);
         obj.borrow_mut().set_by_str(
             "size",
             Value::NativeFunction(Rc::new(NativeFunction::new("Map.size", move |_| {
@@ -399,13 +401,13 @@ fn make_map(initial: Option<&Value>) -> Value {
  * Pre-populate from an iterable (array or string) if provided.
  */
 fn make_set(initial: Option<&Value>) -> Value {
-    let data: Rc<RefCell<Vec<Value>>> = Rc::new(RefCell::new(Vec::new()));
+    let set_items: Rc<RefCell<Vec<Value>>> = Rc::new(RefCell::new(Vec::new()));
 
     // Pre-populate from initial iterable
     match initial {
         Some(Value::Object(arr)) => {
             let elements = crate::vm::builtins::array::collect_elements_pub(&arr.borrow());
-            let mut store = data.borrow_mut();
+            let mut store = set_items.borrow_mut();
             for el in elements {
                 if !store.iter().any(|x| map_key_eq(x, &el)) {
                     store.push(el);
@@ -419,7 +421,7 @@ fn make_set(initial: Option<&Value>) -> Value {
                 .chars()
                 .map(|c| Value::string_owned(c.to_string()))
                 .collect();
-            let mut store = data.borrow_mut();
+            let mut store = set_items.borrow_mut();
             for c in chars {
                 if !store.iter().any(|x| map_key_eq(x, &c)) {
                     store.push(c);
@@ -433,7 +435,7 @@ fn make_set(initial: Option<&Value>) -> Value {
 
     // Set.prototype.add
     {
-        let d = Rc::clone(&data);
+        let d = Rc::clone(&set_items);
         let obj_clone = Rc::clone(&obj);
         obj.borrow_mut().set_by_str(
             "add",
@@ -450,7 +452,7 @@ fn make_set(initial: Option<&Value>) -> Value {
 
     // Set.prototype.has
     {
-        let d = Rc::clone(&data);
+        let d = Rc::clone(&set_items);
         obj.borrow_mut().set_by_str(
             "has",
             Value::NativeFunction(Rc::new(NativeFunction::new("Set.has", move |args| {
@@ -462,7 +464,7 @@ fn make_set(initial: Option<&Value>) -> Value {
 
     // Set.prototype.delete
     {
-        let d = Rc::clone(&data);
+        let d = Rc::clone(&set_items);
         obj.borrow_mut().set_by_str(
             "delete",
             Value::NativeFunction(Rc::new(NativeFunction::new("Set.delete", move |args| {
@@ -477,7 +479,7 @@ fn make_set(initial: Option<&Value>) -> Value {
 
     // Set.prototype.clear
     {
-        let d = Rc::clone(&data);
+        let d = Rc::clone(&set_items);
         obj.borrow_mut().set_by_str(
             "clear",
             Value::NativeFunction(Rc::new(NativeFunction::new("Set.clear", move |_| {
@@ -489,7 +491,7 @@ fn make_set(initial: Option<&Value>) -> Value {
 
     // Set.prototype.forEach
     {
-        let d = Rc::clone(&data);
+        let d = Rc::clone(&set_items);
         obj.borrow_mut().set_by_str(
             "forEach",
             Value::NativeFunction(Rc::new(NativeFunction::new("Set.forEach", move |args| {
@@ -497,7 +499,7 @@ fn make_set(initial: Option<&Value>) -> Value {
                 if let Value::NativeFunction(f) = &cb {
                     let elements: Vec<Value> = d.borrow().clone();
                     for el in elements {
-                        f.call(&[el.clone(), el]);
+                        let _ = f.call(&[el.clone(), el]);
                     }
                 }
                 Value::Undefined
@@ -507,39 +509,39 @@ fn make_set(initial: Option<&Value>) -> Value {
 
     // Set.prototype.keys / values / entries
     {
-        let d = Rc::clone(&data);
+        let d = Rc::clone(&set_items);
         obj.borrow_mut().set_by_str(
             "values",
             Value::NativeFunction(Rc::new(NativeFunction::new("Set.values", move |_| {
-                create_array(d.borrow().clone())
+                create_array(&d.borrow().clone())
             }))),
         );
     }
     {
-        let d = Rc::clone(&data);
+        let d = Rc::clone(&set_items);
         obj.borrow_mut().set_by_str(
             "keys",
             Value::NativeFunction(Rc::new(NativeFunction::new("Set.keys", move |_| {
-                create_array(d.borrow().clone())
+                create_array(&d.borrow().clone())
             }))),
         );
     }
     {
-        let d = Rc::clone(&data);
+        let d = Rc::clone(&set_items);
         obj.borrow_mut().set_by_str(
             "entries",
             Value::NativeFunction(Rc::new(NativeFunction::new("Set.entries", move |_| {
                 let elements: Vec<Value> = d
                     .borrow()
                     .iter()
-                    .map(|v| create_array(vec![v.clone(), v.clone()]))
+                    .map(|v| create_array(&[v.clone(), v.clone()]))
                     .collect();
-                create_array(elements)
+                create_array(&elements)
             }))),
         );
     }
     {
-        let d = Rc::clone(&data);
+        let d = Rc::clone(&set_items);
         obj.borrow_mut().set_by_str(
             "size",
             Value::NativeFunction(Rc::new(NativeFunction::new("Set.size", move |_| {

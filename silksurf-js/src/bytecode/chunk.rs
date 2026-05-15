@@ -112,10 +112,10 @@ impl Chunk {
     pub fn add_number(&mut self, value: f64) -> u16 {
         // Check for existing identical constant to deduplicate
         for (i, c) in self.constants.iter().enumerate() {
-            if let Constant::Number(n) = c {
-                if n.to_bits() == value.to_bits() {
-                    return i as u16;
-                }
+            if let Constant::Number(n) = c
+                && n.to_bits() == value.to_bits()
+            {
+                return i as u16;
             }
         }
         self.add_constant(Constant::Number(value))
@@ -125,10 +125,10 @@ impl Chunk {
     pub fn add_string(&mut self, string_idx: u32) -> u16 {
         // Deduplicate
         for (i, c) in self.constants.iter().enumerate() {
-            if let Constant::String(idx) = c {
-                if *idx == string_idx {
-                    return i as u16;
-                }
+            if let Constant::String(idx) = c
+                && *idx == string_idx
+            {
+                return i as u16;
             }
         }
         self.add_constant(Constant::String(string_idx))
@@ -534,9 +534,9 @@ mod tests {
     fn test_chunk_constants() {
         let mut chunk = Chunk::new();
 
-        let idx1 = chunk.add_number(3.14);
+        let idx1 = chunk.add_number(std::f64::consts::PI);
         let idx2 = chunk.add_number(42.0);
-        let idx3 = chunk.add_number(3.14); // Deduplicated
+        let idx3 = chunk.add_number(std::f64::consts::PI); // Deduplicated
 
         assert_eq!(idx1, 0);
         assert_eq!(idx2, 1);
@@ -579,7 +579,7 @@ mod tests {
         chunk.strict = true;
 
         // Add various constant types
-        chunk.add_number(3.14);
+        chunk.add_number(std::f64::consts::PI);
         chunk.add_number(42.0);
         chunk.add_string(123); // Interned string index
         chunk.add_constant(Constant::BigInt(vec![0x01, 0x02, 0x03]));
@@ -625,10 +625,10 @@ mod tests {
         for (orig, rest) in chunk.constants.iter().zip(restored.constants.iter()) {
             match (orig, rest) {
                 (Constant::Number(a), Constant::Number(b)) => {
-                    assert_eq!(a.to_bits(), b.to_bits())
+                    assert_eq!(a.to_bits(), b.to_bits());
                 }
-                (Constant::String(a), Constant::String(b)) => assert_eq!(a, b),
-                (Constant::Function(a), Constant::Function(b)) => assert_eq!(a, b),
+                (Constant::String(a), Constant::String(b))
+                | (Constant::Function(a), Constant::Function(b)) => assert_eq!(a, b),
                 (Constant::BigInt(a), Constant::BigInt(b)) => assert_eq!(a, b),
                 (
                     Constant::RegExp {

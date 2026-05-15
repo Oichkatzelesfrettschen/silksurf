@@ -53,6 +53,7 @@ pub struct TimerQueue {
 }
 
 impl TimerQueue {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             heap: BinaryHeap::new(),
@@ -94,7 +95,7 @@ impl TimerQueue {
     pub fn clear_timer(&mut self, id: u32) {
         // Mark as cancelled; will be skipped when popped
         // We can't efficiently remove from BinaryHeap, so lazy deletion
-        for entry in self.heap.iter() {
+        for entry in &self.heap {
             if entry.id == id {
                 // BinaryHeap doesn't allow mutable access to elements directly,
                 // so we rebuild with the entry marked cancelled
@@ -165,6 +166,7 @@ impl TimerQueue {
     }
 
     /// Time until the next timer fires (for sleep/poll).
+    #[must_use]
     pub fn next_deadline(&self) -> Option<Duration> {
         self.heap.peek().map(|entry| {
             let now = Instant::now();
@@ -177,6 +179,7 @@ impl TimerQueue {
     }
 
     /// Check if there are any pending timers or rAF callbacks.
+    #[must_use]
     pub fn has_pending(&self) -> bool {
         !self.heap.is_empty() || !self.raf_callbacks.is_empty()
     }
@@ -247,6 +250,10 @@ mod tests {
         let callbacks = q.drain_expired();
         // Only the 0ms timer should have fired
         assert_eq!(callbacks.len(), 1);
-        assert!(matches!(callbacks[0], Value::Number(n) if n == 1.0));
+        if let Value::Number(n) = callbacks[0] {
+            assert!((n - 1.0).abs() < f64::EPSILON);
+        } else {
+            panic!("expected Number(1.0)");
+        }
     }
 }

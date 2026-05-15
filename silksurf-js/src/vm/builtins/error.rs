@@ -1,4 +1,4 @@
-//! Error, TypeError, SyntaxError, RangeError, ReferenceError constructors.
+//! Error, `TypeError`, `SyntaxError`, `RangeError`, `ReferenceError` constructors.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -31,10 +31,10 @@ fn make_error_constructor(name: &str) -> Value {
         let obj_rc = Rc::new(RefCell::new(obj));
         {
             let mut o = obj_rc.borrow_mut();
-            o.set_by_key(PropertyKey::from_str("name"), Value::string(&error_name));
-            o.set_by_key(PropertyKey::from_str("message"), Value::string(&message));
+            o.set_by_key(PropertyKey::string_key("name"), Value::string(&error_name));
+            o.set_by_key(PropertyKey::string_key("message"), Value::string(&message));
             o.set_by_key(
-                PropertyKey::from_str("stack"),
+                PropertyKey::string_key("stack"),
                 Value::string(&format!("{error_name}: {message}")),
             );
         }

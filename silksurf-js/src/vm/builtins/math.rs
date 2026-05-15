@@ -45,7 +45,8 @@ pub fn install(global: &mut Object) {
 }
 
 fn num_arg(args: &[Value], idx: usize) -> f64 {
-    args.get(idx).map_or(f64::NAN, |v| v.to_number())
+    args.get(idx)
+        .map_or(f64::NAN, super::super::value::Value::to_number)
 }
 
 fn math_abs(args: &[Value]) -> Value {
@@ -116,7 +117,7 @@ fn math_random(_args: &[Value]) -> Value {
     // Simple xorshift64 seeded from system -- not cryptographic
     use std::cell::Cell;
     thread_local! {
-        static STATE: Cell<u64> = Cell::new(0x1234_5678_9ABC_DEF0);
+        static STATE: Cell<u64> = const { Cell::new(0x1234_5678_9ABC_DEF0) };
     }
     STATE.with(|s| {
         let mut x = s.get();
@@ -163,6 +164,6 @@ fn math_sign(args: &[Value]) -> Value {
 }
 
 fn math_clz32(args: &[Value]) -> Value {
-    let n = args.first().map_or(0, |v| v.to_u32());
+    let n = args.first().map_or(0, super::super::value::Value::to_u32);
     Value::Number(f64::from(n.leading_zeros()))
 }
