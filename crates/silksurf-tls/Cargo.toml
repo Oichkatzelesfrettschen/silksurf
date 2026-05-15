@@ -14,14 +14,3 @@ webpki-roots = "1.0"
 
 [features]
 platform-verifier = ["dep:rustls-platform-verifier"]
-
-# silksurf-tls/src/bin/tls_probe.rs is the older 100-line diagnostic kept
-# for in-crate smoke testing; silksurf-app/src/bin/tls_probe.rs (982 lines)
-# is the canonical user-facing tls-probe binary with DANE diagnostic.
-# The two share a name; documenting both with `cargo doc` collides because
-# they emit to the same path. Suppress doc generation here until the
-# consolidation task lands (tracked in the SNAZZY-WAFFLE roadmap).
-[[bin]]
-name = "tls_probe"
-path = "src/bin/tls_probe.rs"
-doc = false
