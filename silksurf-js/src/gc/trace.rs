@@ -282,6 +282,8 @@ mod tests {
     #[test]
     fn test_option_trace() {
         let mut heap = Heap::new();
+        // UNWRAP-OK: fresh Heap, alloc of a 32-byte object cannot fail under
+        // normal test conditions.
         let obj = heap.alloc(TypeTag::Object, 32).unwrap();
 
         let mut tracer = CountingTracer::new();
@@ -298,6 +300,8 @@ mod tests {
     #[test]
     fn test_vec_trace() {
         let mut heap = Heap::new();
+        // UNWRAP-OK (x3): fresh Heap with default 1MB threshold; three
+        // 32-byte allocations cannot fail under normal test conditions.
         let obj1 = heap.alloc(TypeTag::Object, 32).unwrap();
         let obj2 = heap.alloc(TypeTag::Object, 32).unwrap();
         let obj3 = heap.alloc(TypeTag::Object, 32).unwrap();
@@ -313,6 +317,8 @@ mod tests {
     #[test]
     fn test_root_set() {
         let mut heap = Heap::new();
+        // UNWRAP-OK (x2): fresh Heap, two small allocations cannot fail
+        // under normal test conditions.
         let obj1 = heap.alloc(TypeTag::Object, 32).unwrap();
         let obj2 = heap.alloc(TypeTag::Object, 32).unwrap();
 
@@ -331,6 +337,8 @@ mod tests {
     #[test]
     fn test_nested_trace() {
         let mut heap = Heap::new();
+        // UNWRAP-OK: fresh Heap, a single small allocation cannot fail under
+        // normal test conditions.
         let obj = heap.alloc(TypeTag::Object, 32).unwrap();
 
         let mut tracer = CountingTracer::new();

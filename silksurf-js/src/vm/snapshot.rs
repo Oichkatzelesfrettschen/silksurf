@@ -136,6 +136,9 @@ impl MmapSnapshot {
     /// Map a snapshot file into memory.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, SnapshotError> {
         let file = File::open(path).map_err(|_| SnapshotError::DeserializeFailed)?;
+        // SAFETY: Mmap::map is unsafe because external mutation of the underlying file
+        // would invalidate the mapping. The snapshot file is a build artifact treated as
+        // immutable; concurrent writers are not part of our supported workflow.
         let mmap = unsafe { Mmap::map(&file).map_err(|_| SnapshotError::DeserializeFailed)? };
         Ok(Self { mmap })
     }
@@ -206,6 +209,8 @@ impl VmSnapshot {
     /// Serialize snapshot to bytes
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
+        // UNWRAP-OK: VmSnapshot's archived layout is composed entirely of plain primitives,
+        // owned strings, and Vecs that rkyv supports out of the box, so serialization cannot fail.
         rkyv::to_bytes::<rkyv::rancor::Error>(self)
             .expect("snapshot serialization failed")
             .to_vec()
@@ -277,6 +282,7 @@ mod tests {
 
         // Serialize and deserialize
         let bytes = snapshot.to_bytes();
+        // UNWRAP-OK: bytes were produced by to_bytes() above, so the rkyv archive is valid.
         let restored = VmSnapshot::from_bytes(&bytes).expect("deserialize failed");
 
         // Verify
@@ -302,6 +308,7 @@ mod tests {
         let snapshot = VmSnapshot::from_vm(&vm, 0);
 
         let bytes = snapshot.to_bytes();
+        // UNWRAP-OK: bytes were produced by to_bytes() above, so the rkyv archive is valid.
         let restored = VmSnapshot::from_bytes(&bytes).expect("deserialize failed");
 
         assert!(restored.registers.is_empty());

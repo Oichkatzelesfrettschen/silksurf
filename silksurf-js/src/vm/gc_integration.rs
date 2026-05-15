@@ -399,11 +399,13 @@ mod tests {
     fn test_track_gc_value() {
         let mut gc = VmGcState::new();
 
+        // UNWRAP-OK: fresh heap with default capacity easily accommodates a 32-byte object.
         let obj = gc.heap.alloc(TypeTag::Object, 32).unwrap();
         let idx = gc.track(GcValue::Ref(obj));
 
         assert_eq!(idx, 0);
         assert!(gc.get_tracked(0).is_some());
+        // UNWRAP-OK: idx 0 was just inserted via gc.track on the line above, so get_tracked returns Some.
         assert!(gc.get_tracked(0).unwrap().has_ref());
     }
 
@@ -411,6 +413,7 @@ mod tests {
     fn test_external_roots() {
         let mut gc = VmGcState::new();
 
+        // UNWRAP-OK: fresh heap with default capacity easily accommodates a 32-byte object.
         let obj = gc.heap.alloc(TypeTag::Object, 32).unwrap();
         gc.add_root(obj);
         assert_eq!(gc.roots.len(), 1);
@@ -424,8 +427,11 @@ mod tests {
         let mut gc = VmGcState::new();
 
         // Allocate objects
+        // UNWRAP-OK: fresh heap with default capacity easily accommodates 32-byte objects.
         let obj1 = gc.heap.alloc(TypeTag::Object, 32).unwrap();
+        // UNWRAP-OK: fresh heap with default capacity easily accommodates 32-byte objects.
         let obj2 = gc.heap.alloc(TypeTag::Object, 32).unwrap();
+        // UNWRAP-OK: fresh heap with default capacity easily accommodates 32-byte objects.
         let _obj3 = gc.heap.alloc(TypeTag::Object, 32).unwrap(); // Not rooted
 
         // Track obj1, root obj2
@@ -444,6 +450,7 @@ mod tests {
     #[test]
     fn test_gc_value_trace() {
         let mut heap = Heap::new();
+        // UNWRAP-OK: fresh heap with default capacity easily accommodates a 32-byte object.
         let obj = heap.alloc(TypeTag::Object, 32).unwrap();
 
         let value = GcValue::Ref(obj);
@@ -457,6 +464,7 @@ mod tests {
     #[test]
     fn test_marking_tracer() {
         let mut heap = Heap::new();
+        // UNWRAP-OK: fresh heap with default capacity easily accommodates a 32-byte object.
         let obj = heap.alloc(TypeTag::Object, 32).unwrap();
 
         {
@@ -472,6 +480,7 @@ mod tests {
     fn test_weak_ref_creation() {
         let mut gc = VmGcState::new();
 
+        // UNWRAP-OK: fresh heap with default capacity easily accommodates a 32-byte object.
         let obj = gc.heap.alloc(TypeTag::Object, 32).unwrap();
         let weak_id = gc.create_weak_ref(obj);
 
@@ -483,6 +492,7 @@ mod tests {
     fn test_weak_ref_removal() {
         let mut gc = VmGcState::new();
 
+        // UNWRAP-OK: fresh heap with default capacity easily accommodates a 32-byte object.
         let obj = gc.heap.alloc(TypeTag::Object, 32).unwrap();
         let weak_id = gc.create_weak_ref(obj);
 
@@ -495,6 +505,7 @@ mod tests {
     fn test_weak_ref_cleared_on_collect() {
         let mut gc = VmGcState::new();
 
+        // UNWRAP-OK: fresh heap with default capacity easily accommodates a 32-byte object.
         let obj = gc.heap.alloc(TypeTag::Object, 32).unwrap();
         let weak_id = gc.create_weak_ref(obj);
 
@@ -509,6 +520,7 @@ mod tests {
     fn test_finalization_registry_basic() {
         let mut gc = VmGcState::new();
 
+        // UNWRAP-OK: fresh heap with default capacity easily accommodates a 32-byte object.
         let obj = gc.heap.alloc(TypeTag::Object, 32).unwrap();
         gc.register_finalizer(obj, HeldValue::Integer(42), None);
 
@@ -520,6 +532,7 @@ mod tests {
     fn test_finalization_queued_on_collect() {
         let mut gc = VmGcState::new();
 
+        // UNWRAP-OK: fresh heap with default capacity easily accommodates a 32-byte object.
         let obj = gc.heap.alloc(TypeTag::Object, 32).unwrap();
         gc.register_finalizer(obj, HeldValue::Integer(42), None);
         gc.register_finalizer(obj, HeldValue::String("cleanup".to_string()), None);
@@ -538,6 +551,7 @@ mod tests {
     fn test_finalization_unregister() {
         let mut gc = VmGcState::new();
 
+        // UNWRAP-OK: fresh heap with default capacity easily accommodates a 32-byte object.
         let obj = gc.heap.alloc(TypeTag::Object, 32).unwrap();
         let token = gc.create_unregister_token();
 
@@ -556,6 +570,7 @@ mod tests {
     fn test_weak_table_compact() {
         let mut gc = VmGcState::new();
 
+        // UNWRAP-OK: fresh heap with default capacity easily accommodates a 32-byte object.
         let obj = gc.heap.alloc(TypeTag::Object, 32).unwrap();
         gc.create_weak_ref(obj);
         gc.create_weak_ref(obj);
@@ -578,7 +593,9 @@ mod tests {
         let mut gc = VmGcState::new();
 
         // Allocate objects: obj1 is rooted, obj2 is not
+        // UNWRAP-OK: fresh heap with default capacity easily accommodates 32-byte objects.
         let obj1 = gc.heap.alloc(TypeTag::Object, 32).unwrap();
+        // UNWRAP-OK: fresh heap with default capacity easily accommodates 32-byte objects.
         let obj2 = gc.heap.alloc(TypeTag::Object, 32).unwrap();
 
         // Root obj1
@@ -604,7 +621,9 @@ mod tests {
         let mut gc = VmGcState::new();
 
         // Allocate objects
+        // UNWRAP-OK: fresh heap with default capacity easily accommodates 32-byte objects.
         let obj1 = gc.heap.alloc(TypeTag::Object, 32).unwrap();
+        // UNWRAP-OK: fresh heap with default capacity easily accommodates 32-byte objects.
         let obj2 = gc.heap.alloc(TypeTag::Object, 32).unwrap();
 
         // Root obj1
@@ -634,6 +653,7 @@ mod tests {
         let mut gc = VmGcState::new();
 
         // Allocate an unrooted object
+        // UNWRAP-OK: fresh heap with default capacity easily accommodates a 32-byte object.
         let obj = gc.heap.alloc(TypeTag::Object, 32).unwrap();
 
         // Create weak ref and register finalizer

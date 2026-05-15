@@ -205,6 +205,7 @@ impl Chunk {
     pub fn disassemble(&self) -> String {
         use std::fmt::Write as _;
         let mut output = String::new();
+        // UNWRAP-OK: writeln! into a String never fails (fmt::Write for String is infallible)
         writeln!(
             output,
             "; Chunk: {} instructions, {} constants, {} registers",
@@ -212,6 +213,7 @@ impl Chunk {
             self.constants.len(),
             self.register_count
         )
+        // UNWRAP-OK: writeln! into String is infallible (fmt::Write for String never errs).
         .unwrap();
 
         if self.strict {
@@ -226,11 +228,13 @@ impl Chunk {
 
         output.push_str("\n; Constants:\n");
         for (i, c) in self.constants.iter().enumerate() {
+            // UNWRAP-OK: writeln! into a String never fails (fmt::Write for String is infallible)
             writeln!(output, "  #{i}: {c:?}").unwrap();
         }
 
         output.push_str("\n; Instructions:\n");
         for (offset, instr) in self.instructions.iter().enumerate() {
+            // UNWRAP-OK: writeln! into a String never fails (fmt::Write for String is infallible)
             writeln!(
                 output,
                 "  {:04x}: {}",
@@ -464,6 +468,9 @@ impl Chunk {
     ///
     /// Uses rkyv for zero-copy deserialization. The returned bytes can be
     /// written to disk and memory-mapped for instant loading.
+    // UNWRAP-OK: Chunk consists of POD/Vec/Option of rkyv-derived types only;
+    // rkyv serialization for this shape can only fail under allocator OOM,
+    // which would already abort. No I/O or fallible user types involved.
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         rkyv::to_bytes::<rkyv::rancor::Error>(self)
@@ -598,6 +605,7 @@ mod tests {
 
         // Serialize and deserialize
         let bytes = chunk.to_bytes();
+        // UNWRAP-OK: bytes were just produced by to_bytes() above; round-trip is always valid
         let restored = Chunk::from_bytes(&bytes).expect("deserialization failed");
 
         // Verify all fields match
@@ -651,7 +659,7 @@ mod tests {
 
         let bytes = chunk.to_bytes();
 
-        // Zero-copy access to archived chunk
+        // UNWRAP-OK: bytes were just produced by to_bytes() above; archive is well-formed
         let archived = Chunk::access_archived(&bytes).expect("access failed");
 
         // Verify we can read archived data without allocation
@@ -664,6 +672,7 @@ mod tests {
     fn test_chunk_serialization_empty() {
         let chunk = Chunk::new();
         let bytes = chunk.to_bytes();
+        // UNWRAP-OK: bytes were just produced by to_bytes() above; round-trip is always valid
         let restored = Chunk::from_bytes(&bytes).expect("deserialization failed");
 
         assert!(restored.instructions.is_empty());
@@ -676,6 +685,7 @@ mod tests {
         let garbage = vec![0x00, 0x01, 0x02, 0x03];
         let result = Chunk::from_bytes(&garbage);
         assert!(result.is_err());
+        // UNWRAP-OK: assert!(result.is_err()) above guarantees Err variant
         assert_eq!(result.unwrap_err(), ChunkDeserializeError::InvalidArchive);
     }
 }

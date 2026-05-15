@@ -264,6 +264,7 @@ impl NanBoxedValue {
         if self.is_number() {
             Some(bytemuck::cast(self.0))
         } else if self.is_smi() {
+            // UNWRAP-OK: is_smi() just verified the SMI tag, so as_smi() returns Some.
             Some(self.as_smi().unwrap() as f64)
         } else {
             None
@@ -356,8 +357,10 @@ impl NanBoxedValue {
             let n: f64 = bytemuck::cast(self.0);
             n != 0.0 && !n.is_nan()
         } else if self.is_boolean() {
+            // UNWRAP-OK: is_boolean() just verified the BOOLEAN tag, so as_boolean() returns Some.
             self.as_boolean().unwrap()
         } else if self.is_smi() {
+            // UNWRAP-OK: is_smi() just verified the SMI tag, so as_smi() returns Some.
             self.as_smi().unwrap() != 0
         } else if self.is_nullish() {
             false
@@ -374,8 +377,10 @@ impl NanBoxedValue {
         if self.is_number() {
             bytemuck::cast(self.0)
         } else if self.is_smi() {
+            // UNWRAP-OK: is_smi() just verified the SMI tag, so as_smi() returns Some.
             self.as_smi().unwrap() as f64
         } else if self.is_boolean() {
+            // UNWRAP-OK: is_boolean() just verified the BOOLEAN tag, so as_boolean() returns Some.
             if self.as_boolean().unwrap() { 1.0 } else { 0.0 }
         } else if self.is_null() {
             0.0
@@ -389,6 +394,7 @@ impl NanBoxedValue {
     #[must_use]
     pub fn to_i32(self) -> i32 {
         if self.is_smi() {
+            // UNWRAP-OK: is_smi() just verified the SMI tag, so as_smi() returns Some.
             self.as_smi().unwrap() as i32
         } else {
             let n = self.to_number();
@@ -473,19 +479,25 @@ impl std::fmt::Debug for NanBoxedValue {
         } else if self.is_null() {
             write!(f, "null")
         } else if self.is_boolean() {
+            // UNWRAP-OK: is_boolean() just verified the BOOLEAN tag, so as_boolean() returns Some.
             write!(f, "{}", self.as_boolean().unwrap())
         } else if self.is_smi() {
+            // UNWRAP-OK: is_smi() just verified the SMI tag, so as_smi() returns Some.
             write!(f, "{}i", self.as_smi().unwrap())
         } else if self.is_number() {
             let n: f64 = bytemuck::cast(self.0);
             write!(f, "{n}")
         } else if self.is_object() {
+            // UNWRAP-OK: is_object() just verified the OBJECT tag, so as_object_ptr() returns Some.
             write!(f, "Object({:p})", self.as_object_ptr().unwrap())
         } else if self.is_string() {
+            // UNWRAP-OK: is_string() just verified the STRING tag, so as_string_ptr() returns Some.
             write!(f, "String({:p})", self.as_string_ptr().unwrap())
         } else if self.is_function() {
+            // UNWRAP-OK: is_function() just verified the FUNCTION tag, so as_function_ptr() returns Some.
             write!(f, "Function({:p})", self.as_function_ptr().unwrap())
         } else if self.is_symbol() {
+            // UNWRAP-OK: is_symbol() just verified the SYMBOL tag, so as_symbol() returns Some.
             write!(f, "Symbol({})", self.as_symbol().unwrap())
         } else {
             write!(f, "Unknown(0x{:016x})", self.0)
@@ -554,6 +566,7 @@ mod tests {
         assert_eq!(zero.as_number(), Some(0.0));
         assert_eq!(neg.as_number(), Some(-42.5));
         assert_eq!(inf.as_number(), Some(f64::INFINITY));
+        // UNWRAP-OK: nan was just created via NanBoxedValue::number, so as_number() returns Some.
         assert!(nan.as_number().unwrap().is_nan());
 
         assert!(pi.is_truthy());

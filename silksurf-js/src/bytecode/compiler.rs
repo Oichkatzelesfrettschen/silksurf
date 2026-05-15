@@ -323,6 +323,9 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
     fn patch_jump(&mut self, offset: usize) {
         let target = self.current_offset();
         let instr = self.chunk.instructions[offset];
+        // UNWRAP-OK: compiler invariant: patch_jump is only called on offsets returned by
+        // emit() with a valid Opcode (Jmp/JmpFalse/JmpTrue/etc.); the byte was just written
+        // by us from a typed Opcode value, so round-trip Opcode::from_byte cannot fail.
         let opcode = Opcode::from_byte(instr.opcode()).unwrap();
         let relative = (target as i32) - (offset as i32) - 1;
 
@@ -428,6 +431,8 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 self.emit(Instruction::new_offset(Opcode::Jmp, back_offset));
                 self.patch_jump(exit_jump);
 
+                // UNWRAP-OK: compiler invariant: we pushed a LoopContext at the top of this
+                // While arm and have not popped it; loop_stack is non-empty here.
                 let loop_ctx = self.loop_stack.pop().unwrap();
                 for brk in loop_ctx.break_targets {
                     self.patch_jump(brk.offset);
@@ -479,6 +484,8 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                     self.patch_jump(exit);
                 }
 
+                // UNWRAP-OK: compiler invariant: we pushed a LoopContext at the top of this
+                // For arm and have not popped it; loop_stack is non-empty here.
                 let loop_ctx = self.loop_stack.pop().unwrap();
                 for brk in loop_ctx.break_targets {
                     self.patch_jump(brk.offset);
@@ -515,6 +522,8 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                     back_offset as i16,
                 ));
 
+                // UNWRAP-OK: compiler invariant: we pushed a LoopContext at the top of this
+                // DoWhile arm and have not popped it; loop_stack is non-empty here.
                 let loop_ctx = self.loop_stack.pop().unwrap();
                 for brk in loop_ctx.break_targets {
                     self.patch_jump(brk.offset);
@@ -821,6 +830,8 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 // Close iterator
                 self.emit(Instruction::new_r(Opcode::IterClose, iter_reg.0));
 
+                // UNWRAP-OK: compiler invariant: we pushed a LoopContext at the top of this
+                // ForOf arm and have not popped it; loop_stack is non-empty here.
                 let loop_ctx = self.loop_stack.pop().unwrap();
                 for brk in loop_ctx.break_targets {
                     self.patch_jump(brk.offset);
@@ -975,6 +986,8 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 self.patch_jump(exit_jump);
                 self.emit(Instruction::new_r(Opcode::IterClose, iter_reg.0));
 
+                // UNWRAP-OK: compiler invariant: we pushed a LoopContext at the top of this
+                // ForIn arm and have not popped it; loop_stack is non-empty here.
                 let loop_ctx = self.loop_stack.pop().unwrap();
                 for brk in loop_ctx.break_targets {
                     self.patch_jump(brk.offset);
@@ -1178,6 +1191,8 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 }
             } else if declarator.init.is_some() {
                 // Destructuring pattern -- compile the RHS and bind via pattern
+                // UNWRAP-OK: guarded by `declarator.init.is_some()` on the line above;
+                // the Option is Some by construction of this branch.
                 let init = declarator.init.as_ref().unwrap();
                 let value_reg = self.compile_expression(init)?;
                 self.compile_pattern_binding(&declarator.id, value_reg, decl.kind)?;
@@ -2165,12 +2180,14 @@ mod tests {
 
     #[test]
     fn test_compile_literal() {
+        // UNWRAP-OK: hardcoded valid JS literal "42;" parses and compiles successfully
         let chunk = compile("42;").unwrap();
         assert!(!chunk.instructions.is_empty());
     }
 
     #[test]
     fn test_compile_binary() {
+        // UNWRAP-OK: hardcoded valid JS expression "1 + 2;" parses and compiles successfully
         let chunk = compile("1 + 2;").unwrap();
         let disasm = chunk.disassemble();
         assert!(disasm.contains("ADD"));
@@ -2178,6 +2195,7 @@ mod tests {
 
     #[test]
     fn test_compile_variable() {
+        // UNWRAP-OK: hardcoded valid JS variable decl + use; parses and compiles successfully
         let chunk = compile("let x = 10; x;").unwrap();
         let disasm = chunk.disassemble();
         assert!(disasm.contains("SET_LOCAL") || disasm.contains("GET_LOCAL"));
@@ -2185,6 +2203,7 @@ mod tests {
 
     #[test]
     fn test_compile_if() {
+        // UNWRAP-OK: hardcoded valid JS if/else statement; parses and compiles successfully
         let chunk = compile("if (true) { 1; } else { 2; }").unwrap();
         let disasm = chunk.disassemble();
         assert!(disasm.contains("JMP"));
@@ -2192,6 +2211,7 @@ mod tests {
 
     #[test]
     fn test_compile_while() {
+        // UNWRAP-OK: hardcoded valid JS while-loop source; parses and compiles successfully
         let chunk = compile("let i = 0; while (i < 10) { i = i + 1; }").unwrap();
         let disasm = chunk.disassemble();
         assert!(disasm.contains("JMP"));
@@ -2200,6 +2220,7 @@ mod tests {
 
     #[test]
     fn test_compile_for() {
+        // UNWRAP-OK: hardcoded valid JS for-loop source; parses and compiles successfully
         let chunk = compile("for (let i = 0; i < 10; i = i + 1) { i; }").unwrap();
         let disasm = chunk.disassemble();
         assert!(disasm.contains("JMP"));

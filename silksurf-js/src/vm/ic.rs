@@ -489,7 +489,9 @@ mod tests {
         assert_eq!(vec.len(), 2);
 
         // Update and lookup
+        // UNWRAP-OK: id1 was just returned from vec.add() on the same vector, so get_mut returns Some.
         vec.get_mut(id1).unwrap().update(0, 5);
+        // UNWRAP-OK: id1 is still a valid index into vec; entry exists from the line above.
         assert_eq!(vec.get_mut(id1).unwrap().lookup(0), Some(5));
     }
 
@@ -500,6 +502,7 @@ mod tests {
         let key = PropertyKey::String(1);
         let id = vec.add(key);
 
+        // UNWRAP-OK: id was just returned from vec.add() above, so get_mut returns Some.
         let ic = vec.get_mut(id).unwrap();
         ic.update(0, 5);
         ic.lookup(0); // hit
@@ -522,10 +525,12 @@ mod tests {
         ic.add_data(0, 5);
         ic.add_data(1, 10);
 
+        // UNWRAP-OK: shape 0 was just added via add_data above, so lookup returns Some.
         let entry = ic.lookup(0).unwrap();
         assert_eq!(entry.slot, Some(5));
         assert!(!entry.is_getter);
 
+        // UNWRAP-OK: shape 1 was just added via add_data above, so lookup returns Some.
         let entry = ic.lookup(1).unwrap();
         assert_eq!(entry.slot, Some(10));
     }
@@ -541,10 +546,12 @@ mod tests {
         // New property transition
         ic.add_transition(1, 2, 0);
 
+        // UNWRAP-OK: from_shape 0 was just registered via add_update above, so lookup returns Some.
         let entry = ic.lookup(0).unwrap();
         assert_eq!(entry.slot, 5);
         assert!(!entry.is_transition);
 
+        // UNWRAP-OK: from_shape 1 was just registered via add_transition above, so lookup returns Some.
         let entry = ic.lookup(1).unwrap();
         assert_eq!(entry.from_shape, 1);
         assert_eq!(entry.to_shape, 2);

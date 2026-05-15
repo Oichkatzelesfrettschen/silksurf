@@ -365,6 +365,7 @@ mod tests {
         let key = PropertyKey::String(1);
         let shape = table.add_property(&root, key, PropertyAttributes::DEFAULT);
 
+        // UNWRAP-OK: key was just added via add_property on the previous line, so get_property returns Some.
         let desc = shape.get_property(key).unwrap();
         assert_eq!(desc.slot, 0);
         assert!(desc.attrs.writable);

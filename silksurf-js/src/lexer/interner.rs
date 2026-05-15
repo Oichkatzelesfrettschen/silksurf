@@ -70,6 +70,10 @@ impl Interner {
     #[inline]
     #[must_use]
     pub fn resolve(&self, symbol: Symbol) -> &str {
+        // UNWRAP-OK: Symbol is constructed only by intern() which assigns the
+        // current values.len() before pushing; every Symbol therefore indexes a
+        // present entry. A foreign Symbol from another Interner is a bug
+        // (documented; panic surfaces it loudly rather than returning garbage).
         self.values
             .get(symbol.0 as usize)
             .map(String::as_str)

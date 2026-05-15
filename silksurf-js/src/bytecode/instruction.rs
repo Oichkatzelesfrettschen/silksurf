@@ -185,6 +185,9 @@ impl Instruction {
     #[inline]
     #[must_use]
     pub fn from_bytes(bytes: &[u8; 4]) -> Self {
+        // UNWRAP-OK: Instruction is repr(transparent) over u32 (4 bytes) and derives FromBytes;
+        // ref_from_bytes on a &[u8; 4] always succeeds because size and alignment requirements
+        // are satisfied by the array type. zerocopy proves this at the type level.
         *Self::ref_from_bytes(bytes).unwrap()
     }
 
@@ -309,6 +312,10 @@ impl InstructionBuilder {
         } else {
             // Conditional jump with register operand
             let reg = instr.dst();
+            // UNWRAP-OK: builder invariant: patch_jump targets an offset previously emitted
+            // by jmp_*_placeholder (or another emit() with a typed Opcode). The byte we read
+            // back here was written from a valid Opcode discriminant, so the round-trip
+            // Opcode::from_byte cannot fail.
             self.instructions[instr_offset] = Instruction::new_r_offset(
                 Opcode::from_byte(opcode).unwrap(),
                 reg,

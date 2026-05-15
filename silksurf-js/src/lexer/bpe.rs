@@ -375,6 +375,8 @@ impl BpeMatcher {
             if node.children[idx].is_none() {
                 node.children[idx] = Some(Box::default());
             }
+            // UNWRAP-OK: the if-block immediately above ensures
+            // node.children[idx] is Some before we take the mutable reference.
             node = node.children[idx].as_mut().unwrap();
         }
 
@@ -433,6 +435,7 @@ mod tests {
         let input = b"function foo()";
         let result = matcher.try_match(input);
         assert!(result.is_some());
+        // UNWRAP-OK: assert!(result.is_some()) on the line above guarantees Some.
         let (_id, len) = result.unwrap();
         assert_eq!(len, 8);
         assert_eq!(&input[..len], b"function");
@@ -446,6 +449,7 @@ mod tests {
         let input = b"===";
         let result = matcher.try_match(input);
         assert!(result.is_some());
+        // UNWRAP-OK: assert!(result.is_some()) on the line above guarantees Some.
         let (_, len) = result.unwrap();
         assert_eq!(len, 3);
     }

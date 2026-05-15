@@ -60,6 +60,9 @@ impl<'a, 'b, M: Module> IrBuilder<'a, 'b, M> {
     fn translate_instruction(&mut self, instr: Instruction) -> Result<(), JitError> {
         // Get opcode as enum, fall back for unknown
         let Some(opcode) = instr.opcode_enum() else {
+            // UNWRAP-OK: TrapCode::user(N) is documented to return Some for
+            // any non-reserved user trap code; 0 is a fixed compile-time
+            // constant in the non-reserved range, so the Option is always Some.
             // Unknown opcode - trap
             self.builder.ins().trap(ir::TrapCode::user(0).unwrap());
             self.has_terminator = true;

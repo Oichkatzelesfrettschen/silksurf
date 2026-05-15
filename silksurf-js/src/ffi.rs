@@ -98,6 +98,8 @@ pub extern "C" fn silksurf_engine_new() -> *mut SilkSurfEngine {
 #[unsafe(no_mangle)]
 pub extern "C" fn silksurf_engine_free(engine: *mut SilkSurfEngine) {
     if !engine.is_null() {
+        // SAFETY: null-checked above; pointer must originate from a prior
+        // silksurf_engine_new() Box::into_raw call (FFI contract).
         unsafe {
             drop(Box::from_raw(engine));
         }
@@ -116,6 +118,8 @@ pub extern "C" fn silksurf_compile(
         return ptr::null_mut();
     }
 
+    // SAFETY: source null-checked above; caller must pass a valid
+    // NUL-terminated C string per FFI contract on silksurf_compile.
     let Ok(source_str) = (unsafe { CStr::from_ptr(source) }).to_str() else {
         set_error("Invalid UTF-8 in source");
         return ptr::null_mut();
@@ -149,7 +153,8 @@ pub extern "C" fn silksurf_compile(
         }
     };
 
-    // Add chunk to VM and return script handle
+    // SAFETY: engine null-checked at function entry; pointer must come from
+    // silksurf_engine_new() and be exclusively owned by the caller (no aliasing).
     let engine = unsafe { &mut *engine };
     let chunk_idx = engine.vm.add_chunk(chunk);
 
@@ -161,6 +166,8 @@ pub extern "C" fn silksurf_compile(
 #[unsafe(no_mangle)]
 pub extern "C" fn silksurf_script_free(script: *mut SilkSurfScript) {
     if !script.is_null() {
+        // SAFETY: null-checked above; pointer must originate from a prior
+        // silksurf_compile() Box::into_raw call (FFI contract, called once).
         unsafe {
             drop(Box::from_raw(script));
         }
@@ -179,7 +186,11 @@ pub extern "C" fn silksurf_run(
         return SilkSurfStatus::ErrorInvalidArg;
     }
 
+    // SAFETY: both pointers null-checked above; engine/script must originate
+    // from silksurf_engine_new()/silksurf_compile() and be uniquely owned.
     let engine = unsafe { &mut *engine };
+    // SAFETY: script null-checked above; pointer comes from silksurf_compile()
+    // and remains valid until silksurf_script_free() is called.
     let script = unsafe { &*script };
 
     match engine.vm.execute(script.chunk_idx) {
@@ -216,6 +227,8 @@ pub extern "C" fn silksurf_script_instruction_count(script: *const SilkSurfScrip
         return -1;
     }
     // Return chunk index as a proxy - full instruction count requires engine access
+    // SAFETY: null-checked above; script pointer must come from silksurf_compile()
+    // and remain valid (not yet freed) per FFI contract.
     unsafe { (*script).chunk_idx as c_int }
 }
 
@@ -245,6 +258,8 @@ pub extern "C" fn silksurf_heap_stats(
     }
 
     // TODO: Wire up actual heap stats when GC tracking is exposed
+    // SAFETY: stats null-checked above; pointer must reference a valid,
+    // properly aligned, writable SilkSurfHeapStats per FFI contract.
     unsafe {
         (*stats).bytes_allocated = 0;
         (*stats).bytes_threshold = 0;
@@ -268,13 +283,20 @@ mod tests {
     #[test]
     fn test_version() {
         let version = silksurf_version();
-        let version_str = unsafe { CStr::from_ptr(version) }.to_str().unwrap();
+        // SAFETY: silksurf_version() returns a static, NUL-terminated, valid
+        // pointer with 'static lifetime; never null and never invalidated.
+        // Use unwrap_or to avoid panic if the static were ever non-UTF-8.
+        let version_str = unsafe { CStr::from_ptr(version) }
+            .to_str()
+            .unwrap_or("unknown");
         assert_eq!(version_str, "0.1.0");
     }
 
     #[test]
     fn test_compile_simple() {
         let engine = silksurf_engine_new();
+        // UNWRAP-OK: literal "1 + 2" contains no interior NUL bytes, so
+        // CString::new cannot return Err(NulError) here.
         let source = CString::new("1 + 2").unwrap();
         let script = silksurf_compile(engine, source.as_ptr());
         assert!(!script.is_null());

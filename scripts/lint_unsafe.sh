@@ -19,11 +19,6 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-## NOTE: silksurf-js/src is intentionally NOT scanned in this round. It has
-## ~40 unannotated unsafe blocks concentrated in gc/heap.rs and ffi.rs.
-## Annotating them is its own batch in the SNAZZY-WAFFLE roadmap (P1
-## follow-up, tracked as a task). Re-include silksurf-js/src here when
-## that batch lands.
 mapfile -t SOURCES < <(find \
     crates/silksurf-app/src \
     crates/silksurf-core/src \
@@ -36,6 +31,7 @@ mapfile -t SOURCES < <(find \
     crates/silksurf-net/src \
     crates/silksurf-render/src \
     crates/silksurf-tls/src \
+    silksurf-js/src \
     -type f -name '*.rs' \
     -not -path '*/tests/*' \
     2>/dev/null)

@@ -216,7 +216,9 @@ impl GcHeader {
     #[inline]
     #[must_use]
     pub fn payload_ptr(&self) -> *mut u8 {
-        // SAFETY: We're computing an offset within the same allocation
+        // SAFETY: GcHeader is always followed by a payload of size
+        // self.size - HEADER_SIZE within the same allocation, so adding
+        // HEADER_SIZE bytes stays within bounds (offset only, no deref).
         unsafe {
             std::ptr::from_ref(self)
                 .cast::<u8>()
@@ -252,12 +254,18 @@ impl GcRef {
     #[inline]
     #[must_use]
     pub fn header(&self) -> &GcHeader {
+        // SAFETY: GcRef can only be constructed from a NonNull GcHeader pointer
+        // returned by Heap::alloc; the heap keeps the underlying allocation live
+        // until sweep, and the borrow checker prevents alias conflicts.
         unsafe { self.ptr.as_ref() }
     }
 
     /// Get mutable header reference
     #[inline]
     pub fn header_mut(&mut self) -> &mut GcHeader {
+        // SAFETY: &mut self proves we have exclusive access to this GcRef; the
+        // pointer was validated at construction (NonNull) and the heap keeps
+        // the allocation live for the duration of the borrow.
         unsafe { self.ptr.as_mut() }
     }
 
@@ -275,6 +283,9 @@ impl GcRef {
     #[inline]
     #[must_use]
     pub unsafe fn payload<T>(&self) -> &T {
+        // SAFETY: Caller-asserted T matches the payload type (per fn safety
+        // contract); payload_ptr() returns a pointer within the same live
+        // allocation, beyond the GcHeader, with size >= sizeof::<T>().
         unsafe { &*self.header().payload_ptr().cast::<T>() }
     }
 
@@ -284,6 +295,9 @@ impl GcRef {
     /// Caller must ensure T matches the actual payload type
     #[inline]
     pub unsafe fn payload_mut<T>(&mut self) -> &mut T {
+        // SAFETY: Caller-asserted T matches the payload type (per fn safety
+        // contract); &mut self gives exclusive access; payload_ptr() returns
+        // a valid pointer within the same live allocation past the header.
         unsafe { &mut *self.header().payload_ptr().cast::<T>() }
     }
 }
@@ -334,6 +348,9 @@ impl FreeList {
     /// Block must be properly aligned and sized for this size class
     pub unsafe fn push(&mut self, block: NonNull<GcHeader>) {
         let header = block.as_ptr();
+        // SAFETY: Caller guarantees block points to a properly aligned/sized
+        // GcHeader for this size class (per fn safety contract); NonNull
+        // ensures non-null, and we hold exclusive access via &mut self.
         unsafe {
             (*header).type_tag = TypeTag::Free as u8;
             (*header).next_free = self.head.map_or(0, |p| p.as_ptr() as u64);
@@ -345,6 +362,9 @@ impl FreeList {
     /// Pop a block from the free list
     pub fn pop(&mut self) -> Option<NonNull<GcHeader>> {
         let block = self.head?;
+        // SAFETY: self.head was populated by push(), which only stores blocks
+        // whose layout matches this size class and whose next_free field was
+        // set to a valid sentinel (0) or another live free-list pointer.
         unsafe {
             let next = (*block.as_ptr()).next_free;
             self.head = if next == 0 {
@@ -491,6 +511,8 @@ impl Heap {
             };
 
             let layout = Layout::from_size_align(alloc_size, ALIGNMENT).ok()?;
+            // SAFETY: layout has nonzero size (alloc_size >= MIN_ALLOC_SIZE = 32)
+            // and alignment ALIGNMENT = 8 which is a valid power of two.
             let ptr = unsafe { alloc(layout) };
             let block = NonNull::new(ptr.cast::<GcHeader>())?;
 
@@ -507,6 +529,10 @@ impl Heap {
         };
 
         // Initialize header
+        // SAFETY: block was either freshly returned from alloc() (uninitialized
+        // memory at least HEADER_SIZE bytes large) or popped from a free list
+        // (still valid backing memory); we hold the only reference and write a
+        // POD GcHeader, satisfying alignment from the Layout above.
         #[allow(clippy::cast_possible_truncation)] // Size is bounded by alloc_size <= 4GB
         unsafe {
             let header = block.as_ptr();
@@ -515,6 +541,8 @@ impl Heap {
 
         self.stats.objects_allocated += 1;
 
+        // SAFETY: block.as_ptr() is non-null (NonNull) and points to a freshly
+        // initialized GcHeader inside a live allocation owned by this Heap.
         unsafe { GcRef::from_raw(block.as_ptr()) }
     }
 
@@ -525,6 +553,9 @@ impl Heap {
             debug_assert!(idx < self.mark_bits.len());
             if !self.mark_bits[idx] {
                 self.mark_bits.set(idx, true);
+                // SAFETY: obj.as_ptr() came from a GcRef whose pointer is in
+                // self.mark_index, which means it is one of self.all_blocks,
+                // i.e. a live, owned allocation; &mut self gives exclusivity.
                 let header = unsafe { &mut *obj.as_ptr() };
                 header.set_color(Color::Gray);
                 self.gray_worklist.push(obj);
@@ -532,6 +563,9 @@ impl Heap {
             return;
         }
 
+        // SAFETY: obj is a live GcRef passed in by the caller; the heap owns
+        // the underlying allocation until sweep, and &mut self ensures no
+        // concurrent mutation of the header.
         let header = unsafe { &mut *obj.as_ptr() };
         if header.color() == Color::White {
             header.set_color(Color::Gray);
@@ -558,6 +592,9 @@ impl Heap {
             }
 
             // Object fully scanned, color it black
+            // SAFETY: obj came off the gray worklist; it was pushed by mark()
+            // only for live allocations owned by this heap, and &mut self
+            // ensures no concurrent header mutation.
             unsafe {
                 (*obj.as_ptr()).set_color(Color::Black);
             }
@@ -593,6 +630,9 @@ impl Heap {
             !self.mark_index.is_empty() && self.mark_bits.len() == self.all_blocks.len();
 
         for (idx, block) in self.all_blocks.drain(..).enumerate() {
+            // SAFETY: block was added to all_blocks by alloc(), which only
+            // pushes pointers to live allocations owned by this heap; &mut
+            // self gives exclusive access for the duration of the loop body.
             let header = unsafe { &mut *block.as_ptr() };
 
             if header.is_free() {
@@ -613,6 +653,9 @@ impl Heap {
                 retained.push(block);
             } else {
                 // Garbage - notify before freeing
+                // SAFETY: block.as_ptr() is non-null (NonNull) and points to
+                // the same live header just borrowed above; from_raw only
+                // wraps it in a GcRef without dereferencing.
                 if let Some(gc_ref) = unsafe { GcRef::from_raw(block.as_ptr()) } {
                     on_collect(gc_ref);
                 }
@@ -624,12 +667,23 @@ impl Heap {
 
                 if size < LARGE_OBJECT_THRESHOLD {
                     if let Some(idx) = Self::size_class_index(size) {
+                        // SAFETY: block has size matching SIZE_CLASSES[idx]
+                        // (size_class_index returns the bucket whose class
+                        // is >= size), satisfying FreeList::push contract.
                         unsafe { self.free_lists[idx].push(block) };
                         retained.push(block);
                     }
                 } else {
                     // Free large object back to system
+                    // UNWRAP-OK: size and ALIGNMENT (8) form a valid Layout:
+                    // size came from the header set by alloc(), which used
+                    // the same Layout::from_size_align call that succeeded
+                    // when this block was originally allocated.
                     let layout = Layout::from_size_align(size, ALIGNMENT).unwrap();
+                    // SAFETY: block was originally allocated via std::alloc
+                    // with the same layout (size, ALIGNMENT); we have unique
+                    // ownership (drained from all_blocks) and no further
+                    // references exist after the on_collect callback returns.
                     unsafe { dealloc(block.as_ptr().cast::<u8>(), layout) };
                 }
             }
@@ -639,11 +693,13 @@ impl Heap {
         self.stats.objects_collected += objects_freed;
         self.stats.bytes_in_use = self.stats.bytes_allocated - bytes_freed;
 
-        // Clean up large objects list
-        self.large_objects.retain(|&block| {
-            let header = unsafe { &*block.as_ptr() };
-            !header.is_free()
-        });
+        // Clean up large objects list: keep only those still present in the
+        // retained block set, since collected large objects were dealloc'd
+        // above and dereferencing them here would be use-after-free.
+        let live: std::collections::HashSet<*mut GcHeader> =
+            self.all_blocks.iter().map(|b| b.as_ptr()).collect();
+        self.large_objects
+            .retain(|&block| live.contains(&block.as_ptr()));
     }
 
     /// Run a full GC cycle
@@ -680,6 +736,10 @@ impl Heap {
         // Mark phase: enumerate roots
         let heap_ptr = std::ptr::from_mut(self);
         root_enumerator(&mut |root| {
+            // SAFETY: heap_ptr was obtained from &mut self and is valid for
+            // the lifetime of this function; the closure runs synchronously
+            // inside root_enumerator (no aliasing across stack frames) and
+            // self is not otherwise borrowed during this call.
             unsafe { (*heap_ptr).mark(root) };
         });
 
@@ -731,9 +791,15 @@ impl Drop for Heap {
     fn drop(&mut self) {
         // Free all remaining blocks
         for block in &self.all_blocks {
+            // SAFETY: every entry in all_blocks was inserted by alloc()
+            // and is still live at drop time (sweep removes freed entries
+            // from the vec); we have exclusive access via &mut self.
             let header = unsafe { &*block.as_ptr() };
             let size = header.size();
             if let Ok(layout) = Layout::from_size_align(size, ALIGNMENT) {
+                // SAFETY: block was originally allocated via std::alloc with
+                // this exact (size, ALIGNMENT) Layout; we own the allocation
+                // and no further use occurs after drop.
                 unsafe { dealloc(block.as_ptr().cast::<u8>(), layout) };
             }
         }
@@ -775,6 +841,7 @@ mod tests {
         let obj = heap.alloc(TypeTag::Object, 64);
         assert!(obj.is_some());
 
+        // UNWRAP-OK: assert_eq above guarantees obj is Some.
         let obj = obj.unwrap();
         assert_eq!(obj.header().type_tag(), TypeTag::Object);
         assert_eq!(obj.header().color(), Color::White);
@@ -786,11 +853,20 @@ mod tests {
         assert!(list.is_empty());
 
         // Allocate and free a block
+        // UNWRAP-OK: 64 is nonzero and ALIGNMENT (8) is a valid power of two,
+        // so Layout::from_size_align always succeeds.
         let layout = Layout::from_size_align(64, ALIGNMENT).unwrap();
+        // SAFETY: layout has nonzero size and a valid power-of-two alignment.
         let ptr = unsafe { alloc(layout) };
         #[allow(clippy::cast_ptr_alignment)] // Test allocation is properly aligned
+        // UNWRAP-OK: alloc() of a valid Layout in a test environment yields a
+        // non-null pointer (would abort the test on OOM rather than returning
+        // null in any realistic case).
         let block = NonNull::new(ptr.cast::<GcHeader>()).unwrap();
 
+        // SAFETY: ptr was just freshly allocated with size 64 and 8-byte
+        // alignment matching GcHeader; we hold the only reference and write
+        // a properly sized header before pushing onto the free list.
         unsafe {
             *block.as_ptr() = GcHeader::new(TypeTag::Object, 64);
             list.push(block);
@@ -804,6 +880,8 @@ mod tests {
         assert!(list.is_empty());
 
         // Clean up
+        // SAFETY: ptr was returned from alloc() with this exact layout above,
+        // pop() removed the only reference, no further use occurs.
         unsafe { dealloc(ptr, layout) };
     }
 
@@ -839,6 +917,7 @@ mod tests {
         let obj = heap.alloc(TypeTag::Buffer, 8192);
         assert!(obj.is_some());
 
+        // UNWRAP-OK: assert_eq above guarantees obj is Some.
         let obj = obj.unwrap();
         assert!(obj.header().size() >= 8192);
     }
