@@ -6,10 +6,9 @@
 
 ## Last refresh
 
-  * Date: 2026-05-14 (P9 release-infra wave; numbers re-pulled from
-    `silksurf-js/conformance/test262-scorecard.json` and the in-repo
-    copy at `docs/conformance/test262-scorecard.json`)
-  * Baseline date: 2026-05-14
+  * Date: 2026-05-15 (P5.S2 + P5.S3 wave; WPT synthetic harness +
+    h2spec scaffold landed. test262 numbers unchanged from 2026-05-14.)
+  * Baseline date: 2026-05-15
   * Reproducer: `scripts/conformance_run.sh`
 
 ## Harness summary
@@ -18,13 +17,13 @@
 |---------|--------|----------|-------------|
 | **test262** (lexer-only) | scaffolded | 157 of ~53 040 vendored .js files (numeric-literals subset) | 104 / 157 = 66.24 % at lexer level (2026-05-14 baseline). See `test262-scorecard.json` |
 | **TLS loader sanity** (silksurf-tls) | functional | 4 unit tests covering empty PEM, malformed PEM, default-host loader, root-store diagnostics | 4 / 4 pass |
-| **HTTP/2 (h2spec)** | scaffolded | external `h2spec` invocation flow documented; no in-tree HTTP/2 server harness yet | NOT YET MEASURED (P5.S3 -- needs local h2 server harness) |
-| **HTML / CSS WPT** | DEFERRED | web-platform-tests not vendored | NOT YET MEASURED (P5.S2) |
+| **HTTP/2 (h2spec)** | scaffolded | `scripts/run_h2spec.sh` driver + JSON scorecard schema; in-tree h2 server still pending | 0 / 0 (stub -- needs in-tree server or operator-supplied `SILKSURF_H2_HOST`). See `crates/silksurf-engine/conformance/h2spec-scorecard.json` |
+| **HTML / CSS WPT (synthetic)** | scaffolded | 16 in-tree fixtures exercising HTML structure, attributes, void elements, lists, tables, forms, scripts, anchors, entities, CSS class / id / type selectors | 9 / 7 / 0 (pass / fail / skip), 56.25 % @ 2026-05-15 baseline. See `crates/silksurf-engine/conformance/wpt-scorecard.json` |
 | **TLS 1.3 RFC 8446 vectors** | DELEGATED | rustls owns protocol-level conformance; silksurf-tls only owns the loader / config / extra-CA surface | NOT YET MEASURED in-tree; relies on upstream rustls test suite. A first-party vector harness is queued (P5.S4 follow-on) |
 | **OCSP stapling (RFC 6066)** | DEFERRED | not yet enforced in silksurf-net | NOT YET MEASURED (P5.S4) |
 | **HSTS (RFC 6797)** | DEFERRED | not yet enforced in silksurf-net | NOT YET MEASURED (P5.S4) |
 
-## Per-harness baseline (2026-05-14)
+## Per-harness baseline (2026-05-15)
 
 ### test262 (JS tokeniser)
 
@@ -37,20 +36,44 @@
   * Runner kind: `lexer` (does NOT parse, compile, or evaluate).
   * Upgrade path: VM-based evaluation, queued as P5 + P7.
 
-### HTML / CSS WPT
+### HTML / CSS WPT (synthetic)
 
-  * NOT YET MEASURED. WPT (web-platform-tests) is not vendored. Vendoring
-    is queued for P5.S2; it requires a subset selection (URL + Fetch +
-    Encoding first since they're bounded), a runner that mounts wpt via
-    silksurf-engine, and per-test browser-state isolation.
-  * Tracking: `silksurf-specification/SILKSURF-RUST-MIGRATION.md` (WPT row).
+  * 9 pass / 7 fail / 0 skip = 56.25 % across 16 in-tree fixtures.
+  * Reproducer:
+    ```sh
+    cargo run -p silksurf-engine --bin wpt_runner -- --verbose
+    ```
+  * Source: `crates/silksurf-engine/conformance/wpt-scorecard.json`.
+  * Fixture set: `crates/silksurf-engine/conformance/wpt/fixtures/`
+    (15+ self-contained HTML files; each has a hard-coded structural
+    check inside `wpt_runner.rs`).
+  * Scope: parser-only -- the runner does not lay out, paint, or run
+    JavaScript. It validates the produced DOM and (for three CSS
+    fixtures) selector matching against the parsed DOM.
+  * Known failures expose real silksurf-html gaps tracked in
+    `silksurf-specification/SILKSURF-RUST-MIGRATION.md`:
+    void-element handling (`<br>`, `<hr>`, `<img>` open scope they
+    should not), implicit body insertion when text appears inside
+    `<title>`, and subsequent `</body>` misclosure. These are baseline
+    failures, not test-runner bugs; they motivate the upgrade path
+    toward a spec-fidelity tree builder.
+  * Upgrade path: vendor a real WPT subset (URL + Fetch + Encoding
+    first) once the engine boots through the rendering pipeline end-to-
+    end; track in `silksurf-specification/SILKSURF-RUST-MIGRATION.md`.
 
 ### h2spec
 
-  * NOT YET MEASURED. We document how to invoke external `h2spec` against
-    a future in-tree HTTP/2 server (`silksurf-net`), but the server side
-    of that harness does not exist yet (queued P5.S3). Until it exists,
-    we cannot generate a numeric scoreboard.
+  * 0 / 0 stub. The driver script is in place; numbers will populate
+    once either the in-tree HTTP/2 server lands (preferred) or an
+    operator points the script at an external endpoint via
+    `SILKSURF_H2_HOST` for toolchain validation.
+  * Reproducer:
+    ```sh
+    scripts/run_h2spec.sh
+    ```
+  * Source: `crates/silksurf-engine/conformance/h2spec-scorecard.json`.
+  * Runbook: `docs/development/RUNBOOK-H2SPEC.md` (install h2spec,
+    pick a server target, interpret exit codes).
   * Tracking: `silksurf-specification/SILKSURF-RUST-MIGRATION.md`
     (HTTP/2 row).
 

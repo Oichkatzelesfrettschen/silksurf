@@ -57,17 +57,33 @@ run_h2spec() {
         echo "    install: https://github.com/summerwind/h2spec"
         return 0
     fi
-    echo "    h2spec invocation against silksurf-net::H2Client is queued in"
-    echo "    SNAZZY-WAFFLE P5.S3 (requires a local h2 server harness)."
-    echo "    Until that lands, point h2spec at any external HTTP/2 server"
-    echo "    you control to validate the tool installation:"
-    echo "        h2spec -h <hostname> -p 443 -t"
+    # Delegate to the dedicated driver. It writes the scorecard JSON
+    # itself, so we do not need to capture stdout. Exit 2 means "no
+    # server available" -- benign in the default workspace.
+    set +e
+    scripts/run_h2spec.sh
+    local rc=$?
+    set -e
+    case "$rc" in
+        0) ;;
+        2) echo "    no in-tree h2 server yet; skipping (set SILKSURF_H2_HOST to override)" ;;
+        *) echo "    h2spec driver exited $rc; see crates/silksurf-engine/conformance/h2spec-results.txt" ;;
+    esac
+}
+
+run_wpt() {
+    echo "==> wpt (synthetic in-tree subset)"
+    cargo build --release -p silksurf-engine --bin wpt_runner --quiet
+    ./target/release/wpt_runner \
+        --dir crates/silksurf-engine/conformance/wpt/fixtures \
+        --scorecard crates/silksurf-engine/conformance/wpt-scorecard.json \
+        || true
 }
 
 # Default: run everything available.
 TARGETS=("$@")
 if [ ${#TARGETS[@]} -eq 0 ]; then
-    TARGETS=(test262 tls h2spec)
+    TARGETS=(test262 tls h2spec wpt)
 fi
 
 for target in "${TARGETS[@]}"; do
@@ -75,10 +91,7 @@ for target in "${TARGETS[@]}"; do
         test262) run_test262 ;;
         tls)     run_tls ;;
         h2spec)  run_h2spec ;;
-        wpt)
-            echo "==> wpt: DEFERRED (web-platform-tests not vendored)."
-            echo "    Tracked in SNAZZY-WAFFLE roadmap P5.S2."
-            ;;
+        wpt)     run_wpt ;;
         *) echo "unknown target: $target" >&2; exit 1 ;;
     esac
 done
