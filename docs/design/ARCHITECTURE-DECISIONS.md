@@ -1143,6 +1143,107 @@ limitation is documented in `docs/design/THREAT-MODEL.md`.
 
 ---
 
+## AD-023: Unicode BiDi and Line-Breaking Crate Adoption
+
+**Status**: Adopted; full render-pipeline integration deferred to typography phase
+**Date**: 2026-05-14
+**Deciders**: Architecture Team
+**SNAZZY-WAFFLE stream**: P8.S3
+
+### Context
+
+SilkSurf already carries `unicode-segmentation` as a workspace dependency
+(used for grapheme-cluster-aware text measurement).  Correct inline layout
+also requires:
+
+  * **UAX #9** (Unicode Bidirectional Algorithm) -- determines the paragraph
+    embedding level and run directionality for mixed LTR/RTL text.
+  * **UAX #14** (Unicode Line Breaking Algorithm) -- determines the byte
+    positions where the layout engine may legally break a line of text.
+
+Without these two algorithms the engine can only handle left-to-right
+Latin text in a single line; all other cases produce incorrect results
+or crash.
+
+The Rust ecosystem provides two mature, minimal crates that implement
+exactly these two standards:
+
+  * `unicode-bidi` -- UAX #9, no unsafe, `#![no_std]`-compatible.
+  * `unicode-linebreak` -- UAX #14, generated from the Unicode data tables,
+    no unsafe.
+
+HarfBuzz (full text shaping, glyph-level layout) is a larger scope and
+is deferred to a future ADR once the font-loading pipeline exists.
+
+### Decision
+
+Adopt `unicode-bidi = "0.3"` and `unicode-linebreak = "0.1"` as
+workspace dependencies.  Wire them into `crates/silksurf-layout` via
+two public utility functions:
+
+  * `bidi_level(text: &str) -> u8` -- returns the UAX #9 paragraph
+    embedding level (0 = LTR, 1 = RTL).
+  * `linebreak_opportunities(text: &str) -> Vec<usize>` -- returns the
+    byte offsets of all Allowed and Mandatory break positions per UAX #14.
+
+These functions are the adoption boundary; they prevent the crates from
+being dead dependencies and define the interface that the render pipeline
+will call once full typography integration begins.
+
+### Rationale
+
+  * `unicode-segmentation` is already present; adding `unicode-bidi` and
+    `unicode-linebreak` completes the minimal i18n triad with no new
+    transitive dependencies of note.
+  * Both crates are pure Rust, `#![no_std]`-compatible, and have no unsafe
+    code -- consistent with the workspace's safety posture.
+  * Scoping adoption to two stub functions keeps the diff surgical and the
+    PR reviewable; it does not touch the hot render path yet.
+  * Deferring HarfBuzz avoids a C FFI dependency before the font pipeline
+    is ready.  A future ADR will cover that boundary.
+  * The stub functions give test coverage (three tests in
+    `crates/silksurf-layout/tests/typography.rs`) so the adoption is
+    verifiable from day one.
+
+### Consequences
+
+Positive:
+  * The workspace now officially supports UAX #9 and UAX #14; the scope
+    is visible to all contributors.
+  * `bidi_level` and `linebreak_opportunities` are stable entry points
+    for the typography phase; the render pipeline can call them without
+    importing the raw crates.
+  * Three integration tests act as a regression fence for the algorithms.
+
+Negative:
+  * Two additional crate dependencies increase compile time slightly
+    (measured at <1 s for a cold `cargo test -p silksurf-layout` build).
+  * Full bidirectional and line-breaking behaviour is not yet wired into
+    the render pipeline -- pages with RTL text or long lines will still
+    render incorrectly until the typography phase completes.
+
+### Alternatives Considered
+
+  * **Roll our own BiDi / line-break logic** -- rejected.  The Unicode
+    algorithms are large and subtle; bugs would be silent and hard to
+    detect.  The two crates are small, well-tested, and cleanroom.
+  * **Adopt HarfBuzz now** -- rejected.  HarfBuzz requires a font-loading
+    pipeline that does not exist yet.  Adding a large C dependency with
+    no call sites would be dead weight.
+  * **Defer entirely** -- rejected.  Deferring leaves the workspace without
+    any UAX #9 / #14 coverage and lets incorrect inline layout accumulate
+    callers that assume LTR-only behaviour.
+
+### See
+
+  * `crates/silksurf-layout/src/lib.rs` -- `bidi_level`, `linebreak_opportunities`
+  * `crates/silksurf-layout/tests/typography.rs` -- adoption tests
+  * `Cargo.toml` -- `unicode-bidi`, `unicode-linebreak` workspace entries
+  * AD-021 -- Internationalization Posture (Minimal Subset, ICU Deferred)
+  * SNAZZY-WAFFLE P8.S3 -- BiDi / line-break adoption stream
+
+---
+
 ## Decision Log
 
 | ID | Title | Status | Date | Impact |
@@ -1164,6 +1265,7 @@ limitation is documented in `docs/design/THREAT-MODEL.md`.
 | AD-020 | Workspace-Wide Canonical Error (SilkError) | Accepted | 2026-04-30 | High |
 | AD-021 | Internationalization Posture (Minimal Subset, ICU Deferred) | Accepted | 2026-05-14 | Medium |
 | AD-022 | Privacy and Site Isolation Skeleton (Deferred) | Accepted | 2026-05-14 | High |
+| AD-023 | Unicode BiDi and Line-Breaking Crate Adoption | Adopted | 2026-05-14 | Medium |
 
 ---
 

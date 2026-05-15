@@ -97,6 +97,47 @@ In rough sensitivity order:
      = MiMalloc;`. Reverting to the system allocator on Linux costs
      ~5-10% on small alloc churn.
 
+## Measuring Idle CPU
+
+`scripts/measure_idle_cpu.sh` samples `/proc/stat` twice with a 5-second
+sleep and computes the fraction of aggregate CPU ticks spent in the idle
+state during that window. It requires Linux (the `/proc/stat` interface)
+and POSIX `sh` + `awk` -- no Python or `bc` dependency.
+
+### Run the script alone
+
+```sh
+sh scripts/measure_idle_cpu.sh
+# example output: 0.9234
+```
+
+The output is a single float in `[0.0, 1.0]` written to stdout. 0.0 means
+the CPU was fully loaded throughout the window; 1.0 means it was fully idle.
+
+### Attach to a history record
+
+Pass the result directly to `append_history.py` using command substitution:
+
+```sh
+python3 perf/append_history.py \
+    --idle-cpu $(sh scripts/measure_idle_cpu.sh) \
+    --notes "nightly run"
+```
+
+The `--idle-cpu` argument is optional. Older records that lack it remain
+valid; the field is not listed under `required` in `perf/schema.json`.
+
+### Advisory note
+
+`idle_cpu_fraction` is a load-baseline indicator, not a direct energy
+measurement. Modern CPUs use frequency scaling (P-states, AMD CPPC, Intel
+Speed Shift): a CPU at 50 % idle but running at a boosted frequency can
+consume more power than a CPU at 10 % idle at a low frequency. Use the
+metric to flag runs taken under unexpected system load -- e.g. a background
+`cargo build` during a bench run -- rather than to draw conclusions about
+energy efficiency. For actual energy data use `perf stat -e power/energy-pkg/`
+(requires `CAP_PERFMON` or `perf_event_paranoid <= 0`).
+
 ## Reproduction caveat
 
 Benchmark numbers in `docs/PERFORMANCE.md` were taken on a specific

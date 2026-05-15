@@ -50,6 +50,10 @@ bytes = "1"
 http = "1"
 hickory-resolver = { version = "0.26.0-beta.3", features = ["dnssec-ring", "tokio"] }
 hickory-proto = { version = "0.26.0-beta.3", features = ["dnssec-ring"] }
+# UAX #9 and UAX #14 support (AD-023). unicode-segmentation is the
+# existing peer; bidi and linebreak complete the minimal i18n triad.
+unicode-bidi = "0.3"
+unicode-linebreak = "0.1"
 
 [profile.dev]
 opt-level = 1
