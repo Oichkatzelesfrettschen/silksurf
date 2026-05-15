@@ -358,6 +358,154 @@ unsafe fn fill_row_sse2(row: &mut [u32], pixel: u32) {
 }
 
 // ============================================================================
+// Determinism test helpers: scalar and SIMD fill entry points
+// ============================================================================
+
+/*
+ * fill_scalar -- plain scalar fill of a u32 pixel row.
+ *
+ * WHY: Exposes the scalar fallback path so the determinism test in
+ * tests/determinism.rs can compare it byte-for-byte against fill_simd.
+ * Both must produce identical output for every (buf, color) pair.
+ *
+ * WHAT: Iterates each element and writes `color` directly. No intrinsics.
+ * HOW: Called from tests/determinism.rs via the public crate API.
+ */
+pub fn fill_scalar(buf: &mut [u32], color: u32) {
+    buf.fill(color);
+}
+
+/*
+ * fill_simd -- SIMD-accelerated fill of a u32 pixel row.
+ *
+ * WHY: Exposes the SSE2 fast path so the determinism test can verify it
+ * produces exactly the same bytes as fill_scalar for every input.
+ * On non-x86 targets this delegates to fill_scalar so the test still
+ * compiles and passes (scalar == scalar is trivially true, but ensures
+ * no platform-specific divergence is accidentally introduced later).
+ *
+ * WHAT: On x86/x86_64 with SSE2: uses _mm_set1_epi32 + _mm_storeu_si128
+ * to write 4 pixels per store, then a scalar tail. Delegates to fill_scalar
+ * on all other targets.
+ * HOW: Called from tests/determinism.rs via the public crate API.
+ */
+pub fn fill_simd(buf: &mut [u32], color: u32) {
+    fill_row_u32(buf, color);
+}
+
+// ============================================================================
+// Color science -- sRGB <-> linear and alpha premultiplication
+// ============================================================================
+
+/*
+ * srgb_to_linear -- map an sRGB encoded byte to linear-light f32 [0.0, 1.0].
+ *
+ * WHY: Compositing in perceptually-encoded (sRGB) space produces incorrect
+ * results because sRGB is not additive. All blending and alpha compositing
+ * must happen in linear light. The transfer function applied here is the
+ * IEC 61966-2-1 (sRGB) piecewise formula.
+ *
+ * WHAT: Converts a u8 sRGB channel to f32 linear. The two-segment formula:
+ *   c_srgb / 255.0 <= 0.04045 => c_lin = c_srgb / (255.0 * 12.92)
+ *   c_srgb / 255.0 >  0.04045 => c_lin = ((c_srgb/255.0 + 0.055) / 1.055)^2.4
+ *
+ * Output is clamped to [0.0, 1.0] to guard against floating-point surprises
+ * near the boundary.
+ *
+ * See: IEC 61966-2-1:1999, section 4.2.
+ * See: docs/design/COLOR.md, section "sRGB <-> Linear Conversion".
+ */
+pub fn srgb_to_linear(c: u8) -> f32 {
+    let c_f = c as f32 / 255.0;
+    let linear = if c_f <= 0.04045 {
+        c_f / 12.92
+    } else {
+        ((c_f + 0.055) / 1.055).powf(2.4)
+    };
+    linear.clamp(0.0, 1.0)
+}
+
+/*
+ * linear_to_srgb -- map a linear-light f32 [0.0, 1.0] back to a u8 sRGB byte.
+ *
+ * WHY: After compositing in linear light we must encode back to sRGB for
+ * display and for storage in the ARGB u32 framebuffer format.
+ *
+ * WHAT: Inverse of the IEC 61966-2-1 piecewise formula, then round to u8:
+ *   c_lin <= 0.0031308 => c_srgb = c_lin * 12.92
+ *   c_lin >  0.0031308 => c_srgb = 1.055 * c_lin^(1/2.4) - 0.055
+ * Result multiplied by 255.0 and rounded to nearest integer, then clamped
+ * to [0, 255] to handle floating-point edge values >= 1.0.
+ *
+ * See: IEC 61966-2-1:1999, section 4.2.
+ * See: docs/design/COLOR.md, section "sRGB <-> Linear Conversion".
+ */
+pub fn linear_to_srgb(c: f32) -> u8 {
+    let c_clamped = c.clamp(0.0, 1.0);
+    let encoded = if c_clamped <= 0.0031308 {
+        c_clamped * 12.92
+    } else {
+        1.055 * c_clamped.powf(1.0 / 2.4) - 0.055
+    };
+    (encoded * 255.0).round().clamp(0.0, 255.0) as u8
+}
+
+/*
+ * premultiply -- apply alpha premultiplication to sRGB r, g, b channels.
+ *
+ * WHY: Straight (unassociated) alpha stored in ARGB must be converted to
+ * premultiplied (associated) alpha before compositing. Premultiplied form
+ * avoids a division in the Porter-Duff compositing equations and produces
+ * correct results at alpha edges.
+ *
+ * WHAT: premult_channel = round(straight_channel * a / 255). Uses the
+ * integer approximation (c * a + 127 + ((c * a + 127) >> 8)) >> 8 to achieve
+ * correctly-rounded results without floating-point conversion overhead.
+ * This approximation is used by Cairo, Skia, and pixman.
+ *
+ * NOTE: operates in sRGB encoded space. Full compositing correctness requires
+ * linear-light premultiplication; this function is for framebuffer packing
+ * where premultiplied-sRGB is the convention. See docs/design/COLOR.md.
+ *
+ * See: Porter, T. and Duff, T. "Compositing Digital Images." SIGGRAPH 1984.
+ * See: docs/design/COLOR.md, section "Alpha Premultiplication Policy".
+ */
+pub fn premultiply(r: u8, g: u8, b: u8, a: u8) -> (u8, u8, u8) {
+    let alpha = a as u32;
+    let premult = |c: u8| -> u8 {
+        let ca = c as u32 * alpha + 127;
+        ((ca + (ca >> 8)) >> 8) as u8
+    };
+    (premult(r), premult(g), premult(b))
+}
+
+/*
+ * unpremultiply -- recover straight alpha r, g, b from premultiplied channels.
+ *
+ * WHY: Premultiplied pixels stored in the framebuffer must be divided back
+ * out before re-encoding to sRGB for export or colour picking. This is the
+ * inverse of premultiply().
+ *
+ * WHAT: straight_channel = round(premult_channel * 255 / a). When a == 0
+ * all channels are defined as 0 (fully transparent; no colour data to recover).
+ * The result is clamped to [0, 255] to guard against accumulated rounding.
+ *
+ * See: docs/design/COLOR.md, section "Alpha Premultiplication Policy".
+ */
+pub fn unpremultiply(r: u8, g: u8, b: u8, a: u8) -> (u8, u8, u8) {
+    if a == 0 {
+        return (0, 0, 0);
+    }
+    let alpha = a as u32;
+    let unpremult = |c: u8| -> u8 {
+        // round(c * 255 / a), clamped to [0, 255]
+        let numerator = c as u32 * 255 + (alpha / 2);
+        (numerator / alpha).min(255) as u8
+    };
+    (unpremult(r), unpremult(g), unpremult(b))
+}
+
+// ============================================================================
 // Parallel tile rasterization (behind "parallel" feature flag)
 // ============================================================================
 

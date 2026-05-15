@@ -964,6 +964,185 @@ from the lint scope.
 
 ---
 
+## AD-021: Internationalization Posture -- Minimal Subset, ICU Deferred
+
+**Status**: Accepted
+**Date**: 2026-05-14
+**Deciders**: SNAZZY-WAFFLE roadmap (P8.S4)
+
+### Context
+
+Correct internationalization (i18n) in a browser engine spans grapheme
+clustering, Unicode normalization, bidirectional text (BiDi), collation,
+number/date/time formatting, and IDNA (Internationalized Domain Names in
+Applications).  Full ICU integration (icu4x or the system libicu) brings a
+large dependency surface (icu4x alone is ~30 crates; system libicu is a
+shared-library runtime dependency that varies by distribution).
+
+The workspace already depends on:
+
+  * `unicode-segmentation` -- grapheme cluster and word-boundary iteration
+    (transitive via `silksurf-css` and `silksurf-dom`).
+  * `url` -- RFC 3986 URL parsing with IDNA 2008 hostname processing via
+    the `idna` crate (version 1.1.0, transitive via `url`).
+
+### Decision
+
+Adopt the **minimal-subset** path for the P8 release:
+
+  1. Use `unicode-segmentation` for grapheme clustering wherever the engine
+     needs to count user-visible characters (e.g. text layout, cursor
+     positioning).  No new dep is introduced; the crate is already in the
+     workspace.
+
+  2. Rely on the `url` crate's built-in IDNA/Punycode handling for hostname
+     canonicalization.  The `url` crate calls into `idna 1.1.0` (already
+     in `Cargo.lock`) and produces ACE-encoded hostnames that survive
+     round-trips through the network stack without additional code.
+
+  3. Defer the following to a future ADR (target P10 or later):
+       * ICU collation (locale-sensitive string sorting)
+       * ICU number/date/time formatting (Intl.* JavaScript API surface)
+       * Full BiDi algorithm (Unicode TR9)
+       * Unicode normalization beyond what Rust's standard library covers
+       * icu4x integration
+
+### Rationale
+
+  * The minimal subset covers the engine's current hot paths (text layout,
+    hostname parsing, basic text comparison) with zero new dependencies.
+  * ICU integration is a multi-week effort; deferring it keeps P8 scope
+    manageable and avoids pulling a large transitive closure into the
+    workspace before the dependency vetting process (P9) runs.
+  * `unicode-segmentation` is MIT-licensed, audited, and tiny (~60 KB
+    compiled); there is no security argument for replacing it sooner.
+  * The `idna` crate (a dep of `url`) implements IDNA 2008 + UTS#46
+    mapping tables; replacing it with a bespoke implementation would be a
+    cleanroom violation and an unnecessary risk.
+
+### Consequences
+
+Positive: zero new deps; hostname round-trip correctness guaranteed by
+the existing `url` dep; grapheme cursor logic is correct for Latin and CJK
+scripts; P8 ships on time.
+
+Negative: `Intl.*` JS APIs are unimplemented (already documented in
+AD-005 as out of scope for Phase 1); full BiDi layout is absent (right-
+to-left rendering will be visually broken); locale-sensitive collation is
+absent (JS `Array.sort` with locale comparator degrades to byte order).
+
+### Future ADR Hook
+
+A follow-on ADR (target AD-025 or later) will evaluate icu4x vs system
+libicu at the point where `Intl.Collator`, `Intl.DateTimeFormat`, or RTL
+layout becomes a tracked gap rather than a known limitation.
+
+### See
+
+  * `crates/silksurf-net/tests/idn.rs` -- IDN/Punycode round-trip test
+  * AD-005 -- Test262 compliance target (Intl excluded from Phase 1)
+  * https://docs.rs/unicode-segmentation
+  * https://docs.rs/idna
+
+---
+
+## AD-022: Privacy and Site Isolation Skeleton -- Deferred
+
+**Status**: Accepted (skeleton only; implementation deferred)
+**Date**: 2026-05-14
+**Deciders**: SNAZZY-WAFFLE roadmap (P8.S9)
+
+### Context
+
+A production browser engine must address four interrelated privacy and
+security concerns before it can be trusted with user data:
+
+  1. **Cookie jar partitioning**: cookies scoped to (site, top-level-site)
+     tuples prevent cross-site tracking via cookies.
+  2. **Third-party storage partitioning**: localStorage, IndexedDB, and
+     Cache Storage must be partitioned per top-level origin so embedded
+     third-party frames cannot correlate user state across sites.
+  3. **Fingerprinting surface audit**: JS-visible APIs (canvas, AudioContext
+     timing, font enumeration, WebGL renderer string, navigator.*) expose
+     entropy that trackers aggregate into stable identifiers.
+  4. **Site isolation / process model**: running each site in a separate OS
+     process (or at minimum a separate sandboxed thread) limits the blast
+     radius of a compromised renderer.
+
+None of these are implemented in the current codebase.  The networking
+and storage layers are too immature to carry the partitioning semantics
+correctly; adding partial implementations now would create false confidence
+and debt that is harder to remove than absent code.
+
+### Decision
+
+Introduce a skeleton module (`crates/silksurf-engine/src/privacy.rs`) that
+reserves the API surface and documents the deferral.  The module exposes:
+
+  * `CookieJar` -- empty struct; implementation deferred (see below).
+  * `StoragePartition` -- empty struct; implementation deferred.
+  * `partition_key(origin: &str) -> String` -- placeholder that returns the
+    origin unchanged.  When partitioning is implemented, this function will
+    return a (site, top-level-site) key tuple serialised as a string.
+
+All four concerns are deferred:
+
+  * **Cookie jar partitioning**: deferred to the networking maturity phase
+    (P9+).  The `CookieJar` struct will acquire fields and methods when the
+    HTTP layer has a stable Set-Cookie parser and a session model.
+  * **Third-party storage partitioning**: deferred to the storage layer
+    (P10+).  No localStorage or IndexedDB implementation exists yet;
+    partitioning will be designed in when storage lands.
+  * **Fingerprinting surface audit**: deferred to P10.  A structured audit
+    requires a working JS engine with Intl and canvas; the audit will be
+    documented in `docs/design/THREAT-MODEL.md` once the surface exists.
+  * **Site isolation**: deferred to the process model ADR (future AD-012).
+    A multi-process architecture requires IPC design, sandbox integration
+    (seccomp/Landlock on Linux), and a shared-memory protocol for the
+    display list; none of these are in scope for P8.
+
+### Rationale
+
+  * Skeleton-first avoids the dual failure modes of (a) shipping nothing
+    and (b) shipping a partial implementation that gives false assurance.
+    The empty structs and TODO comments are honest: they say "this is where
+    the work belongs, it is not done yet."
+  * `partition_key` as a passthrough is the correct placeholder: callers
+    that use it today will get correct behaviour once the real implementation
+    lands, because all call sites already pass `origin` and the only change
+    will be the return value.
+  * Deferring fingerprinting audit to P10 matches the dependency on a
+    working JS engine; auditing non-existent APIs is not useful.
+
+### Consequences
+
+Positive: the module exists as a hook for P9/P10 work; the deferral is
+explicit and findable; no false assurance that privacy is implemented.
+
+Negative: the engine has no cookie isolation, no storage partitioning,
+no fingerprinting mitigations, and no process isolation.  It should not
+be used with untrusted web content until these are addressed.  This
+limitation is documented in `docs/design/THREAT-MODEL.md`.
+
+### Alternatives Considered
+
+  * Implement a basic in-memory `CookieJar` now -- rejected because without
+    a `SameSite` parser, a `Set-Cookie` tokenizer, and a session model, an
+    in-memory jar would be a leaky abstraction that callers would rely on
+    before it is safe.
+  * Skip the skeleton entirely -- rejected because then the deferral is
+    invisible; future contributors would have to rediscover that these APIs
+    are missing.
+
+### See
+
+  * `crates/silksurf-engine/src/privacy.rs` -- skeleton implementation
+  * `docs/design/THREAT-MODEL.md` -- fingerprinting gap, cookie gap
+  * AD-012 (future) -- Multi-Process Architecture / site isolation
+  * SNAZZY-WAFFLE P8.S9 -- Privacy/sandboxing stream
+
+---
+
 ## Decision Log
 
 | ID | Title | Status | Date | Impact |
@@ -983,6 +1162,8 @@ from the lint scope.
 | AD-018 | Persistent On-Disk Response Cache | Accepted | 2026-04-30 | Medium |
 | AD-019 | tls-probe as Supported Diagnostic Surface | Accepted | 2026-04-30 | Medium |
 | AD-020 | Workspace-Wide Canonical Error (SilkError) | Accepted | 2026-04-30 | High |
+| AD-021 | Internationalization Posture (Minimal Subset, ICU Deferred) | Accepted | 2026-05-14 | Medium |
+| AD-022 | Privacy and Site Isolation Skeleton (Deferred) | Accepted | 2026-05-14 | High |
 
 ---
 
