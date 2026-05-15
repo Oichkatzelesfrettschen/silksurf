@@ -1,6 +1,6 @@
 //! JSON object (parse, stringify)
 //!
-//! Uses serde_json for parsing/serialization -- battle-tested, SIMD-friendly
+//! Uses `serde_json` for parsing/serialization -- battle-tested, SIMD-friendly
 //! internal scanner, and zero-copy string handling where possible.
 
 use std::cell::RefCell;
@@ -60,7 +60,8 @@ fn json_stringify(args: &[Value]) -> Value {
     Value::string_owned(result)
 }
 
-/// Convert serde_json::Value -> JS Value (public for use by fetch).
+/// Convert `serde_json::Value` -> JS Value (public for use by fetch).
+#[must_use]
 pub fn serde_to_js_public(val: &serde_json::Value) -> Value {
     serde_to_js(val)
 }
@@ -89,7 +90,7 @@ fn serde_to_js(val: &serde_json::Value) -> Value {
             {
                 let mut o = obj_rc.borrow_mut();
                 for (key, val) in map {
-                    o.set_by_key(PropertyKey::from_str(key), serde_to_js(val));
+                    o.set_by_key(PropertyKey::string_key(key), serde_to_js(val));
                 }
             }
             Value::Object(obj_rc)
@@ -97,7 +98,7 @@ fn serde_to_js(val: &serde_json::Value) -> Value {
     }
 }
 
-/// Convert JS Value -> serde_json::Value
+/// Convert JS Value -> `serde_json::Value`
 fn js_to_serde(val: &Value) -> serde_json::Value {
     match val {
         Value::Undefined | Value::Function(_) | Value::NativeFunction(_) | Value::HostObject(_) => {
@@ -108,8 +109,7 @@ fn js_to_serde(val: &Value) -> serde_json::Value {
         Value::Number(n) => {
             if n.is_finite() {
                 serde_json::Number::from_f64(*n)
-                    .map(serde_json::Value::Number)
-                    .unwrap_or(serde_json::Value::Null)
+                    .map_or(serde_json::Value::Null, serde_json::Value::Number)
             } else {
                 serde_json::Value::Null
             }
@@ -131,10 +131,10 @@ fn js_to_serde(val: &Value) -> serde_json::Value {
             } else {
                 let mut map = serde_json::Map::new();
                 for (key, val) in &o.properties {
-                    if let PropertyKey::String(s) = key {
-                        if let Some(name) = s.as_str() {
-                            map.insert(name.to_string(), js_to_serde(val));
-                        }
+                    if let PropertyKey::String(s) = key
+                        && let Some(name) = s.as_str()
+                    {
+                        map.insert(name.to_string(), js_to_serde(val));
                     }
                 }
                 serde_json::Value::Object(map)

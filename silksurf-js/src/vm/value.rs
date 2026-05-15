@@ -33,6 +33,12 @@ use std::rc::Rc;
 use super::host::HostObjectRef;
 use super::string::JsString;
 
+/// Boxed native function body: `args -> result`.
+///
+/// WHY: `Box<dyn Fn(&[Value]) -> Value>` is complex enough to trigger
+/// `clippy::type_complexity`.  Aliasing it keeps struct fields readable.
+pub type NativeFnBody = Box<dyn Fn(&[Value]) -> Value>;
+
 /// Property key for object properties (string or symbol).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PropertyKey {
@@ -44,16 +50,19 @@ pub enum PropertyKey {
 
 impl PropertyKey {
     /// Create a string property key.
-    pub fn from_str(s: &str) -> Self {
+    #[must_use]
+    pub fn string_key(s: &str) -> Self {
         PropertyKey::String(Rc::new(JsString::new(s)))
     }
 
     /// Create from an integer index.
+    #[must_use]
     pub fn from_index(idx: u32) -> Self {
         PropertyKey::Index(idx)
     }
 
     /// Try to convert to a string representation.
+    #[must_use]
     pub fn as_str(&self) -> Option<&str> {
         match self {
             PropertyKey::String(s) => s.as_str(),
@@ -186,7 +195,7 @@ impl Value {
 
     /// `ToInt32` conversion per ECMA-262 7.1.6.
     ///
-    /// Uses num-traits FloatCore for correct modulo arithmetic on f64,
+    /// Uses num-traits `FloatCore` for correct modulo arithmetic on f64,
     /// handling -0.0, large magnitudes, and sign preservation per spec.
     #[must_use]
     pub fn to_i32(&self) -> i32 {
@@ -275,12 +284,11 @@ impl Value {
     pub fn type_of(&self) -> &'static str {
         match self {
             Value::Undefined => "undefined",
-            Value::Null | Value::Object(_) => "object",
+            Value::Null | Value::Object(_) | Value::HostObject(_) => "object",
             Value::Boolean(_) => "boolean",
             Value::Number(_) => "number",
             Value::String(_) => "string",
             Value::Function(_) | Value::NativeFunction(_) => "function",
-            Value::HostObject(_) => "object",
         }
     }
 }
@@ -288,7 +296,7 @@ impl Value {
 /// Simple object representation with string-keyed properties.
 #[derive(Debug)]
 pub struct Object {
-    /// Properties indexed by PropertyKey
+    /// Properties indexed by `PropertyKey`
     pub properties: HashMap<PropertyKey, Value>,
     /// Prototype (for prototype chain)
     pub prototype: Option<Rc<RefCell<Object>>>,
@@ -304,7 +312,7 @@ impl Object {
         }
     }
 
-    /// Get property by PropertyKey
+    /// Get property by `PropertyKey`
     #[must_use]
     pub fn get_by_key(&self, key: &PropertyKey) -> Value {
         if let Some(val) = self.properties.get(key) {
@@ -321,10 +329,10 @@ impl Object {
     pub fn get_by_str(&self, name: &str) -> Value {
         // Check own properties by iterating (since we match on string content)
         for (key, val) in &self.properties {
-            if let PropertyKey::String(s) = key {
-                if s.as_str() == Some(name) {
-                    return val.clone();
-                }
+            if let PropertyKey::String(s) = key
+                && s.as_str() == Some(name)
+            {
+                return val.clone();
             }
         }
         if let Some(ref proto) = self.prototype {
@@ -340,14 +348,14 @@ impl Object {
         self.get_by_key(&PropertyKey::Index(key))
     }
 
-    /// Set property by PropertyKey
+    /// Set property by `PropertyKey`
     pub fn set_by_key(&mut self, key: PropertyKey, value: Value) {
         self.properties.insert(key, value);
     }
 
     /// Set property by string name
     pub fn set_by_str(&mut self, name: &str, value: Value) {
-        self.set_by_key(PropertyKey::from_str(name), value);
+        self.set_by_key(PropertyKey::string_key(name), value);
     }
 
     /// Set property by integer index (backward compat)
@@ -367,7 +375,7 @@ pub struct NativeFunction {
     /// Function name
     pub name: String,
     /// Implementation
-    pub func: Box<dyn Fn(&[Value]) -> Value>,
+    pub func: NativeFnBody,
 }
 
 impl NativeFunction {
@@ -380,6 +388,7 @@ impl NativeFunction {
     }
 
     /// Call the native function.
+    #[must_use]
     pub fn call(&self, args: &[Value]) -> Value {
         (self.func)(args)
     }
@@ -435,15 +444,15 @@ mod tests {
 
     #[test]
     fn test_to_number() {
-        assert_eq!(Value::Null.to_number(), 0.0);
+        assert!((Value::Null.to_number() - 0.0).abs() < f64::EPSILON);
         assert!(Value::Undefined.to_number().is_nan());
-        assert_eq!(Value::Boolean(true).to_number(), 1.0);
-        assert_eq!(Value::Boolean(false).to_number(), 0.0);
-        assert_eq!(Value::Number(42.0).to_number(), 42.0);
+        assert!((Value::Boolean(true).to_number() - 1.0).abs() < f64::EPSILON);
+        assert!((Value::Boolean(false).to_number() - 0.0).abs() < f64::EPSILON);
+        assert!((Value::Number(42.0).to_number() - 42.0).abs() < f64::EPSILON);
         // String to number
-        assert_eq!(Value::string("42").to_number(), 42.0);
-        assert_eq!(Value::string("  3.14  ").to_number(), 3.14);
-        assert_eq!(Value::string("").to_number(), 0.0);
+        assert!((Value::string("42").to_number() - 42.0).abs() < f64::EPSILON);
+        assert!((Value::string("  1.23  ").to_number() - 1.23).abs() < f64::EPSILON);
+        assert!((Value::string("").to_number() - 0.0).abs() < f64::EPSILON);
         assert!(Value::string("abc").to_number().is_nan());
     }
 
@@ -479,7 +488,7 @@ mod tests {
         assert_eq!(Value::Null.to_js_string().as_str(), Some("null"));
         assert_eq!(Value::Boolean(true).to_js_string().as_str(), Some("true"));
         assert_eq!(Value::Number(42.0).to_js_string().as_str(), Some("42"));
-        assert_eq!(Value::Number(3.14).to_js_string().as_str(), Some("3.14"));
+        assert_eq!(Value::Number(1.23).to_js_string().as_str(), Some("1.23"));
         assert_eq!(
             Value::string("hello").to_js_string().as_str(),
             Some("hello")
@@ -488,8 +497,8 @@ mod tests {
 
     #[test]
     fn test_property_key() {
-        let key1 = PropertyKey::from_str("name");
-        let key2 = PropertyKey::from_str("name");
+        let key1 = PropertyKey::string_key("name");
+        let key2 = PropertyKey::string_key("name");
         assert_eq!(key1, key2);
 
         let mut obj = Object::new();

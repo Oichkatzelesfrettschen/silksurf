@@ -2,11 +2,11 @@
 //! requestAnimationFrame, cancelAnimationFrame, queueMicrotask
 //!
 //! These are installed on the global object but need access to the VM's
-//! timer queue and microtask queue. Since NativeFunction closures can't
-//! borrow the VM, we use shared Rc<RefCell<>> references to the queues.
+//! timer queue and microtask queue. Since `NativeFunction` closures can't
+//! borrow the VM, we use shared Rc<`RefCell`<>> references to the queues.
 //!
 //! The actual timer/microtask queues live on the Vm struct. These builtins
-//! are wired up via Vm::install_timer_builtins() after Vm::new().
+//! are wired up via `Vm::install_timer_builtins()` after `Vm::new()`.
 
 use super::native_fn;
 use crate::vm::value::{Object, Value};
@@ -24,7 +24,9 @@ pub fn install(global: &mut Object) {
         native_fn("setTimeout", |args| {
             // Return a dummy timer ID; actual scheduling happens in event loop
             let _callback = args.first().cloned();
-            let _delay = args.get(1).map_or(0.0, |v| v.to_number());
+            let _delay = args
+                .get(1)
+                .map_or(0.0, super::super::value::Value::to_number);
             Value::Number(0.0) // Placeholder ID
         }),
     );
@@ -33,7 +35,9 @@ pub fn install(global: &mut Object) {
         "setInterval",
         native_fn("setInterval", |args| {
             let _callback = args.first().cloned();
-            let _interval = args.get(1).map_or(0.0, |v| v.to_number());
+            let _interval = args
+                .get(1)
+                .map_or(0.0, super::super::value::Value::to_number);
             Value::Number(0.0)
         }),
     );

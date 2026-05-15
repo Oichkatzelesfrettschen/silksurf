@@ -1,4 +1,4 @@
-//! Element HostObject -- exposes DOM elements to JavaScript.
+//! Element `HostObject` -- exposes DOM elements to JavaScript.
 //!
 //! Provides: appendChild, removeChild, insertBefore, setAttribute,
 //! getAttribute, className, classList, textContent, children, parentNode,
@@ -16,7 +16,7 @@ use crate::vm::builtins::array::create_array;
 use crate::vm::host::{HostObject, HostObjectRef, make_host_object};
 use crate::vm::value::{NativeFunction, Value};
 
-/// JS Element object backed by a NodeId + shared Dom reference.
+/// JS Element object backed by a `NodeId` + shared Dom reference.
 pub struct ElementHost {
     dom: SharedDom,
     node_id: NodeId,
@@ -47,6 +47,7 @@ impl ElementHost {
         }
     }
 
+    #[must_use]
     pub fn node_id(&self) -> NodeId {
         self.node_id
     }
@@ -69,20 +70,16 @@ impl HostObject for ElementHost {
                 dom.element_name(nid)
                     .ok()
                     .flatten()
-                    .map(|n| Value::string(&n.to_ascii_uppercase()))
-                    .unwrap_or(Value::Undefined)
+                    .map_or(Value::Undefined, |n| Value::string(&n.to_ascii_uppercase()))
             }
             "id" => {
                 let dom = dom_ref.borrow();
-                get_attribute_value(&dom, nid, "id")
-                    .map(Value::string_owned)
-                    .unwrap_or(Value::string(""))
+                get_attribute_value(&dom, nid, "id").map_or(Value::string(""), Value::string_owned)
             }
             "className" => {
                 let dom = dom_ref.borrow();
                 get_attribute_value(&dom, nid, "class")
-                    .map(Value::string_owned)
-                    .unwrap_or(Value::string(""))
+                    .map_or(Value::string(""), Value::string_owned)
             }
             "textContent" => {
                 let dom = dom_ref.borrow();
@@ -103,51 +100,46 @@ impl HostObject for ElementHost {
                             .collect()
                     })
                     .unwrap_or_default();
-                create_array(children)
+                create_array(&children)
             }
             "firstChild" | "firstElementChild" => {
                 let dom = dom_ref.borrow();
                 dom.first_child(nid)
                     .ok()
                     .flatten()
-                    .map(|child| node_to_js_value(dom_ref, child))
-                    .unwrap_or(Value::Null)
+                    .map_or(Value::Null, |child| node_to_js_value(dom_ref, child))
             }
             "lastChild" | "lastElementChild" => {
                 let dom = dom_ref.borrow();
                 dom.last_child(nid)
                     .ok()
                     .flatten()
-                    .map(|child| node_to_js_value(dom_ref, child))
-                    .unwrap_or(Value::Null)
+                    .map_or(Value::Null, |child| node_to_js_value(dom_ref, child))
             }
             "parentNode" | "parentElement" => {
                 let dom = dom_ref.borrow();
                 dom.parent(nid)
                     .ok()
                     .flatten()
-                    .map(|parent| node_to_js_value(dom_ref, parent))
-                    .unwrap_or(Value::Null)
+                    .map_or(Value::Null, |parent| node_to_js_value(dom_ref, parent))
             }
             "nextSibling" | "nextElementSibling" => {
                 let dom = dom_ref.borrow();
                 dom.next_sibling(nid)
                     .ok()
                     .flatten()
-                    .map(|sib| node_to_js_value(dom_ref, sib))
-                    .unwrap_or(Value::Null)
+                    .map_or(Value::Null, |sib| node_to_js_value(dom_ref, sib))
             }
             "previousSibling" | "previousElementSibling" => {
                 let dom = dom_ref.borrow();
                 dom.previous_sibling(nid)
                     .ok()
                     .flatten()
-                    .map(|sib| node_to_js_value(dom_ref, sib))
-                    .unwrap_or(Value::Null)
+                    .map_or(Value::Null, |sib| node_to_js_value(dom_ref, sib))
             }
             "nodeType" => {
                 let dom = dom_ref.borrow();
-                let t = match dom.node(nid).ok().map(|n| n.kind()) {
+                let t = match dom.node(nid).ok().map(silksurf_dom::Node::kind) {
                     Some(NodeKind::Element { .. }) => 1,
                     Some(NodeKind::Text { .. }) => 3,
                     Some(NodeKind::Comment { .. }) => 8,
@@ -236,15 +228,12 @@ impl HostObject for ElementHost {
                         .unwrap_or_default();
                     let dom_borrow = dom.borrow();
                     get_attribute_value(&dom_borrow, node, &attr_name)
-                        .map(Value::string_owned)
-                        .unwrap_or(Value::Null)
+                        .map_or(Value::Null, Value::string_owned)
                 })))
             }
             "classList" => {
                 // Return a simple object with add/remove/toggle/contains
-                let dom = Rc::clone(dom_ref);
-                let node = nid;
-                make_class_list(dom, node)
+                make_class_list(dom_ref, nid)
             }
             /*
              * data / nodeValue -- raw text content of Text and Comment nodes.
@@ -253,9 +242,11 @@ impl HostObject for ElementHost {
              */
             "data" | "nodeValue" => {
                 let dom = dom_ref.borrow();
-                match dom.node(nid).ok().map(|n| n.kind()) {
+                match dom.node(nid).ok().map(silksurf_dom::Node::kind) {
                     Some(NodeKind::Text { text }) => Value::string_owned(text.clone()),
-                    Some(NodeKind::Comment { data }) => Value::string_owned(data.clone()),
+                    Some(NodeKind::Comment { data: comment_text }) => {
+                        Value::string_owned(comment_text.clone())
+                    }
                     _ => Value::Null,
                 }
             }
@@ -364,9 +355,7 @@ impl HostObject for ElementHost {
                     let dom_borrow = dom.borrow();
                     let result = find_first_matching_pub(&dom_borrow, root, &selector);
                     drop(dom_borrow);
-                    result
-                        .map(|n| node_to_js_value(&dom, n))
-                        .unwrap_or(Value::Null)
+                    result.map_or(Value::Null, |n| node_to_js_value(&dom, n))
                 })))
             }
             _ => Value::Undefined,
@@ -418,7 +407,7 @@ impl HostObject for ElementHost {
         }
     }
 
-    fn class_name(&self) -> &str {
+    fn class_name(&self) -> &'static str {
         "HTMLElement"
     }
 
@@ -431,7 +420,7 @@ impl HostObject for ElementHost {
     }
 }
 
-/// Extract NodeId from a HostObject Value (if it's an ElementHost).
+/// Extract `NodeId` from a `HostObject` Value (if it's an `ElementHost`).
 fn extract_node_id(val: Option<&Value>) -> Option<NodeId> {
     match val? {
         Value::HostObject(host) => {
@@ -439,7 +428,7 @@ fn extract_node_id(val: Option<&Value>) -> Option<NodeId> {
             borrowed
                 .as_any()
                 .downcast_ref::<ElementHost>()
-                .map(|e| e.node_id())
+                .map(ElementHost::node_id)
         }
         _ => None,
     }
@@ -457,10 +446,10 @@ fn get_attribute_value(dom: &Dom, node: NodeId, name: &str) -> Option<String> {
 
 /// Collect text content recursively.
 fn collect_text(dom: &Dom, node: NodeId, result: &mut String) {
-    if let Ok(n) = dom.node(node) {
-        if let NodeKind::Text { text } = n.kind() {
-            result.push_str(text);
-        }
+    if let Ok(n) = dom.node(node)
+        && let NodeKind::Text { text } = n.kind()
+    {
+        result.push_str(text);
     }
     if let Ok(children) = dom.children(node) {
         for &child in children {
@@ -505,8 +494,7 @@ impl HostObject for StyleHost {
     fn get_property(&self, name: &str) -> Value {
         self.props
             .get(name)
-            .map(|v| Value::string_owned(v.clone()))
-            .unwrap_or_else(|| Value::string(""))
+            .map_or_else(|| Value::string(""), |v| Value::string_owned(v.clone()))
     }
 
     fn set_property(&mut self, name: &str, value: Value) -> bool {
@@ -516,7 +504,7 @@ impl HostObject for StyleHost {
         true
     }
 
-    fn class_name(&self) -> &str {
+    fn class_name(&self) -> &'static str {
         "CSSStyleDeclaration"
     }
 
@@ -559,8 +547,7 @@ impl HostObject for DatasetHost {
         let attr_name = format!("data-{}", camel_to_kebab(name));
         let dom = self.dom.borrow();
         get_attribute_value(&dom, self.node, &attr_name)
-            .map(Value::string_owned)
-            .unwrap_or(Value::Undefined)
+            .map_or(Value::Undefined, Value::string_owned)
     }
 
     fn set_property(&mut self, name: &str, value: Value) -> bool {
@@ -574,7 +561,7 @@ impl HostObject for DatasetHost {
         true
     }
 
-    fn class_name(&self) -> &str {
+    fn class_name(&self) -> &'static str {
         "DOMStringMap"
     }
 
@@ -603,13 +590,13 @@ fn camel_to_kebab(s: &str) -> String {
 }
 
 /// Create a classList object with add/remove/toggle/contains methods.
-fn make_class_list(dom: SharedDom, node: NodeId) -> Value {
+fn make_class_list(dom: &SharedDom, node: NodeId) -> Value {
     use crate::vm::value::{Object, PropertyKey};
 
     let obj = Object::new();
     let obj_rc = Rc::new(RefCell::new(obj));
 
-    let dom_add = Rc::clone(&dom);
+    let dom_add = Rc::clone(dom);
     let add_fn = Value::NativeFunction(Rc::new(NativeFunction::new("add", move |args| {
         for arg in args {
             let cls = arg.to_js_string();
@@ -631,7 +618,7 @@ fn make_class_list(dom: SharedDom, node: NodeId) -> Value {
         Value::Undefined
     })));
 
-    let dom_remove = Rc::clone(&dom);
+    let dom_remove = Rc::clone(dom);
     let remove_fn = Value::NativeFunction(Rc::new(NativeFunction::new("remove", move |args| {
         for arg in args {
             let cls = arg.to_js_string();
@@ -647,7 +634,7 @@ fn make_class_list(dom: SharedDom, node: NodeId) -> Value {
         Value::Undefined
     })));
 
-    let dom_toggle = Rc::clone(&dom);
+    let dom_toggle = Rc::clone(dom);
     let toggle_fn = Value::NativeFunction(Rc::new(NativeFunction::new("toggle", move |args| {
         let cls = args
             .first()
@@ -674,7 +661,7 @@ fn make_class_list(dom: SharedDom, node: NodeId) -> Value {
         }
     })));
 
-    let dom_contains = Rc::clone(&dom);
+    let dom_contains = Rc::clone(dom);
     let contains_fn =
         Value::NativeFunction(Rc::new(NativeFunction::new("contains", move |args| {
             let cls = args
@@ -691,10 +678,10 @@ fn make_class_list(dom: SharedDom, node: NodeId) -> Value {
 
     {
         let mut o = obj_rc.borrow_mut();
-        o.set_by_key(PropertyKey::from_str("add"), add_fn);
-        o.set_by_key(PropertyKey::from_str("remove"), remove_fn);
-        o.set_by_key(PropertyKey::from_str("toggle"), toggle_fn);
-        o.set_by_key(PropertyKey::from_str("contains"), contains_fn);
+        o.set_by_key(PropertyKey::string_key("add"), add_fn);
+        o.set_by_key(PropertyKey::string_key("remove"), remove_fn);
+        o.set_by_key(PropertyKey::string_key("toggle"), toggle_fn);
+        o.set_by_key(PropertyKey::string_key("contains"), contains_fn);
     }
 
     Value::Object(obj_rc)

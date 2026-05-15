@@ -1,4 +1,4 @@
-//! Event loop integration for the SilkSurf JS runtime.
+//! Event loop integration for the `SilkSurf` JS runtime.
 //!
 //! The event loop orchestrates:
 //! 1. XCB event polling (mouse, keyboard, window events)
@@ -76,21 +76,22 @@ pub fn tick(timers: &mut TimerQueue, microtasks: &mut MicrotaskQueue) -> TickRes
     }
 }
 
-/// Execute a callback value (NativeFunction only for now).
+/// Execute a callback value (`NativeFunction` only for now).
 fn execute_callback(callback: &Value) {
     if let Value::NativeFunction(func) = callback {
-        func.call(&[]);
+        let _ = func.call(&[]);
     }
 }
 
 /// Execute a callback with arguments.
 fn execute_callback_with_args(callback: &Value, args: &[Value]) {
     if let Value::NativeFunction(func) = callback {
-        func.call(args);
+        let _ = func.call(args);
     }
 }
 
 /// Check if the event loop has any pending work.
+#[must_use]
 pub fn has_pending_work(timers: &TimerQueue, microtasks: &MicrotaskQueue) -> bool {
     timers.has_pending() || !microtasks.is_empty()
 }

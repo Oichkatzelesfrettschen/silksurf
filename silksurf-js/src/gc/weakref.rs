@@ -135,14 +135,14 @@ impl WeakTable {
 
     /// Remove a weak reference
     pub fn unregister(&mut self, id: u64) {
-        if let Some(entry) = self.entries.remove(&id) {
-            if let Some(target) = entry.target {
-                let target_ptr = target.as_ptr() as usize;
-                if let Some(ids) = self.target_index.get_mut(&target_ptr) {
-                    ids.retain(|&i| i != id);
-                    if ids.is_empty() {
-                        self.target_index.remove(&target_ptr);
-                    }
+        if let Some(entry) = self.entries.remove(&id)
+            && let Some(target) = entry.target
+        {
+            let target_ptr = target.as_ptr() as usize;
+            if let Some(ids) = self.target_index.get_mut(&target_ptr) {
+                ids.retain(|&i| i != id);
+                if ids.is_empty() {
+                    self.target_index.remove(&target_ptr);
                 }
             }
         }
@@ -380,12 +380,12 @@ impl FinalizationRegistry {
                 held_values.push(entry.take_held_value());
 
                 // Clean up token index
-                if let Some(token) = entry.unregister_token {
-                    if let Some(token_ids) = self.token_index.get_mut(&token.id()) {
-                        token_ids.retain(|&i| i != id);
-                        if token_ids.is_empty() {
-                            self.token_index.remove(&token.id());
-                        }
+                if let Some(token) = entry.unregister_token
+                    && let Some(token_ids) = self.token_index.get_mut(&token.id())
+                {
+                    token_ids.retain(|&i| i != id);
+                    if token_ids.is_empty() {
+                        self.token_index.remove(&token.id());
                     }
                 }
             }

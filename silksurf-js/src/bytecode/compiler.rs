@@ -37,6 +37,9 @@ impl CompileError {
 /// Result type for compilation
 pub type CompileResult<T> = Result<T, CompileError>;
 
+/// Output of `compile_with_children`: main chunk, child function chunks, and interned string pool.
+pub type CompileOutput = (Chunk, Vec<Chunk>, Vec<(u32, String)>);
+
 /// Variable binding in the scope
 #[derive(Debug, Clone)]
 struct Binding {
@@ -82,7 +85,7 @@ pub struct Compiler<'src, 'arena> {
     /// Child chunks for nested function expressions / arrow functions
     child_chunks: Vec<Chunk>,
     /// String intern table for property names and identifiers.
-    /// Maps string content -> u32 index in the VM's StringTable.
+    /// Maps string content -> u32 index in the VM's `StringTable`.
     string_pool: HashMap<String, u32>,
     next_string_id: u32,
     scopes: Vec<Scope>,
@@ -167,13 +170,13 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
     }
 
     /// Get child chunks (function bodies) produced during compilation.
-    /// Must be called after compile() on a second Compiler instance,
-    /// or via compile_with_children().
-    /// Compile and return (main_chunk, child_chunks, string_pool).
+    /// Must be called after `compile()` on a second Compiler instance,
+    /// or via `compile_with_children()`.
+    /// Compile and return (`main_chunk`, `child_chunks`, `string_pool`).
     pub fn compile_with_children(
         mut self,
         program: &Program<'src, 'arena>,
-    ) -> CompileResult<(Chunk, Vec<Chunk>, Vec<(u32, String)>)> {
+    ) -> CompileResult<CompileOutput> {
         self.check_strict_directive(program);
         self.collect_declarations(program.body);
 
@@ -246,7 +249,8 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
         }
     }
 
-    /// Get the string pool for loading into the VM's StringTable.
+    /// Get the string pool for loading into the VM's `StringTable`.
+    #[must_use]
     pub fn get_string_pool(&self) -> Vec<(u32, String)> {
         self.string_pool
             .iter()
@@ -255,12 +259,11 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
     }
 
     fn check_strict_directive(&mut self, program: &Program<'src, 'arena>) {
-        if let Some(Statement::Expression(expr_stmt)) = program.body.first() {
-            if let Expression::Literal(Literal::String(s)) = expr_stmt.expression {
-                if s.value == "use strict" {
-                    self.strict = true;
-                }
-            }
+        if let Some(Statement::Expression(expr_stmt)) = program.body.first()
+            && let Expression::Literal(Literal::String(s)) = expr_stmt.expression
+            && s.value == "use strict"
+        {
+            self.strict = true;
         }
     }
 
@@ -279,10 +282,10 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 // Hoist function declarations: pre-allocate their slots so the
                 // function is available before its textual position.
                 Statement::FunctionDeclaration(func) => {
-                    if let Some(ref id) = func.id {
-                        if self.lookup_var(id.name).is_none() {
-                            self.declare_var(id.name, VariableKind::Var, false);
-                        }
+                    if let Some(ref id) = func.id
+                        && self.lookup_var(id.name).is_none()
+                    {
+                        self.declare_var(id.name, VariableKind::Var, false);
                     }
                 }
                 _ => {}
@@ -687,14 +690,23 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                     let func_idx = base_offset + n_nested;
                     self.child_chunks.push(child_chunk);
                     let const_idx = self.chunk.add_constant(Constant::Function(func_idx));
-                    let tmp = self.alloc_register();
-                    self.emit(Instruction::new_ri(Opcode::NewFunction, tmp.0, const_idx));
+                    let func_reg = self.alloc_register();
+                    self.emit(Instruction::new_ri(
+                        Opcode::NewFunction,
+                        func_reg.0,
+                        const_idx,
+                    ));
                     // Store into the pre-hoisted slot
                     if let Some((depth, slot)) = self.lookup_var(id.name) {
                         if depth == 0 {
-                            self.emit(Instruction::new_rr(Opcode::SetLocal, slot, tmp.0));
+                            self.emit(Instruction::new_rr(Opcode::SetLocal, slot, func_reg.0));
                         } else {
-                            self.emit(Instruction::new_rrr(Opcode::SetCapture, depth, slot, tmp.0));
+                            self.emit(Instruction::new_rrr(
+                                Opcode::SetCapture,
+                                depth,
+                                slot,
+                                func_reg.0,
+                            ));
                         }
                     }
                 }
@@ -813,7 +825,7 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                             self.emit(Instruction::new_ri(Opcode::SetGlobal, val_reg.0, const_idx));
                         }
                     }
-                    _ => {}
+                    ForInLeft::Pattern(_) => {}
                 }
 
                 // Compile body
@@ -975,7 +987,7 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                             self.emit(Instruction::new_ri(Opcode::SetGlobal, val_reg.0, const_idx));
                         }
                     }
-                    _ => {}
+                    ForInLeft::Pattern(_) => {}
                 }
 
                 let continue_target = self.current_offset();
@@ -1065,13 +1077,12 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                         } => {
                             let prop_reg = self.alloc_register();
                             if *computed {
-                                let key_reg = match key {
-                                    PropertyKey::Computed(expr) => self.compile_expression(expr)?,
-                                    _ => {
-                                        let r = self.alloc_register();
-                                        self.emit(Instruction::new_r(Opcode::LoadUndefined, r.0));
-                                        r
-                                    }
+                                let key_reg = if let PropertyKey::Computed(expr) = key {
+                                    self.compile_expression(expr)?
+                                } else {
+                                    let r = self.alloc_register();
+                                    self.emit(Instruction::new_r(Opcode::LoadUndefined, r.0));
+                                    r
                                 };
                                 self.emit(Instruction::new_rrr(
                                     Opcode::GetElem,
@@ -1180,20 +1191,17 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                     {
                         binding.initialized = true;
                     }
-                } else if decl.kind == VariableKind::Var {
-                    if let Some((depth, slot)) = self.lookup_var(id.name) {
-                        let reg = self.alloc_register();
-                        self.emit(Instruction::new_r(Opcode::LoadUndefined, reg.0));
-                        if depth == 0 {
-                            self.emit(Instruction::new_rr(Opcode::SetLocal, slot, reg.0));
-                        }
+                } else if decl.kind == VariableKind::Var
+                    && let Some((depth, slot)) = self.lookup_var(id.name)
+                {
+                    let reg = self.alloc_register();
+                    self.emit(Instruction::new_r(Opcode::LoadUndefined, reg.0));
+                    if depth == 0 {
+                        self.emit(Instruction::new_rr(Opcode::SetLocal, slot, reg.0));
                     }
                 }
-            } else if declarator.init.is_some() {
+            } else if let Some(init) = &declarator.init {
                 // Destructuring pattern -- compile the RHS and bind via pattern
-                // UNWRAP-OK: guarded by `declarator.init.is_some()` on the line above;
-                // the Option is Some by construction of this branch.
-                let init = declarator.init.as_ref().unwrap();
                 let value_reg = self.compile_expression(init)?;
                 self.compile_pattern_binding(&declarator.id, value_reg, decl.kind)?;
             }
@@ -1418,11 +1426,7 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                             quasi_reg.0,
                             const_idx,
                         ));
-                        if !initialized {
-                            // First piece: just move to result
-                            self.emit(Instruction::new_rr(Opcode::Mov, acc_reg.0, quasi_reg.0));
-                            initialized = true;
-                        } else {
+                        if initialized {
                             // Concat: acc = acc + quasi
                             let new_reg = self.alloc_register();
                             self.emit(Instruction::new_rrr(
@@ -1432,16 +1436,17 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                                 quasi_reg.0,
                             ));
                             acc_reg = new_reg;
+                        } else {
+                            // First piece: just move to result
+                            self.emit(Instruction::new_rr(Opcode::Mov, acc_reg.0, quasi_reg.0));
+                            initialized = true;
                         }
                     }
 
                     // Add the interpolated expression if present
                     if i < n_exprs {
                         let expr_reg = self.compile_expression(&tmpl.expressions[i])?;
-                        if !initialized {
-                            self.emit(Instruction::new_rr(Opcode::Mov, acc_reg.0, expr_reg.0));
-                            initialized = true;
-                        } else {
+                        if initialized {
                             let new_reg = self.alloc_register();
                             self.emit(Instruction::new_rrr(
                                 Opcode::Add,
@@ -1450,6 +1455,9 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                                 expr_reg.0,
                             ));
                             acc_reg = new_reg;
+                        } else {
+                            self.emit(Instruction::new_rr(Opcode::Mov, acc_reg.0, expr_reg.0));
+                            initialized = true;
                         }
                     }
                 }
@@ -1804,11 +1812,15 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                  *
                  * TODO: Implement proper short-circuit via conditional jump.
                  * See: Opcode::JmpNullish for ??= conditional skip
+                 *
+                 * AssignmentOperator::Assign is handled by the outer `if` branch above;
+                 * reaching this arm with Assign is unreachable in practice, but the
+                 * compiler cannot prove it so we list it explicitly rather than using `_`.
                  */
                 AssignmentOperator::NullishAssign
                 | AssignmentOperator::LogicalAndAssign
-                | AssignmentOperator::LogicalOrAssign => Opcode::Mov,
-                _ => Opcode::Mov,
+                | AssignmentOperator::LogicalOrAssign
+                | AssignmentOperator::Assign => Opcode::Mov,
             };
 
             self.emit(Instruction::new_rrr(
@@ -2174,7 +2186,7 @@ mod tests {
         let arena = AstArena::new();
         let parser = Parser::new(source, &arena);
         let (program, errors) = parser.parse();
-        assert!(errors.is_empty(), "Parse errors: {:?}", errors);
+        assert!(errors.is_empty(), "Parse errors: {errors:?}");
         Compiler::new().compile(&program)
     }
 

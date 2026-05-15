@@ -721,12 +721,11 @@ mod asn1_cert {
         // Scan remaining TBS fields for [3] EXPLICIT extensions.
         let mut sans = Vec::new();
         while cur < tbs.len() {
-            if tbs[cur] == CTX3 {
-                if let Some((ext_wrapper, _)) = read_tlv_at(tbs, cur) {
-                    if let Some((exts, _)) = peel_seq(ext_wrapper) {
-                        sans = parse_sans(exts);
-                    }
-                }
+            if tbs[cur] == CTX3
+                && let Some((ext_wrapper, _)) = read_tlv_at(tbs, cur)
+                && let Some((exts, _)) = peel_seq(ext_wrapper)
+            {
+                sans = parse_sans(exts);
             }
             match skip_tlv(tbs, cur) {
                 Some(next) => cur = next,

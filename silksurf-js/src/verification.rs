@@ -120,7 +120,6 @@ mod proofs {
 mod tests {
     #[test]
     fn test_verification_module_compiles() {
-        // Just verify the module compiles correctly
-        assert!(true);
+        // Just verify the module compiles correctly -- no assertion needed
     }
 }

@@ -550,7 +550,7 @@ mod tests {
 
     #[test]
     fn test_number() {
-        let pi = NanBoxedValue::number(3.14159);
+        let pi = NanBoxedValue::number(std::f64::consts::PI);
         let zero = NanBoxedValue::number(0.0);
         let neg = NanBoxedValue::number(-42.5);
         let inf = NanBoxedValue::number(f64::INFINITY);
@@ -562,7 +562,7 @@ mod tests {
         assert!(inf.is_number());
         assert!(nan.is_number());
 
-        assert_eq!(pi.as_number(), Some(3.14159));
+        assert_eq!(pi.as_number(), Some(std::f64::consts::PI));
         assert_eq!(zero.as_number(), Some(0.0));
         assert_eq!(neg.as_number(), Some(-42.5));
         assert_eq!(inf.as_number(), Some(f64::INFINITY));
@@ -592,8 +592,8 @@ mod tests {
         assert_eq!(zero.as_smi(), Some(0));
 
         // SMI to number conversion
-        assert_eq!(pos.to_number(), 42.0);
-        assert_eq!(neg.to_number(), -100.0);
+        assert!((pos.to_number() - 42.0).abs() < f64::EPSILON);
+        assert!((neg.to_number() - (-100.0)).abs() < f64::EPSILON);
 
         assert!(pos.is_truthy());
         assert!(neg.is_truthy());

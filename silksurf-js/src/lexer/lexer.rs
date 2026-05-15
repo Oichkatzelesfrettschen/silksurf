@@ -233,55 +233,55 @@ impl<'src> Lexer<'src> {
 
         // Try BPE pattern match first (for keywords and multi-char operators)
         let bpe = get_bpe_matcher();
-        if bpe.could_start_pattern(byte) {
-            if let Some((pattern_id, len)) = bpe.try_match(&self.bytes[self.pos..]) {
-                // Matched a BPE pattern - but for keywords/identifiers, verify it's not part of larger identifier
-                if pattern_id < 30 {
-                    // Keywords (IDs 0-29)
-                    // Check if followed by identifier char
-                    let next_byte = self.bytes.get(self.pos + len).copied();
-                    if !is_identifier_continue_byte(next_byte) {
-                        self.pos += len;
-                        let text = self.current_text();
-                        if let Some(kw) = keyword_lookup(text) {
-                            return Token::new(kw, self.make_span());
+        if bpe.could_start_pattern(byte)
+            && let Some((pattern_id, len)) = bpe.try_match(&self.bytes[self.pos..])
+        {
+            // Matched a BPE pattern - but for keywords/identifiers, verify it's not part of larger identifier
+            if pattern_id < 30 {
+                // Keywords (IDs 0-29)
+                // Check if followed by identifier char
+                let next_byte = self.bytes.get(self.pos + len).copied();
+                if !is_identifier_continue_byte(next_byte) {
+                    self.pos += len;
+                    let text = self.current_text();
+                    if let Some(kw) = keyword_lookup(text) {
+                        return Token::new(kw, self.make_span());
+                    }
+                }
+                // Fall through to regular identifier scanning
+            } else if (30..=45).contains(&pattern_id) {
+                // Operators (IDs 30-45) - always match
+                self.pos += len;
+                let kind = match pattern_id {
+                    30 => TokenKind::StrictEqual,
+                    31 => TokenKind::StrictNotEqual,
+                    32 => TokenKind::Arrow,
+                    33 => TokenKind::AmpersandAmpersand,
+                    34 => TokenKind::PipePipe,
+                    35 => TokenKind::PlusPlus,
+                    36 => TokenKind::MinusMinus,
+                    37 => TokenKind::PlusAssign,
+                    38 => TokenKind::MinusAssign,
+                    39 => TokenKind::Equal,
+                    40 => TokenKind::NotEqual,
+                    41 => TokenKind::LessEqual,
+                    42 => TokenKind::GreaterEqual,
+                    43 => {
+                        /* BPE matched '??' but we need to check for '??=' */
+                        if self.advance_if(b'=') {
+                            TokenKind::QuestionQuestionAssign
+                        } else {
+                            TokenKind::QuestionQuestion
                         }
                     }
-                    // Fall through to regular identifier scanning
-                } else if (30..=45).contains(&pattern_id) {
-                    // Operators (IDs 30-45) - always match
-                    self.pos += len;
-                    let kind = match pattern_id {
-                        30 => TokenKind::StrictEqual,
-                        31 => TokenKind::StrictNotEqual,
-                        32 => TokenKind::Arrow,
-                        33 => TokenKind::AmpersandAmpersand,
-                        34 => TokenKind::PipePipe,
-                        35 => TokenKind::PlusPlus,
-                        36 => TokenKind::MinusMinus,
-                        37 => TokenKind::PlusAssign,
-                        38 => TokenKind::MinusAssign,
-                        39 => TokenKind::Equal,
-                        40 => TokenKind::NotEqual,
-                        41 => TokenKind::LessEqual,
-                        42 => TokenKind::GreaterEqual,
-                        43 => {
-                            /* BPE matched '??' but we need to check for '??=' */
-                            if self.advance_if(b'=') {
-                                TokenKind::QuestionQuestionAssign
-                            } else {
-                                TokenKind::QuestionQuestion
-                            }
-                        }
-                        44 => TokenKind::QuestionDot,
-                        45 => TokenKind::Ellipsis,
-                        _ => unreachable!(),
-                    };
-                    return Token::new(kind, self.make_span());
-                }
-                // For common identifiers (IDs 50+), fall through to regular identifier scanning
-                // This allows proper handling and interning
+                    44 => TokenKind::QuestionDot,
+                    45 => TokenKind::Ellipsis,
+                    _ => unreachable!(),
+                };
+                return Token::new(kind, self.make_span());
             }
+            // For common identifiers (IDs 50+), fall through to regular identifier scanning
+            // This allows proper handling and interning
         }
 
         self.scan_token()

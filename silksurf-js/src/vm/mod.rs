@@ -412,6 +412,7 @@ impl Vm {
     }
 
     /// Number of chunks currently registered.
+    #[must_use]
     pub fn chunks_len(&self) -> usize {
         self.chunks.len()
     }
@@ -616,11 +617,11 @@ impl Vm {
     /// params (slots 0, 1, ...) map to base+0, base+1, ... which are the arg
     /// positions. Top-level code has base=0 so the behavior is unchanged.
     ///
-    /// See: op_call Value::Function -- computes new_base = current_base + callee + 1
+    /// See: `op_call` `Value::Function` -- computes `new_base` = `current_base` + callee + 1
     /// See: CallFrame.base for the per-frame window start
     #[inline(always)]
     fn get_reg(&self, idx: u8) -> &Value {
-        let base = self.call_stack.last().map(|f| f.base).unwrap_or(0);
+        let base = self.call_stack.last().map_or(0, |f| f.base);
         let abs_idx = base + idx as usize;
         // Safe: op_call grows registers to new_base+256 before pushing each frame,
         // so abs_idx < registers.len() for all valid frame-relative indices (0-255).
@@ -628,10 +629,10 @@ impl Vm {
     }
 
     /// Set register value (frame-relative: adds current call frame's base).
-    /// See: get_reg for the WHY of frame-relative addressing.
+    /// See: `get_reg` for the WHY of frame-relative addressing.
     #[inline(always)]
     fn set_reg(&mut self, idx: u8, value: Value) {
-        let base = self.call_stack.last().map(|f| f.base).unwrap_or(0);
+        let base = self.call_stack.last().map_or(0, |f| f.base);
         let abs_idx = base + idx as usize;
         if abs_idx < self.registers.len() {
             self.registers[abs_idx] = value;
@@ -1044,7 +1045,7 @@ fn op_call(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
              * See: compile_call -- args allocated at next_register after callee
              * See: get_reg for the frame-relative addressing scheme
              */
-            let current_base = vm.call_stack.last().map(|f| f.base).unwrap_or(0);
+            let current_base = vm.call_stack.last().map_or(0, |f| f.base);
             let new_base = current_base + instr.src1() as usize + 1;
             // Grow the register array if this frame's window would overflow.
             // Each function uses at most 256 registers (u8 index limit).
@@ -1068,7 +1069,7 @@ fn op_call(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
              */
             let argc = instr.src2() as usize;
             let mut args = Vec::with_capacity(argc);
-            let current_base = vm.call_stack.last().map(|f| f.base).unwrap_or(0);
+            let current_base = vm.call_stack.last().map_or(0, |f| f.base);
             let base_reg = current_base + instr.src1() as usize + 1;
             for i in 0..argc {
                 if base_reg + i < vm.registers.len() {
@@ -1102,7 +1103,7 @@ fn op_ret(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
      *      returns vm.registers[0] to the Rust caller.
      */
     let value = vm.get_reg(instr.dst()).clone();
-    let return_reg = vm.call_stack.last().map(|f| f.return_reg).unwrap_or(0);
+    let return_reg = vm.call_stack.last().map_or(0, |f| f.return_reg);
     vm.call_stack.pop();
     if vm.call_stack.is_empty() {
         // Returning from top-level execute() frame -- store in absolute r0.
@@ -1122,7 +1123,7 @@ fn op_ret_undefined(vm: &mut Vm, _instr: Instruction) -> VmResult<()> {
     /*
      * Return undefined. See op_ret for the return_reg-before-pop invariant.
      */
-    let return_reg = vm.call_stack.last().map(|f| f.return_reg).unwrap_or(0);
+    let return_reg = vm.call_stack.last().map_or(0, |f| f.return_reg);
     vm.call_stack.pop();
     if vm.call_stack.is_empty() {
         Err(VmError::Halted)
@@ -1163,8 +1164,8 @@ fn op_throw(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     }
 }
 
-/// EnterTry: push a try handler. dst=catch_offset (const_idx), src1 is unused.
-/// The instruction uses the wide constant format: catch offset as const_idx.
+/// `EnterTry`: push a try handler. `dst=catch_offset` (`const_idx`), src1 is unused.
+/// The instruction uses the wide constant format: catch offset as `const_idx`.
 fn op_enter_try(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     let catch_offset = instr.const_idx() as usize;
     let frame = vm.call_stack.last().ok_or(VmError::OutOfBounds)?;
@@ -1179,20 +1180,20 @@ fn op_enter_try(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     Ok(())
 }
 
-/// LeaveTry: pop the current try handler (normal exit from try block).
+/// `LeaveTry`: pop the current try handler (normal exit from try block).
 fn op_leave_try(vm: &mut Vm, _instr: Instruction) -> VmResult<()> {
     vm.try_handlers.pop();
     Ok(())
 }
 
-/// EnterCatch: marks catch block start (exception already in r0 from throw dispatch).
+/// `EnterCatch`: marks catch block start (exception already in r0 from throw dispatch).
 fn op_enter_catch(_vm: &mut Vm, _instr: Instruction) -> VmResult<()> {
     // Exception value is already in r0, set by op_throw.
     // The catch block reads it from there.
     Ok(())
 }
 
-/// EnterFinally: marks finally block start.
+/// `EnterFinally`: marks finally block start.
 fn op_enter_finally(_vm: &mut Vm, _instr: Instruction) -> VmResult<()> {
     Ok(())
 }
@@ -1269,7 +1270,7 @@ fn op_spread_call(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
              *
              * See: op_call Value::Function for the identical base computation
              */
-            let current_base = vm.call_stack.last().map(|f| f.base).unwrap_or(0);
+            let current_base = vm.call_stack.last().map_or(0, |f| f.base);
             let arg_reg_base = current_base + instr.src1() as usize + 1;
             // Grow register array if needed before writing args or pushing frame.
             let needed = arg_reg_base + args.len().max(256);
@@ -1321,7 +1322,7 @@ fn op_spread_call(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
  */
 fn op_get_iterator(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     let src = vm.get_reg(instr.src1()).clone();
-    let iter = make_iterator_for(src);
+    let iter = make_iterator_for(&src);
     vm.set_reg(instr.dst(), iter);
     Ok(())
 }
@@ -1338,8 +1339,8 @@ fn op_get_iterator(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
  *           actually stored as a plain array Value under key "__data")
  *   __idx:  current position (stored as Value::Number under "__idx")
  */
-fn make_iterator_for(iterable: Value) -> Value {
-    let elements: Vec<Value> = match &iterable {
+fn make_iterator_for(iterable: &Value) -> Value {
+    let elements: Vec<Value> = match iterable {
         Value::Object(o) => {
             let o_borrow = o.borrow();
             if builtins::array::is_array_like(&o_borrow) {
@@ -1357,26 +1358,26 @@ fn make_iterator_for(iterable: Value) -> Value {
         _ => vec![],
     };
 
-    let data = Rc::new(RefCell::new(elements));
+    let iter_elements = Rc::new(RefCell::new(elements));
     let idx = Rc::new(RefCell::new(0usize));
 
     let iter_obj = Rc::new(RefCell::new(value::Object::new()));
     {
         // next() method: returns {value, done}
-        let data_ref = Rc::clone(&data);
+        let iter_elements_ref = Rc::clone(&iter_elements);
         let idx_ref = Rc::clone(&idx);
         let next_fn = Value::NativeFunction(Rc::new(value::NativeFunction::new(
             "__iter_next__",
             move |_| {
                 let i = *idx_ref.borrow();
-                let data = data_ref.borrow();
-                let done = i >= data.len();
+                let elems = iter_elements_ref.borrow();
+                let done = i >= elems.len();
                 let value = if done {
                     Value::Undefined
                 } else {
-                    data[i].clone()
+                    elems[i].clone()
                 };
-                drop(data);
+                drop(elems);
                 *idx_ref.borrow_mut() = i + 1;
                 // Return {value, done}
                 let result = Rc::new(RefCell::new(value::Object::new()));
@@ -1404,26 +1405,22 @@ fn make_iterator_for(iterable: Value) -> Value {
  */
 fn op_iter_next(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     let iter = vm.get_reg(instr.src1()).clone();
-    let result = match &iter {
-        Value::Object(o) => {
-            let next_fn = o.borrow().get_by_str("next");
-            match next_fn {
-                Value::NativeFunction(f) => f.call(&[]),
-                _ => {
-                    // No next function: return done=true
-                    let r = Rc::new(RefCell::new(value::Object::new()));
-                    r.borrow_mut().set_by_str("done", Value::Boolean(true));
-                    r.borrow_mut().set_by_str("value", Value::Undefined);
-                    Value::Object(r)
-                }
-            }
-        }
-        _ => {
+    let result = if let Value::Object(o) = &iter {
+        let next_fn = o.borrow().get_by_str("next");
+        if let Value::NativeFunction(f) = next_fn {
+            f.call(&[])
+        } else {
+            // No next function: return done=true
             let r = Rc::new(RefCell::new(value::Object::new()));
             r.borrow_mut().set_by_str("done", Value::Boolean(true));
             r.borrow_mut().set_by_str("value", Value::Undefined);
             Value::Object(r)
         }
+    } else {
+        let r = Rc::new(RefCell::new(value::Object::new()));
+        r.borrow_mut().set_by_str("done", Value::Boolean(true));
+        r.borrow_mut().set_by_str("value", Value::Undefined);
+        Value::Object(r)
     };
     vm.set_reg(instr.dst(), result);
     Ok(())
@@ -1492,10 +1489,10 @@ fn op_get_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
         Value::HostObject(host) => host.borrow().get_property(&prop_name),
         Value::Object(o) => {
             let own = o.borrow().get_by_str(&prop_name);
-            if !matches!(own, Value::Undefined) {
-                own
-            } else {
+            if matches!(own, Value::Undefined) {
                 builtins::array::get_array_method(o, &prop_name).unwrap_or(Value::Undefined)
+            } else {
+                own
             }
         }
         Value::String(s) => {
@@ -1509,7 +1506,7 @@ fn op_get_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
          * Without .bind(), the property lookup returns Undefined and
          * calling it gives TypeError("not a function").
          */
-        ref val @ (Value::Function(_) | Value::NativeFunction(_)) if prop_name == "bind" => {
+        _val if prop_name == "bind" => {
             // .bind(thisArg, ...args) returns a new NativeFunction
             // that calls the original with the bound arguments prepended.
             // Simplified: ignore thisArg, just prepend bound args.
@@ -1734,7 +1731,10 @@ fn op_get_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
                     "Number.parseInt",
                     |args| {
                         // Same behaviour as global parseInt
-                        let s = args.first().map(|v| v.to_js_string()).unwrap_or_default();
+                        let s = args
+                            .first()
+                            .map(value::Value::to_js_string)
+                            .unwrap_or_default();
                         let text = s.as_str().unwrap_or("").trim();
                         let radix = args.get(1).map_or(10, |v| v.to_number() as u32);
                         let radix = if radix == 0 { 10 } else { radix };
@@ -1746,7 +1746,10 @@ fn op_get_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
                 "parseFloat" => Value::NativeFunction(Rc::new(value::NativeFunction::new(
                     "Number.parseFloat",
                     |args| {
-                        let s = args.first().map(|v| v.to_js_string()).unwrap_or_default();
+                        let s = args
+                            .first()
+                            .map(value::Value::to_js_string)
+                            .unwrap_or_default();
                         let text = s.as_str().unwrap_or("").trim();
                         text.parse::<f64>()
                             .map(value::Value::Number)
@@ -1774,18 +1777,18 @@ fn op_get_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
                             let keys: Vec<value::Value> = o_borrow
                                 .properties
                                 .keys()
-                                .filter_map(|k| match k {
+                                .map(|k| match k {
                                     value::PropertyKey::String(s) => {
-                                        Some(value::Value::String(Rc::clone(s)))
+                                        value::Value::String(Rc::clone(s))
                                     }
                                     value::PropertyKey::Index(i) => {
-                                        Some(value::Value::string_owned(i.to_string()))
+                                        value::Value::string_owned(i.to_string())
                                     }
                                 })
                                 .collect();
-                            builtins::array::create_array(keys)
+                            builtins::array::create_array(&keys)
                         } else {
-                            builtins::array::create_array(vec![])
+                            builtins::array::create_array(&[])
                         }
                     },
                 ))),
@@ -1796,9 +1799,9 @@ fn op_get_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
                             let o_borrow = o.borrow();
                             let vals: Vec<value::Value> =
                                 o_borrow.properties.values().cloned().collect();
-                            builtins::array::create_array(vals)
+                            builtins::array::create_array(&vals)
                         } else {
-                            builtins::array::create_array(vec![])
+                            builtins::array::create_array(&[])
                         }
                     },
                 ))),
@@ -1819,12 +1822,12 @@ fn op_get_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
                                             value::Value::string_owned(i.to_string())
                                         }
                                     };
-                                    builtins::array::create_array(vec![key_val, v.clone()])
+                                    builtins::array::create_array(&[key_val, v.clone()])
                                 })
                                 .collect();
-                            builtins::array::create_array(entries)
+                            builtins::array::create_array(&entries)
                         } else {
-                            builtins::array::create_array(vec![])
+                            builtins::array::create_array(&[])
                         }
                     },
                 ))),
@@ -1886,7 +1889,7 @@ fn op_get_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
                                     let key_s = key_str.as_str().unwrap_or("");
                                     obj_rc
                                         .borrow_mut()
-                                        .set_by_key(value::PropertyKey::from_str(key_s), v);
+                                        .set_by_key(value::PropertyKey::string_key(key_s), v);
                                 }
                             }
                         }
@@ -1900,18 +1903,18 @@ fn op_get_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
                                 .borrow()
                                 .properties
                                 .keys()
-                                .filter_map(|k| match k {
+                                .map(|k| match k {
                                     value::PropertyKey::String(s) => {
-                                        Some(value::Value::String(Rc::clone(s)))
+                                        value::Value::String(Rc::clone(s))
                                     }
                                     value::PropertyKey::Index(i) => {
-                                        Some(value::Value::string_owned(i.to_string()))
+                                        value::Value::string_owned(i.to_string())
                                     }
                                 })
                                 .collect();
-                            builtins::array::create_array(keys)
+                            builtins::array::create_array(&keys)
                         } else {
-                            builtins::array::create_array(vec![])
+                            builtins::array::create_array(&[])
                         }
                     }),
                 )),
@@ -2029,16 +2032,16 @@ fn op_get_prop(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
                                         f.call(&[el.clone(), value::Value::Number(i as f64)])
                                     })
                                     .collect();
-                                create_array(mapped)
+                                create_array(&mapped)
                             } else {
-                                create_array(elements)
+                                create_array(&elements)
                             }
                         },
                     )))
                 }
                 "of" => {
                     Value::NativeFunction(Rc::new(value::NativeFunction::new("Array.of", |args| {
-                        builtins::array::create_array(args.to_vec())
+                        builtins::array::create_array(args)
                     })))
                 }
                 _ => Value::Undefined,
@@ -2310,7 +2313,7 @@ mod tests {
         let result = vm.execute(idx).unwrap();
 
         if let Value::Number(n) = result {
-            assert_eq!(n, 15.0);
+            assert!((n - 15.0).abs() < f64::EPSILON);
         } else {
             panic!("Expected number");
         }
@@ -2360,7 +2363,7 @@ mod tests {
         let result = vm.execute(idx).unwrap();
 
         if let Value::Number(n) = result {
-            assert_eq!(n, 200.0);
+            assert!((n - 200.0).abs() < f64::EPSILON);
         } else {
             panic!("Expected number");
         }
@@ -2385,7 +2388,7 @@ mod tests {
         let result = vm.execute(idx).unwrap();
 
         if let Value::Number(n) = result {
-            assert_eq!(n, 0x0F as f64);
+            assert!((n - f64::from(0x0F)).abs() < f64::EPSILON);
         } else {
             panic!("Expected number");
         }
@@ -2410,7 +2413,7 @@ mod tests {
         let result = vm.execute(idx).unwrap();
 
         if let Value::Number(n) = result {
-            assert_eq!(n, 42.0);
+            assert!((n - 42.0).abs() < f64::EPSILON);
         } else {
             panic!("Expected number");
         }
@@ -2438,10 +2441,10 @@ mod tests {
                 let child_base = vm.chunks_len();
                 for mut child in child_chunks {
                     for constant in child.constants_mut() {
-                        if let Constant::String(str_id) = constant {
-                            if let Some(&vm_id) = str_map.get(str_id) {
-                                *str_id = vm_id;
-                            }
+                        if let Constant::String(str_id) = constant
+                            && let Some(&vm_id) = str_map.get(str_id)
+                        {
+                            *str_id = vm_id;
                         }
                     }
                     vm.add_chunk(child);
@@ -2645,10 +2648,11 @@ mod tests {
         let v =
             run_and_get_result("function add(x, y) { return x + y; } window.result = add(3, 4);")
                 .expect("script failed");
-        assert!(
-            matches!(v, Value::Number(n) if n == 7.0),
-            "expected 7, got {v:?}"
-        );
+        if let Value::Number(n) = v {
+            assert!((n - 7.0).abs() < f64::EPSILON, "expected 7, got {n}");
+        } else {
+            panic!("expected 7, got {v:?}");
+        }
     }
 
     #[test]
@@ -2658,10 +2662,11 @@ mod tests {
             "function add({x, y}) { return x + y; } window.result = add({x: 3, y: 4});",
         )
         .expect("script failed");
-        assert!(
-            matches!(v, Value::Number(n) if n == 7.0),
-            "expected 7, got {v:?}"
-        );
+        if let Value::Number(n) = v {
+            assert!((n - 7.0).abs() < f64::EPSILON, "expected 7, got {n}");
+        } else {
+            panic!("expected 7, got {v:?}");
+        }
     }
 
     #[test]
@@ -2671,10 +2676,11 @@ mod tests {
             "function sum([a, b]) { return a + b; } window.result = sum([10, 20]);",
         )
         .expect("script failed");
-        assert!(
-            matches!(v, Value::Number(n) if n == 30.0),
-            "expected 30, got {v:?}"
-        );
+        if let Value::Number(n) = v {
+            assert!((n - 30.0).abs() < f64::EPSILON, "expected 30, got {n}");
+        } else {
+            panic!("expected 30, got {v:?}");
+        }
     }
 
     #[test]
@@ -2701,9 +2707,10 @@ mod tests {
             "function f(n, {a, b}) { return n + a + b; } window.result = f(1, {a: 2, b: 3});",
         )
         .expect("script failed");
-        assert!(
-            matches!(v, Value::Number(n) if n == 6.0),
-            "expected 6, got {v:?}"
-        );
+        if let Value::Number(n) = v {
+            assert!((n - 6.0).abs() < f64::EPSILON, "expected 6, got {n}");
+        } else {
+            panic!("expected 6, got {v:?}");
+        }
     }
 }

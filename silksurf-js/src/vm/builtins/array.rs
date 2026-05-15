@@ -8,7 +8,14 @@ use std::rc::Rc;
 
 use crate::vm::value::{NativeFunction, Object, PropertyKey, Value};
 
+/// Box holding an array method implementation.
+///
+/// WHY: The raw type `Option<Box<dyn Fn(&[Value]) -> Value>>` is complex enough
+/// to trigger `clippy::type_complexity`.  Aliasing it keeps the match body readable.
+type ArrayMethod = Option<Box<dyn Fn(&[Value]) -> Value>>;
+
 /// Check if an object looks like an array (has numeric "length").
+#[must_use]
 pub fn is_array_like(obj: &Object) -> bool {
     matches!(obj.get_by_str("length"), Value::Number(n) if n >= 0.0)
 }
@@ -22,6 +29,7 @@ fn array_length(obj: &Object) -> usize {
 }
 
 /// Collect array elements into a Vec<Value> (pub for use from vm/mod.rs static dispatch).
+#[must_use]
 pub fn collect_elements_pub(obj: &Object) -> Vec<Value> {
     collect_elements(obj)
 }
@@ -48,7 +56,8 @@ fn set_elements(obj: &mut Object, elements: &[Value]) {
 }
 
 /// Create a new JS array from elements.
-pub fn create_array(elements: Vec<Value>) -> Value {
+#[must_use]
+pub fn create_array(elements: &[Value]) -> Value {
     let obj = Object::new();
     let obj_rc = Rc::new(RefCell::new(obj));
     {
@@ -61,9 +70,9 @@ pub fn create_array(elements: Vec<Value>) -> Value {
     Value::Object(obj_rc)
 }
 
-/// Look up an array method by name. Returns a NativeFunction Value if found.
+/// Look up an array method by name. Returns a `NativeFunction` Value if found.
 pub fn get_array_method(obj_rc: &Rc<RefCell<Object>>, name: &str) -> Option<Value> {
-    let method: Option<Box<dyn Fn(&[Value]) -> Value>> = match name {
+    let method: ArrayMethod = match name {
         "push" => {
             let arr = Rc::clone(obj_rc);
             Some(Box::new(move |args: &[Value]| {
@@ -125,13 +134,13 @@ pub fn get_array_method(obj_rc: &Rc<RefCell<Object>>, name: &str) -> Option<Valu
             let arr = Rc::clone(obj_rc);
             Some(Box::new(move |args: &[Value]| {
                 let o = arr.borrow();
-                let sep = args
-                    .first()
-                    .map(|v| {
+                let sep = args.first().map_or_else(
+                    || ",".to_string(),
+                    |v| {
                         let s = v.to_js_string();
                         s.as_str().unwrap_or(",").to_string()
-                    })
-                    .unwrap_or_else(|| ",".to_string());
+                    },
+                );
                 let elements = collect_elements(&o);
                 let parts: Vec<String> = elements
                     .iter()
@@ -164,7 +173,7 @@ pub fn get_array_method(obj_rc: &Rc<RefCell<Object>>, name: &str) -> Option<Valu
                 for i in start..end {
                     result.push(o.get_by_key(&PropertyKey::Index(i as u32)));
                 }
-                create_array(result)
+                create_array(&result)
             }))
         }
         "forEach" => {
@@ -175,7 +184,7 @@ pub fn get_array_method(obj_rc: &Rc<RefCell<Object>>, name: &str) -> Option<Valu
                 if let Value::NativeFunction(func) = &callback {
                     let elements = collect_elements(&o);
                     for (i, elem) in elements.iter().enumerate() {
-                        func.call(&[elem.clone(), Value::Number(i as f64)]);
+                        let _ = func.call(&[elem.clone(), Value::Number(i as f64)]);
                     }
                 }
                 Value::Undefined
@@ -193,9 +202,9 @@ pub fn get_array_method(obj_rc: &Rc<RefCell<Object>>, name: &str) -> Option<Valu
                         .enumerate()
                         .map(|(i, elem)| func.call(&[elem.clone(), Value::Number(i as f64)]))
                         .collect();
-                    create_array(mapped)
+                    create_array(&mapped)
                 } else {
-                    create_array(elements)
+                    create_array(&elements)
                 }
             }))
         }
@@ -215,9 +224,9 @@ pub fn get_array_method(obj_rc: &Rc<RefCell<Object>>, name: &str) -> Option<Valu
                         })
                         .map(|(_, elem)| elem.clone())
                         .collect();
-                    create_array(filtered)
+                    create_array(&filtered)
                 } else {
-                    create_array(vec![])
+                    create_array(&[])
                 }
             }))
         }
@@ -280,7 +289,7 @@ pub fn get_array_method(obj_rc: &Rc<RefCell<Object>>, name: &str) -> Option<Valu
                     }
                     result.push(arg.clone());
                 }
-                create_array(result)
+                create_array(&result)
             }))
         }
         "reverse" => {
@@ -356,7 +365,7 @@ pub fn get_array_method(obj_rc: &Rc<RefCell<Object>>, name: &str) -> Option<Valu
                 let elements = collect_elements(&arr.borrow());
                 let mut result = Vec::new();
                 flatten_array(&elements, depth, &mut result);
-                create_array(result)
+                create_array(&result)
             }))
         }
         "flatMap" => {
@@ -376,7 +385,7 @@ pub fn get_array_method(obj_rc: &Rc<RefCell<Object>>, name: &str) -> Option<Valu
                     }
                     result.push(mapped);
                 }
-                create_array(result)
+                create_array(&result)
             }))
         }
         "sort" => {
@@ -464,7 +473,7 @@ pub fn get_array_method(obj_rc: &Rc<RefCell<Object>>, name: &str) -> Option<Valu
                 }
                 let mut o = arr.borrow_mut();
                 set_elements(&mut o, &elements);
-                create_array(removed)
+                create_array(&removed)
             }))
         }
         "length" => return Some(Value::Number(array_length(&obj_rc.borrow()) as f64)),
@@ -477,6 +486,9 @@ pub fn get_array_method(obj_rc: &Rc<RefCell<Object>>, name: &str) -> Option<Valu
 /// Simplified strict equality for array method use.
 fn strict_equal(a: &Value, b: &Value) -> bool {
     match (a, b) {
+        // JS === for numbers: exact IEEE 754 comparison (NaN != NaN, +0 == -0).
+        // Epsilon comparison would be semantically wrong here.
+        #[allow(clippy::float_cmp)]
         (Value::Number(x), Value::Number(y)) => x == y,
         (Value::Boolean(x), Value::Boolean(y)) => x == y,
         (Value::String(x), Value::String(y)) => x == y,
@@ -516,15 +528,15 @@ fn call_value(func: &Value, args: &[Value]) -> Value {
  */
 fn flatten_array(elements: &[Value], depth: u32, out: &mut Vec<Value>) {
     for el in elements {
-        if depth > 0 {
-            if let Value::Object(o) = el {
-                let o_borrow = o.borrow();
-                if is_array_like(&o_borrow) {
-                    let inner = collect_elements(&o_borrow);
-                    drop(o_borrow);
-                    flatten_array(&inner, depth - 1, out);
-                    continue;
-                }
+        if depth > 0
+            && let Value::Object(o) = el
+        {
+            let o_borrow = o.borrow();
+            if is_array_like(&o_borrow) {
+                let inner = collect_elements(&o_borrow);
+                drop(o_borrow);
+                flatten_array(&inner, depth - 1, out);
+                continue;
             }
         }
         out.push(el.clone());

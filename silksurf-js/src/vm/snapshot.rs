@@ -251,9 +251,12 @@ mod tests {
             PrimitiveValue::from_value(&super::super::Value::Boolean(true), &mut object_map);
         assert!(matches!(bool_val, PrimitiveValue::Boolean(true)));
 
-        let num = PrimitiveValue::from_value(&super::super::Value::Number(3.14), &mut object_map);
+        let num = PrimitiveValue::from_value(
+            &super::super::Value::Number(std::f64::consts::PI),
+            &mut object_map,
+        );
         if let PrimitiveValue::Number(n) = num {
-            assert!((n - 3.14).abs() < f64::EPSILON);
+            assert!((n - std::f64::consts::PI).abs() < f64::EPSILON);
         } else {
             panic!("Expected number");
         }
@@ -293,7 +296,7 @@ mod tests {
 
         // Check register values
         match &restored.registers[0] {
-            PrimitiveValue::Number(n) => assert_eq!(*n, 100.0),
+            PrimitiveValue::Number(n) => assert!((*n - 100.0).abs() < f64::EPSILON),
             _ => panic!("Expected number"),
         }
         match &restored.registers[1] {

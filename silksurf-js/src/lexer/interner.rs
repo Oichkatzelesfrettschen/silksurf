@@ -5,13 +5,12 @@
 
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Symbol(u32);
-
-/// An interned string symbol
+/// An interned string symbol.
 ///
 /// Comparing two Symbols is O(1) (integer comparison).
 /// Getting the string back is O(1) (lookup in interner).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Symbol(u32);
 
 /// String interner for identifiers.
 ///

@@ -323,7 +323,7 @@ mod tests {
             bytes_threshold: 0,
             gc_count: 0,
         };
-        let status = silksurf_heap_stats(engine, &mut stats);
+        let status = silksurf_heap_stats(engine, &raw mut stats);
         assert!(matches!(status, SilkSurfStatus::Ok));
         silksurf_engine_free(engine);
     }
