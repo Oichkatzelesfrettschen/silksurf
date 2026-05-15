@@ -161,7 +161,12 @@ fn srgb_to_linear_boundary_invariants() {
 // ---------------------------------------------------------------------------
 #[test]
 fn srgb_round_trips_canonical_values() {
-    let cases: &[(u8, &str)] = &[(0, "black"), (255, "white"), (128, "midgray"), (200, "bright")];
+    let cases: &[(u8, &str)] = &[
+        (0, "black"),
+        (255, "white"),
+        (128, "midgray"),
+        (200, "bright"),
+    ];
 
     for &(original, label) in cases {
         let linear = ref_srgb_to_linear(original);

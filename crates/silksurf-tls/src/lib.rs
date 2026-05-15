@@ -4,8 +4,8 @@
 //! (rustls-native-certs). Provides a configured rustls ClientConfig.
 
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::CertificateDer;
+use rustls::pki_types::pem::PemObject;
 use rustls::{ClientConfig, DigitallySignedStruct, Error, RootCertStore, SignatureScheme};
 use std::fmt;
 use std::path::{Path, PathBuf};

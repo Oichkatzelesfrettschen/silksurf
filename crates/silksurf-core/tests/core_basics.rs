@@ -30,7 +30,10 @@ fn interner_round_trip_returns_original_bytes() {
 
     assert_eq!(resolved, original, "resolve(intern(s)) must equal s");
     assert_eq!(interner.len(), 1, "single intern produces one entry");
-    assert!(!interner.is_empty(), "after one intern the table is non-empty");
+    assert!(
+        !interner.is_empty(),
+        "after one intern the table is non-empty"
+    );
 }
 
 // 2) Atom monotonic / identity property.
@@ -46,19 +49,46 @@ fn atom_distinct_for_different_strings_and_stable_for_same_string() {
     let span_a = interner.intern("span");
     let div_b = interner.intern("div");
 
-    assert_ne!(div_a, span_a, "different strings must yield different atoms");
-    assert_eq!(div_a, div_b, "interning the same string twice must yield the same atom");
-    assert_ne!(div_a.raw(), span_a.raw(), "raw indices must differ for distinct atoms");
-    assert_eq!(div_a.raw(), div_b.raw(), "raw indices must be stable across re-interns");
-    assert_eq!(interner.len(), 2, "two distinct strings produce exactly two table entries");
+    assert_ne!(
+        div_a, span_a,
+        "different strings must yield different atoms"
+    );
+    assert_eq!(
+        div_a, div_b,
+        "interning the same string twice must yield the same atom"
+    );
+    assert_ne!(
+        div_a.raw(),
+        span_a.raw(),
+        "raw indices must differ for distinct atoms"
+    );
+    assert_eq!(
+        div_a.raw(),
+        div_b.raw(),
+        "raw indices must be stable across re-interns"
+    );
+    assert_eq!(
+        interner.len(),
+        2,
+        "two distinct strings produce exactly two table entries"
+    );
 
     // Helper guard for downstream resolve_table consumers: verify the
     // helper that decides which strings are intern-eligible behaves
     // sensibly on canonical inputs. A short ASCII identifier qualifies;
     // a string with whitespace does not.
-    assert!(should_intern_identifier("div"), "short ASCII identifier must qualify");
-    assert!(!should_intern_identifier("with space"), "whitespace must disqualify");
-    assert!(!should_intern_identifier(""), "empty string must disqualify");
+    assert!(
+        should_intern_identifier("div"),
+        "short ASCII identifier must qualify"
+    );
+    assert!(
+        !should_intern_identifier("with space"),
+        "whitespace must disqualify"
+    );
+    assert!(
+        !should_intern_identifier(""),
+        "empty string must disqualify"
+    );
 }
 
 // 3) SilkError Display: every variant must produce a non-empty string.
@@ -72,9 +102,15 @@ fn silk_error_display_is_non_empty_for_every_variant() {
     let variants: Vec<SilkError> = vec![
         SilkError::InvalidInput("bad token".to_string()),
         SilkError::Unsupported("CSS Houdini".to_string()),
-        SilkError::Css { offset: 42, message: "unclosed brace".to_string() },
+        SilkError::Css {
+            offset: 42,
+            message: "unclosed brace".to_string(),
+        },
         SilkError::Dom("missing parent".to_string()),
-        SilkError::HtmlTokenize { offset: 7, message: "unexpected EOF".to_string() },
+        SilkError::HtmlTokenize {
+            offset: 7,
+            message: "unexpected EOF".to_string(),
+        },
         SilkError::HtmlTreeBuild("orphan node".to_string()),
         SilkError::Net("connect refused".to_string()),
         SilkError::Tls("handshake failure".to_string()),
@@ -112,19 +148,29 @@ fn silk_error_from_impls_target_correct_variants() {
     let lifted: SilkError = io_err.into();
     match &lifted {
         SilkError::Io(inner) => {
-            assert_eq!(inner.kind(), std::io::ErrorKind::NotFound, "kind must round-trip through From");
+            assert_eq!(
+                inner.kind(),
+                std::io::ErrorKind::NotFound,
+                "kind must round-trip through From"
+            );
         }
         other => panic!("expected SilkError::Io, got {other:?}"),
     }
     // Display of an Io variant must surface the underlying message.
     let displayed = format!("{lifted}");
-    assert!(displayed.contains("I/O"), "Io display must mention I/O, got: {displayed}");
+    assert!(
+        displayed.contains("I/O"),
+        "Io display must mention I/O, got: {displayed}"
+    );
 
     // String-erased conversion pattern used by leaf crates: leaf crate
     // implements `impl From<MyErr> for SilkError { fn from(e) ->
     // SilkError::MyDomain(e.to_string()) }`. Simulate the result.
     let css_message = "unexpected token at column 17";
-    let from_string: SilkError = SilkError::Css { offset: 17, message: css_message.to_string() };
+    let from_string: SilkError = SilkError::Css {
+        offset: 17,
+        message: css_message.to_string(),
+    };
     match &from_string {
         SilkError::Css { offset, message } => {
             assert_eq!(*offset, 17);
@@ -169,7 +215,10 @@ fn silk_result_alias_supports_ok_and_err_paths() {
     let bad_format = parse_positive_u32("not-a-number");
     match bad_format {
         Err(SilkError::InvalidInput(msg)) => {
-            assert!(msg.contains("not-a-number"), "error must surface the bad input, got: {msg}");
+            assert!(
+                msg.contains("not-a-number"),
+                "error must surface the bad input, got: {msg}"
+            );
         }
         other => panic!("expected InvalidInput from parse failure, got {other:?}"),
     }
@@ -178,7 +227,10 @@ fn silk_result_alias_supports_ok_and_err_paths() {
     let zero = parse_positive_u32("0");
     match zero {
         Err(SilkError::InvalidInput(msg)) => {
-            assert!(msg.contains("positive"), "error must explain the rule, got: {msg}");
+            assert!(
+                msg.contains("positive"),
+                "error must explain the rule, got: {msg}"
+            );
         }
         other => panic!("expected InvalidInput for zero, got {other:?}"),
     }

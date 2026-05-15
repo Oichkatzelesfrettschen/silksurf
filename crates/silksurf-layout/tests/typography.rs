@@ -18,7 +18,11 @@ use silksurf_layout::{bidi_level, linebreak_opportunities};
 // must be 0 (LTR) by UAX #9 rules.
 #[test]
 fn bidi_level_for_ltr_text() {
-    assert_eq!(bidi_level("Hello"), 0, "pure ASCII must resolve to LTR (level 0)");
+    assert_eq!(
+        bidi_level("Hello"),
+        0,
+        "pure ASCII must resolve to LTR (level 0)"
+    );
 }
 
 // bidi_level_for_rtl_text

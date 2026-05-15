@@ -87,9 +87,7 @@ fn unicode_host_is_normalised_to_ace() {
 #[test]
 fn ace_host_no_percent_encoding_introduced() {
     let raw = format!("http://{ACE_HOST}/");
-    let as_str = url::Url::parse(&raw)
-        .expect("valid URL")
-        .to_string();
+    let as_str = url::Url::parse(&raw).expect("valid URL").to_string();
     // The serialised URL must not contain a percent sign in the host.
     // (Path/query percent-encoding is fine; host encoding is not.)
     let host_part = as_str
