@@ -1,5 +1,19 @@
 # silksurf-tls Operations
 
+## Resource bounds (P8.S8)
+
+| Constant                  | Default | Enforcement site                                       | Failure mode                       |
+|---------------------------|---------|---------------------------------------------------------|------------------------------------|
+| `MAX_TLS_HANDSHAKE_SECS`  | `30`    | (advisory) consumed by `silksurf-net::BasicClient::fetch` | Returns `NetError` on TCP timeout  |
+
+GAP: rustls itself does not expose a handshake-level timeout API
+(its design is I/O-agnostic -- the consumer drives reads and writes).
+The constant is therefore advisory in this crate and enforced at the
+silksurf-net I/O boundary via
+`TcpStream::set_read_timeout(Some(Duration::from_secs(MAX_TLS_HANDSHAKE_SECS)))`.
+Once a richer silksurf-tls handshake driver lands (P5.S4) it should
+consume this constant directly via `TlsConfig` builder options.
+
 ## Root store loading order
 
 `TlsConfig::new()` builds the root store as:

@@ -24,6 +24,27 @@ pub use parser::{
     AtRule, AtRuleBlock, CssParser, Declaration, Rule, StyleRule, Stylesheet, parse_stylesheet,
     parse_stylesheet_bytes, parse_stylesheet_with_interner,
 };
+
+/*
+ * MAX_CSS_RULES -- DoS bound on the number of top-level rules in one
+ * Stylesheet.
+ *
+ * WHY: An adversarial CSS payload can pack the parser with millions of
+ * empty selector blocks (`a{}a{}a{}...`), forcing the cascade and
+ * matching subsystems into super-linear work per element. Capping the
+ * rule count at the parse entry point (parse_stylesheet*) converts this
+ * class of OOM/CPU attack into a recoverable CssError. The cap is
+ * generous: real-world stylesheets observed in field collections
+ * (Reddit, ChatGPT, Wikipedia, Hacker News) stay below ~20_000 rules
+ * even with vendor prefixes.
+ *
+ * Default 50_000 rules. The Stylesheet struct stores rules in
+ * Vec<Rule>; at ~256 B per Rule entry (selector + declarations +
+ * AtRule blocks) the cap bounds the parsed Stylesheet at ~12.8 MiB.
+ *
+ * See: SNAZZY-WAFFLE roadmap P8.S8 (DoS bounds per crate).
+ */
+pub const MAX_CSS_RULES: usize = 50_000;
 pub use selector::{
     AttributeOperator, AttributeSelector, Combinator, CompoundSelector, Selector, SelectorIdent,
     SelectorList, SelectorModifier, SelectorStep, TypeSelector, intern_rules, parse_selector_list,

@@ -59,6 +59,31 @@ use value::{JsFunction, Object, Value};
 use crate::bytecode::{Chunk, Constant, Instruction, Opcode};
 
 /*
+ * MAX_CALL_STACK_DEPTH -- DoS bound on JavaScript call stack depth.
+ *
+ * WHY: Unbounded recursion (`function f(){f();} f();`) would otherwise
+ * grow vm.call_stack as a Vec<CallFrame> until the host process runs
+ * out of address space, crashing the renderer instead of throwing a
+ * recoverable RangeError. The bound is enforced inside op_call and
+ * op_spread_call (the only opcodes that push a CallFrame for JS-side
+ * functions); native calls do not consume a frame.
+ *
+ * Default 10_000 frames. CallFrame is 32 B on 64-bit, so the cap
+ * bounds vm.call_stack at ~320 KiB. The historical default was 1024
+ * which matched V8's classic limit but caused spec-conforming code
+ * paths (deeply nested promise chains, recursive descent parsers in
+ * user JS) to throw spuriously. 10_000 matches modern V8 / SpiderMonkey
+ * defaults while still firing well below host-thread stack exhaustion.
+ *
+ * Used as the initial value of Vm::max_stack_depth; the field remains
+ * mutable so embedders can override per-VM if needed.
+ *
+ * See: SNAZZY-WAFFLE roadmap P8.S8 (DoS bounds per crate).
+ * See: op_call / op_spread_call (this file) for the enforcement sites.
+ */
+pub const MAX_CALL_STACK_DEPTH: usize = 10_000;
+
+/*
  * VmError -- all possible VM execution failures.
  *
  * Exception(Value) carries the JS throw value through the call stack.
@@ -99,7 +124,7 @@ pub type VmResult<T> = Result<T, VmError>;
  * program counter within that chunk's instruction array.
  *
  * Layout: 16 bytes (usize + usize + usize + u8 + padding)
- * Max depth: vm.max_stack_depth (default 1024)
+ * Max depth: vm.max_stack_depth (default MAX_CALL_STACK_DEPTH = 10_000)
  *
  * See: op_call (mod.rs) for frame push
  * See: op_ret (mod.rs) for frame pop and result propagation
@@ -193,7 +218,7 @@ struct TryHandler {
  *
  * Memory layout:
  *   registers: 256 Value slots (~6-10KB depending on Value size)
- *   call_stack: pre-allocated for 64 frames, max 1024
+ *   call_stack: pre-allocated for 64 frames, max MAX_CALL_STACK_DEPTH (10_000)
  *   chunks: compiled function bytecode (owned, never freed during execution)
  *   strings: interned string table (O(1) lookup)
  *   global: Rc<RefCell<Object>> -- shared with DOM bridge
@@ -375,7 +400,7 @@ impl Vm {
             microtasks: promise::MicrotaskQueue::new(),
             try_handlers: Vec::new(),
             timers: timers::TimerQueue::new(),
-            max_stack_depth: 1024,
+            max_stack_depth: MAX_CALL_STACK_DEPTH,
         }
     }
 

@@ -15,6 +15,11 @@ silksurf-render = { path = "../silksurf-render", features = ["parallel"] }
 rustc-hash = { workspace = true }
 mimalloc = { workspace = true }
 serde_json = { workspace = true }
+# Structured spans at the pipeline boundary (P8.S6 -- observability roadmap).
+# Used by lib.rs `render`, `render_document`, and the incremental variants.
+# We instrument coarse boundaries only -- inner-loop code stays span-free to
+# preserve throughput.
+tracing = { workspace = true }
 silksurf-net = { path = "../silksurf-net", optional = true }
 silksurf-tls = { path = "../silksurf-tls", optional = true }
 

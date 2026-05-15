@@ -29,12 +29,22 @@ The on-disk schema (`CachedResponseDisk`) is `serde_json`-stable.
 Records have `url`, `status`, `headers`, `body` (base64 if non-UTF-8),
 `etag`, `last_modified`, `cached_at` (RFC 3339).
 
-## Resource bounds (TBD)
+## Resource bounds (P8.S8)
 
-The current client has no max-body-size cap, no per-request timeout,
-no max-connections cap. These are tracked in SNAZZY-WAFFLE roadmap
-P8.S8 (DoS bounds). Until they land, do not point silksurf-app at
-adversarial hosts.
+| Constant                   | Default      | Enforcement site                                  | Failure mode                  |
+|----------------------------|--------------|----------------------------------------------------|-------------------------------|
+| `MAX_RESPONSE_BODY_BYTES`  | `16 MiB`     | `read_response()` accumulator check                | Returns `NetError`            |
+| (alias) handshake timeout  | `30 s`       | `BasicClient::fetch` TCP `set_read_timeout` call    | Returns `NetError` on stall   |
+
+The handshake timeout is sourced from
+`silksurf_tls::MAX_TLS_HANDSHAKE_SECS` so the value lives in one place.
+The body cap is checked after each `read()` chunk; oversized responses
+are dropped, the connection closed, and the caller sees a recoverable
+`NetError`.
+
+Per-request total-deadline and max-connections caps remain on the
+roadmap (still tracked under P8.S8). Until they land, do not point
+silksurf-app at adversarial hosts.
 
 ## Tokio runtime
 

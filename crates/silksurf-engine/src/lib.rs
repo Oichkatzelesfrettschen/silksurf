@@ -96,6 +96,22 @@ impl EnginePipeline {
         self.style_cache.generation()
     }
 
+    /*
+     * P8.S6 -- coarse-grained tracing span at the pipeline boundary.
+     *
+     * WHY: We want structured timing for the three pipeline stages (style /
+     * layout / display-list) without paying span-overhead per node.  An
+     * outer `info_span!` here bounds the cost to one span enter/exit per
+     * render_document call; the sub-stages remain uninstrumented so their
+     * tight loops keep their cache behaviour.
+     *
+     * `skip(self, arena)` keeps the span fields cheap -- arenas/caches do
+     * not implement `Debug` and would either be huge or fail to format.
+     */
+    #[tracing::instrument(
+        skip_all,
+        fields(viewport_w = viewport.width, viewport_h = viewport.height)
+    )]
     pub fn render_document<'a>(
         &mut self,
         document: ParsedDocument,
@@ -122,6 +138,22 @@ impl EnginePipeline {
         })
     }
 
+    /*
+     * P8.S6 -- incremental render boundary span.
+     *
+     * Mirrors render_document; we additionally record `dirty_count` because
+     * dirty-set size is the primary driver of incremental cost and a
+     * useful filter when scanning logs ("show me re-renders with > 100
+     * dirty nodes").
+     */
+    #[tracing::instrument(
+        skip_all,
+        fields(
+            dirty_count = dirty_nodes.len(),
+            viewport_w = viewport.width,
+            viewport_h = viewport.height
+        )
+    )]
     pub fn render_document_incremental<'a>(
         &mut self,
         document: ParsedDocument,
@@ -205,6 +237,14 @@ pub fn render_document<'a>(
     pipeline.render_document(document, stylesheet, viewport, arena)
 }
 
+/*
+ * P8.S6 -- top-level render entry span.
+ *
+ * `skip_all` covers the large `&str` HTML/CSS payloads (would bloat span
+ * fields) and the arena reference.  We include `html_len` and `css_len`
+ * as cheap, useful scalars for log filtering.
+ */
+#[tracing::instrument(skip_all, fields(html_len = html.len(), css_len = css.len()))]
 pub fn render<'a>(
     html: &str,
     css: &str,

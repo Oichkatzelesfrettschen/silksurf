@@ -195,7 +195,31 @@ pub fn parse_stylesheet(input: &str) -> Result<Stylesheet, CssError> {
     let mut tokens = tokenizer.feed(input)?;
     tokens.extend(tokenizer.finish()?);
     let mut parser = CssParser::new(tokens);
-    Ok(parser.parse_stylesheet())
+    let stylesheet = parser.parse_stylesheet();
+    /*
+     * DoS bound (P8.S8): refuse stylesheets whose top-level rule count
+     * exceeds crate::MAX_CSS_RULES. Checked once after parsing (not
+     * inside the parser hot path) so the cascade and matching layers
+     * never see a degenerate Vec<Rule>.
+     *
+     * TODO(P8.S8): Push the check INTO CssParser::parse_stylesheet so
+     * we abort early instead of allocating the full rule Vec first.
+     * That requires changing the inner method's signature to return
+     * Result<Stylesheet, CssError>, which is a breaking API change for
+     * the few external callers of CssParser directly. Tracked for the
+     * next API-break window.
+     */
+    if stylesheet.rules.len() > crate::MAX_CSS_RULES {
+        return Err(CssError {
+            offset: 0,
+            message: format!(
+                "stylesheet rule count {} exceeds MAX_CSS_RULES {}",
+                stylesheet.rules.len(),
+                crate::MAX_CSS_RULES
+            ),
+        });
+    }
+    Ok(stylesheet)
 }
 
 pub fn parse_stylesheet_bytes(input: &[u8]) -> Result<Stylesheet, CssError> {
