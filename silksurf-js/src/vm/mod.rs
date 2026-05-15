@@ -136,17 +136,19 @@ pub struct CallFrame {
     pub base: usize,
     pub return_reg: u8,
     /*
-     * captures -- snapshot of the executing function's upvalues.
+     * captures -- the executing closure's upvalue cell, SHARED with the
+     * JsFunction object via Rc.
      *
-     * WHY: Closures need to read/write the values of variables captured
-     * from enclosing function scopes. JsFunction owns the captures Vec;
-     * each call clones the (cheap) Rc into the new frame so
-     * `op_get_capture` and `op_set_capture` can resolve `depth=0`
-     * reads/writes against the running function's upvalues without
-     * walking back through the call stack.
+     * WHY: Closures need read/write access to variables captured from
+     * enclosing function scopes, and mutations must persist across
+     * invocations (counter pattern). JsFunction owns the canonical
+     * Rc<RefCell<Vec<Value>>>; every call clones the Rc (cheap refcount
+     * bump) so all CallFrames for the same closure see the same backing
+     * Vec. `op_set_capture` (depth=0) writes through this shared cell, so
+     * the next call's `op_get_capture` observes the update.
      *
-     * Top-level frames and frames pushed for native call paths leave
-     * this empty -- they have no enclosing function scope to capture.
+     * Top-level frames and frames pushed for native call paths leave this
+     * empty -- they have no enclosing function scope to capture.
      */
     pub captures: Rc<RefCell<Vec<Value>>>,
 }
@@ -1059,15 +1061,21 @@ fn op_call(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
             if needed > vm.registers.len() {
                 vm.registers.resize(needed, Value::Undefined);
             }
-            // Snapshot the closure's captures into the new frame. We
-            // copy values rather than alias the JsFunction's RefCell so
-            // each invocation has its own activation: SetCapture inside
-            // the body mutates only this frame, not the function object
-            // shared between callers. (Multi-closure shared bindings -- the
-            // counter pattern across sibling closures -- are out of scope
-            // for this fix; the snapshot model is correct for the common
-            // case of read-only captured parameters.)
-            let captures = Rc::new(RefCell::new(func.captures.borrow().clone()));
+            // Share the closure's captures cell with the new frame.
+            //
+            // WHY: The canonical closure pattern -- `function makeCounter()
+            // { var count = 0; return function() { count++; return count;
+            // }; }` -- requires `count` mutations from one invocation to be
+            // visible to the next. Snapshotting (cloning the inner Vec)
+            // gave each call a private copy, so c() always returned 1. By
+            // cloning the Rc instead of the Vec, every CallFrame for this
+            // JsFunction reads and writes through the same RefCell, and
+            // SetCapture (depth=0) durably mutates the closure state.
+            //
+            // Cost: Rc::clone is a single atomic-free refcount bump on
+            // single-threaded code; far cheaper than allocating + cloning
+            // the Vec on every call.
+            let captures = Rc::clone(&func.captures);
             vm.call_stack.push(CallFrame {
                 chunk_idx,
                 pc: 0,
@@ -1511,9 +1519,9 @@ fn op_spread_call(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
             if vm.call_stack.len() >= vm.max_stack_depth {
                 return Err(VmError::StackOverflow);
             }
-            // Snapshot the closure's captures into the new frame; same
-            // semantics as op_call's Value::Function arm.
-            let captures = Rc::new(RefCell::new(func.captures.borrow().clone()));
+            // Share the closure's captures cell with the new frame; same
+            // shared-binding rationale as op_call's Value::Function arm.
+            let captures = Rc::clone(&func.captures);
             vm.call_stack.push(CallFrame {
                 chunk_idx,
                 pc: 0,
@@ -3193,13 +3201,12 @@ mod tests {
     #[test]
     fn test_async_function_returns_resolved_promise() {
         /*
-         * NOTE: The parser currently surfaces `async function NAME(){...}`
-         * at statement position as an ExpressionStatement(Function), not a
-         * FunctionDeclaration, so the binding is not hoisted under the name.
-         * Using `var f = async function() {...}` lets us call `f()` without
-         * depending on that hoisting path, which is unrelated to async/await
-         * semantics.  See parser.rs parse_statement / parse_async_expression
-         * for the lowering.
+         * Parser now lowers `async function NAME(){...}` at statement
+         * position to a FunctionDeclaration (with is_async=true), so the
+         * name is hoisted into the enclosing scope.  See
+         * test_async_function_declaration_is_hoisted below for the
+         * declaration-form test; this test stays on the assignment form to
+         * keep it focused on async/await Promise wrapping.
          */
         // UNWRAP-OK: well-formed script; failure indicates an async/await bug.
         let (state, value) = run_and_get_promise_state(
@@ -3259,6 +3266,132 @@ mod tests {
             assert!((n - 3.0).abs() < f64::EPSILON, "expected 3, got {n}");
         } else {
             panic!("expected number 3, got {value:?}");
+        }
+    }
+
+    /*
+     * async_function_declaration_is_hoisted -- regression for the parser
+     * gap where `async function NAME(){...}` at statement position was
+     * lowered to ExpressionStatement(Function), which prevented hoisting
+     * (collect_declarations_in_stmt only walks Statement::FunctionDeclaration).
+     *
+     * After the fix, parse_statement consumes `async` when followed by
+     * `function` and dispatches to parse_function_declaration with
+     * is_async=true.  The name `greet` is therefore hoisted into the
+     * surrounding scope and resolvable as a callable Value::Function.
+     *
+     * We use `typeof greet === "function"` rather than `greet instanceof
+     * Function` because Instanceof opcode dispatch is not yet installed in
+     * the VM (see opcode table init in Vm::new).
+     *
+     * Expected: window.result == 1 (truthy branch ran).
+     *
+     * See: parser.rs parse_statement (TokenKind::Async arm)
+     * See: compiler.rs collect_declarations_in_stmt
+     */
+    #[test]
+    fn test_async_function_declaration_is_hoisted() {
+        // UNWRAP-OK: well-formed script; failure indicates the parser
+        // regressed back to the ExpressionStatement(Function) lowering.
+        let v = run_and_get_result(
+            "async function greet() { return \"hello\"; }\
+             window.result = typeof greet === \"function\" ? 1 : 0;",
+        )
+        .expect("script failed");
+        if let Value::Number(n) = v {
+            assert!((n - 1.0).abs() < f64::EPSILON, "expected 1, got {n}");
+        } else {
+            panic!("expected number 1, got {v:?}");
+        }
+    }
+
+    /*
+     * closure_counter_persists_across_calls -- regression for the closure
+     * snapshot bug where each invocation of an inner function received a
+     * private clone of JsFunction.captures, so `count++` mutations were
+     * lost between calls.
+     *
+     * Canonical pattern:
+     *   function makeCounter() {
+     *     var count = 0;
+     *     return function() { count++; return count; };
+     *   }
+     *   var c = makeCounter();
+     *   c(); c(); c();   // must return 3
+     *
+     * After the fix, JsFunction.captures is Rc<RefCell<Vec<Value>>> and
+     * op_call shares the Rc into the new CallFrame, so SetCapture writes
+     * propagate across calls.  Pre-fix this test asserted 1; post-fix it
+     * asserts 3.
+     *
+     * See: vm/value.rs JsFunction.captures
+     * See: vm/mod.rs op_call (Value::Function arm)
+     * See: vm/mod.rs op_set_capture (depth=0)
+     */
+    #[test]
+    fn test_closure_counter_persists_across_calls() {
+        // UNWRAP-OK: well-formed script; failure indicates the closure
+        // capture sharing regressed back to snapshot semantics.
+        let v = run_and_get_result(
+            "function makeCounter() {\
+                 var count = 0;\
+                 return function() { count++; return count; };\
+             }\
+             var c = makeCounter();\
+             c(); c();\
+             window.result = c();",
+        )
+        // UNWRAP-OK: well-formed script; failure means closure capture sharing regressed.
+        .expect("script failed");
+        if let Value::Number(n) = v {
+            assert!((n - 3.0).abs() < f64::EPSILON, "expected 3, got {n}");
+        } else {
+            panic!("expected number 3, got {v:?}");
+        }
+    }
+
+    /*
+     * closure_aliased_handles_share_state -- two references to the same
+     * closure object must observe each other's mutations.
+     *
+     * Pattern:
+     *   var c = makeCounter();
+     *   var d = c;          // d and c are the same Rc<JsFunction>
+     *   c(); d(); c();       // d sees c's increment and vice versa
+     *
+     * This exercises the Rc-sharing semantics: cloning the Value::Function
+     * register only bumps the Rc<JsFunction>, so both `c` and `d` resolve
+     * to the SAME captures cell.  Each call shares the cell with the
+     * JsFunction, so all three increments accumulate to 3.
+     *
+     * See: closure_counter_persists_across_calls for the single-handle
+     *      version of this guarantee.
+     */
+    #[test]
+    fn test_closure_aliased_handles_share_state() {
+        // UNWRAP-OK: well-formed script; failure indicates Rc<JsFunction>
+        // alias semantics regressed (e.g., capture cell got cloned per
+        // assignment).
+        let v = run_and_get_result(
+            "function makeCounter() {\
+                 var count = 0;\
+                 return function() { count++; return count; };\
+             }\
+             var c = makeCounter();\
+             var d = c;\
+             c();\
+             d();\
+             window.result = c();",
+        )
+        // UNWRAP-OK: well-formed script; failure means Rc<JsFunction> alias semantics regressed.
+        .expect("script failed");
+        if let Value::Number(n) = v {
+            assert!(
+                (n - 3.0).abs() < f64::EPSILON,
+                "expected 3 (c+d+c share state), got {n}"
+            );
+        } else {
+            panic!("expected number 3, got {v:?}");
         }
     }
 }

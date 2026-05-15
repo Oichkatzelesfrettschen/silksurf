@@ -405,18 +405,23 @@ impl std::fmt::Debug for NativeFunction {
 /// `captures` uses interior mutability so the compiler can emit
 /// `BindCapture` instructions immediately after `NewFunction` to fill in
 /// upvalue values (parent scope locals at the moment the inner function
-/// is created). Once construction is done the closure carries those values
-/// for the rest of its lifetime; subsequent reads/writes (inside the
-/// closure body) go through CallFrame.captures, not back here.
+/// is created). The wrapping `Rc` is critical: every `CallFrame` for this
+/// closure shares the SAME `RefCell<Vec<Value>>`, so mutations performed
+/// in the closure body (e.g. `count++` in the canonical counter pattern)
+/// persist across calls. Snapshotting via `.borrow().clone()` would give
+/// each invocation a private copy and silently break observable closure
+/// semantics.
+///
+/// See: `vm/mod.rs` `op_call` -- shares this `Rc` into the new `CallFrame`.
+/// See: `vm/mod.rs` `op_set_capture` -- writes propagate through the shared cell.
 #[derive(Debug)]
 pub struct JsFunction {
     /// Bytecode chunk index
     pub chunk_idx: u32,
-    /// Captured upvalues. Filled by `BindCapture` after `NewFunction`;
-    /// indexed by the captures-slot the inner function was compiled
-    /// against. Wrapped in `RefCell` because the VM mutates it through
-    /// the `Rc<JsFunction>` stored in a register.
-    pub captures: RefCell<Vec<Value>>,
+    /// Captured upvalues, shared across all invocations of this closure.
+    /// Filled by `BindCapture` after `NewFunction`; indexed by the
+    /// captures-slot the inner function was compiled against.
+    pub captures: Rc<RefCell<Vec<Value>>>,
     /// Name (interned string index, None for anonymous)
     pub name: Option<u32>,
 }
@@ -427,7 +432,7 @@ impl JsFunction {
     pub fn new(chunk_idx: u32) -> Self {
         Self {
             chunk_idx,
-            captures: RefCell::new(Vec::new()),
+            captures: Rc::new(RefCell::new(Vec::new())),
             name: None,
         }
     }
