@@ -94,6 +94,24 @@ pub struct Compiler<'src, 'arena> {
     max_register: u8,
     loop_stack: Vec<LoopContext>,
     strict: bool,
+    /*
+     * is_async_function -- true when compiling the body of an async function
+     * or async arrow.
+     *
+     * WHY: Inside an async body every `return X` must wrap X in Promise.resolve
+     * before unwinding to the caller, and the implicit fall-off-the-end return
+     * must do the same with `undefined`.  The compiler emits AsyncReturn
+     * instead of Ret/RetUndefined when this flag is set, and the VM's
+     * op_async_return handles the wrapping at runtime (see vm/mod.rs).
+     *
+     * The flag is only ever set on a child compiler created for the async
+     * function's body; the top-level Compiler always has it cleared.
+     *
+     * See: Statement::FunctionDeclaration, Expression::Function, Expression::Arrow
+     *      for where the flag is set when compiling async bodies
+     * See: Statement::Return for the AsyncReturn vs Ret selection
+     */
+    is_async_function: bool,
     errors: Vec<CompileError>,
     _phantom: std::marker::PhantomData<(&'src (), &'arena ())>,
 }
@@ -134,6 +152,7 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
             max_register: 0,
             loop_stack: Vec::new(),
             strict: false,
+            is_async_function: false,
             errors: Vec::new(),
             _phantom: std::marker::PhantomData,
         }
@@ -663,9 +682,37 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 }
             }
             Statement::Return(ret) => {
+                /*
+                 * Inside an async function body we MUST emit AsyncReturn so the
+                 * VM wraps the value in Promise.resolve before unwinding to
+                 * the caller.  For a bare `return;` we synthesise an undefined
+                 * register and feed it through AsyncReturn so the caller sees
+                 * a fulfilled Promise<undefined> rather than the raw undefined.
+                 *
+                 * Non-async functions keep the original Ret/RetUndefined path
+                 * so we do not regress any existing test.
+                 *
+                 * See: vm/mod.rs op_async_return for the runtime wrap
+                 * See: is_async_function for where the flag is set
+                 */
                 if let Some(arg) = ret.argument.as_ref() {
                     let reg = self.compile_expression(arg)?;
-                    self.emit_at(Instruction::new_r(Opcode::Ret, reg.0), ret.span);
+                    let op = if self.is_async_function {
+                        Opcode::AsyncReturn
+                    } else {
+                        Opcode::Ret
+                    };
+                    self.emit_at(Instruction::new_r(op, reg.0), ret.span);
+                } else if self.is_async_function {
+                    let undef_reg = self.alloc_register();
+                    self.emit_at(
+                        Instruction::new_r(Opcode::LoadUndefined, undef_reg.0),
+                        ret.span,
+                    );
+                    self.emit_at(
+                        Instruction::new_r(Opcode::AsyncReturn, undef_reg.0),
+                        ret.span,
+                    );
                 } else {
                     self.emit_at(Instruction::new(Opcode::RetUndefined), ret.span);
                 }
@@ -715,6 +762,9 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 if let Some(ref id) = func.id {
                     let mut child =
                         Compiler::new_with_pool(self.string_pool.clone(), self.next_string_id);
+                    // Propagate the async marker so Statement::Return inside
+                    // the body emits AsyncReturn instead of Ret.
+                    child.is_async_function = func.is_async;
                     /*
                      * Two-pass parameter binding to support destructuring.
                      *
@@ -748,7 +798,26 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                     for stmt in func.body.body {
                         child.compile_statement(stmt)?;
                     }
-                    child.chunk.emit(Instruction::new(Opcode::RetUndefined));
+                    /*
+                     * Implicit fall-off-the-end return.
+                     *
+                     * Sync function: just RetUndefined.
+                     * Async function: must produce a fulfilled Promise<undefined>
+                     * so the caller's `await` (or `.then`) sees a settled value.
+                     * We synthesise an undefined register, then emit AsyncReturn
+                     * so the VM wraps it in Promise.resolve(undefined).
+                     */
+                    if func.is_async {
+                        let undef_reg = child.alloc_register();
+                        child
+                            .chunk
+                            .emit(Instruction::new_r(Opcode::LoadUndefined, undef_reg.0));
+                        child
+                            .chunk
+                            .emit(Instruction::new_r(Opcode::AsyncReturn, undef_reg.0));
+                    } else {
+                        child.chunk.emit(Instruction::new(Opcode::RetUndefined));
+                    }
                     let (mut child_chunk, nested, merged_pool, merged_next) = child.into_parts();
                     self.string_pool = merged_pool;
                     self.next_string_id = merged_next;
@@ -1360,6 +1429,9 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 let result_reg = self.alloc_register();
                 let mut child =
                     Compiler::new_with_pool(self.string_pool.clone(), self.next_string_id);
+                // Propagate the async marker so Statement::Return inside the
+                // body emits AsyncReturn instead of Ret.
+                child.is_async_function = func.is_async;
                 // Declare parameters in child scope (two-pass; see FunctionDeclaration)
                 let mut destructuring_params = Vec::new();
                 for param in func.params {
@@ -1378,7 +1450,20 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 for stmt in func.body.body {
                     child.compile_statement(stmt)?;
                 }
-                child.chunk.emit(Instruction::new(Opcode::RetUndefined));
+                // Implicit fall-off-the-end return -- async wraps in
+                // Promise.resolve(undefined); see Statement::FunctionDeclaration
+                // for the same pattern.
+                if func.is_async {
+                    let undef_reg = child.alloc_register();
+                    child
+                        .chunk
+                        .emit(Instruction::new_r(Opcode::LoadUndefined, undef_reg.0));
+                    child
+                        .chunk
+                        .emit(Instruction::new_r(Opcode::AsyncReturn, undef_reg.0));
+                } else {
+                    child.chunk.emit(Instruction::new(Opcode::RetUndefined));
+                }
                 let (mut child_chunk, nested, merged_pool, merged_next) = child.into_parts();
                 // Merge child string pool additions back into parent
                 self.string_pool = merged_pool;
@@ -1416,6 +1501,10 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 let result_reg = self.alloc_register();
                 let mut child =
                     Compiler::new_with_pool(self.string_pool.clone(), self.next_string_id);
+                // Propagate the async marker so Statement::Return inside the
+                // body emits AsyncReturn, and so the implicit fall-off-the-end
+                // return wraps the value in Promise.resolve.
+                child.is_async_function = arrow.is_async;
                 // Two-pass parameter binding -- same as FunctionDeclaration/Expression
                 let mut destructuring_params = Vec::new();
                 for param in arrow.params {
@@ -1432,14 +1521,31 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 match &arrow.body {
                     crate::parser::ArrowBody::Expression(expr) => {
                         let val_reg = child.compile_expression(expr)?;
-                        child.chunk.emit(Instruction::new_r(Opcode::Ret, val_reg.0));
+                        // Concise-body arrow: the expression IS the return
+                        // value.  Async arrows must wrap in Promise.resolve.
+                        let op = if arrow.is_async {
+                            Opcode::AsyncReturn
+                        } else {
+                            Opcode::Ret
+                        };
+                        child.chunk.emit(Instruction::new_r(op, val_reg.0));
                     }
                     crate::parser::ArrowBody::Block(block) => {
                         child.collect_declarations(block.body);
                         for stmt in block.body {
                             child.compile_statement(stmt)?;
                         }
-                        child.chunk.emit(Instruction::new(Opcode::RetUndefined));
+                        if arrow.is_async {
+                            let undef_reg = child.alloc_register();
+                            child
+                                .chunk
+                                .emit(Instruction::new_r(Opcode::LoadUndefined, undef_reg.0));
+                            child
+                                .chunk
+                                .emit(Instruction::new_r(Opcode::AsyncReturn, undef_reg.0));
+                        } else {
+                            child.chunk.emit(Instruction::new(Opcode::RetUndefined));
+                        }
                     }
                 }
                 let (mut child_chunk, nested, merged_pool, merged_next) = child.into_parts();
@@ -1622,6 +1728,32 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                     new_expr.span,
                 );
                 self.free_registers_to(arg_base);
+                Ok(result_reg)
+            }
+            /*
+             * Expression::Await -- `await expr` inside an async function.
+             *
+             * WHY: Without compilation `await x` evaluated to undefined and
+             * any code that depended on the resolved value silently saw
+             * undefined.  Now we compile the inner expression, allocate a
+             * destination register, and emit Await(dst, src) which the VM
+             * resolves synchronously: a Promise wrapper has its current state
+             * read via the INTERNAL_SLOT_KEY introspect function and either
+             * the fulfillment value lands in dst, the rejection reason is
+             * thrown, or (for a non-Promise value) the value passes through.
+             *
+             * Note: this is a synchronous-await model -- the frame does not
+             * suspend; pending Promises currently resolve to undefined.  Real
+             * suspending await requires resumable frames (out of scope here;
+             * see vm/mod.rs op_await for the full rationale).
+             */
+            Expression::Await(await_expr) => {
+                let value_reg = self.compile_expression(await_expr.argument)?;
+                let result_reg = self.alloc_register();
+                self.emit_at(
+                    Instruction::new_rr(Opcode::Await, result_reg.0, value_reg.0),
+                    await_expr.span,
+                );
                 Ok(result_reg)
             }
             _ => {
