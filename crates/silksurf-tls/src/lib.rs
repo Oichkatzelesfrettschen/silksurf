@@ -4,11 +4,10 @@
 //! (rustls-native-certs). Provides a configured rustls ClientConfig.
 
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::CertificateDer;
 use rustls::{ClientConfig, DigitallySignedStruct, Error, RootCertStore, SignatureScheme};
 use std::fmt;
-use std::fs::File;
-use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -255,8 +254,9 @@ fn build_root_store_with_extra_ca_file(
 }
 
 fn load_extra_ca_file(path: &Path) -> Result<Vec<CertificateDer<'static>>, TlsConfigError> {
-    let mut reader = BufReader::new(File::open(path)?);
-    let certs = rustls_pemfile::certs(&mut reader).collect::<Result<Vec<_>, _>>()?;
+    let certs = CertificateDer::pem_file_iter(path)
+        .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
+        .map_err(|e| TlsConfigError::Io(std::io::Error::other(e.to_string())))?;
 
     if certs.is_empty() {
         return Err(TlsConfigError::NoCertificates {

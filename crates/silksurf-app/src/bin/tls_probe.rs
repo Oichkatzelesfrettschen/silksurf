@@ -30,7 +30,7 @@
  * See: silksurf-app/src/main.rs  --tls-ca-file flag integration
  */
 
-use hickory_proto::rr::record_data::RData;
+use hickory_proto::rr::RData;
 use hickory_resolver::Resolver;
 use rustls::pki_types::ServerName;
 use std::io::{Read, Write};
@@ -315,7 +315,7 @@ fn probe_dane(host: &str, port: u16) {
             let records: Vec<&hickory_proto::rr::rdata::TLSA> = lookup
                 .answers()
                 .iter()
-                .filter_map(|rec| match rec.data() {
+                .filter_map(|rec| match &rec.data {
                     RData::TLSA(tlsa) => Some(tlsa),
                     _ => None,
                 })
