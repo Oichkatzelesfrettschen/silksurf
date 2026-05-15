@@ -2398,6 +2398,27 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
             };
             self.emit(Instruction::new_rr(opcode, updated_reg.0, current_reg.0));
 
+            /*
+             * Write the updated value BACK to the binding.
+             *
+             * WHY: Without this write, `count++` inside a closure would
+             * read count, compute count+1, but never propagate the result
+             * to the slot/capture/global -- so the next read sees the same
+             * stale value. This was the silent half of the closure-counter
+             * bug: even after JsFunction.captures became Rc-shared
+             * (vm/value.rs), the captured slot was never updated by `++`.
+             *
+             * Mirror compile_assignment's three-way dispatch:
+             *   1. local / intra-function block-scope binding -- SetLocal
+             *      (depth 0) or SetCapture (depth >= 1).
+             *   2. captured-from-parent upvalue -- SetCapture(depth=0,
+             *      captures_idx). depth=0 selects op_set_capture's upvalue
+             *      mode against CallFrame.captures.
+             *   3. unresolved -- SetGlobal by interned name. Matches the
+             *      read side in compile_identifier.
+             *
+             * See: compile_assignment for the canonical write dispatch.
+             */
             if let Some((depth, slot)) = self.lookup_var(id.name) {
                 if depth == 0 {
                     self.emit(Instruction::new_rr(Opcode::SetLocal, slot, updated_reg.0));
@@ -2409,6 +2430,21 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                         updated_reg.0,
                     ));
                 }
+            } else if let Some(captures_idx) = self.resolve_upvalue(id.name) {
+                self.emit(Instruction::new_rrr(
+                    Opcode::SetCapture,
+                    0,
+                    captures_idx,
+                    updated_reg.0,
+                ));
+            } else {
+                let str_id = self.intern_string(id.raw);
+                let name_idx = self.chunk.add_constant(Constant::String(str_id));
+                self.emit(Instruction::new_ri(
+                    Opcode::SetGlobal,
+                    updated_reg.0,
+                    name_idx,
+                ));
             }
 
             if update.prefix {

@@ -270,6 +270,31 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         match &self.current.kind {
             TokenKind::Var | TokenKind::Let | TokenKind::Const => self.parse_variable_declaration(),
             TokenKind::Function => self.parse_function_declaration(),
+            /*
+             * `async function NAME(...) {...}` at statement position is a
+             * FunctionDeclaration with is_async=true (per ECMA-262
+             * AsyncFunctionDeclaration).  Hoisting (see
+             * collect_declarations_in_stmt in compiler.rs) only walks the
+             * FunctionDeclaration arm, so misclassifying this as an
+             * ExpressionStatement(Function) silently drops the binding from
+             * the enclosing scope and leaves call sites looking it up as a
+             * global instead.
+             *
+             * The parse_function_declaration helper detects async by
+             * checking `self.previous == Async`, so we consume the async
+             * token here, then dispatch on the next token: Function -> hoist
+             * as declaration; anything else -> resume the expression-level
+             * async path (arrow function or `async` used as an identifier).
+             */
+            TokenKind::Async => {
+                let async_start = self.current.span.start;
+                self.advance(); // Consume `async`; sets previous = Async
+                if self.check(&TokenKind::Function) {
+                    self.parse_function_declaration()
+                } else {
+                    self.parse_async_expression_statement(async_start)
+                }
+            }
             TokenKind::Class => self.parse_class_declaration(),
             TokenKind::If => self.parse_if_statement(),
             TokenKind::While => self.parse_while_statement(),
@@ -293,6 +318,70 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             }
             _ => self.parse_expression_statement(),
         }
+    }
+
+    /*
+     * parse_async_expression_statement -- finish parsing an async expression
+     * after `async` was consumed at statement-level lookahead.
+     *
+     * WHY: parse_statement consumes `async` to disambiguate
+     * `async function NAME() {}` (declaration) from `async () => {...}` and
+     * `async x => {...}` (expressions). When the lookahead falls through to
+     * the expression case, we cannot re-enter parse_async_expression because
+     * it expects `async` to still be the current token. This helper mirrors
+     * the post-async arrow-function branches using the already-consumed
+     * async start position. Behaviour for non-arrow continuations matches
+     * parse_async_expression: an unexpected-token error.
+     *
+     * `async_start` is the byte offset of the `async` keyword, used as the
+     * start of the resulting expression's span.
+     */
+    fn parse_async_expression_statement(
+        &mut self,
+        async_start: u32,
+    ) -> ParseResult<Statement<'src, 'arena>> {
+        // async (params) => body  -- arrow function expression
+        if self.check(&TokenKind::LeftParen) {
+            self.advance();
+            let arrow_expr = if self.check(&TokenKind::RightParen) {
+                self.advance();
+                self.parse_arrow_function(async_start, Vec::new(), true)?
+            } else {
+                let expr = self.parse_expression()?;
+                self.expect(&TokenKind::RightParen, ")")?;
+                let params = Self::expression_to_params(&expr)?;
+                self.parse_arrow_function(async_start, params, true)?
+            };
+            let expr_alloc = self.arena.alloc(arrow_expr);
+            self.match_token(&TokenKind::Semicolon);
+            let end = self.previous.span.end;
+            return Ok(Statement::Expression(ExpressionStatement {
+                expression: expr_alloc,
+                span: Span::new(async_start, end),
+            }));
+        }
+
+        // async x => body  -- single-identifier arrow function
+        if self.is_identifier() {
+            let ident = self.parse_identifier()?;
+            let params = vec![Pattern::Identifier(ident)];
+            let arrow_expr = self.parse_arrow_function(async_start, params, true)?;
+            let expr_alloc = self.arena.alloc(arrow_expr);
+            self.match_token(&TokenKind::Semicolon);
+            let end = self.previous.span.end;
+            return Ok(Statement::Expression(ExpressionStatement {
+                expression: expr_alloc,
+                span: Span::new(async_start, end),
+            }));
+        }
+
+        // Mirror parse_async_expression's error path: `async` not followed
+        // by a recognised continuation is a parse error here too.
+        Err(ParseError::unexpected_token(
+            self.current.span,
+            vec!["function", "(", "identifier"],
+            &format!("{:?}", self.current.kind),
+        ))
     }
 
     /// Parse variable declaration: var/let/const x = y;
