@@ -1,0 +1,11 @@
+{
+  "total": 0,
+  "pass": 0,
+  "fail": 0,
+  "skip": 0,
+  "rate": 0.0,
+  "timestamp": "2026-05-15T00:00:00Z",
+  "runner_version": "not-yet-run",
+  "runner_kind": "h2spec-stub",
+  "notes": "Run scripts/run_h2spec.sh against a live silksurf-net h2 server to populate."
+}

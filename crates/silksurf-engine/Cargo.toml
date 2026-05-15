@@ -28,3 +28,13 @@ default = []
 full = ["net"]
 net = ["dep:silksurf-net", "dep:silksurf-tls"]
 platform-verifier = ["net", "silksurf-tls/platform-verifier"]
+
+# =============================================================================
+# Binaries
+# =============================================================================
+# bench_pipeline and bench_js are autodiscovered from src/bin/. wpt_runner is
+# declared explicitly so external tooling (scripts/conformance_run.sh, CI)
+# can reference the binary name without relying on autodiscovery semantics.
+[[bin]]
+name = "wpt_runner"
+path = "src/bin/wpt_runner.rs"
