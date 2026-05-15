@@ -131,6 +131,15 @@ pub enum Opcode {
     RetUndefined = 0x49,
     /// Throw exception: throw r[src]
     Throw = 0x4A,
+    /// Async return: return Promise.resolve(r[src]) from an async function
+    ///
+    /// WHY: An async function's caller expects a Promise, not the raw return
+    /// value. `AsyncReturn` wraps r[src] in an already-fulfilled Promise and
+    /// pops the call frame just like Ret. Emitted by the compiler at every
+    /// return point of an async function body (including the implicit return
+    /// at the end of the body, which uses `LoadUndefined` into a temp reg then
+    /// `AsyncReturn`).
+    AsyncReturn = 0x4B,
 
     // ========================================
     // Property Access (0x50-0x5F)
@@ -297,7 +306,7 @@ pub static OPCODE_META: [OpcodeMeta; 256] = {
 
     set_ops!(0, false, false, Nop, Debugger, LeaveTry);
     set_ops!(0, false, true, Halt, RetUndefined, Rethrow);
-    set_ops!(1, false, true, Ret, Throw);
+    set_ops!(1, false, true, Ret, Throw, AsyncReturn);
     set_ops!(
         1,
         false,
@@ -433,7 +442,7 @@ impl Opcode {
             | 0x10..=0x18
             | 0x20..=0x27
             | 0x30..=0x37
-            | 0x40..=0x4A
+            | 0x40..=0x4B
             | 0x50..=0x58
             | 0x60..=0x6C
             | 0x70..=0x79

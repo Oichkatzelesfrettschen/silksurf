@@ -297,6 +297,117 @@ fn execute_promise_reaction(
 // Promise JS API (installed as builtins)
 // ============================================================================
 
+/*
+ * INTERNAL_SLOT_KEY -- hidden property name that tags a JS object as a Promise wrapper.
+ *
+ * WHY: The VM's op_await needs to detect "is this value a Promise?" and read
+ * its current state without exposing the Rc<RefCell<Promise>> through the
+ * public Value enum. Adding a hidden NativeFunction property keyed by this
+ * sentinel string lets us recognize Promise wrappers (presence check) and
+ * extract their state lazily (call the function).
+ *
+ * The leading "@@" mimics the spec's well-known-symbol convention so user
+ * scripts cannot accidentally collide with this name through normal property
+ * access (any literal property starting with "@@" would be unusual).
+ *
+ * See: promise_to_value (this file) for installation
+ * See: as_settled_promise (this file) for the introspect side
+ * See: vm/mod.rs op_await for the consumer
+ */
+pub const INTERNAL_SLOT_KEY: &str = "@@silksurf_promise_internal";
+
+/*
+ * as_settled_promise -- if `value` is a Promise wrapper, return its current
+ * (state, result) pair. Returns None for non-promise values.
+ *
+ * WHY: op_await needs to inspect a value to decide whether to extract a
+ * resolved value, throw a rejection, or pass the value through unchanged.
+ * Exposing the underlying state via NativeFunction (installed in
+ * promise_to_value) keeps the Value enum unchanged while still giving the
+ * VM live access to the Promise's current state.
+ *
+ * The introspect function returns an Object with two properties:
+ *   { state: "pending" | "fulfilled" | "rejected", result: Value }
+ *
+ * Returns None when:
+ *   - value is not an Object
+ *   - the Object lacks the INTERNAL_SLOT_KEY property
+ *   - the property exists but is not a NativeFunction (defensive)
+ *   - the call result is malformed (defensive)
+ */
+#[must_use]
+pub fn as_settled_promise(value: &Value) -> Option<(PromiseState, Value)> {
+    let Value::Object(obj_rc) = value else {
+        return None;
+    };
+    // Pull the introspect function out without holding the borrow across the call.
+    let introspect = {
+        let obj = obj_rc.borrow();
+        obj.get_by_str(INTERNAL_SLOT_KEY)
+    };
+    let Value::NativeFunction(func) = introspect else {
+        return None;
+    };
+    let snapshot = func.call(&[]);
+    let Value::Object(snap_rc) = snapshot else {
+        return None;
+    };
+    let snap = snap_rc.borrow();
+    let state_val = snap.get_by_str("state");
+    let result = snap.get_by_str("result");
+    let state_str = state_val.to_js_string();
+    let state = match state_str.as_str() {
+        Some("pending") => PromiseState::Pending,
+        Some("fulfilled") => PromiseState::Fulfilled,
+        Some("rejected") => PromiseState::Rejected,
+        _ => return None,
+    };
+    Some((state, result))
+}
+
+/*
+ * resolved_promise_value -- create a JS-visible Promise wrapper that is
+ * already fulfilled with `value`.
+ *
+ * WHY: op_async_return needs to wrap an async function's return value in a
+ * Promise without going through the JS-side Promise.resolve native call.
+ * This helper does the same work directly: allocate the Rust Promise, mark
+ * it Fulfilled, and produce the JS wrapper via promise_to_value.
+ *
+ * If `value` is itself already a Promise wrapper, we return it as-is (per
+ * the spec rule that Promise.resolve unwraps thenables produced by Promise).
+ * For non-promise values we always produce a fresh fulfilled Promise.
+ */
+#[must_use]
+pub fn resolved_promise_value(value: Value) -> Value {
+    if as_settled_promise(&value).is_some() {
+        return value;
+    }
+    let p = Promise::new();
+    let mut queue = MicrotaskQueue::new();
+    Promise::resolve(&p, value, &mut queue);
+    queue.drain();
+    promise_to_value(&p)
+}
+
+/*
+ * rejected_promise_value -- create a JS-visible Promise wrapper that is
+ * already rejected with `reason`.
+ *
+ * WHY: When an async function throws, the resulting Promise must settle in
+ * the rejected state so the caller's `.catch()` (or another `await`) sees
+ * the failure. Used by the VM if we ever wire up async-throw semantics; for
+ * now exposed for symmetry and external callers.
+ */
+#[must_use]
+pub fn rejected_promise_value(reason: Value) -> Value {
+    let p = Promise::new();
+    let mut queue = MicrotaskQueue::new();
+    Promise::reject(&p, reason, &mut queue);
+    queue.drain();
+    promise_to_value(&p)
+}
+
 /// Create a JS Value wrapping a Promise for use from JS.
 pub fn promise_to_value(promise: &Rc<RefCell<Promise>>) -> Value {
     use super::value::{Object, PropertyKey};
@@ -359,11 +470,51 @@ pub fn promise_to_value(promise: &Rc<RefCell<Promise>>) -> Value {
         promise_to_value(&chained)
     })));
 
+    /*
+     * @@silksurf_promise_internal -- live introspect function.
+     *
+     * WHY: op_await needs to read the Promise's current state without going
+     * through the JS .then() machinery. The function captures the Rc clone of
+     * the underlying Promise; each call returns a fresh Object snapshot of
+     * { state, result } from a borrow of the RefCell.
+     *
+     * This lets the VM treat any object carrying this slot as a Promise
+     * wrapper and react synchronously to its current state. See
+     * as_settled_promise for the consumer side.
+     */
+    let p_introspect = Rc::clone(promise);
+    let introspect_fn = Value::NativeFunction(Rc::new(NativeFunction::new(
+        "@@silksurf_promise_introspect",
+        move |_args| {
+            use super::value::Object as InnerObject;
+            let snapshot = InnerObject::new();
+            let snapshot_rc = Rc::new(RefCell::new(snapshot));
+            let p = p_introspect.borrow();
+            let state = match p.state {
+                PromiseState::Pending => "pending",
+                PromiseState::Fulfilled => "fulfilled",
+                PromiseState::Rejected => "rejected",
+            };
+            let result_value = p.result.clone();
+            drop(p);
+            {
+                let mut s = snapshot_rc.borrow_mut();
+                s.set_by_key(
+                    PropertyKey::string_key("state"),
+                    Value::string_owned(state.to_string()),
+                );
+                s.set_by_key(PropertyKey::string_key("result"), result_value);
+            }
+            Value::Object(snapshot_rc)
+        },
+    )));
+
     {
         let mut o = obj_rc.borrow_mut();
         o.set_by_key(PropertyKey::string_key("then"), then_fn);
         o.set_by_key(PropertyKey::string_key("catch"), catch_fn);
         o.set_by_key(PropertyKey::string_key("finally"), finally_fn);
+        o.set_by_key(PropertyKey::string_key(INTERNAL_SLOT_KEY), introspect_fn);
     }
 
     Value::Object(obj_rc)
