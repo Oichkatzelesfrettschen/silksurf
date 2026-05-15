@@ -6,20 +6,61 @@
 
 ## Last refresh
 
-  * Date: 2026-04-30
+  * Date: 2026-05-14 (P9 release-infra wave; numbers re-pulled from
+    `silksurf-js/conformance/test262-scorecard.json` and the in-repo
+    copy at `docs/conformance/test262-scorecard.json`)
+  * Baseline date: 2026-05-14
   * Reproducer: `scripts/conformance_run.sh`
 
 ## Harness summary
 
 | Harness | Status | Coverage | Last result |
 |---------|--------|----------|-------------|
-| **test262** (lexer-only) | scaffolded | 157 of ~53 040 vendored .js files (numeric-literals subset) | 104 / 157 = 66.2 % at lexer level. See `test262-scorecard.json` |
+| **test262** (lexer-only) | scaffolded | 157 of ~53 040 vendored .js files (numeric-literals subset) | 104 / 157 = 66.24 % at lexer level (2026-05-14 baseline). See `test262-scorecard.json` |
 | **TLS loader sanity** (silksurf-tls) | functional | 4 unit tests covering empty PEM, malformed PEM, default-host loader, root-store diagnostics | 4 / 4 pass |
-| **HTTP/2 (h2spec)** | scaffolded | external `h2spec` invocation flow documented; no in-tree HTTP/2 server harness yet | n/a (P5.S3 -- needs local h2 server harness) |
-| **WPT** | DEFERRED | web-platform-tests not vendored | n/a (P5.S2) |
-| **TLS 1.3 RFC 8446 vectors** | DELEGATED | rustls owns protocol-level conformance; silksurf-tls only owns the loader / config / extra-CA surface | rustls upstream test suite |
-| **OCSP stapling (RFC 6066)** | DEFERRED | not yet enforced in silksurf-net | n/a (P5.S4) |
-| **HSTS (RFC 6797)** | DEFERRED | not yet enforced in silksurf-net | n/a (P5.S4) |
+| **HTTP/2 (h2spec)** | scaffolded | external `h2spec` invocation flow documented; no in-tree HTTP/2 server harness yet | NOT YET MEASURED (P5.S3 -- needs local h2 server harness) |
+| **HTML / CSS WPT** | DEFERRED | web-platform-tests not vendored | NOT YET MEASURED (P5.S2) |
+| **TLS 1.3 RFC 8446 vectors** | DELEGATED | rustls owns protocol-level conformance; silksurf-tls only owns the loader / config / extra-CA surface | NOT YET MEASURED in-tree; relies on upstream rustls test suite. A first-party vector harness is queued (P5.S4 follow-on) |
+| **OCSP stapling (RFC 6066)** | DEFERRED | not yet enforced in silksurf-net | NOT YET MEASURED (P5.S4) |
+| **HSTS (RFC 6797)** | DEFERRED | not yet enforced in silksurf-net | NOT YET MEASURED (P5.S4) |
+
+## Per-harness baseline (2026-05-14)
+
+### test262 (JS tokeniser)
+
+  * Source: `docs/conformance/test262-scorecard.json` (mirrored from
+    `silksurf-js/conformance/test262-scorecard.json` after each run).
+  * Subset: `language/literals/numeric` (157 files of ~53 040 in the
+    vendored corpus).
+  * Result: 104 passed / 53 failed / 0 skipped = 66.24 %.
+  * Wall time: 0.031 s.
+  * Runner kind: `lexer` (does NOT parse, compile, or evaluate).
+  * Upgrade path: VM-based evaluation, queued as P5 + P7.
+
+### HTML / CSS WPT
+
+  * NOT YET MEASURED. WPT (web-platform-tests) is not vendored. Vendoring
+    is queued for P5.S2; it requires a subset selection (URL + Fetch +
+    Encoding first since they're bounded), a runner that mounts wpt via
+    silksurf-engine, and per-test browser-state isolation.
+  * Tracking: `silksurf-specification/SILKSURF-RUST-MIGRATION.md` (WPT row).
+
+### h2spec
+
+  * NOT YET MEASURED. We document how to invoke external `h2spec` against
+    a future in-tree HTTP/2 server (`silksurf-net`), but the server side
+    of that harness does not exist yet (queued P5.S3). Until it exists,
+    we cannot generate a numeric scoreboard.
+  * Tracking: `silksurf-specification/SILKSURF-RUST-MIGRATION.md`
+    (HTTP/2 row).
+
+### TLS conformance vectors
+
+  * NOT YET MEASURED in-tree. silksurf-tls deliberately defers protocol
+    conformance to rustls (delegation rationale documented in
+    `docs/NETWORK_TLS.md`). A first-party RFC 8446 vector harness that
+    re-exercises rustls through silksurf-tls's loader is queued behind
+    OCSP / HSTS work.
 
 ## test262 scope
 

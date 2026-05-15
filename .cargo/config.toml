@@ -11,3 +11,21 @@ target-dir = "target"
 #
 # Cargo's `gc` feature (auto-cleanup of unused target/ artifacts) is a nightly
 # convenience that does not affect builds. We do not opt into it; see ADR-008.
+#
+# ---------------------------------------------------------------------------
+# Reproducible builds (P9.S2)
+# ---------------------------------------------------------------------------
+# SOURCE_DATE_EPOCH is intentionally NOT set in this file. Reproducibility
+# requires the value to come from the build environment so that two
+# operators on two machines, building from the same git commit, set the
+# same value derived from `git log -1 --format=%ct`. Hard-coding it here
+# would be wrong: it would shadow the per-commit timestamp and silently
+# defeat reproducibility guarantees.
+#
+# Canonical reproducible build recipe:
+#   export SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
+#   cargo build --workspace --release
+#
+# See docs/development/REPRODUCIBLE-BUILD.md for the full recipe and
+# verification flow with diffoscope / sha256sum.
+# ---------------------------------------------------------------------------

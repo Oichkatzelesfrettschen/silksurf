@@ -118,3 +118,42 @@ panic = "abort"
 incremental = false
 debug = 1
 strip = "none"
+
+# ---------------------------------------------------------------------------
+# Release infrastructure (P9.S1).
+#
+# WHY: We package release artifacts entirely on the developer workstation
+#      (strict-local-only CI per ADR-009). cargo-dist is the canonical
+#      packaging tool; configuring it here lets `dist build` produce
+#      reproducible tarballs for the supported targets without any cloud
+#      orchestration.
+# WHAT: workspace-level cargo-dist config. `ci = []` and the absence of any
+#      `pr-run-mode` keep all builds purely local. `installers = []` means
+#      we do not ship shell-installer or PowerShell-installer wrappers --
+#      only raw binary tarballs. The two targets cover developer laptops
+#      (x86_64) and the ARM SBC fleet used by the perf lab (aarch64).
+# HOW: `dist build` to materialise artifacts into `target/distrib/`,
+#      `dist plan` to dry-run, `dist manifest` to introspect the planned
+#      release. The release script (scripts/release.sh) wraps the gate.
+#
+# Note on the original P9 spec: an earlier draft listed `builds-locals = true`
+# as a desired key. cargo-dist 0.31 has no such key; the canonical way to
+# express "build everything locally, no CI" is the combination
+# `ci = []` + `local-artifacts-jobs = []`. That is what we do here.
+# ---------------------------------------------------------------------------
+[workspace.metadata.dist]
+cargo-dist-version = "0.31.0"
+ci = []
+targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
+installers = []
+local-artifacts-jobs = []
+# Tarball binaries only (no .deb / .rpm / .msi). The gzip tarball variant
+# is the most portable and is what the perf-lab provisioning scripts expect.
+unix-archive = ".tar.gz"
+windows-archive = ".tar.gz"
+# Toolchain pinning lives in rust-toolchain.toml (1.94.1). cargo-dist used
+# to accept a `rust-toolchain-version` key but deprecated it in 0.27 in
+# favour of letting rustup honour rust-toolchain.toml -- which is what we
+# already do. Reproducible-build verification still depends on the rest
+# of the workspace agreeing on the same toolchain; see
+# docs/development/REPRODUCIBLE-BUILD.md.
