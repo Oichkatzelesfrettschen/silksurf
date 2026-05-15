@@ -193,21 +193,36 @@ impl StringTable {
  * the nearest handler when an exception is thrown. TryHandlers form
  * a stack (LIFO) that mirrors try block nesting depth.
  *
- * On throw: pop the top handler, unwind call_stack to handler's
- * stack_depth, then jump to catch_pc (or finally_pc if no catch).
- * The exception value is placed in register 0 for the catch block.
+ * On throw:
+ *   - If catch_pc > 0: unwind to stack_depth, jump to catch_pc, store
+ *     exception in r0 so the catch block can read it.
+ *   - If finally_pc > 0 (no catch): unwind to stack_depth, store the
+ *     exception in pending_exception, jump to finally_pc. The finally
+ *     bytecode ends with Rethrow which re-throws pending_exception.
+ *
+ * pending_exception is None unless a throw is in flight through a
+ * finally-only block (try-finally without catch).
  *
  * See: op_enter_try (mod.rs) for handler installation
  * See: op_throw (mod.rs) for handler dispatch
+ * See: op_rethrow (mod.rs) for re-throwing from finally
  * See: execute() main loop for Exception handling in dispatch
  */
 #[derive(Debug)]
 struct TryHandler {
+    /// Absolute instruction index of the catch block, 0 = no catch.
     catch_pc: usize,
+    /// Absolute instruction index of the throw-path finally duplicate, 0 = no finally.
     finally_pc: usize,
+    /// Call-stack depth at the time `EnterTry` executed.
     stack_depth: usize,
-    /// Chunk index of the handler
+    /// Chunk index that owns this handler.
     chunk_idx: usize,
+    /// Exception value in flight through a finally-only block.
+    ///
+    /// Set by `op_throw` when there is no catch but there is a finally.
+    /// Cleared and re-thrown by `op_rethrow` at the end of the finally block.
+    pending_exception: Option<Value>,
 }
 
 /*
@@ -381,6 +396,8 @@ static DISPATCH_TABLE: [OpHandler; 256] = {
     table[Opcode::LeaveTry as usize] = op_leave_try;
     table[Opcode::EnterCatch as usize] = op_enter_catch;
     table[Opcode::EnterFinally as usize] = op_enter_finally;
+    table[Opcode::Rethrow as usize] = op_rethrow;
+    table[Opcode::GetException as usize] = op_get_exception;
 
     table
 };
@@ -526,82 +543,45 @@ impl Vm {
                     // entries and the array only ever grows, so index 0 is always valid.
                     return Ok(unsafe { self.registers.get_unchecked(0) }.clone());
                 }
-                Err(VmError::Exception(value)) => {
-                    // Check for try handler before propagating
-                    if let Some(try_handler) = self.try_handlers.pop() {
-                        while self.call_stack.len() > try_handler.stack_depth {
-                            self.call_stack.pop();
-                        }
-                        if try_handler.catch_pc > 0 {
-                            if let Some(frame) = self.call_stack.last_mut() {
-                                frame.pc = try_handler.catch_pc;
-                                frame.chunk_idx = try_handler.chunk_idx;
-                            }
-                            self.set_reg(0, value);
-                        } else if try_handler.finally_pc > 0 {
-                            if let Some(frame) = self.call_stack.last_mut() {
-                                frame.pc = try_handler.finally_pc;
-                                frame.chunk_idx = try_handler.chunk_idx;
-                            }
-                        } else {
-                            return Err(VmError::Exception(value));
-                        }
-                    } else {
-                        return Err(VmError::Exception(value));
-                    }
-                }
+                /*
+                 * VmError::Exception -- a JS-level `throw` value that the Throw
+                 * opcode or a native call raised. Route through dispatch_exception
+                 * which handles catch, finally-only, and uncaught paths uniformly.
+                 *
+                 * If dispatch_exception returns Ok(()) the VM continues (it already
+                 * redirected the PC to the handler block). If it returns Err, the
+                 * exception is uncaught and propagates to the Rust caller.
+                 */
+                Err(VmError::Exception(value)) => match dispatch_exception(self, value) {
+                    Ok(()) => {}
+                    Err(err) => return Err(err),
+                },
                 /*
                  * JS-level errors (TypeError, ReferenceError) ARE catchable by
-                 * try/catch. Convert them to Exception(value) and re-dispatch
-                 * through the try handler mechanism.
+                 * try/catch. Convert them to Exception(Value) and route through
+                 * dispatch_exception for uniform catch/finally handling.
                  *
                  * WHY: op_call returns VmError::TypeError("not a function") when
-                 * the callee isn't callable. Without this conversion, try{...}catch(e){}
-                 * around the call does NOT catch the error -- it propagates past the
-                 * handler because only VmError::Exception is checked above.
-                 *
-                 * This was the cause of scripts 0 and 1 failing despite having
-                 * a try/catch: the TypeError leaked through the Exception handler.
+                 * the callee is not callable. Without this conversion, a
+                 * try{...}catch(e){} around the call does NOT catch the error --
+                 * it propagates past the handler because only VmError::Exception
+                 * is routed through dispatch_exception above.
                  *
                  * Internal VM errors (OutOfBounds, StackOverflow, InvalidOpcode)
                  * are NOT converted -- those are unrecoverable engine faults.
                  */
                 Err(VmError::TypeError(msg)) => {
                     let exc_val = Value::string_owned(format!("TypeError: {msg}"));
-                    if let Some(try_handler) = self.try_handlers.pop() {
-                        while self.call_stack.len() > try_handler.stack_depth {
-                            self.call_stack.pop();
-                        }
-                        if try_handler.catch_pc > 0 {
-                            if let Some(frame) = self.call_stack.last_mut() {
-                                frame.pc = try_handler.catch_pc;
-                                frame.chunk_idx = try_handler.chunk_idx;
-                            }
-                            self.set_reg(0, exc_val);
-                        } else {
-                            return Err(VmError::TypeError(msg));
-                        }
-                    } else {
-                        return Err(VmError::TypeError(msg));
+                    match dispatch_exception(self, exc_val) {
+                        Ok(()) => {}
+                        Err(_) => return Err(VmError::TypeError(msg)),
                     }
                 }
                 Err(VmError::ReferenceError(msg)) => {
                     let exc_val = Value::string_owned(format!("ReferenceError: {msg}"));
-                    if let Some(try_handler) = self.try_handlers.pop() {
-                        while self.call_stack.len() > try_handler.stack_depth {
-                            self.call_stack.pop();
-                        }
-                        if try_handler.catch_pc > 0 {
-                            if let Some(frame) = self.call_stack.last_mut() {
-                                frame.pc = try_handler.catch_pc;
-                                frame.chunk_idx = try_handler.chunk_idx;
-                            }
-                            self.set_reg(0, exc_val);
-                        } else {
-                            return Err(VmError::ReferenceError(msg));
-                        }
-                    } else {
-                        return Err(VmError::ReferenceError(msg));
+                    match dispatch_exception(self, exc_val) {
+                        Ok(()) => {}
+                        Err(_) => return Err(VmError::ReferenceError(msg)),
                     }
                 }
                 Err(e) => return Err(e),
@@ -1133,16 +1113,42 @@ fn op_ret_undefined(vm: &mut Vm, _instr: Instruction) -> VmResult<()> {
     }
 }
 
+/*
+ * op_throw -- raise a JS exception.
+ *
+ * WHY: Three dispatch paths:
+ *   1. catch_pc > 0: there is a catch block. Unwind call stack, jump to
+ *      catch_pc, store the exception in r0 (the catch block reads it from r0
+ *      and the compiler copies it to the catch variable register via Mov).
+ *   2. finally_pc > 0 (no catch): store the exception in the handler's
+ *      pending_exception slot, push the handler back (so Rethrow can find it),
+ *      then unwind and jump to the finally block. The finally block ends with
+ *      Rethrow which reads pending_exception and re-throws it.
+ *   3. No handler: propagate as VmError::Exception to the Rust caller.
+ *
+ * See: op_rethrow for path 2 continuation
+ * See: execute() for VmError::Exception -> try_handler routing
+ */
 fn op_throw(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     let value = vm.get_reg(instr.dst()).clone();
-    // Check if there's a try handler to catch this exception
-    if let Some(handler) = vm.try_handlers.pop() {
-        // Unwind call stack to handler depth
+    dispatch_exception(vm, value)
+}
+
+/*
+ * dispatch_exception -- shared throw-dispatch logic used by op_throw and execute().
+ *
+ * WHY: Both the Throw opcode and the execute() loop's error-recovery path need
+ * the same try-handler lookup. Factoring it here avoids duplication and ensures
+ * the finally-path pending_exception logic is applied consistently.
+ */
+fn dispatch_exception(vm: &mut Vm, value: Value) -> VmResult<()> {
+    if let Some(mut handler) = vm.try_handlers.pop() {
+        // Unwind call stack to the depth at which EnterTry executed.
         while vm.call_stack.len() > handler.stack_depth {
             vm.call_stack.pop();
         }
         if handler.catch_pc > 0 {
-            // Jump to catch block, store exception in r0
+            // Jump to catch block; exception is in r0 for the catch body.
             if let Some(frame) = vm.call_stack.last_mut() {
                 frame.pc = handler.catch_pc;
                 frame.chunk_idx = handler.chunk_idx;
@@ -1150,10 +1156,15 @@ fn op_throw(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
             vm.set_reg(0, value);
             Ok(())
         } else if handler.finally_pc > 0 {
-            // No catch, jump to finally
+            // finally-only block: save exception so Rethrow can re-throw it,
+            // then push the handler back and jump to the finally block.
+            handler.pending_exception = Some(value);
+            let finally_pc = handler.finally_pc;
+            let chunk_idx = handler.chunk_idx;
+            vm.try_handlers.push(handler);
             if let Some(frame) = vm.call_stack.last_mut() {
-                frame.pc = handler.finally_pc;
-                frame.chunk_idx = handler.chunk_idx;
+                frame.pc = finally_pc;
+                frame.chunk_idx = chunk_idx;
             }
             Ok(())
         } else {
@@ -1164,18 +1175,48 @@ fn op_throw(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     }
 }
 
-/// `EnterTry`: push a try handler. `dst=catch_offset` (`const_idx`), src1 is unused.
-/// The instruction uses the wide constant format: catch offset as `const_idx`.
+/*
+ * op_enter_try -- install an exception handler frame.
+ *
+ * WHY: The instruction carries a 16-bit handler_index (`const_idx`) that
+ * indexes into `chunk.handlers` -- the exception-handler table compiled into
+ * each Chunk. Storing absolute instruction indices in the Chunk avoids
+ * computing offsets at execution time and avoids the sign/range constraints
+ * of the inline offset encoding used by Jump instructions.
+ *
+ * The `catch_target` and `finally_pc` fields are derived from the handler
+ * record:
+ *   - catch_target = Some(n): there is a catch block starting at instruction n.
+ *   - finally_target = Some(n): there is a finally block (throw path) starting
+ *     at instruction n; it ends with Rethrow.
+ *   - Both absent: the try body has neither catch nor finally (rare, no-op).
+ *
+ * pending_exception starts as None; set by op_throw when routing an exception
+ * through a finally-only block.
+ *
+ * See: chunk.rs ExceptionHandler for the handler record layout
+ * See: op_throw for how the handler is consumed
+ * See: compiler.rs Statement::Try for how handler_index is emitted
+ */
 fn op_enter_try(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
-    let catch_offset = instr.const_idx() as usize;
+    let handler_index = instr.const_idx() as usize;
     let frame = vm.call_stack.last().ok_or(VmError::OutOfBounds)?;
-    let current_pc = frame.pc;
     let chunk_idx = frame.chunk_idx;
+    let stack_depth = vm.call_stack.len();
+    let chunk = &vm.chunks[chunk_idx];
+    let (catch_pc, finally_pc) = if let Some(handler) = chunk.handlers.get(handler_index) {
+        let catch_pc = handler.catch_target.map_or(0, |t| t as usize);
+        let finally_pc = handler.finally_target.map_or(0, |t| t as usize);
+        (catch_pc, finally_pc)
+    } else {
+        (0, 0)
+    };
     vm.try_handlers.push(TryHandler {
-        catch_pc: current_pc + catch_offset,
-        finally_pc: 0,
-        stack_depth: vm.call_stack.len(),
+        catch_pc,
+        finally_pc,
+        stack_depth,
         chunk_idx,
+        pending_exception: None,
     });
     Ok(())
 }
@@ -1186,15 +1227,64 @@ fn op_leave_try(vm: &mut Vm, _instr: Instruction) -> VmResult<()> {
     Ok(())
 }
 
-/// `EnterCatch`: marks catch block start (exception already in r0 from throw dispatch).
+/// `EnterCatch`: marks catch block start; exception value is already in r0.
+///
+/// The compiler emits a `Mov r_catch, r0` immediately after this opcode to
+/// copy the exception from r0 into the declared catch-variable register.
 fn op_enter_catch(_vm: &mut Vm, _instr: Instruction) -> VmResult<()> {
-    // Exception value is already in r0, set by op_throw.
-    // The catch block reads it from there.
     Ok(())
 }
 
-/// `EnterFinally`: marks finally block start.
+/// `EnterFinally`: marks the start of a finally block (no-op; the block is
+/// just normal bytecode reachable from both the normal and throw paths).
 fn op_enter_finally(_vm: &mut Vm, _instr: Instruction) -> VmResult<()> {
+    Ok(())
+}
+
+/*
+ * op_rethrow -- re-throw a pending exception after a finally-only block.
+ *
+ * WHY: When a throw routes through a finally-only block (try { } finally { }),
+ * op_throw saves the exception in the top TryHandler's pending_exception and
+ * jumps to the finally bytecode. The finally block ends with Rethrow. At that
+ * point the TryHandler is still on try_handlers (pushed back by op_throw).
+ *
+ * op_rethrow:
+ *   1. Pop the TryHandler to retrieve pending_exception.
+ *   2. Call dispatch_exception, which searches the *next* enclosing handler
+ *      (the one pushed back is gone). If no outer handler exists, the exception
+ *      propagates as VmError::Exception to the Rust caller.
+ *
+ * The compiler emits Rethrow only at the end of the throw-path duplicate of a
+ * finally block (see Statement::Try in compiler.rs).
+ *
+ * See: op_throw / dispatch_exception for how pending_exception is set
+ * See: compiler.rs Statement::Try for when Rethrow is emitted
+ */
+fn op_rethrow(vm: &mut Vm, _instr: Instruction) -> VmResult<()> {
+    // Pop the handler that was pushed back by dispatch_exception when routing
+    // through a finally-only block.  pending_exception holds the exception.
+    if let Some(handler) = vm.try_handlers.pop()
+        && let Some(exc) = handler.pending_exception
+    {
+        return dispatch_exception(vm, exc);
+    }
+    // If no pending exception (rethrow at end of a catch-then-finally block
+    // with no in-flight exception), just continue normally.
+    Ok(())
+}
+
+/*
+ * op_get_exception -- load the current exception value into a register.
+ *
+ * WHY: Some compiled patterns need to read the exception from somewhere other
+ * than r0. The exception is placed in r0 by dispatch_exception; this opcode
+ * copies r0 to instr.dst() for callers that need it in a specific register.
+ * Currently used only by disassembly and future planned uses.
+ */
+fn op_get_exception(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
+    let exc = vm.get_reg(0).clone();
+    vm.set_reg(instr.dst(), exc);
     Ok(())
 }
 
@@ -2711,6 +2801,116 @@ mod tests {
             assert!((n - 6.0).abs() < f64::EPSILON, "expected 6, got {n}");
         } else {
             panic!("expected 6, got {v:?}");
+        }
+    }
+
+    // ========================================================================
+    // Exception handling tests (P7.S1)
+    //
+    // WHY: These tests verify that try/catch/finally opcodes work correctly
+    // end-to-end through the full compile->execute pipeline.  Each test uses
+    // window.result as the observable output (see run_and_get_result).
+    // ========================================================================
+
+    /*
+     * try_catch_basic -- throw inside try; catch receives the value; code after
+     * catch runs normally.
+     *
+     * Expected: window.result == 42 (set by catch block).
+     */
+    #[test]
+    fn test_try_catch_basic() {
+        // UNWRAP-OK: well-formed script; failure indicates a VM or compiler bug.
+        let v = run_and_get_result(
+            "try { throw 42; window.result = 0; } catch(e) { window.result = e; }",
+        )
+        .expect("script failed");
+        if let Value::Number(n) = v {
+            assert!((n - 42.0).abs() < f64::EPSILON, "expected 42, got {n}");
+        } else {
+            panic!("expected number 42, got {v:?}");
+        }
+    }
+
+    /*
+     * try_catch_no_throw -- try block completes normally; catch is not entered;
+     * code after the whole try/catch runs.
+     *
+     * Expected: window.result == 1 (set by try body; catch is skipped).
+     */
+    #[test]
+    fn test_try_catch_no_throw() {
+        // UNWRAP-OK: well-formed script; failure indicates a VM or compiler bug.
+        let v = run_and_get_result("try { window.result = 1; } catch(e) { window.result = 99; }")
+            .expect("script failed");
+        if let Value::Number(n) = v {
+            assert!((n - 1.0).abs() < f64::EPSILON, "expected 1, got {n}");
+        } else {
+            panic!("expected number 1, got {v:?}");
+        }
+    }
+
+    /*
+     * try_finally_runs_on_throw -- throw inside try with no catch; finally
+     * executes before the exception propagates outward.  The outer try/catch
+     * captures the propagated exception.
+     *
+     * Expected: window.result == 7 (set by finally); the outer catch fires
+     * because the inner try has no catch clause.
+     */
+    #[test]
+    fn test_try_finally_runs_on_throw() {
+        // UNWRAP-OK: well-formed script; failure indicates a VM or compiler bug.
+        let v = run_and_get_result(
+            "try {
+               try { throw 1; } finally { window.result = 7; }
+             } catch(e) {}",
+        )
+        .expect("script failed");
+        if let Value::Number(n) = v {
+            assert!((n - 7.0).abs() < f64::EPSILON, "expected 7, got {n}");
+        } else {
+            panic!("expected number 7, got {v:?}");
+        }
+    }
+
+    /*
+     * try_finally_runs_on_normal -- try block completes without throwing;
+     * finally still runs after the try body.
+     *
+     * Expected: window.result == 5 (set by finally; try sets it to 1 first).
+     */
+    #[test]
+    fn test_try_finally_runs_on_normal() {
+        // UNWRAP-OK: well-formed script; failure indicates a VM or compiler bug.
+        let v = run_and_get_result("try { window.result = 1; } finally { window.result = 5; }")
+            .expect("script failed");
+        if let Value::Number(n) = v {
+            assert!((n - 5.0).abs() < f64::EPSILON, "expected 5, got {n}");
+        } else {
+            panic!("expected number 5, got {v:?}");
+        }
+    }
+
+    /*
+     * nested_try_catch -- inner try/catch handles the inner throw; the outer
+     * catch does NOT fire because the inner catch consumed the exception.
+     *
+     * Expected: window.result == 2 (set by inner catch; outer catch is skipped).
+     */
+    #[test]
+    fn test_nested_try_catch() {
+        // UNWRAP-OK: well-formed script; failure indicates a VM or compiler bug.
+        let v = run_and_get_result(
+            "try {
+               try { throw 1; } catch(inner) { window.result = 2; }
+             } catch(outer) { window.result = 99; }",
+        )
+        .expect("script failed");
+        if let Value::Number(n) = v {
+            assert!((n - 2.0).abs() < f64::EPSILON, "expected 2, got {n}");
+        } else {
+            panic!("expected number 2, got {v:?}");
         }
     }
 }

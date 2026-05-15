@@ -540,51 +540,126 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
             /*
              * try { body } catch (e) { handler } finally { cleanup }
              *
-             * Uses EnterTry/LeaveTry/EnterCatch opcodes.
-             * Exception value placed in register 0 for catch block.
+             * WHY: try/catch/finally requires three separate bytecode layouts
+             * depending on which clauses are present. In all cases an
+             * ExceptionHandler record is added to chunk.handlers and EnterTry
+             * carries its index so the VM can look up catch_target and
+             * finally_target at throw time.
+             *
+             * NORMAL path (no exception):
+             *   EnterTry [idx]
+             *   <try body>
+             *   LeaveTry
+             *   [Jmp skip_catch]       -- if catch present
+             *   [<catch block>]        -- if catch present
+             *   [skip_catch:]
+             *   [<finally body>]       -- if finally present (normal path copy)
+             *   [Jmp after_finally]    -- if finally present
+             *   [<finally body again>] -- finally throw-path duplicate (Rethrow)
+             *   after_finally:         -- / or just end if no finally
+             *
+             * THROW path:
+             *   catch_target points to EnterCatch; exception in r0; compiler
+             *   copies r0 -> catch variable via Mov immediately after EnterCatch.
+             *   finally_target points to the throw-path duplicate of the finally
+             *   block, which ends with Rethrow.
+             *
+             * See: vm/mod.rs dispatch_exception for throw routing
+             * See: vm/mod.rs op_rethrow for throw-path finally termination
+             * See: chunk.rs ExceptionHandler for the handler record layout
              */
             Statement::Try(try_stmt) => {
-                // Emit EnterTry with offset to catch block
-                let enter_try = self.emit(Instruction::new_ri(
-                    Opcode::EnterTry,
-                    0,
-                    0, // patch later
-                ));
+                let has_catch = try_stmt.handler.is_some();
 
-                // Compile try body
+                // Reserve a handler slot index before emitting EnterTry.
+                // We will backpatch catch_target and finally_target below.
+                let handler_index = self.chunk.handlers.len() as u16;
+                use crate::bytecode::chunk::ExceptionHandler;
+                self.chunk.handlers.push(ExceptionHandler {
+                    try_start: self.current_offset() as u32,
+                    try_end: 0,           // backpatched after LeaveTry
+                    catch_target: None,   // backpatched if catch present
+                    finally_target: None, // backpatched if finally present
+                    exception_reg: 0,
+                });
+
+                // EnterTry: operand is the handler index in chunk.handlers.
+                let _enter_try = self.emit(Instruction::new_ri(Opcode::EnterTry, 0, handler_index));
+
+                // Compile try body.
                 for stmt in try_stmt.block.body {
                     self.compile_statement(stmt)?;
                 }
+
+                // LeaveTry: normal exit from try block.
                 self.emit(Instruction::new(Opcode::LeaveTry));
 
-                // Jump over catch block
-                let skip_catch = self.emit(Instruction::new_offset(Opcode::Jmp, 0));
+                // Backpatch try_end to the instruction after LeaveTry.
+                let try_end_pc = self.current_offset() as u32;
+                self.chunk.handlers[handler_index as usize].try_end = try_end_pc;
 
-                // Patch EnterTry to point here (catch start)
-                let catch_offset = self.current_offset() - enter_try - 1;
-                self.chunk.instructions[enter_try] =
-                    Instruction::new_ri(Opcode::EnterTry, 0, catch_offset as u16);
-                self.emit(Instruction::new(Opcode::EnterCatch));
+                // ---- catch block ----
+                let skip_catch_jump = if has_catch {
+                    // Jump over catch block on normal path.
+                    let jmp = self.emit(Instruction::new_offset(Opcode::Jmp, 0));
+                    Some(jmp)
+                } else {
+                    None
+                };
 
-                // Compile catch body (if present)
                 if let Some(ref handler) = try_stmt.handler {
-                    // Exception is in r0; bind to catch variable
+                    // Record where the catch block starts.
+                    let catch_start = self.current_offset() as u32;
+                    self.chunk.handlers[handler_index as usize].catch_target = Some(catch_start);
+
+                    self.emit(Instruction::new(Opcode::EnterCatch));
+
+                    // Bind the catch variable: exception is already in r0.
+                    // Allocate a register for `e` and copy r0 into it so the
+                    // catch body can reference it by name.
                     if let Some(crate::parser::Pattern::Identifier(ref id)) = handler.param {
                         self.declare_var(id.name, VariableKind::Let, true);
+                        if let Some((_depth, slot)) = self.lookup_var(id.name) {
+                            // Copy exception from r0 into the catch variable's slot.
+                            self.emit(Instruction::new_rr(Opcode::Mov, slot, 0));
+                        }
                     }
+
+                    // Compile catch body.
                     for stmt in handler.body.body {
                         self.compile_statement(stmt)?;
                     }
                 }
 
-                // Patch skip_catch jump
-                self.patch_jump(skip_catch);
+                // Patch the normal-path jump over the catch block.
+                if let Some(jmp) = skip_catch_jump {
+                    self.patch_jump(jmp);
+                }
 
-                // Compile finally block (if present)
+                // ---- finally block ----
                 if let Some(ref finalizer) = try_stmt.finalizer {
+                    // Normal path finally: fall through from catch (or try if no catch).
+                    // The finally code runs and then jumps past the throw-path duplicate.
                     for stmt in finalizer.body {
                         self.compile_statement(stmt)?;
                     }
+                    let skip_throw_finally = self.emit(Instruction::new_offset(Opcode::Jmp, 0));
+
+                    // Throw-path finally: a duplicate of the finally body that ends
+                    // with Rethrow to re-throw the pending exception.
+                    let finally_throw_start = self.current_offset() as u32;
+                    self.chunk.handlers[handler_index as usize].finally_target =
+                        Some(finally_throw_start);
+
+                    self.emit(Instruction::new(Opcode::EnterFinally));
+                    for stmt in finalizer.body {
+                        self.compile_statement(stmt)?;
+                    }
+                    // Rethrow re-throws the pending_exception stored in the TryHandler.
+                    self.emit(Instruction::new(Opcode::Rethrow));
+
+                    // Patch the normal-path jump over the throw-path duplicate.
+                    self.patch_jump(skip_throw_finally);
                 }
             }
             Statement::Return(ret) => {
