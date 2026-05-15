@@ -31,6 +31,12 @@
 pub mod flex;
 pub mod neighbor_table;
 
+// unicode-bidi (UAX #9) and unicode-linebreak (UAX #14) are consumed by
+// bidi_level() and linebreak_opportunities() below.  Full integration into
+// the render pipeline is deferred to the typography phase (AD-023).
+use unicode_bidi::BidiInfo;
+use unicode_linebreak::linebreaks;
+
 use rustc_hash::FxHashMap;
 use silksurf_core::{ArenaVec, SilkArena};
 use silksurf_css::{ComputedStyle, Display, Edges, Length};
@@ -525,4 +531,62 @@ fn collapsed_char_count(text: &str) -> usize {
         }
     }
     count
+}
+
+// ---------------------------------------------------------------------------
+// Unicode text-analysis helpers (AD-023)
+//
+// WHY: Correct inline layout requires knowledge of BiDi paragraph levels
+// (UAX #9) and legal line-break opportunities (UAX #14).  These two
+// functions encapsulate the crate-level entry points so that higher-level
+// callers never touch the raw crate APIs directly, keeping future
+// upgrade paths contained to this module.
+//
+// Full render-pipeline integration is deferred to the typography phase;
+// these functions are the adoption-boundary stubs that prevent the crates
+// from being dead dependencies.
+// ---------------------------------------------------------------------------
+
+/// bidi_level -- return the Unicode paragraph embedding level for `text`.
+///
+/// WHY: An embedding level of 0 means left-to-right (the common case);
+/// 1 means right-to-left.  The layout engine must know this before it
+/// can position inline boxes correctly under UAX #9.
+///
+/// Returns 0 for empty input (no BiDi runs -> LTR default per UAX #9 SS2).
+pub fn bidi_level(text: &str) -> u8 {
+    if text.is_empty() {
+        return 0;
+    }
+    let info = BidiInfo::new(text, None);
+    // UNWRAP-OK: BidiInfo::new on non-empty input always produces at least
+    // one paragraph; paragraphs() is non-empty when text is non-empty.
+    let para = info.paragraphs.first().unwrap();
+    para.level.number()
+}
+
+/// linebreak_opportunities -- return byte offsets where line breaks are
+/// permitted according to UAX #14.
+///
+/// WHY: The inline-layout pass must know which byte positions are legal
+/// wrap points before it can break text across lines.  This function
+/// collects all Opportunity positions from the unicode-linebreak iterator
+/// into a Vec so that callers can random-access them without re-running
+/// the iterator multiple times.
+///
+/// The returned offsets are the byte indices *after* the last code unit
+/// that may appear on the preceding line (matching the unicode-linebreak
+/// crate convention).
+pub fn linebreak_opportunities(text: &str) -> Vec<usize> {
+    linebreaks(text)
+        .filter_map(|(offset, opportunity)| {
+            if opportunity == unicode_linebreak::BreakOpportunity::Allowed
+                || opportunity == unicode_linebreak::BreakOpportunity::Mandatory
+            {
+                Some(offset)
+            } else {
+                None
+            }
+        })
+        .collect()
 }

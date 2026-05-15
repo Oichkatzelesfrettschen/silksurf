@@ -63,6 +63,12 @@
         }
       }
     },
+    "idle_cpu_fraction": {
+      "type": "number",
+      "description": "Fraction of CPU time spent idle over a 5-second sampling window, measured from /proc/stat on Linux. Computed as idle_delta / total_delta where idle_delta = idle_ticks[after] - idle_ticks[before] and total_delta = sum(all_ticks[after]) - sum(all_ticks[before]). Range: 0.0 (fully loaded) to 1.0 (fully idle). Advisory only: modern CPUs use frequency scaling so idle fraction is not a direct energy proxy, but it is a useful load baseline. Absent on older records and on non-Linux hosts.",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
     "notes": {
       "type": "string",
       "description": "Optional free-text annotation, e.g. environment notes, regression context, or experiment label."

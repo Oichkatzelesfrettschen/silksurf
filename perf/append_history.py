@@ -21,6 +21,11 @@
 #                                     --profile  release \
 #                                     --notes    "post-fused-pipeline tweak"
 #
+#      To attach an idle-CPU fraction (see scripts/measure_idle_cpu.sh):
+#
+#          python3 perf/append_history.py \
+#              --idle-cpu $(sh scripts/measure_idle_cpu.sh)
+#
 #      The three required microsecond metrics (fused_pipeline_us,
 #      css_cache_hit_us, full_render_us) are taken from
 #      baseline.json["metrics"] when present. To accommodate older baseline
@@ -175,12 +180,23 @@ def collect_metrics(baseline: Dict[str, Any]) -> Dict[str, float]:
     return metrics
 
 
+def validate_idle_cpu_fraction(value: float, source: str) -> float:
+    """Reject values outside [0, 1] -- the schema enforces this range."""
+    if value < 0.0 or value > 1.0:
+        raise AppendError(
+            f"--idle-cpu value from {source} is {value!r}, "
+            "which is outside the valid range [0.0, 1.0]"
+        )
+    return value
+
+
 def build_record(
     git_sha: str,
     rust_version: str,
     profile: str,
     metrics: Dict[str, float],
     notes: Optional[str],
+    idle_cpu_fraction: Optional[float] = None,
 ) -> Dict[str, Any]:
     record: Dict[str, Any] = {
         "git_sha": git_sha,
@@ -189,6 +205,8 @@ def build_record(
         "profile": profile,
         "metrics": metrics,
     }
+    if idle_cpu_fraction is not None:
+        record["idle_cpu_fraction"] = idle_cpu_fraction
     if notes is not None and notes != "":
         record["notes"] = notes
     return record
@@ -241,6 +259,18 @@ def parse_args(argv: list) -> argparse.Namespace:
         help="optional free-text annotation for this run",
     )
     parser.add_argument(
+        "--idle-cpu",
+        type=float,
+        default=None,
+        metavar="FRACTION",
+        dest="idle_cpu",
+        help=(
+            "fraction of CPU time spent idle over a 5-second sampling window "
+            "(0.0 = fully loaded, 1.0 = fully idle). Produced by "
+            "scripts/measure_idle_cpu.sh. Optional; absent from older records."
+        ),
+    )
+    parser.add_argument(
         "--repo-root",
         type=Path,
         default=repo_root_default,
@@ -257,12 +287,16 @@ def main(argv: Optional[list] = None) -> int:
         metrics = collect_metrics(baseline)
         git_sha = get_git_sha(args.repo_root)
         rust_version = get_rust_version()
+        idle_cpu_fraction: Optional[float] = None
+        if args.idle_cpu is not None:
+            idle_cpu_fraction = validate_idle_cpu_fraction(args.idle_cpu, "--idle-cpu")
         record = build_record(
             git_sha=git_sha,
             rust_version=rust_version,
             profile=args.profile,
             metrics=metrics,
             notes=args.notes,
+            idle_cpu_fraction=idle_cpu_fraction,
         )
         append_ndjson(args.history, record)
     except AppendError as exc:
