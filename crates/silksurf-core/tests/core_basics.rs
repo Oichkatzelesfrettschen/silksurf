@@ -116,7 +116,7 @@ fn silk_error_display_is_non_empty_for_every_variant() {
         SilkError::Tls("handshake failure".to_string()),
         SilkError::Engine("pipeline aborted".to_string()),
         SilkError::Js("ReferenceError: x is not defined".to_string()),
-        SilkError::Io(std::io::Error::new(std::io::ErrorKind::Other, "synthetic")),
+        SilkError::Io(std::io::Error::other("synthetic")),
     ];
 
     assert!(!variants.is_empty(), "variant list must be non-empty");
