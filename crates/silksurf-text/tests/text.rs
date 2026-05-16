@@ -47,7 +47,12 @@ fn measure_narrow_max_width_increases_height() {
 #[test]
 fn rasterize_glyphs_empty_text_is_noop() {
     let mut buf = vec![0xffu8; 32 * 32 * 4];
-    let color = Color { r: 0, g: 0, b: 0, a: 255 };
+    let color = Color {
+        r: 0,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
     let Some(mut pixmap) = tiny_skia::PixmapMut::from_bytes(&mut buf, 32, 32) else {
         panic!("could not create pixmap");
     };
@@ -58,7 +63,12 @@ fn rasterize_glyphs_empty_text_is_noop() {
 #[test]
 fn rasterize_glyphs_marks_pixels() {
     let mut buf = vec![0xffu8; 64 * 64 * 4];
-    let color = Color { r: 0, g: 0, b: 0, a: 255 };
+    let color = Color {
+        r: 0,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
     {
         let Some(mut pixmap) = tiny_skia::PixmapMut::from_bytes(&mut buf, 64, 64) else {
             panic!("could not create pixmap");
@@ -69,5 +79,8 @@ fn rasterize_glyphs_marks_pixels() {
     let has_non_white = buf
         .chunks_exact(4)
         .any(|p| p[0] != 255 || p[1] != 255 || p[2] != 255);
-    assert!(has_non_white, "expected glyphs to modify at least one pixel");
+    assert!(
+        has_non_white,
+        "expected glyphs to modify at least one pixel"
+    );
 }

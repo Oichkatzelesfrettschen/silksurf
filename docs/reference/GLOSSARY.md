@@ -646,6 +646,14 @@ files and the relevant ADRs.
 **Type**: Rasterizer function
 **Definition**: Rasterizes all tiles into a caller-supplied `Vec<u8>`. Avoids the 4 MB allocation on subsequent frames by reusing the same buffer. Preferred over `rasterize_parallel` in interactive render loops.
 
+### rasterize_skia
+**Type**: Rasterizer function
+**Definition**: Rasterizes a `DisplayList` into a newly-allocated RGBA `Vec<u8>` using tiny-skia for anti-aliased path rendering and cosmic-text for glyph shaping. Returns `width * height * 4` bytes.
+
+### rasterize_skia_into
+**Type**: Rasterizer function
+**Definition**: Rasterizes a `DisplayList` into a caller-supplied `Vec<u8>` using tiny-skia. Reuses the buffer across frames to avoid repeated large allocations. Preferred over `rasterize_skia` in render loops.
+
 ### remove_child
 **Type**: DOM mutation function
 **Definition**: Detaches a child node from its parent in the DOM tree. The node is retained in the arena; call within a `with_mutation_batch` for correct generation tracking.
@@ -693,6 +701,10 @@ files and the relevant ADRs.
 ### take_dirty_nodes
 **Type**: DOM change detection function
 **Definition**: Returns the set of `NodeId`s marked dirty since the last call, and clears the set. Used by the incremental render pipeline to determine which subtrees to re-cascade.
+
+### TextState
+**Type**: Text rendering state structure
+**Definition**: Holds the `FontSystem` and `SwashCache` used by cosmic-text for glyph shaping and rasterization. Stored as a `LazyLock<Mutex<TextState>>` and initialized once per process. Accessed only from the main render thread.
 
 ### TlsConfig
 **Type**: TLS configuration structure

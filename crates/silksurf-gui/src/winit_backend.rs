@@ -154,7 +154,9 @@ impl ApplicationHandler for WinitApp {
                 event_loop.exit();
             }
 
-            WindowEvent::KeyboardInput { event: key_event, .. } => {
+            WindowEvent::KeyboardInput {
+                event: key_event, ..
+            } => {
                 if key_event.logical_key == Key::Named(NamedKey::Escape) {
                     event_loop.exit();
                 }

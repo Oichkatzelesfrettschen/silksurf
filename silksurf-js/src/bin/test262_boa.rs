@@ -33,10 +33,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use boa_engine::{
-    js_string,
-    object::ObjectInitializer,
+    Context, JsValue, NativeFunction, Source, js_string, object::ObjectInitializer,
     property::Attribute,
-    Context, JsValue, NativeFunction, Source,
 };
 
 // ---------------------------------------------------------------------------
@@ -95,7 +93,13 @@ fn parse_args() -> Config {
 
     let dir = dir.unwrap_or_else(|| PathBuf::from("silksurf-js/test262/test/language"));
 
-    Config { dir, full, verbose, threads, scorecard }
+    Config {
+        dir,
+        full,
+        verbose,
+        threads,
+        scorecard,
+    }
 }
 
 fn print_help() {
@@ -158,7 +162,10 @@ fn parse_meta(content: &str) -> TestMeta {
         }
 
         if let Some(rest) = trimmed.strip_prefix("flags:") {
-            in_neg = false; in_features = false; in_includes = false; in_flags = false;
+            in_neg = false;
+            in_features = false;
+            in_includes = false;
+            in_flags = false;
             let val = rest.trim();
             if val.starts_with('[') {
                 meta.flags = parse_inline_list(val);
@@ -166,7 +173,10 @@ fn parse_meta(content: &str) -> TestMeta {
                 in_flags = true;
             }
         } else if let Some(rest) = trimmed.strip_prefix("features:") {
-            in_neg = false; in_features = false; in_includes = false; in_flags = false;
+            in_neg = false;
+            in_features = false;
+            in_includes = false;
+            in_flags = false;
             let val = rest.trim();
             if val.starts_with('[') {
                 meta.features = parse_inline_list(val);
@@ -174,7 +184,10 @@ fn parse_meta(content: &str) -> TestMeta {
                 in_features = true;
             }
         } else if let Some(rest) = trimmed.strip_prefix("includes:") {
-            in_neg = false; in_features = false; in_includes = false; in_flags = false;
+            in_neg = false;
+            in_features = false;
+            in_includes = false;
+            in_flags = false;
             let val = rest.trim();
             if val.starts_with('[') {
                 meta.includes = parse_inline_list(val);
@@ -182,13 +195,23 @@ fn parse_meta(content: &str) -> TestMeta {
                 in_includes = true;
             }
         } else if trimmed == "negative:" {
-            in_neg = true; in_features = false; in_includes = false; in_flags = false;
-            meta.negative = Some(NegSpec { phase: Phase::Parse, ntype: String::new() });
+            in_neg = true;
+            in_features = false;
+            in_includes = false;
+            in_flags = false;
+            meta.negative = Some(NegSpec {
+                phase: Phase::Parse,
+                ntype: String::new(),
+            });
         } else if in_neg {
             if let Some(rest) = trimmed.strip_prefix("phase:") {
                 let phase_str = rest.trim();
                 if let Some(neg) = &mut meta.negative {
-                    neg.phase = if phase_str == "parse" { Phase::Parse } else { Phase::Runtime };
+                    neg.phase = if phase_str == "parse" {
+                        Phase::Parse
+                    } else {
+                        Phase::Runtime
+                    };
                 }
             } else if let Some(rest) = trimmed.strip_prefix("type:") {
                 let t = rest.trim().to_string();
@@ -200,16 +223,24 @@ fn parse_meta(content: &str) -> TestMeta {
             }
         } else if in_features && trimmed.starts_with('-') {
             let f = trimmed[1..].trim().to_string();
-            if !f.is_empty() { meta.features.push(f); }
+            if !f.is_empty() {
+                meta.features.push(f);
+            }
         } else if in_includes && trimmed.starts_with('-') {
             let inc = trimmed[1..].trim().to_string();
-            if !inc.is_empty() { meta.includes.push(inc); }
+            if !inc.is_empty() {
+                meta.includes.push(inc);
+            }
         } else if in_flags && trimmed.starts_with('-') {
             let flag = trimmed[1..].trim().to_string();
-            if !flag.is_empty() { meta.flags.push(flag); }
+            if !flag.is_empty() {
+                meta.flags.push(flag);
+            }
         } else if !trimmed.starts_with(' ') && !trimmed.starts_with('-') {
             // New top-level key resets all list contexts
-            in_features = false; in_includes = false; in_flags = false;
+            in_features = false;
+            in_includes = false;
+            in_flags = false;
         }
     }
 
@@ -555,7 +586,9 @@ fn error_matches(e: &boa_engine::JsError, expected: &str) -> bool {
 // ---------------------------------------------------------------------------
 
 fn collect_js_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
@@ -597,10 +630,16 @@ struct Totals {
 }
 
 impl Totals {
-    fn total(&self) -> usize { self.pass + self.fail + self.skip }
+    fn total(&self) -> usize {
+        self.pass + self.fail + self.skip
+    }
     fn rate(&self) -> f64 {
         let run = self.pass + self.fail;
-        if run == 0 { 0.0 } else { self.pass as f64 / run as f64 }
+        if run == 0 {
+            0.0
+        } else {
+            self.pass as f64 / run as f64
+        }
     }
 }
 
@@ -668,18 +707,20 @@ fn main() {
         let work_rx = Arc::clone(&work_rx);
         let result_tx = result_tx.clone();
         let harness = Arc::clone(&harness);
-        std::thread::spawn(move || loop {
-            let item = {
-                let rx = work_rx.lock().unwrap();
-                rx.recv()
-            };
-            match item {
-                Ok(WorkItem { path, source }) => {
-                    let meta = parse_meta(&source);
-                    let outcome = run_test(&meta, &harness, &source);
-                    let _ = result_tx.send((path, outcome));
+        std::thread::spawn(move || {
+            loop {
+                let item = {
+                    let rx = work_rx.lock().unwrap();
+                    rx.recv()
+                };
+                match item {
+                    Ok(WorkItem { path, source }) => {
+                        let meta = parse_meta(&source);
+                        let outcome = run_test(&meta, &harness, &source);
+                        let _ = result_tx.send((path, outcome));
+                    }
+                    Err(_) => break,
                 }
-                Err(_) => break,
             }
         });
     }
@@ -749,7 +790,10 @@ fn main() {
             println!("  FAIL  {}  -- {}", path.display(), reason);
         }
         if fail_list.len() > show {
-            println!("  ... and {} more (use -v for full list)", fail_list.len() - show);
+            println!(
+                "  ... and {} more (use -v for full list)",
+                fail_list.len() - show
+            );
         }
     }
 
@@ -757,11 +801,22 @@ fn main() {
     println!("------------------------------------------------------------");
     println!(
         "PASS: {}  FAIL: {}  SKIP: {}  TOTAL: {}",
-        totals.pass, totals.fail, totals.skip, totals.total()
+        totals.pass,
+        totals.fail,
+        totals.skip,
+        totals.total()
     );
-    println!("Rate: {:.2}%  ({:.1}s)", totals.rate() * 100.0, duration.as_secs_f64());
+    println!(
+        "Rate: {:.2}%  ({:.1}s)",
+        totals.rate() * 100.0,
+        duration.as_secs_f64()
+    );
 
-    let scope_label = if cfg.full { "language+built-ins+annexB" } else { "language" };
+    let scope_label = if cfg.full {
+        "language+built-ins+annexB"
+    } else {
+        "language"
+    };
     if let Err(e) = emit_scorecard(&cfg.scorecard, &totals, scope_label, duration) {
         eprintln!("WARN: scorecard write failed: {e}");
     } else {

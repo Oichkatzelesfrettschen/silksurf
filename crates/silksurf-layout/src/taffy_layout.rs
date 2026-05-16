@@ -25,16 +25,15 @@
 
 use rustc_hash::FxHashMap;
 use silksurf_css::{
-    AlignItems as CssAlignItems, AlignSelf as CssAlignSelf, ComputedStyle,
-    Display as CssDisplay, FlexBasis, FlexDirection as CssFlexDirection,
-    FlexWrap as CssFlexWrap, JustifyContent as CssJustifyContent, Length,
+    AlignItems as CssAlignItems, AlignSelf as CssAlignSelf, ComputedStyle, Display as CssDisplay,
+    FlexBasis, FlexDirection as CssFlexDirection, FlexWrap as CssFlexWrap,
+    JustifyContent as CssJustifyContent, Length,
 };
 use silksurf_dom::{Dom, NodeId as DomNodeId, NodeKind};
 use taffy::{
-    AlignItems, AlignSelf, AvailableSpace, Dimension, Display as TaffyDisplay,
-    FlexDirection, FlexWrap, JustifyContent, LengthPercentage, LengthPercentageAuto,
-    NodeId as TaffyId, Size, Style, TaffyTree,
-    geometry::Rect as TaffyRect,
+    AlignItems, AlignSelf, AvailableSpace, Dimension, Display as TaffyDisplay, FlexDirection,
+    FlexWrap, JustifyContent, LengthPercentage, LengthPercentageAuto, NodeId as TaffyId, Size,
+    Style, TaffyTree, geometry::Rect as TaffyRect,
 };
 
 use crate::{Rect, neighbor_table::LayoutNeighborTable};
@@ -122,55 +121,65 @@ impl TaffyLayout {
         };
 
         // Split borrow: tree needs &mut, taffy_to_bfs needs &.
-        let TaffyLayout { tree, taffy_to_bfs, .. } = self;
+        let TaffyLayout {
+            tree, taffy_to_bfs, ..
+        } = self;
 
-        tree.compute_layout_with_measure(root, available, |known, avail, taffy_node_id, _ctx, _style| {
-            let bfs_idx = match taffy_to_bfs.get(&taffy_node_id) {
-                Some(&idx) => idx,
-                None => return Size::ZERO,
-            };
+        tree.compute_layout_with_measure(
+            root,
+            available,
+            |known, avail, taffy_node_id, _ctx, _style| {
+                let bfs_idx = match taffy_to_bfs.get(&taffy_node_id) {
+                    Some(&idx) => idx,
+                    None => return Size::ZERO,
+                };
 
-            let font_size = styles
-                .get(bfs_idx)
-                .and_then(Option::as_ref)
-                .map(|s| match s.font_size {
-                    Length::Px(px) => px,
-                    _ => 16.0,
-                })
-                .unwrap_or(16.0);
+                let font_size = styles
+                    .get(bfs_idx)
+                    .and_then(Option::as_ref)
+                    .map(|s| match s.font_size {
+                        Length::Px(px) => px,
+                        _ => 16.0,
+                    })
+                    .unwrap_or(16.0);
 
-            let max_w = match avail.width {
-                AvailableSpace::Definite(w) => Some(w),
-                _ => None,
-            };
+                let max_w = match avail.width {
+                    AvailableSpace::Definite(w) => Some(w),
+                    _ => None,
+                };
 
-            let dom_node_id = match bfs_order.get(bfs_idx) {
-                Some(&id) => id,
-                None => return Size::ZERO,
-            };
+                let dom_node_id = match bfs_order.get(bfs_idx) {
+                    Some(&id) => id,
+                    None => return Size::ZERO,
+                };
 
-            if let Ok(node) = dom.node(dom_node_id)
-                && let NodeKind::Text { text } = node.kind()
-            {
-                let (w, h) = silksurf_text::measure_text(text, font_size, max_w);
-                return Size { width: w, height: h };
-            }
+                if let Ok(node) = dom.node(dom_node_id)
+                    && let NodeKind::Text { text } = node.kind()
+                {
+                    let (w, h) = silksurf_text::measure_text(text, font_size, max_w);
+                    return Size {
+                        width: w,
+                        height: h,
+                    };
+                }
 
-            // Element leaf node with no text: use line_height as minimum height.
-            let line_h = styles
-                .get(bfs_idx)
-                .and_then(Option::as_ref)
-                .map(|s| match s.line_height {
-                    Length::Px(px) => px,
-                    _ => 16.0,
-                })
-                .unwrap_or(16.0);
+                // Element leaf node with no text: use line_height as minimum height.
+                let line_h = styles
+                    .get(bfs_idx)
+                    .and_then(Option::as_ref)
+                    .map(|s| match s.line_height {
+                        Length::Px(px) => px,
+                        _ => 16.0,
+                    })
+                    .unwrap_or(16.0);
 
-            Size {
-                width: known.width.unwrap_or(0.0),
-                height: known.height.unwrap_or(line_h),
-            }
-        }).is_ok()
+                Size {
+                    width: known.width.unwrap_or(0.0),
+                    height: known.height.unwrap_or(line_h),
+                }
+            },
+        )
+        .is_ok()
     }
 
     /// Write absolute positions from taffy layout results into node_rects.
@@ -178,12 +187,7 @@ impl TaffyLayout {
     /// taffy's Layout.location is parent-relative, so we accumulate offsets
     /// down the BFS tree (parents are always processed before children in
     /// BFS order, so node_rects[parent] is already filled when we process child).
-    pub fn write_rects(
-        &self,
-        parent_idx: &[u32],
-        node_rects: &mut [Rect],
-        viewport: Rect,
-    ) {
+    pub fn write_rects(&self, parent_idx: &[u32], node_rects: &mut [Rect], viewport: Rect) {
         let n = self.taffy_nodes.len().min(node_rects.len());
         for i in 0..n {
             let tn = match self.taffy_nodes[i] {
@@ -311,11 +315,13 @@ fn css_to_taffy_style(style: Option<&ComputedStyle>) -> Style {
     };
 
     let gap_col = LengthPercentage::length(
-        style.flex_container.column_gap.max(style.flex_container.gap),
+        style
+            .flex_container
+            .column_gap
+            .max(style.flex_container.gap),
     );
-    let gap_row = LengthPercentage::length(
-        style.flex_container.row_gap.max(style.flex_container.gap),
-    );
+    let gap_row =
+        LengthPercentage::length(style.flex_container.row_gap.max(style.flex_container.gap));
 
     Style {
         display,
@@ -384,7 +390,12 @@ mod tests {
         let (dom, root) = make_dom_with_text();
         let table = LayoutNeighborTable::build(&dom, root);
         let styles: Vec<Option<ComputedStyle>> = vec![None; table.len()];
-        let viewport = Rect { x: 0.0, y: 0.0, width: 800.0, height: 600.0 };
+        let viewport = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 800.0,
+            height: 600.0,
+        };
         let mut tl = TaffyLayout::new();
         tl.rebuild(&table, &styles);
         let ok = tl.compute(&dom, &styles, &table.bfs_order, viewport);
@@ -396,7 +407,12 @@ mod tests {
         let (dom, root) = make_dom_with_text();
         let table = LayoutNeighborTable::build(&dom, root);
         let styles: Vec<Option<ComputedStyle>> = vec![None; table.len()];
-        let viewport = Rect { x: 0.0, y: 0.0, width: 800.0, height: 600.0 };
+        let viewport = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 800.0,
+            height: 600.0,
+        };
         let mut tl = TaffyLayout::new();
         tl.rebuild(&table, &styles);
         tl.compute(&dom, &styles, &table.bfs_order, viewport);
@@ -446,7 +462,12 @@ mod tests {
             }
         }
 
-        let viewport = Rect { x: 0.0, y: 0.0, width: 200.0, height: 100.0 };
+        let viewport = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 200.0,
+            height: 100.0,
+        };
         let mut tl = TaffyLayout::new();
         tl.rebuild(&table, &styles);
         tl.compute(&dom, &styles, &table.bfs_order, viewport);

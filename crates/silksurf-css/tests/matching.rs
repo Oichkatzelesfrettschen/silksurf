@@ -254,9 +254,23 @@ fn where_contributes_zero_specificity() {
     let is_spec = selector_specificity(&is_sel);
 
     // div:where(.active) -> (0, 0, 1) -- element only
-    assert_eq!(where_spec, Specificity { ids: 0, classes: 0, elements: 1 });
+    assert_eq!(
+        where_spec,
+        Specificity {
+            ids: 0,
+            classes: 0,
+            elements: 1
+        }
+    );
     // div:is(.active) -> (0, 1, 1) -- element + class from .active arg
-    assert_eq!(is_spec, Specificity { ids: 0, classes: 1, elements: 1 });
+    assert_eq!(
+        is_spec,
+        Specificity {
+            ids: 0,
+            classes: 1,
+            elements: 1
+        }
+    );
 }
 
 #[test]
