@@ -138,6 +138,8 @@ fn round_trip_mixed() {
                 rect: rect(3.0, 0.0, 3.0, 4.0),
                 node: fake_node,
                 text_len: 5,
+                text: "hello".to_string(),
+                font_size: 16.0,
                 color: color(200, 200, 40),
             },
         ],
@@ -180,6 +182,8 @@ fn item_count_correct() {
                 rect: rect(10.0, 0.0, 10.0, 10.0),
                 node: fake_node,
                 text_len: 3,
+                text: "abc".to_string(),
+                font_size: 16.0,
                 color: color(0, 255, 0),
             },
             DisplayItem::SolidColor {
@@ -190,6 +194,8 @@ fn item_count_correct() {
                 rect: rect(30.0, 0.0, 10.0, 10.0),
                 node: fake_node,
                 text_len: 7,
+                text: "abcdefg".to_string(),
+                font_size: 16.0,
                 color: color(128, 128, 0),
             },
             DisplayItem::SolidColor {
