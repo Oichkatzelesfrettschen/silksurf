@@ -12,24 +12,30 @@
  *   - console (via boa_runtime::Console)
  *   - setTimeout/clearTimeout/setInterval/clearInterval (immediate-dispatch stubs)
  *   - requestAnimationFrame (no-op stub returning fake id)
- *   - document (stub object; full DOM bridge is future work)
+ *   - document (stub by default; replaced with live DOM when with_dom() is used)
  *   - window / self (alias for globalThis)
  *
  * HOW:
+ *   // Without DOM access (scripts only):
  *   let mut ctx = SilkContext::new();
  *   ctx.eval(script_source)?;
  *   ctx.run_pending_jobs();
  *
- * DOM BRIDGE NOTE: document.getElementById and friends return null. A full
- * silksurf_dom::Dom-backed bridge will be wired in a subsequent pass using
- * boa_engine's NativeObject trait to expose NodeId handles to JS.
+ *   // With live DOM bridge:
+ *   let dom_arc = Arc::new(Mutex::new(parse_html(html)));
+ *   let mut ctx = SilkContext::with_dom(dom_arc);
+ *   ctx.eval(script_source)?;
  */
+
+use std::sync::{Arc, Mutex};
 
 use boa_engine::{
     Context, JsValue, NativeFunction, Source, js_string, object::ObjectInitializer,
     property::Attribute,
 };
 use boa_runtime::Console;
+
+mod dom_bridge;
 
 /// Production JavaScript execution context backed by `boa_engine`.
 ///
@@ -210,5 +216,18 @@ impl SilkContext {
     /// during script execution have their `.then()` continuations run.
     pub fn run_pending_jobs(&mut self) {
         let _ = self.ctx.run_jobs();
+    }
+
+    /// Build a context with the full DOM bridge wired to `dom`.
+    ///
+    /// The returned context has all standard host objects from `new()` plus
+    /// a live `document` object whose methods (`getElementById`, `querySelector`,
+    /// `querySelectorAll`, `createElement`, `setAttribute`) read and write
+    /// the supplied `Dom` through the shared `Arc<Mutex<Dom>>`.
+    #[must_use]
+    pub fn with_dom(dom: &Arc<Mutex<silksurf_dom::Dom>>) -> Self {
+        let mut ctx = Self::new();
+        dom_bridge::install_document(dom, &mut ctx.ctx);
+        ctx
     }
 }
