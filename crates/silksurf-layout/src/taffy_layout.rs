@@ -149,11 +149,11 @@ impl TaffyLayout {
                 None => return Size::ZERO,
             };
 
-            if let Ok(node) = dom.node(dom_node_id) {
-                if let NodeKind::Text { text } = node.kind() {
-                    let (w, h) = silksurf_text::measure_text(text, font_size, max_w);
-                    return Size { width: w, height: h };
-                }
+            if let Ok(node) = dom.node(dom_node_id)
+                && let NodeKind::Text { text } = node.kind()
+            {
+                let (w, h) = silksurf_text::measure_text(text, font_size, max_w);
+                return Size { width: w, height: h };
             }
 
             // Element leaf node with no text: use line_height as minimum height.
@@ -421,12 +421,22 @@ mod tests {
         let n = table.len();
         let mut styles: Vec<Option<ComputedStyle>> = vec![None; n];
 
-        let mut container_style = ComputedStyle::default();
-        container_style.display = CssDisplay::Flex;
-        container_style.flex_container.direction = CssFlexDirection::Row;
+        let container_style = ComputedStyle {
+            display: CssDisplay::Flex,
+            flex_container: silksurf_css::FlexContainerStyle {
+                direction: CssFlexDirection::Row,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
 
-        let mut item_style = ComputedStyle::default();
-        item_style.flex_item.flex_grow = 1.0;
+        let item_style = ComputedStyle {
+            flex_item: silksurf_css::FlexItemStyle {
+                flex_grow: 1.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
 
         for (i, &node) in table.bfs_order.iter().enumerate() {
             if node == container {
