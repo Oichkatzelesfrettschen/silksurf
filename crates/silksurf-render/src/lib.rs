@@ -40,7 +40,10 @@ use rustc_hash::FxHashMap;
 use silksurf_css::{BoxShadow as CssBoxShadow, Color, ComputedStyle};
 use silksurf_dom::{Dom, NodeId, NodeKind};
 use silksurf_layout::{LayoutTree, Rect};
-use tiny_skia::{FillRule, GradientStop, LinearGradient, Paint, PathBuilder, PixmapMut, Point, SpreadMode, Transform};
+use tiny_skia::{
+    FillRule, GradientStop, LinearGradient, Paint, PathBuilder, PixmapMut, Point, SpreadMode,
+    Transform,
+};
 
 /// Type-batched rasterization (feature "batched-raster").
 ///
@@ -747,7 +750,12 @@ pub fn rasterize_parallel_into(
                 DisplayItem::RoundedRect { color, .. } => *color,
                 DisplayItem::BoxShadow { shadow, .. } => shadow.color,
                 DisplayItem::LinearGradient { stops, .. } => {
-                    stops.first().map(|pair| pair.1).unwrap_or(Color { r: 0, g: 0, b: 0, a: 0 })
+                    stops.first().map(|pair| pair.1).unwrap_or(Color {
+                        r: 0,
+                        g: 0,
+                        b: 0,
+                        a: 0,
+                    })
                 }
             };
 
@@ -925,9 +933,11 @@ pub fn rasterize_skia_into(display_list: &DisplayList, width: u32, height: u32, 
                 ) else {
                     continue;
                 };
-                let mut paint = Paint::default();
-                paint.anti_alias = true;
-                paint.shader = gradient;
+                let paint = Paint {
+                    anti_alias: true,
+                    shader: gradient,
+                    ..Paint::default()
+                };
                 pixmap.fill_rect(sk_r, &paint, Transform::identity(), None);
             }
         }
