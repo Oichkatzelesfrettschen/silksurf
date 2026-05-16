@@ -192,6 +192,16 @@ pub struct BoxShadow {
     pub inset: bool,
 }
 
+/// CSS linear-gradient() value.
+///
+/// angle_deg follows CSS convention: 0 = to-top, 90 = to-right, 180 = to-bottom.
+/// stops positions are in the range [0.0, 1.0] (0% to 100%).
+#[derive(Debug, Clone, PartialEq)]
+pub struct LinearGradient {
+    pub angle_deg: f32,
+    pub stops: Vec<(f32, Color)>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Length {
     Px(f32),
@@ -299,6 +309,7 @@ pub struct ComputedStyle {
     // Decoration
     pub border_radius: f32,
     pub box_shadow: Option<BoxShadow>,
+    pub background_image: Option<LinearGradient>,
 }
 
 impl Default for ComputedStyle {
@@ -333,6 +344,7 @@ impl Default for ComputedStyle {
             font_style: FontStyle::default(),
             border_radius: 0.0,
             box_shadow: None,
+            background_image: None,
         }
     }
 }
@@ -401,6 +413,7 @@ struct CascadedStyle {
     // Decoration
     border_radius: Option<ResolvedProperty<f32>>,
     box_shadow: Option<ResolvedProperty<BoxShadow>>,
+    background_image: Option<ResolvedProperty<LinearGradient>>,
 }
 
 impl CascadedStyle {
@@ -501,6 +514,7 @@ impl CascadedStyle {
                 .unwrap_or_default(),
             border_radius: self.border_radius.map(|e| e.value).unwrap_or(0.0),
             box_shadow: self.box_shadow.map(|e| e.value),
+            background_image: self.background_image.map(|e| e.value),
         }
     }
 }
@@ -1722,6 +1736,17 @@ fn apply_declaration(
                 );
             }
         }
+        PropertyId::BackgroundImage => {
+            if let Some(value) = parse_linear_gradient(&declaration.value) {
+                apply_property(
+                    &mut cascaded.background_image,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
         PropertyId::Unknown => {}
     }
 }
@@ -1980,6 +2005,170 @@ fn parse_box_shadow(tokens: &[CssToken]) -> Option<BoxShadow> {
     })
 }
 
+/*
+ * parse_linear_gradient -- parse background-image: linear-gradient(...).
+ *
+ * Supports:
+ *   linear-gradient(<angle>deg, <stop>, ...)
+ *   linear-gradient(to top|right|bottom|left, <stop>, ...)
+ *   linear-gradient(to top|right bottom|left, <stop>, ...)   (diagonal)
+ *   linear-gradient(<stop>, ...)                              (default 180deg)
+ *
+ * Each <stop> is: <color> [<percentage>]
+ * Missing percentages are auto-distributed evenly across the range [0, 1].
+ *
+ * Returns None if the token list contains no linear-gradient() function,
+ * if fewer than two stops are parseable, or on any structural error.
+ */
+fn parse_linear_gradient(tokens: &[CssToken]) -> Option<LinearGradient> {
+    // Find the Function("linear-gradient") token.
+    let func_pos = tokens.iter().position(
+        |t| matches!(t, CssToken::Function(name) if name.eq_ignore_ascii_case("linear-gradient")),
+    )?;
+
+    // Collect inner tokens up to matching ParenClose.
+    let mut inner: Vec<&CssToken> = Vec::new();
+    let mut depth = 1usize;
+    for token in &tokens[func_pos + 1..] {
+        match token {
+            CssToken::ParenOpen => {
+                depth += 1;
+                inner.push(token);
+            }
+            CssToken::ParenClose => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+                inner.push(token);
+            }
+            _ => inner.push(token),
+        }
+    }
+
+    // Split inner tokens by top-level commas into argument groups.
+    let mut args: Vec<Vec<&CssToken>> = Vec::new();
+    let mut current: Vec<&CssToken> = Vec::new();
+    for token in &inner {
+        if matches!(token, CssToken::Comma) {
+            args.push(std::mem::take(&mut current));
+        } else {
+            current.push(token);
+        }
+    }
+    args.push(current);
+
+    if args.is_empty() {
+        return None;
+    }
+
+    // Try to parse first arg as an angle expression.
+    let first_nowhite: Vec<&CssToken> = args[0]
+        .iter()
+        .copied()
+        .filter(|t| !matches!(t, CssToken::Whitespace))
+        .collect();
+    let (angle_deg, stop_start) = match gradient_angle(&first_nowhite) {
+        Some(a) => (a, 1),
+        None => (180.0, 0), // default: to bottom
+    };
+
+    // Parse remaining args as color stops.
+    let color_args = &args[stop_start..];
+    let count = color_args.len();
+    if count < 2 {
+        return None;
+    }
+
+    let mut stops: Vec<(f32, Color)> = Vec::with_capacity(count);
+    for (i, arg) in color_args.iter().enumerate() {
+        let arg_nowhite: Vec<&CssToken> = arg
+            .iter()
+            .copied()
+            .filter(|t| !matches!(t, CssToken::Whitespace))
+            .collect();
+        let auto_pos = i as f32 / (count - 1) as f32;
+        if let Some(stop) = gradient_color_stop(&arg_nowhite, auto_pos) {
+            stops.push(stop);
+        }
+    }
+
+    if stops.len() < 2 {
+        return None;
+    }
+    Some(LinearGradient { angle_deg, stops })
+}
+
+/*
+ * gradient_angle -- parse the optional angle/direction first argument.
+ *
+ * Returns the angle in degrees (CSS convention: 0=to-top, 90=to-right,
+ * 180=to-bottom, 270=to-left), or None if tokens do not look like an angle.
+ */
+fn gradient_angle(tokens: &[&CssToken]) -> Option<f32> {
+    match tokens {
+        [CssToken::Dimension { value, unit }] if unit.eq_ignore_ascii_case("deg") => {
+            value.parse().ok()
+        }
+        [CssToken::Dimension { value, unit }] if unit.eq_ignore_ascii_case("grad") => {
+            value.parse::<f32>().ok().map(|g| g * 0.9)
+        }
+        [CssToken::Dimension { value, unit }] if unit.eq_ignore_ascii_case("rad") => {
+            value.parse::<f32>().ok().map(|r| r.to_degrees())
+        }
+        [CssToken::Dimension { value, unit }] if unit.eq_ignore_ascii_case("turn") => {
+            value.parse::<f32>().ok().map(|t| t * 360.0)
+        }
+        [CssToken::Ident(to), CssToken::Ident(dir)] if to.eq_ignore_ascii_case("to") => {
+            match dir.as_str() {
+                d if d.eq_ignore_ascii_case("top") => Some(0.0),
+                d if d.eq_ignore_ascii_case("right") => Some(90.0),
+                d if d.eq_ignore_ascii_case("bottom") => Some(180.0),
+                d if d.eq_ignore_ascii_case("left") => Some(270.0),
+                _ => None,
+            }
+        }
+        [CssToken::Ident(to), CssToken::Ident(v), CssToken::Ident(h)]
+            if to.eq_ignore_ascii_case("to") =>
+        {
+            // Diagonal directions.
+            let is_top = v.eq_ignore_ascii_case("top") || h.eq_ignore_ascii_case("top");
+            let is_right = v.eq_ignore_ascii_case("right") || h.eq_ignore_ascii_case("right");
+            let is_bottom = v.eq_ignore_ascii_case("bottom") || h.eq_ignore_ascii_case("bottom");
+            let is_left = v.eq_ignore_ascii_case("left") || h.eq_ignore_ascii_case("left");
+            match (is_top, is_right, is_bottom, is_left) {
+                (true, true, false, false) => Some(45.0),
+                (false, true, true, false) => Some(135.0),
+                (false, false, true, true) => Some(225.0),
+                (true, false, false, true) => Some(315.0),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/*
+ * gradient_color_stop -- parse one color stop from an arg group.
+ *
+ * tokens: whitespace-stripped tokens for one comma-delimited arg.
+ * auto_pos: position to use if none is specified (evenly distributed).
+ *
+ * Returns (position [0,1], color) or None if no color is parseable.
+ */
+fn gradient_color_stop(tokens: &[&CssToken], auto_pos: f32) -> Option<(f32, Color)> {
+    let color = match tokens.first()? {
+        CssToken::Ident(name) => parse_named_color(name)?,
+        CssToken::Hash(value) => parse_hex_color(value)?,
+        _ => return None,
+    };
+    let pos = match tokens.get(1) {
+        Some(CssToken::Percentage(v)) => v.parse::<f32>().ok().map(|p| p / 100.0)?,
+        _ => auto_pos,
+    };
+    Some((pos, color))
+}
+
 fn parse_length_list(tokens: &[CssToken]) -> Vec<Length> {
     let mut values = Vec::new();
     for token in tokens {
@@ -2169,4 +2358,65 @@ fn parse_rgb_component(token: &CssToken) -> Option<u8> {
 
 fn hex_to_u8(value: &str) -> Option<u8> {
     u8::from_str_radix(value, 16).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::parser::parse_stylesheet;
+    use crate::style::LinearGradient;
+
+    fn gradient_from_rule(css: &str) -> Option<LinearGradient> {
+        let sheet = parse_stylesheet(css).ok()?;
+        let rule = sheet.rules.first()?;
+        let crate::parser::Rule::Style(sr) = rule else {
+            return None;
+        };
+        let decl = sr
+            .declarations
+            .iter()
+            .find(|d| d.property_id == crate::property_id::PropertyId::BackgroundImage)?;
+        super::parse_linear_gradient(&decl.value)
+    }
+
+    #[test]
+    fn test_angle_deg() {
+        let g = gradient_from_rule("a { background-image: linear-gradient(90deg, red, blue); }")
+            .expect("should parse");
+        assert!((g.angle_deg - 90.0).abs() < 0.01);
+        assert_eq!(g.stops.len(), 2);
+        assert!((g.stops[0].0 - 0.0).abs() < 0.01);
+        assert!((g.stops[1].0 - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_to_right() {
+        let g = gradient_from_rule(
+            "a { background-image: linear-gradient(to right, #ff0000, #0000ff); }",
+        )
+        .expect("should parse");
+        assert!((g.angle_deg - 90.0).abs() < 0.01);
+        assert_eq!(g.stops.len(), 2);
+    }
+
+    #[test]
+    fn test_default_direction() {
+        let g = gradient_from_rule("a { background-image: linear-gradient(red, blue); }")
+            .expect("should parse");
+        assert!((g.angle_deg - 180.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_explicit_positions() {
+        let g =
+            gradient_from_rule("a { background-image: linear-gradient(0deg, red 0%, blue 100%); }")
+                .expect("should parse");
+        assert!((g.stops[0].0 - 0.0).abs() < 0.01);
+        assert!((g.stops[1].0 - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_too_few_stops_rejected() {
+        let result = gradient_from_rule("a { background-image: linear-gradient(90deg, red); }");
+        assert!(result.is_none(), "single stop should be rejected");
+    }
 }

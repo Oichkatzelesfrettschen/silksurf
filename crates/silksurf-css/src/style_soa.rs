@@ -27,7 +27,7 @@
 
 use crate::{
     BoxShadow, Color, ComputedStyle, Display, Edges, FlexContainerStyle, FlexItemStyle, FontStyle,
-    FontWeight, Length, LengthOrAuto, Overflow, Position, TextAlign,
+    FontWeight, Length, LengthOrAuto, LinearGradient, Overflow, Position, TextAlign,
 };
 use rustc_hash::FxHashMap;
 use silksurf_dom::NodeId;
@@ -319,6 +319,7 @@ pub(crate) struct ComputedStyleSoA {
     // Decoration
     pub(crate) border_radius: Vec<f32>,
     pub(crate) box_shadow: Vec<Option<BoxShadow>>,
+    pub(crate) background_image: Vec<Option<LinearGradient>>,
 }
 
 impl Default for ComputedStyleSoA {
@@ -359,6 +360,7 @@ impl ComputedStyleSoA {
             font_style: Vec::new(),
             border_radius: Vec::new(),
             box_shadow: Vec::new(),
+            background_image: Vec::new(),
         }
     }
 
@@ -395,6 +397,7 @@ impl ComputedStyleSoA {
         self.font_style.push(style.font_style);
         self.border_radius.push(style.border_radius);
         self.box_shadow.push(style.box_shadow);
+        self.background_image.push(style.background_image.clone());
     }
 
     /*
@@ -433,6 +436,7 @@ impl ComputedStyleSoA {
             font_style: self.font_style[index],
             border_radius: self.border_radius[index],
             box_shadow: self.box_shadow[index],
+            background_image: self.background_image[index].clone(),
         })
     }
 

@@ -59,6 +59,7 @@ pub enum PropertyId {
     TextAlign = 36,
     FontWeight = 37,
     FontStyle = 38,
+    BackgroundImage = 39,
     Unknown = 255,
 }
 
@@ -85,6 +86,7 @@ pub fn lookup_property_id(name: &str) -> PropertyId {
         (b'c', 10) if name.eq_ignore_ascii_case("column-gap") => PropertyId::ColumnGap,
         // 'b' prefix
         (b'b', 16) if name.eq_ignore_ascii_case("background-color") => PropertyId::BackgroundColor,
+        (b'b', 16) if name.eq_ignore_ascii_case("background-image") => PropertyId::BackgroundImage,
         (b'b', 6) if name.eq_ignore_ascii_case("border") => PropertyId::Border,
         (b'b', 12) if name.eq_ignore_ascii_case("border-width") => PropertyId::BorderWidth,
         (b'b', 6) if name.eq_ignore_ascii_case("bottom") => PropertyId::Bottom,
@@ -175,6 +177,14 @@ mod tests {
             PropertyId::BorderRadius
         );
         assert_eq!(lookup_property_id("TEXT-ALIGN"), PropertyId::TextAlign);
+        assert_eq!(
+            lookup_property_id("background-image"),
+            PropertyId::BackgroundImage
+        );
+        assert_eq!(
+            lookup_property_id("BACKGROUND-IMAGE"),
+            PropertyId::BackgroundImage
+        );
     }
 
     #[test]
