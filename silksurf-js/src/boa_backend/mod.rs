@@ -30,7 +30,11 @@
 use std::sync::{Arc, Mutex};
 
 use boa_engine::{
-    Context, JsValue, NativeFunction, Source, js_string, object::ObjectInitializer,
+    Context, JsNativeError, JsString, JsValue, NativeFunction, Source, js_string,
+    object::{
+        ObjectInitializer,
+        builtins::{JsArray, JsPromise},
+    },
     property::Attribute,
 };
 use boa_runtime::Console;
@@ -126,6 +130,27 @@ impl SilkContext {
         )
         // UNWRAP-OK: fresh Context cannot already have "cancelAnimationFrame" defined.
         .expect("cancelAnimationFrame: install on fresh context cannot fail");
+
+        // -- fetch() ----------------------------------------------------------
+        // Synchronous execution: the HTTP request blocks the calling thread.
+        // The returned JsPromise is pre-resolved (or pre-rejected), so .then()
+        // chains and await both work correctly without an async event loop.
+        ctx.register_global_callable(
+            js_string!("fetch"),
+            1,
+            NativeFunction::from_fn_ptr(|_this, args, ctx| {
+                let url = if let Some(v) = args.first() {
+                    v.to_string(ctx)?.to_std_string_lossy()
+                } else {
+                    let err = JsNativeError::typ()
+                        .with_message("fetch: URL argument is required");
+                    return Ok(JsValue::from(JsPromise::from_result::<JsValue, JsNativeError>(Err(err), ctx)));
+                };
+                Ok(JsValue::from(fetch_sync(url.as_str(), ctx)))
+            }),
+        )
+        // UNWRAP-OK: fresh Context cannot already have "fetch" defined.
+        .expect("fetch: install on fresh context cannot fail");
 
         // -- document stub ----------------------------------------------------
         // getElementById / querySelector / querySelectorAll return null until
@@ -229,5 +254,150 @@ impl SilkContext {
         let mut ctx = Self::new();
         dom_bridge::install_document(dom, &mut ctx.ctx);
         ctx
+    }
+}
+
+// ---- fetch() implementation ------------------------------------------------
+
+/// Execute a single HTTP GET synchronously and return a pre-resolved `JsPromise`.
+///
+/// The Promise is pre-resolved (or pre-rejected), so `.then()` chains and
+/// `await` both work without an async event loop.  Only GET is supported when
+/// called without an options argument.
+fn fetch_sync(url: &str, ctx: &mut Context) -> JsPromise {
+    use silksurf_net::{BasicClient, HttpMethod, HttpRequest, NetClient};
+
+    let request = HttpRequest {
+        method: HttpMethod::Get,
+        url: url.to_owned(),
+        headers: vec![("Accept".to_owned(), "*/*".to_owned())],
+        body: Vec::new(),
+    };
+
+    match BasicClient::new().fetch(&request) {
+        Ok(response) => {
+            let response_val = build_response_object(response, ctx);
+            JsPromise::from_result::<JsValue, JsNativeError>(Ok(response_val), ctx)
+        }
+        Err(err) => {
+            let js_err = JsNativeError::error().with_message(err.message.clone());
+            JsPromise::from_result::<JsValue, JsNativeError>(Err(js_err), ctx)
+        }
+    }
+}
+
+/// Build a plain JS Response-like object from an HTTP response.
+///
+/// Exposes: status (u32), ok (bool), statusText (string),
+/// `text()` -> `Promise<string>`, `json()` -> `Promise<object>`.
+fn build_response_object(response: silksurf_net::HttpResponse, ctx: &mut Context) -> JsValue {
+    let status = response.status;
+    let body = response.body;
+
+    let status_text = match status {
+        200 => "OK",
+        201 => "Created",
+        204 => "No Content",
+        301 => "Moved Permanently",
+        302 => "Found",
+        304 => "Not Modified",
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        404 => "Not Found",
+        500 => "Internal Server Error",
+        _ => "",
+    };
+
+    // Build headers JsArray of [name, value] pairs.
+    let headers_arr = JsArray::new(ctx);
+    for (name, value) in &response.headers {
+        let pair = JsArray::new(ctx);
+        let _ = pair.push(JsValue::from(JsString::from(name.as_str())), ctx);
+        let _ = pair.push(JsValue::from(JsString::from(value.as_str())), ctx);
+        let _ = headers_arr.push(JsValue::from(pair), ctx);
+    }
+
+    // text() closure
+    // SAFETY: body_text is Vec<u8>, which is not a GC-traced type.
+    let body_text = body.clone();
+    let text_fn = unsafe {
+        NativeFunction::from_closure(move |_this, _args, ctx| {
+            let s = String::from_utf8_lossy(&body_text).to_string();
+            let p = JsPromise::from_result::<JsValue, JsNativeError>(
+                Ok(JsValue::from(JsString::from(s.as_str()))),
+                ctx,
+            );
+            Ok(JsValue::from(p))
+        })
+    };
+
+    // json() closure
+    // SAFETY: body_json is Vec<u8>, which is not a GC-traced type.
+    let body_json = body;
+    let json_fn = unsafe {
+        NativeFunction::from_closure(move |_this, _args, ctx| {
+            let text = String::from_utf8_lossy(&body_json);
+            match serde_json::from_str::<serde_json::Value>(&text) {
+                Ok(parsed) => {
+                    let js_val = serde_json_to_js(&parsed, ctx);
+                    let p = JsPromise::from_result::<JsValue, JsNativeError>(Ok(js_val), ctx);
+                    Ok(JsValue::from(p))
+                }
+                Err(e) => {
+                    let err =
+                        JsNativeError::syntax().with_message(format!("JSON parse error: {e}"));
+                    let p = JsPromise::from_result::<JsValue, JsNativeError>(Err(err), ctx);
+                    Ok(JsValue::from(p))
+                }
+            }
+        })
+    };
+
+    ObjectInitializer::new(ctx)
+        .property(js_string!("status"), status, Attribute::all())
+        .property(
+            js_string!("ok"),
+            (200..300).contains(&status),
+            Attribute::all(),
+        )
+        .property(
+            js_string!("statusText"),
+            JsString::from(status_text),
+            Attribute::all(),
+        )
+        .property(js_string!("headers"), headers_arr, Attribute::all())
+        .function(text_fn, js_string!("text"), 0)
+        .function(json_fn, js_string!("json"), 0)
+        .build()
+        .into()
+}
+
+/// Recursively convert a `serde_json::Value` into a `JsValue`.
+fn serde_json_to_js(val: &serde_json::Value, ctx: &mut Context) -> JsValue {
+    match val {
+        serde_json::Value::Null => JsValue::null(),
+        serde_json::Value::Bool(b) => JsValue::from(*b),
+        serde_json::Value::Number(n) => JsValue::from(n.as_f64().unwrap_or(f64::NAN)),
+        serde_json::Value::String(s) => JsValue::from(JsString::from(s.as_str())),
+        serde_json::Value::Array(arr) => {
+            let js_arr = JsArray::new(ctx);
+            for item in arr {
+                let v = serde_json_to_js(item, ctx);
+                let _ = js_arr.push(v, ctx);
+            }
+            JsValue::from(js_arr)
+        }
+        serde_json::Value::Object(map) => {
+            let pairs: Vec<(String, JsValue)> = map
+                .iter()
+                .map(|(k, v)| (k.clone(), serde_json_to_js(v, ctx)))
+                .collect();
+            let mut init = ObjectInitializer::new(ctx);
+            for (key, val) in pairs {
+                init.property(js_string!(key.as_str()), val, Attribute::all());
+            }
+            init.build().into()
+        }
     }
 }
