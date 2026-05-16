@@ -54,10 +54,11 @@ pub use selector::{
 use smol_str::SmolStr;
 
 pub use style::{
-    AlignItems, AlignSelf, CascadeWorkspace, Color, ComputedStyle, Display, Edges, FlexBasis,
-    FlexContainerStyle, FlexDirection, FlexItemStyle, FlexWrap, JustifyContent, Length,
-    LengthOrAuto, Overflow, Position, StyleCache, StyleIndex, compute_style_for_node,
-    compute_style_for_node_with_index, compute_style_for_node_with_workspace, compute_styles,
+    AlignItems, AlignSelf, BoxShadow, CascadeWorkspace, Color, ComputedStyle, Display, Edges,
+    FlexBasis, FlexContainerStyle, FlexDirection, FlexItemStyle, FlexWrap, FontStyle, FontWeight,
+    JustifyContent, Length, LengthOrAuto, Overflow, Position, StyleCache, StyleIndex, TextAlign,
+    compute_style_for_node, compute_style_for_node_with_index,
+    compute_style_for_node_with_workspace, compute_styles,
 };
 
 /*
