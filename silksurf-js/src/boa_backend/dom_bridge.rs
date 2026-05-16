@@ -33,13 +33,13 @@ use boa_engine::{
     },
     property::Attribute,
 };
-use silksurf_dom::{Dom, NodeId, NodeKind};
+use silksurf_dom::{Dom, Node, NodeId, NodeKind};
 
 // ---- helpers ---------------------------------------------------------------
 
-/// Extract a NodeId from the first argument of a DOM method.
+/// Extract a `NodeId` from the first argument of a DOM method.
 ///
-/// All node objects built by node_to_js_object carry a `nodeId` u32 property.
+/// All node objects built by `node_to_js_object` carry a `nodeId` u32 property.
 /// This helper reads that property back so callers can route mutations to the
 /// right slot in the Dom arena.
 fn extract_node_id(arg: Option<&JsValue>, ctx: &mut Context) -> JsResult<NodeId> {
@@ -155,12 +155,12 @@ fn snapshot_node(dom: &Dom, node_id: NodeId) -> NodeSnapshot {
                     text: String::new(),
                 };
             }
-            NodeKind::Comment { data } => {
+            NodeKind::Comment { data: comment_text } => {
                 return NodeSnapshot {
                     tag_name: String::new(),
                     node_name: "#comment".into(),
                     node_type: 8,
-                    node_value: data.clone(),
+                    node_value: comment_text.clone(),
                     id_val: String::new(),
                     class_val: String::new(),
                     text: String::new(),
@@ -204,10 +204,10 @@ fn snapshot_node(dom: &Dom, node_id: NodeId) -> NodeSnapshot {
 
 // ---- accessor getter builder -----------------------------------------------
 
-/// Wrap a NativeFunction as a JsFunction for use with ObjectInitializer::accessor.
+/// Wrap a `NativeFunction` as a `JsFunction` for use with `ObjectInitializer::accessor`.
 ///
-/// Borrows ctx.realm() briefly; the returned JsFunction is independent of ctx's
-/// lifetime after build() returns.
+/// Borrows `ctx.realm()` briefly; the returned `JsFunction` is independent of ctx's
+/// lifetime after `build()` returns.
 fn make_getter(ctx: &mut Context, f: NativeFunction) -> JsFunction {
     FunctionObjectBuilder::new(ctx.realm(), f).build()
 }
@@ -241,10 +241,8 @@ pub(super) fn node_to_js_object(
 
     // ---- accessor getter closures (all lazy, lock released before each call) --
 
-    // SAFETY (applies to all from_closure calls below):
-    // Arc<Mutex<Dom>> and NodeId are not boa GC-traced types.
-    // Neither capture requires GC tracing, so from_closure is sound here.
-
+    // SAFETY: Arc<Mutex<Dom>> and NodeId (usize) are not boa GC-traced types;
+    // from_closure is sound because none of the captures need GC tracing.
     let arc_pn = Arc::clone(dom_arc);
     let pn_native = unsafe {
         NativeFunction::from_closure(move |_this, _args, ctx| {
@@ -259,13 +257,14 @@ pub(super) fn node_to_js_object(
         })
     };
 
+    // SAFETY: same -- Arc<Mutex<Dom>> and NodeId captures are not GC-traced.
     let arc_cn = Arc::clone(dom_arc);
     let child_nodes_native = unsafe {
         NativeFunction::from_closure(move |_this, _args, ctx| {
             let child_ids = {
                 let dom = arc_cn.lock().unwrap_or_else(PoisonError::into_inner);
                 dom.children(node_id)
-                    .map(|c| c.to_vec())
+                    .map(<[NodeId]>::to_vec)
                     .unwrap_or_default()
             };
             let arr = JsArray::new(ctx);
@@ -278,13 +277,14 @@ pub(super) fn node_to_js_object(
         })
     };
 
+    // SAFETY: same -- Arc<Mutex<Dom>> and NodeId captures are not GC-traced.
     let arc_ch = Arc::clone(dom_arc);
     let children_native = unsafe {
         NativeFunction::from_closure(move |_this, _args, ctx| {
             let child_ids = {
                 let dom = arc_ch.lock().unwrap_or_else(PoisonError::into_inner);
                 dom.children(node_id)
-                    .map(|c| c.to_vec())
+                    .map(<[NodeId]>::to_vec)
                     .unwrap_or_default()
             };
             // children only includes element nodes (nodeType == 1)
@@ -292,10 +292,7 @@ pub(super) fn node_to_js_object(
             for cid in &child_ids {
                 let is_element = {
                     let dom = arc_ch.lock().unwrap_or_else(PoisonError::into_inner);
-                    matches!(
-                        dom.node(*cid).map(|n| n.kind()),
-                        Ok(NodeKind::Element { .. })
-                    )
+                    matches!(dom.node(*cid).map(Node::kind), Ok(NodeKind::Element { .. }))
                 };
                 if is_element {
                     element_ids.push(*cid);
@@ -311,6 +308,7 @@ pub(super) fn node_to_js_object(
         })
     };
 
+    // SAFETY: same -- Arc<Mutex<Dom>> and NodeId captures are not GC-traced.
     let arc_fc = Arc::clone(dom_arc);
     let first_child_native = unsafe {
         NativeFunction::from_closure(move |_this, _args, ctx| {
@@ -325,6 +323,7 @@ pub(super) fn node_to_js_object(
         })
     };
 
+    // SAFETY: same -- Arc<Mutex<Dom>> and NodeId captures are not GC-traced.
     let arc_lc = Arc::clone(dom_arc);
     let last_child_native = unsafe {
         NativeFunction::from_closure(move |_this, _args, ctx| {
@@ -339,6 +338,7 @@ pub(super) fn node_to_js_object(
         })
     };
 
+    // SAFETY: same -- Arc<Mutex<Dom>> and NodeId captures are not GC-traced.
     let arc_ns = Arc::clone(dom_arc);
     let next_sibling_native = unsafe {
         NativeFunction::from_closure(move |_this, _args, ctx| {
@@ -353,6 +353,7 @@ pub(super) fn node_to_js_object(
         })
     };
 
+    // SAFETY: same -- Arc<Mutex<Dom>> and NodeId captures are not GC-traced.
     let arc_ps = Arc::clone(dom_arc);
     let prev_sibling_native = unsafe {
         NativeFunction::from_closure(move |_this, _args, ctx| {
@@ -369,6 +370,7 @@ pub(super) fn node_to_js_object(
 
     // ---- mutation method closures (NativeFunction, passed to .function()) ----
 
+    // SAFETY: same -- Arc<Mutex<Dom>> and NodeId captures are not GC-traced.
     let arc_get = Arc::clone(dom_arc);
     let get_attribute = unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
@@ -391,6 +393,7 @@ pub(super) fn node_to_js_object(
         })
     };
 
+    // SAFETY: same -- Arc<Mutex<Dom>> and NodeId captures are not GC-traced.
     let arc_set = Arc::clone(dom_arc);
     let set_attribute = unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
@@ -408,6 +411,7 @@ pub(super) fn node_to_js_object(
         })
     };
 
+    // SAFETY: same -- Arc<Mutex<Dom>> and NodeId captures are not GC-traced.
     let arc_ac = Arc::clone(dom_arc);
     let append_child = unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
@@ -420,6 +424,7 @@ pub(super) fn node_to_js_object(
         })
     };
 
+    // SAFETY: same -- Arc<Mutex<Dom>> and NodeId captures are not GC-traced.
     let arc_rc = Arc::clone(dom_arc);
     let remove_child = unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
@@ -432,6 +437,7 @@ pub(super) fn node_to_js_object(
         })
     };
 
+    // SAFETY: same -- Arc<Mutex<Dom>> and NodeId captures are not GC-traced.
     let arc_ib = Arc::clone(dom_arc);
     let insert_before = unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
@@ -445,6 +451,7 @@ pub(super) fn node_to_js_object(
         })
     };
 
+    // SAFETY: same -- Arc<Mutex<Dom>> and NodeId captures are not GC-traced.
     let arc_rp = Arc::clone(dom_arc);
     let replace_child = unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
