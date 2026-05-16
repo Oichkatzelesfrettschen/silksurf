@@ -197,13 +197,13 @@ impl FusedWorkspace {
             let content_rect = self.node_rects[i];
 
             // Box-shadow paints below the background (CSS paint order).
-            if let Some(shadow) = style.box_shadow {
-                if !shadow.inset {
-                    self.display_items.push(DisplayItem::BoxShadow {
-                        rect: content_rect,
-                        shadow,
-                    });
-                }
+            if let Some(shadow) = style.box_shadow
+                && !shadow.inset
+            {
+                self.display_items.push(DisplayItem::BoxShadow {
+                    rect: content_rect,
+                    shadow,
+                });
             }
 
             if style.background_color.a > 0 {
