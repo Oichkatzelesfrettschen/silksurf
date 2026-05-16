@@ -56,6 +56,10 @@ unicode-xid = "0.2"
 # SIMD-accelerated byte searching (3-6x faster lexer scanning)
 memchr = "2.8"
 
+# ECMAScript-compatible regex engine (Unicode property escapes, lookahead,
+# named captures). Used by String.prototype.match/search/replace and RegExp.
+regress = "0.11"
+
 # -----------------------------------------------------------------------------
 # Compile-Time Utilities
 # -----------------------------------------------------------------------------

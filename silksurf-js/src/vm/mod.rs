@@ -4073,4 +4073,67 @@ mod tests {
             panic!("expected number 1002, got {v:?}");
         }
     }
+
+    #[test]
+    fn test_string_match_returns_array_on_hit() {
+        // "hello".match("el+") -> ["ell"], index=1
+        let v = run_and_get_result(r#"var m = "hello".match("el+"); window.result = m[0];"#);
+        // UNWRAP-OK: test fixture literal is valid JS.
+        let v = v.expect("script failed");
+        assert!(
+            matches!(&v, Value::String(s) if s.as_str() == Some("ell")),
+            "expected 'ell', got {v:?}"
+        );
+    }
+
+    #[test]
+    fn test_string_match_returns_null_on_miss() {
+        let v = run_and_get_result(
+            r#"var m = "hello".match("xyz"); window.result = m === null ? 1 : 0;"#,
+        );
+        // UNWRAP-OK: test fixture literal is valid JS.
+        let v = v.expect("script failed");
+        assert!(
+            matches!(v, Value::Number(n) if (n - 1.0).abs() < f64::EPSILON),
+            "expected 1 (null check), got {v:?}"
+        );
+    }
+
+    #[test]
+    fn test_string_search_returns_char_index() {
+        // "hello".search("ll") -> 2
+        let v = run_and_get_result(r#"window.result = "hello".search("ll");"#);
+        // UNWRAP-OK: test fixture literal is valid JS.
+        let v = v.expect("script failed");
+        assert!(
+            matches!(v, Value::Number(n) if (n - 2.0).abs() < f64::EPSILON),
+            "expected 2, got {v:?}"
+        );
+    }
+
+    #[test]
+    fn test_string_search_returns_minus_one_on_miss() {
+        let v = run_and_get_result(r#"window.result = "hello".search("xyz");"#);
+        // UNWRAP-OK: test fixture literal is valid JS.
+        let v = v.expect("script failed");
+        assert!(
+            matches!(v, Value::Number(n) if (n - (-1.0)).abs() < f64::EPSILON),
+            "expected -1, got {v:?}"
+        );
+    }
+
+    #[test]
+    fn test_string_match_captures_group() {
+        // Use a character-class pattern to avoid JS string-escape complexity with \d.
+        // "2024-01-15".match("([0-9]+)-([0-9]+)-([0-9]+)") -> result[1] = "2024"
+        let v = run_and_get_result(
+            r#"var m = "2024-01-15".match("([0-9]+)-([0-9]+)-([0-9]+)"); window.result = m[1];"#,
+        );
+        // UNWRAP-OK: test fixture literal is valid JS.
+        let v = v.expect("script failed");
+        assert!(
+            matches!(&v, Value::String(s) if s.as_str() == Some("2024")),
+            "expected '2024', got {v:?}"
+        );
+    }
 }

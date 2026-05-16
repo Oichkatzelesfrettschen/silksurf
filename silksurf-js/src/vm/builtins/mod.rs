@@ -19,6 +19,7 @@
  *   window.rs          -- window/self/globalThis, performance.now(), navigator
  *   array.rs           -- Array.prototype (14 methods: push, map, filter, etc.)
  *   string_proto.rs    -- String.prototype (20 methods: split, replace, etc.)
+ *   regex.rs           -- regex_match/regex_search helpers (regress crate)
  *
  * install_builtins() is called from Vm::new() to populate the global object.
  * The last step installs window/self/globalThis as self-referential pointers.
@@ -36,6 +37,7 @@ pub mod json;
 pub mod map_set;
 mod math;
 mod promise_builtin;
+pub mod regex;
 mod storage;
 pub mod string_proto;
 mod timers_builtin;
