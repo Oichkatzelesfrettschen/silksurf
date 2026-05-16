@@ -206,7 +206,13 @@ impl FusedWorkspace {
                 });
             }
 
-            if style.background_color.a > 0 {
+            if let Some(ref gradient) = style.background_image {
+                self.display_items.push(DisplayItem::LinearGradient {
+                    rect: content_rect,
+                    angle: gradient.angle_deg,
+                    stops: gradient.stops.clone(),
+                });
+            } else if style.background_color.a > 0 {
                 if style.border_radius > 0.0 {
                     self.display_items.push(DisplayItem::RoundedRect {
                         rect: content_rect,
@@ -352,7 +358,13 @@ pub fn fused_style_layout_paint(
         }
         let content_rect = node_rects[i];
 
-        if style.background_color.a > 0 {
+        if let Some(ref gradient) = style.background_image {
+            display_items.push(DisplayItem::LinearGradient {
+                rect: content_rect,
+                angle: gradient.angle_deg,
+                stops: gradient.stops.clone(),
+            });
+        } else if style.background_color.a > 0 {
             display_items.push(DisplayItem::SolidColor {
                 rect: content_rect,
                 color: style.background_color,

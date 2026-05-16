@@ -20,7 +20,8 @@
  */
 
 use silksurf_css::{
-    SelectorList, matches_selector_list, parse_selector_list_with_interner, parse_stylesheet,
+    SelectorList, compute_style_for_node, matches_selector_list, parse_selector_list_with_interner,
+    parse_stylesheet,
 };
 use silksurf_dom::{Dom, NodeId, NodeKind};
 use silksurf_engine::parse_html;
@@ -244,6 +245,7 @@ fn run_one(path: &Path) -> Outcome {
         }
         "html_semantic_sections" => check_html_semantic_sections(&parsed.dom, parsed.document),
         "css_flexbox_display" => check_css_flexbox_display(&parsed.dom, parsed.document, &source),
+        "css_linear_gradient" => check_css_linear_gradient(&parsed.dom, parsed.document, &source),
         other => Outcome::Skip(format!("no check registered for fixture stem '{other}'")),
     }
 }
@@ -870,6 +872,59 @@ fn check_css_flexbox_display(dom: &Dom, document: NodeId, source: &str) -> Outco
     };
     if !matches_selector_list(dom, col_div, &col_sel) {
         return Outcome::Fail("'.col' did not match inner div".to_string());
+    }
+    Outcome::Pass
+}
+
+fn check_css_linear_gradient(dom: &Dom, document: NodeId, source: &str) -> Outcome {
+    let css = match extract_inline_style(source) {
+        Some(c) => c,
+        None => return Outcome::Skip("no <style> block found".to_string()),
+    };
+    let stylesheet = match parse_stylesheet(&css) {
+        Ok(s) => s,
+        Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
+    };
+    // Fixture defines 4 gradient rules (.grad-angle, .grad-dir, .grad-def, .grad-pos).
+    if stylesheet.rules.len() < 4 {
+        return Outcome::Fail(format!(
+            "expected >= 4 gradient rules, got {}",
+            stylesheet.rules.len()
+        ));
+    }
+    let body = match body_of(dom, document) {
+        Some(b) => b,
+        None => return Outcome::Fail("missing body".to_string()),
+    };
+    // For each class, find the div, match selector, then verify cascade produces background_image.
+    let checks: &[(&str, &str)] = &[
+        (".grad-angle", "grad-angle"),
+        (".grad-dir", "grad-dir"),
+        (".grad-def", "grad-def"),
+        (".grad-pos", "grad-pos"),
+    ];
+    let children = element_children(dom, body);
+    for (selector, class) in checks {
+        let sel = match parse_selector(dom, selector) {
+            Some(s) => s,
+            None => return Outcome::Fail(format!("could not parse selector '{selector}'")),
+        };
+        let matched = children
+            .iter()
+            .copied()
+            .find(|&c| matches_selector_list(dom, c, &sel));
+        let node = match matched {
+            Some(n) => n,
+            None => {
+                return Outcome::Fail(format!("no element matched '{selector}' (class={class})"));
+            }
+        };
+        let style = compute_style_for_node(dom, node, &stylesheet, None);
+        if style.background_image.is_none() {
+            return Outcome::Fail(format!(
+                "background_image not set for {selector} after cascade"
+            ));
+        }
     }
     Outcome::Pass
 }
