@@ -47,8 +47,14 @@ pub struct DisplayListBatched {
     /// Text items: (rect, node_id, text_len, color).
     ///
     /// text_len is the character count of the source text node, carried for
-    /// future glyph rasterization (P8.S8). The color fills the rect today.
+    /// future glyph rasterization (L5). The color fills the rect today.
     pub texts: Vec<(Rect, NodeId, u32, Color)>,
+    /// Rounded rectangle items: (rect, radii, color).
+    ///
+    /// radii is [top-left, top-right, bottom-right, bottom-left] in CSS
+    /// clockwise order. The scalar rasterizer falls back to fill_rect;
+    /// the tiny-skia path renders anti-aliased cubic bezier arcs.
+    pub rounded_rects: Vec<(Rect, [f32; 4], Color)>,
 }
 
 impl DisplayListBatched {
@@ -67,6 +73,7 @@ impl DisplayListBatched {
     pub fn from_display_list(dl: &DisplayList) -> Self {
         let mut solid_colors: Vec<(Rect, Color)> = Vec::new();
         let mut texts: Vec<(Rect, NodeId, u32, Color)> = Vec::new();
+        let mut rounded_rects: Vec<(Rect, [f32; 4], Color)> = Vec::new();
 
         for item in &dl.items {
             match item {
@@ -78,8 +85,12 @@ impl DisplayListBatched {
                     node,
                     text_len,
                     color,
+                    ..
                 } => {
                     texts.push((*rect, *node, *text_len, *color));
+                }
+                DisplayItem::RoundedRect { rect, radii, color } => {
+                    rounded_rects.push((*rect, *radii, *color));
                 }
             }
         }
@@ -87,6 +98,7 @@ impl DisplayListBatched {
         Self {
             solid_colors,
             texts,
+            rounded_rects,
         }
     }
 
@@ -124,6 +136,13 @@ impl DisplayListBatched {
             fill_rect(&mut buffer, width, height, *rect, *color);
         }
 
+        for (rect, _radii, color) in &self.rounded_rects {
+            if !rect_intersects(*rect, damage) {
+                continue;
+            }
+            fill_rect(&mut buffer, width, height, *rect, *color);
+        }
+
         buffer
     }
 
@@ -135,7 +154,7 @@ impl DisplayListBatched {
      * the same source list.
      */
     pub fn item_count(&self) -> usize {
-        self.solid_colors.len() + self.texts.len()
+        self.solid_colors.len() + self.texts.len() + self.rounded_rects.len()
     }
 }
 

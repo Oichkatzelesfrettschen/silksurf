@@ -41,6 +41,7 @@ pub enum Display {
     Block,
     Flex,
     InlineFlex,
+    Grid,
     None,
 }
 
@@ -1601,6 +1602,7 @@ fn parse_display(tokens: &[CssToken]) -> Option<Display> {
         "inline" => Some(Display::Inline),
         "flex" => Some(Display::Flex),
         "inline-flex" => Some(Display::InlineFlex),
+        "grid" => Some(Display::Grid),
         "none" => Some(Display::None),
         _ => None,
     }

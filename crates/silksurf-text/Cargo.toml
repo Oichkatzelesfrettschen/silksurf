@@ -1,0 +1,11 @@
+[package]
+name = "silksurf-text"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94.1"
+publish = false
+
+[dependencies]
+cosmic-text = { workspace = true }
+tiny-skia = { workspace = true }
+silksurf-css = { path = "../silksurf-css" }
