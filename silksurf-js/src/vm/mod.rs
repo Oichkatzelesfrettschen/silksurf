@@ -37,6 +37,7 @@ pub mod builtins;
 pub mod dom_bridge;
 pub mod event_loop;
 pub mod gc_integration;
+mod generator;
 pub mod host;
 pub mod ic;
 pub mod nanbox;
@@ -284,6 +285,29 @@ pub struct Vm {
     pub timers: timers::TimerQueue,
     /// Maximum call stack depth
     max_stack_depth: usize,
+    /*
+     * generator_yield_stack -- active yield-collection buffers for
+     * generators currently being constructed (i.e. their bodies are running
+     * eagerly).
+     *
+     * WHY: `op_yield` runs deep inside `vm.execute()` and must hand its
+     * value back to the enclosing `op_call`-driven generator constructor.
+     * We park a stack of `Rc<RefCell<Vec<Value>>>` here so:
+     *   - nested generator construction (a generator that itself calls
+     *     another generator and yields its results) does not lose values
+     *   - top-of-stack is the buffer to push into; the constructor pops it
+     *     after the body completes
+     *
+     * The stack is empty whenever no generator is being constructed; in
+     * that case a stray `Yield` opcode silently no-ops (and the compiler
+     * should have caught the misuse statically -- yield only inside
+     * function*).
+     *
+     * See: generator.rs for the eager-strategy design rationale.
+     * See: op_yield / op_yield_star for the producer side.
+     * See: invoke_generator for the consumer / save+restore boilerplate.
+     */
+    generator_yield_stack: Vec<generator::GeneratorBuffer>,
 }
 
 /*
@@ -384,6 +408,7 @@ static DISPATCH_TABLE: [OpHandler; 256] = {
     table[Opcode::NewObject as usize] = op_new_object;
     table[Opcode::NewArray as usize] = op_new_array;
     table[Opcode::NewFunction as usize] = op_new_function;
+    table[Opcode::NewGenerator as usize] = op_new_generator;
     table[Opcode::BindCapture as usize] = op_bind_capture;
 
     // Scope
@@ -409,6 +434,10 @@ static DISPATCH_TABLE: [OpHandler; 256] = {
     table[Opcode::IterDone as usize] = op_iter_done;
     table[Opcode::IterValue as usize] = op_iter_value;
     table[Opcode::IterClose as usize] = op_iter_close;
+
+    // Generators (function* / yield)
+    table[Opcode::Yield as usize] = op_yield;
+    table[Opcode::YieldStar as usize] = op_yield_star;
 
     // Exception handling
     table[Opcode::EnterTry as usize] = op_enter_try;
@@ -437,6 +466,7 @@ impl Vm {
             try_handlers: Vec::new(),
             timers: timers::TimerQueue::new(),
             max_stack_depth: MAX_CALL_STACK_DEPTH,
+            generator_yield_stack: Vec::new(),
         }
     }
 
@@ -1042,6 +1072,24 @@ fn op_call(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
                 return Err(VmError::StackOverflow);
             }
             /*
+             * Generator-function call path (eager evaluation).
+             *
+             * WHY: A `function*` declaration compiles its body into a chunk
+             * with `is_generator = true` and the call site emits
+             * NewGenerator (not NewFunction).  When that generator-function
+             * is invoked we must NOT push a regular call frame: spec
+             * semantics say the body does not run yet -- the call returns
+             * an iterator.
+             *
+             * Eager strategy (see vm/generator.rs for the full rationale):
+             * snapshot context, run body to completion collecting yields,
+             * restore context, wrap into iterator.  Implemented in
+             * invoke_generator below.
+             */
+            if vm.chunks[chunk_idx].is_generator {
+                return invoke_generator(vm, &func, chunk_idx, instr);
+            }
+            /*
              * Compute the callee's register window base.
              *
              * WHY: The caller places args immediately after the callee register
@@ -1105,6 +1153,211 @@ fn op_call(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
             Ok(())
         }
         _ => Err(VmError::TypeError("not a function".to_string())),
+    }
+}
+
+/*
+ * invoke_generator -- eagerly run a generator-flagged chunk to completion
+ * and deliver a JS iterator object into the caller's destination register.
+ *
+ * WHY: Generator functions cannot share the normal call_stack push path
+ * because they must return an iterator without running the body in the
+ * caller's frame.  Instead we drive a fresh execute() in a saved
+ * sub-context.
+ *
+ * Step-by-step:
+ *   1. Marshal argv: copy the caller's arg registers (current_base + src1 +
+ *      1 onwards) into an owned Vec; they're about to be overwritten when
+ *      we seed the sub-context at absolute r0..N.
+ *   2. Save context: pull out the existing call_stack (std::mem::take) and
+ *      snapshot the absolute registers we are about to clobber.  Both are
+ *      restored after the body finishes (success or error path).
+ *   3. Seed the sub-context: write args to absolute r0.., zero the rest of
+ *      the snapshot window, push a fresh yield-collection buffer.
+ *   4. Run run_generator_body(chunk_idx, captures): a shim that mirrors
+ *      execute()'s loop but seeds the top frame with the closure's
+ *      captures (execute() would otherwise install an empty captures vec,
+ *      breaking upvalue references inside generator bodies).
+ *   5. Restore context: pop the yield buffer, restore registers and
+ *      call_stack.
+ *   6. Build the iterator object via generator::build_generator and store
+ *      it in the caller's destination register.
+ *
+ * Errors raised during the eager run (TypeError, uncaught throw, etc.) are
+ * surfaced to the caller of op_call exactly as if a regular function had
+ * thrown -- the saved call_stack/registers are restored first so subsequent
+ * dispatch_exception sees a coherent state.
+ *
+ * See: vm/generator.rs for the eager-strategy design rationale and known
+ *      limitations (visible-side-effects-at-construction, no .next(value)
+ *      argument plumbing, no resumable throw()).
+ */
+fn invoke_generator(
+    vm: &mut Vm,
+    func: &value::JsFunction,
+    chunk_idx: usize,
+    instr: Instruction,
+) -> VmResult<()> {
+    // 1. Snapshot caller args -- args live at current_base + src1 + 1 ..
+    let argc = instr.src2() as usize;
+    let current_base = vm.call_stack.last().map_or(0, |f| f.base);
+    let args_start = current_base + instr.src1() as usize + 1;
+    let mut argv: Vec<Value> = Vec::with_capacity(argc);
+    for slot in 0..argc {
+        let abs = args_start + slot;
+        if abs < vm.registers.len() {
+            argv.push(vm.registers[abs].clone());
+        } else {
+            argv.push(Value::Undefined);
+        }
+    }
+
+    // 2. Save the current call_stack so the sub-execute starts from
+    //    scratch.  Snapshot the absolute register slots we are about to
+    //    overwrite.
+    let saved_call_stack = std::mem::take(&mut vm.call_stack);
+    let snapshot_len = vm.registers.len().min(256);
+    let saved_registers: Vec<Value> = vm.registers[..snapshot_len].to_vec();
+
+    // 3. Seed args at absolute r0.., zero the rest of the snapshot window
+    //    so the body starts with a clean register file.  Beyond
+    //    snapshot_len we leave registers untouched: the 256-register window
+    //    matches the per-frame u8 index limit, so the body cannot reach
+    //    further.
+    for (i, arg) in argv.iter().enumerate() {
+        if i < vm.registers.len() {
+            vm.registers[i] = arg.clone();
+        }
+    }
+    for i in argv.len()..snapshot_len {
+        vm.registers[i] = Value::Undefined;
+    }
+    // Park a fresh yield-collection buffer; op_yield pushes into it.
+    let buffer: generator::GeneratorBuffer = Rc::new(RefCell::new(Vec::new()));
+    vm.generator_yield_stack.push(Rc::clone(&buffer));
+
+    // 4. Run the body via the captures-aware shim.
+    let captures = Rc::clone(&func.captures);
+    let run_result = run_generator_body(vm, chunk_idx, captures);
+
+    // 5. Pop our buffer.  The top-of-stack must match `buffer` -- a
+    //    mismatch means the body's construction stack underflowed (bug).
+    let popped = vm.generator_yield_stack.pop();
+    debug_assert!(
+        popped.as_ref().is_some_and(|p| Rc::ptr_eq(p, &buffer)),
+        "generator yield stack underflow: nested construction lost ordering",
+    );
+
+    // 6. Restore the saved register window and call_stack BEFORE
+    //    inspecting run_result so that an error path leaves the VM
+    //    coherent.
+    for (i, value) in saved_registers.into_iter().enumerate() {
+        if i < vm.registers.len() {
+            vm.registers[i] = value;
+        }
+    }
+    vm.call_stack = saved_call_stack;
+
+    // 7. Propagate any error.  Halted from the sub-execute is normal
+    //    completion of the body; the body's return value is captured in
+    //    the Ok arm by run_generator_body.
+    let return_value = match run_result {
+        Ok(value) => value,
+        Err(VmError::Halted) => Value::Undefined,
+        Err(err) => return Err(err),
+    };
+
+    // 8. Build the iterator object and store it in the caller's dst
+    //    register.
+    let yielded: Vec<Value> = std::mem::take(&mut *buffer.borrow_mut());
+    let iterator = generator::build_generator(yielded, return_value);
+    vm.set_reg(instr.dst(), iterator);
+    Ok(())
+}
+
+/*
+ * run_generator_body -- inline execute() variant that respects supplied
+ * captures for the top-level frame.
+ *
+ * WHY: vm.execute() unconditionally seeds the top frame with an empty
+ * captures vec.  Generator bodies that close over outer variables must see
+ * those upvalues via the JsFunction's captures.  This shim pushes a frame
+ * with the right Rc<RefCell<Vec<Value>>>, then runs the same dispatch loop
+ * as execute().
+ *
+ * Returns the final value of register 0 on normal completion (which holds
+ * the return value after Ret/RetUndefined), or the error otherwise.
+ *
+ * The implementation mirrors execute()'s loop: any future change to
+ * dispatch semantics (new opcodes, new error categories) MUST be reflected
+ * in both.  The duplication is small (~40 lines) and isolated; the
+ * alternative (threading "initial captures" through execute()) would touch
+ * every call site of execute().
+ */
+fn run_generator_body(
+    vm: &mut Vm,
+    chunk_idx: usize,
+    captures: Rc<RefCell<Vec<Value>>>,
+) -> VmResult<Value> {
+    if chunk_idx >= vm.chunks.len() {
+        return Err(VmError::OutOfBounds);
+    }
+    vm.call_stack.push(CallFrame {
+        chunk_idx,
+        pc: 0,
+        base: 0,
+        return_reg: 0,
+        captures,
+    });
+    loop {
+        let frame = vm.call_stack.last_mut().ok_or(VmError::OutOfBounds)?;
+        debug_assert!(frame.chunk_idx < vm.chunks.len());
+        // SAFETY: call frames only store valid chunk indices (enforced at
+        // push sites: op_call validates chunk_idx before pushing).
+        let chunk = unsafe { vm.chunks.get_unchecked(frame.chunk_idx) };
+        if frame.pc >= chunk.len() {
+            // Implicit fall-off-the-end.
+            vm.call_stack.pop();
+            if vm.call_stack.is_empty() {
+                let r0 = vm.registers.first().cloned().unwrap_or(Value::Undefined);
+                return Ok(r0);
+            }
+            continue;
+        }
+        // SAFETY: bounds checked above.
+        let instr = unsafe { *chunk.instructions.get_unchecked(frame.pc) };
+        frame.pc += 1;
+        let opcode = instr.opcode() as usize;
+        // SAFETY: opcode is a u8 cast to usize and DISPATCH_TABLE has 256
+        // entries; the index is always in bounds.
+        let handler = unsafe { *DISPATCH_TABLE.get_unchecked(opcode) };
+        match handler(vm, instr) {
+            Ok(()) => {}
+            Err(VmError::Halted) => {
+                let r0 = vm.registers.first().cloned().unwrap_or(Value::Undefined);
+                vm.microtasks.drain();
+                return Ok(r0);
+            }
+            Err(VmError::Exception(value)) => match dispatch_exception(vm, value) {
+                Ok(()) => {}
+                Err(err) => return Err(err),
+            },
+            Err(VmError::TypeError(msg)) => {
+                let exc_val = Value::string_owned(format!("TypeError: {msg}"));
+                match dispatch_exception(vm, exc_val) {
+                    Ok(()) => {}
+                    Err(_) => return Err(VmError::TypeError(msg)),
+                }
+            }
+            Err(VmError::ReferenceError(msg)) => {
+                let exc_val = Value::string_owned(format!("ReferenceError: {msg}"));
+                match dispatch_exception(vm, exc_val) {
+                    Ok(()) => {}
+                    Err(_) => return Err(VmError::ReferenceError(msg)),
+                }
+            }
+            Err(err) => return Err(err),
+        }
     }
 }
 
@@ -1567,14 +1820,28 @@ fn op_get_iterator(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
  *
  * Array-like Objects: snapshot elements into __data Vec.
  * Strings: split into chars, store as __data Vec.
+ * Iterator-shaped Objects (have a `next` method): pass through unchanged
+ *   so `for...of` over a generator (built by vm/generator.rs) drives the
+ *   generator's own next() instead of treating it as empty.
  * Others: empty iterator (done=true from the start).
  *
  * The iterator holds:
- *   __data: internal Vec<Value> (stored as a NativeFunction returning a pointer --
- *           actually stored as a plain array Value under key "__data")
+ *   __data: internal Vec<Value> (stored as a NativeFunction returning a
+ *           pointer -- actually stored as a plain array Value under key
+ *           "__data")
  *   __idx:  current position (stored as Value::Number under "__idx")
  */
 fn make_iterator_for(iterable: &Value) -> Value {
+    // Iterator-shaped pass-through: objects that already expose a `next`
+    // NativeFunction (generators, manually-built iterators) ARE iterators
+    // and must not be rewrapped -- doing so would lose their internal state
+    // and yield zero elements.
+    if let Value::Object(o) = iterable {
+        let has_next = matches!(o.borrow().get_by_str("next"), Value::NativeFunction(_));
+        if has_next {
+            return iterable.clone();
+        }
+    }
     let elements: Vec<Value> = match iterable {
         Value::Object(o) => {
             let o_borrow = o.borrow();
@@ -2411,6 +2678,97 @@ fn op_new_function(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
     };
     let func = Rc::new(JsFunction::new(chunk_idx));
     vm.set_reg(instr.dst(), Value::Function(func));
+    Ok(())
+}
+
+/*
+ * op_new_generator -- create a Value::Function value pointing at a generator
+ * body chunk.
+ *
+ * WHY: At runtime there is no observable difference between a regular
+ * Function value and a generator-function value before it is called: both
+ * are first-class JS values that flow through registers, closures, and
+ * argument lists.  The DIFFERENCE shows up when the value is invoked: op_call
+ * inspects vm.chunks[chunk_idx].is_generator and diverts generator-flagged
+ * chunks to invoke_generator (eager body execution, returns iterator).
+ *
+ * So this handler is structurally identical to op_new_function -- it just
+ * resolves the constant-pool Function entry into a Value::Function with the
+ * given chunk index.  The compiler MUST flag the referenced chunk's
+ * is_generator field (it does, in Statement::FunctionDeclaration and
+ * Expression::Function when the AST node's is_generator is set).
+ *
+ * Splitting NewGenerator from NewFunction at the bytecode level keeps the
+ * call-site explicit (better debuggability) and leaves room for future
+ * proper-suspension implementations that may want a richer wrapper here.
+ *
+ * Encoding: dst = result register, const_idx = constant-pool slot holding
+ * Constant::Function(chunk_idx).
+ *
+ * See: invoke_generator for the eager dispatch when this value is called.
+ * See: vm/generator.rs for the design rationale and limitations.
+ */
+fn op_new_generator(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
+    let const_idx = instr.const_idx();
+    let chunk = vm.current_chunk();
+    let chunk_idx = match chunk.get_constant(const_idx) {
+        Some(Constant::Function(idx)) => *idx,
+        _ => u32::from(const_idx),
+    };
+    let func = Rc::new(JsFunction::new(chunk_idx));
+    vm.set_reg(instr.dst(), Value::Function(func));
+    Ok(())
+}
+
+/*
+ * op_yield -- emit a value from the currently-executing generator body.
+ *
+ * WHY: In the eager strategy the generator body runs to completion before
+ * the caller ever sees the iterator.  Each `yield expr` therefore appends
+ * `expr`'s value to the active yield buffer (top of generator_yield_stack)
+ * and continues execution -- no suspension.  The dst register receives
+ * undefined because the eager strategy cannot plumb the .next(value)
+ * argument back into the yielded expression (documented limitation; see
+ * vm/generator.rs).
+ *
+ * Encoding: Yield(dst, src) -- read value from r[src], store undefined in
+ * r[dst] (yield expression result).
+ *
+ * If the stack is empty (yield outside a generator -- compiler bug or
+ * direct bytecode injection) we silently no-op the append.  We still write
+ * undefined to dst so downstream code observes a consistent value.
+ */
+fn op_yield(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
+    let value = vm.get_reg(instr.src1()).clone();
+    if let Some(buffer) = vm.generator_yield_stack.last() {
+        buffer.borrow_mut().push(value);
+    }
+    vm.set_reg(instr.dst(), Value::Undefined);
+    Ok(())
+}
+
+/*
+ * op_yield_star -- delegate to an iterable; flatten its values into the
+ * active yield buffer.
+ *
+ * WHY: `yield* iterable` is spec-defined as "yield every value produced by
+ * iterable.next() until done".  In eager mode we drain the iterable
+ * synchronously via generator::yield_star_flatten, which handles arrays,
+ * strings, and iterator-shaped objects (including other generators built
+ * by build_generator).
+ *
+ * Encoding: YieldStar(dst, src) -- read iterable from r[src], drain into
+ * top yield buffer, store undefined in r[dst].
+ *
+ * No-op (apart from writing undefined to dst) when the yield stack is
+ * empty.
+ */
+fn op_yield_star(vm: &mut Vm, instr: Instruction) -> VmResult<()> {
+    let iterable = vm.get_reg(instr.src1()).clone();
+    if let Some(buffer) = vm.generator_yield_stack.last().cloned() {
+        generator::yield_star_flatten(&buffer, &iterable);
+    }
+    vm.set_reg(instr.dst(), Value::Undefined);
     Ok(())
 }
 
@@ -3392,6 +3750,280 @@ mod tests {
             );
         } else {
             panic!("expected number 3, got {v:?}");
+        }
+    }
+
+    // ========================================================================
+    // Promise combinator tests (Promise.all / race / allSettled / any)
+    //
+    // WHY: These tests pin down the synchronous-settle implementation of the
+    // four ECMAScript Promise combinators. Each test feeds already-settled
+    // inputs (Promise.resolve / numeric literals) so the microtask drain
+    // inside the builtin can complete every step in one pass. They guard
+    // against regressing back to the old stubs which returned the raw input
+    // array (Promise.all) or the first input value (Promise.race) without
+    // ever inspecting promise state.
+    //
+    // See: vm/builtins/promise_builtin.rs for the implementations.
+    // ========================================================================
+
+    /*
+     * promise_all_basic -- mix of plain values and a fulfilled Promise; result
+     * must be a Fulfilled Promise wrapping an array whose length is 3 and
+     * whose first element is the number 1.  We check length + first + second
+     * elements rather than the full array because run_and_get_promise_state
+     * only surfaces the wrapper's result value, not nested introspection.
+     */
+    #[test]
+    fn test_promise_all_basic() {
+        // UNWRAP-OK: well-formed script; failure indicates Promise.all regressed.
+        let (state, value) =
+            run_and_get_promise_state("window.result = Promise.all([1, Promise.resolve(2), 3]);")
+                .expect("script failed");
+        assert_eq!(state, promise::PromiseState::Fulfilled);
+        let Value::Object(arr) = value else {
+            panic!("expected array object, got {value:?}");
+        };
+        let arr_ref = arr.borrow();
+        if let Value::Number(len) = arr_ref.get_by_str("length") {
+            assert!(
+                (len - 3.0).abs() < f64::EPSILON,
+                "expected length 3, got {len}"
+            );
+        } else {
+            panic!("expected numeric length");
+        }
+        let first = arr_ref.get_by_key(&crate::vm::value::PropertyKey::Index(0));
+        if let Value::Number(n) = first {
+            assert!((n - 1.0).abs() < f64::EPSILON, "expected first=1, got {n}");
+        } else {
+            panic!("expected first element to be number 1, got {first:?}");
+        }
+        let second = arr_ref.get_by_key(&crate::vm::value::PropertyKey::Index(1));
+        if let Value::Number(n) = second {
+            assert!((n - 2.0).abs() < f64::EPSILON, "expected second=2, got {n}");
+        } else {
+            panic!("expected second element to be number 2, got {second:?}");
+        }
+    }
+
+    /*
+     * promise_race_basic -- a single fulfilled Promise must win the race; the
+     * resulting wrapper is Fulfilled with that promise's value (42), not the
+     * Promise wrapper itself.
+     */
+    #[test]
+    fn test_promise_race_basic() {
+        // UNWRAP-OK: well-formed script; failure indicates Promise.race regressed.
+        let (state, value) =
+            run_and_get_promise_state("window.result = Promise.race([Promise.resolve(42)]);")
+                .expect("script failed");
+        assert_eq!(state, promise::PromiseState::Fulfilled);
+        if let Value::Number(n) = value {
+            assert!((n - 42.0).abs() < f64::EPSILON, "expected 42, got {n}");
+        } else {
+            panic!("expected number 42, got {value:?}");
+        }
+    }
+
+    /*
+     * promise_all_settled -- one fulfilled input; result is Fulfilled with an
+     * array containing a single descriptor object whose status is "fulfilled"
+     * and whose value is 1.
+     */
+    #[test]
+    fn test_promise_all_settled() {
+        // UNWRAP-OK: well-formed script; failure indicates Promise.allSettled regressed.
+        let (state, value) =
+            run_and_get_promise_state("window.result = Promise.allSettled([Promise.resolve(1)]);")
+                .expect("script failed");
+        assert_eq!(state, promise::PromiseState::Fulfilled);
+        let Value::Object(arr) = value else {
+            panic!("expected array object, got {value:?}");
+        };
+        let arr_ref = arr.borrow();
+        if let Value::Number(len) = arr_ref.get_by_str("length") {
+            assert!(
+                (len - 1.0).abs() < f64::EPSILON,
+                "expected length 1, got {len}"
+            );
+        } else {
+            panic!("expected numeric length");
+        }
+        let descriptor = arr_ref.get_by_key(&crate::vm::value::PropertyKey::Index(0));
+        let Value::Object(desc_rc) = descriptor else {
+            panic!("expected descriptor object");
+        };
+        let desc = desc_rc.borrow();
+        let status = desc.get_by_str("status");
+        let status_str = status.to_js_string();
+        assert_eq!(
+            status_str.as_str().unwrap_or(""),
+            "fulfilled",
+            "expected status=fulfilled"
+        );
+        if let Value::Number(n) = desc.get_by_str("value") {
+            assert!((n - 1.0).abs() < f64::EPSILON, "expected value=1, got {n}");
+        } else {
+            panic!("expected descriptor.value to be number 1");
+        }
+    }
+
+    /*
+     * promise_any_basic -- first fulfilled wins; result is Fulfilled with 99.
+     */
+    #[test]
+    fn test_promise_any_basic() {
+        // UNWRAP-OK: well-formed script; failure indicates Promise.any regressed.
+        let (state, value) =
+            run_and_get_promise_state("window.result = Promise.any([Promise.resolve(99)]);")
+                .expect("script failed");
+        assert_eq!(state, promise::PromiseState::Fulfilled);
+        if let Value::Number(n) = value {
+            assert!((n - 99.0).abs() < f64::EPSILON, "expected 99, got {n}");
+        } else {
+            panic!("expected number 99, got {value:?}");
+        }
+    }
+
+    // ========================================================================
+    // Generator tests (function* / yield / yield* / for...of over generator)
+    //
+    // WHY: These tests verify the eager-strategy generator implementation
+    // end-to-end:
+    //   - test_generator_basic: function* declaration, multiple yields,
+    //     direct .next().value calls, sum yields three values.
+    //   - test_generator_done: after exhausting all yields, .next().done
+    //     is observably truthy.
+    //   - test_for_of_generator: for...of drives the generator via its
+    //     own next() method (no array-like wrapping); body sums yielded
+    //     values to 0+1+2 = 3.
+    //   - test_generator_yield_star: yield* delegates to an inner array,
+    //     flattening its elements into the parent's yield buffer.
+    //
+    // Known limitations (documented in vm/generator.rs and exercised here
+    // only insofar as the test bodies avoid the unsupported patterns):
+    //   * .next(value) argument is not plumbed back into yield expressions.
+    //   * Side effects in the body happen at construction time, not lazily.
+    //   * .return() / .throw() do not retroactively re-run the body.
+    //
+    // See: vm/generator.rs for the eager-strategy design rationale.
+    // See: vm/mod.rs op_yield / op_yield_star / op_new_generator /
+    //      invoke_generator for the runtime dispatch.
+    // See: bytecode/compiler.rs Statement::FunctionDeclaration /
+    //      Expression::Function (is_generator branch) and Expression::Yield
+    //      for the bytecode emission.
+    // ========================================================================
+
+    /*
+     * generator_basic -- three sequential .next().value calls return the
+     * three yielded values in order; their sum is 1 + 2 + 3 = 6.
+     *
+     * Exercises: NewGenerator emission, invoke_generator eager execution,
+     * build_generator iterator construction, op_call on the returned
+     * iterator's `next` NativeFunction, GetProp on the {value, done}
+     * record.
+     */
+    #[test]
+    fn test_generator_basic() {
+        // UNWRAP-OK: well-formed script; failure indicates the generator
+        // VM/compiler integration regressed.
+        let v = run_and_get_result(
+            "function* gen() { yield 1; yield 2; yield 3; }\
+             var g = gen();\
+             window.result = g.next().value + g.next().value + g.next().value;",
+        )
+        .expect("script failed");
+        if let Value::Number(n) = v {
+            assert!((n - 6.0).abs() < f64::EPSILON, "expected 6, got {n}");
+        } else {
+            panic!("expected number 6, got {v:?}");
+        }
+    }
+
+    /*
+     * generator_done -- after the buffer is exhausted (three yields, three
+     * .next() calls), the FOURTH .next() must report done=true.
+     *
+     * Exercises: build_generator's exhaustion path (finished flag flips,
+     * subsequent calls return {value: undefined, done: true}).
+     */
+    #[test]
+    fn test_generator_done() {
+        let v = run_and_get_result(
+            "function* gen() { yield 1; yield 2; yield 3; }\
+             var g = gen();\
+             g.next(); g.next(); g.next();\
+             window.result = g.next().done;",
+        )
+        // UNWRAP-OK: well-formed script; failure indicates the iterator's
+        // done flag is not flipping on exhaustion.
+        .expect("script failed");
+        if let Value::Boolean(b) = v {
+            assert!(b, "expected done=true after exhausting all yields");
+        } else {
+            panic!("expected boolean true, got {v:?}");
+        }
+    }
+
+    /*
+     * for_of_generator -- for...of drives a generator's own next() instead
+     * of treating the iterator as an empty array-like.
+     *
+     * Exercises: make_iterator_for's iterator-shaped pass-through branch
+     * (detects `next` NativeFunction on the object), op_iter_next dispatch
+     * to the generator's next closure, op_iter_done flag extraction.
+     *
+     * range(3) yields 0, 1, 2; sum = 3.
+     */
+    #[test]
+    fn test_for_of_generator() {
+        let v = run_and_get_result(
+            "function* range(n) {\
+                 var i = 0;\
+                 while (i < n) { yield i; i = i + 1; }\
+             }\
+             var sum = 0;\
+             for (var x of range(3)) { sum = sum + x; }\
+             window.result = sum;",
+        )
+        // UNWRAP-OK: well-formed script; failure indicates the for-of /
+        // generator iterator-protocol bridge regressed.
+        .expect("script failed");
+        if let Value::Number(n) = v {
+            assert!((n - 3.0).abs() < f64::EPSILON, "expected 3, got {n}");
+        } else {
+            panic!("expected number 3, got {v:?}");
+        }
+    }
+
+    /*
+     * generator_yield_star -- yield* delegates to an iterable, flattening
+     * its elements into the parent generator's yield buffer.
+     *
+     * Exercises: op_yield_star, generator::yield_star_flatten's array-like
+     * path.  The outer generator yields 10, then delegates to [1, 2, 3],
+     * then yields 20.  for-of summing gives 10 + 1 + 2 + 3 + 20 = 36.
+     */
+    #[test]
+    fn test_generator_yield_star() {
+        let v = run_and_get_result(
+            "function* combined() {\
+                 yield 10;\
+                 yield* [1, 2, 3];\
+                 yield 20;\
+             }\
+             var sum = 0;\
+             for (var x of combined()) { sum = sum + x; }\
+             window.result = sum;",
+        )
+        // UNWRAP-OK: well-formed script; failure indicates yield* delegation
+        // regressed.
+        .expect("script failed");
+        if let Value::Number(n) = v {
+            assert!((n - 36.0).abs() < f64::EPSILON, "expected 36, got {n}");
+        } else {
+            panic!("expected number 36, got {v:?}");
         }
     }
 }
