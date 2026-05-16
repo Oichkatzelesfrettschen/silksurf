@@ -54,6 +54,11 @@ pub enum PropertyId {
     OverflowX = 31,
     OverflowY = 32,
     Opacity = 33,
+    BorderRadius = 34,
+    BoxShadow = 35,
+    TextAlign = 36,
+    FontWeight = 37,
+    FontStyle = 38,
     Unknown = 255,
 }
 
@@ -83,9 +88,13 @@ pub fn lookup_property_id(name: &str) -> PropertyId {
         (b'b', 6) if name.eq_ignore_ascii_case("border") => PropertyId::Border,
         (b'b', 12) if name.eq_ignore_ascii_case("border-width") => PropertyId::BorderWidth,
         (b'b', 6) if name.eq_ignore_ascii_case("bottom") => PropertyId::Bottom,
+        (b'b', 13) if name.eq_ignore_ascii_case("border-radius") => PropertyId::BorderRadius,
+        (b'b', 10) if name.eq_ignore_ascii_case("box-shadow") => PropertyId::BoxShadow,
         // 'f' prefix
         (b'f', 9) if name.eq_ignore_ascii_case("font-size") => PropertyId::FontSize,
         (b'f', 11) if name.eq_ignore_ascii_case("font-family") => PropertyId::FontFamily,
+        (b'f', 11) if name.eq_ignore_ascii_case("font-weight") => PropertyId::FontWeight,
+        (b'f', 10) if name.eq_ignore_ascii_case("font-style") => PropertyId::FontStyle,
         (b'f', 14) if name.eq_ignore_ascii_case("flex-direction") => PropertyId::FlexDirection,
         (b'f', 9) if name.eq_ignore_ascii_case("flex-wrap") => PropertyId::FlexWrap,
         (b'f', 9) if name.eq_ignore_ascii_case("flex-flow") => PropertyId::FlexFlow,
@@ -116,6 +125,7 @@ pub fn lookup_property_id(name: &str) -> PropertyId {
         (b'r', 7) if name.eq_ignore_ascii_case("row-gap") => PropertyId::RowGap,
         // 't' prefix
         (b't', 3) if name.eq_ignore_ascii_case("top") => PropertyId::Top,
+        (b't', 10) if name.eq_ignore_ascii_case("text-align") => PropertyId::TextAlign,
         // 'a' prefix
         (b'a', 11) if name.eq_ignore_ascii_case("align-items") => PropertyId::AlignItems,
         (b'a', 10) if name.eq_ignore_ascii_case("align-self") => PropertyId::AlignSelf,
@@ -148,6 +158,23 @@ mod tests {
             PropertyId::JustifyContent
         );
         assert_eq!(lookup_property_id("z-index"), PropertyId::ZIndex);
+    }
+
+    #[test]
+    fn test_new_visual_properties() {
+        assert_eq!(
+            lookup_property_id("border-radius"),
+            PropertyId::BorderRadius
+        );
+        assert_eq!(lookup_property_id("box-shadow"), PropertyId::BoxShadow);
+        assert_eq!(lookup_property_id("text-align"), PropertyId::TextAlign);
+        assert_eq!(lookup_property_id("font-weight"), PropertyId::FontWeight);
+        assert_eq!(lookup_property_id("font-style"), PropertyId::FontStyle);
+        assert_eq!(
+            lookup_property_id("BORDER-RADIUS"),
+            PropertyId::BorderRadius
+        );
+        assert_eq!(lookup_property_id("TEXT-ALIGN"), PropertyId::TextAlign);
     }
 
     #[test]

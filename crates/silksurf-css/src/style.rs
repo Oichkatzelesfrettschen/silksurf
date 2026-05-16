@@ -150,6 +150,48 @@ pub enum Overflow {
     Auto,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TextAlign {
+    #[default]
+    Left,
+    Right,
+    Center,
+    Justify,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FontWeight {
+    Normal,
+    Bold,
+    Bolder,
+    Lighter,
+    Number(u16),
+}
+
+impl Default for FontWeight {
+    fn default() -> Self {
+        FontWeight::Normal
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FontStyle {
+    #[default]
+    Normal,
+    Italic,
+    Oblique,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BoxShadow {
+    pub offset_x: f32,
+    pub offset_y: f32,
+    pub blur_radius: f32,
+    pub spread_radius: f32,
+    pub color: Color,
+    pub inset: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Length {
     Px(f32),
@@ -250,6 +292,13 @@ pub struct ComputedStyle {
     pub overflow_y: Overflow,
     // Visual
     pub opacity: f32,
+    // Text
+    pub text_align: TextAlign,
+    pub font_weight: FontWeight,
+    pub font_style: FontStyle,
+    // Decoration
+    pub border_radius: f32,
+    pub box_shadow: Option<BoxShadow>,
 }
 
 impl Default for ComputedStyle {
@@ -279,6 +328,11 @@ impl Default for ComputedStyle {
             overflow_x: Overflow::default(),
             overflow_y: Overflow::default(),
             opacity: 1.0,
+            text_align: TextAlign::default(),
+            font_weight: FontWeight::default(),
+            font_style: FontStyle::default(),
+            border_radius: 0.0,
+            box_shadow: None,
         }
     }
 }
@@ -340,6 +394,13 @@ struct CascadedStyle {
     overflow_y: Option<ResolvedProperty<Overflow>>,
     // Visual
     opacity: Option<ResolvedProperty<f32>>,
+    // Text
+    text_align: Option<ResolvedProperty<TextAlign>>,
+    font_weight: Option<ResolvedProperty<FontWeight>>,
+    font_style: Option<ResolvedProperty<FontStyle>>,
+    // Decoration
+    border_radius: Option<ResolvedProperty<f32>>,
+    box_shadow: Option<ResolvedProperty<BoxShadow>>,
 }
 
 impl CascadedStyle {
@@ -423,6 +484,23 @@ impl CascadedStyle {
             overflow_x: self.overflow_x.map(|e| e.value).unwrap_or_default(),
             overflow_y: self.overflow_y.map(|e| e.value).unwrap_or_default(),
             opacity: self.opacity.map(|e| e.value).unwrap_or(1.0),
+            text_align: self
+                .text_align
+                .map(|e| e.value)
+                .or_else(|| parent.map(|s| s.text_align))
+                .unwrap_or_default(),
+            font_weight: self
+                .font_weight
+                .map(|e| e.value)
+                .or_else(|| parent.map(|s| s.font_weight))
+                .unwrap_or_default(),
+            font_style: self
+                .font_style
+                .map(|e| e.value)
+                .or_else(|| parent.map(|s| s.font_style))
+                .unwrap_or_default(),
+            border_radius: self.border_radius.map(|e| e.value).unwrap_or(0.0),
+            box_shadow: self.box_shadow.map(|e| e.value),
         }
     }
 }
@@ -1588,6 +1666,62 @@ fn apply_declaration(
                 );
             }
         }
+        // Visual decorations
+        PropertyId::BorderRadius => {
+            if let Some(value) = parse_border_radius(&declaration.value) {
+                apply_property(
+                    &mut cascaded.border_radius,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::BoxShadow => {
+            if let Some(value) = parse_box_shadow(&declaration.value) {
+                apply_property(
+                    &mut cascaded.box_shadow,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::TextAlign => {
+            if let Some(value) = parse_text_align(&declaration.value) {
+                apply_property(
+                    &mut cascaded.text_align,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::FontWeight => {
+            if let Some(value) = parse_font_weight(&declaration.value) {
+                apply_property(
+                    &mut cascaded.font_weight,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::FontStyle => {
+            if let Some(value) = parse_font_style(&declaration.value) {
+                apply_property(
+                    &mut cascaded.font_style,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
         PropertyId::Unknown => {}
     }
 }
@@ -1755,6 +1889,97 @@ fn parse_opacity(tokens: &[CssToken]) -> Option<f32> {
         _ => None,
     })
 }
+
+fn parse_border_radius(tokens: &[CssToken]) -> Option<f32> {
+    tokens.iter().find_map(|token| match token {
+        CssToken::Dimension { value, unit } if unit.eq_ignore_ascii_case("px") => {
+            value.parse::<f32>().ok()
+        }
+        CssToken::Percentage(value) => value.parse::<f32>().ok(),
+        CssToken::Number(value) if value == "0" => Some(0.0),
+        _ => None,
+    })
+}
+
+fn parse_text_align(tokens: &[CssToken]) -> Option<TextAlign> {
+    match first_ident(tokens)? {
+        "left" => Some(TextAlign::Left),
+        "right" => Some(TextAlign::Right),
+        "center" => Some(TextAlign::Center),
+        "justify" => Some(TextAlign::Justify),
+        _ => None,
+    }
+}
+
+fn parse_font_weight(tokens: &[CssToken]) -> Option<FontWeight> {
+    tokens.iter().find_map(|token| match token {
+        CssToken::Whitespace => None,
+        CssToken::Ident(value) => match value.to_ascii_lowercase().as_str() {
+            "normal" => Some(FontWeight::Normal),
+            "bold" => Some(FontWeight::Bold),
+            "bolder" => Some(FontWeight::Bolder),
+            "lighter" => Some(FontWeight::Lighter),
+            _ => None,
+        },
+        CssToken::Number(value) => value.parse::<u16>().ok().map(FontWeight::Number),
+        _ => None,
+    })
+}
+
+fn parse_font_style(tokens: &[CssToken]) -> Option<FontStyle> {
+    match first_ident(tokens)? {
+        "normal" => Some(FontStyle::Normal),
+        "italic" => Some(FontStyle::Italic),
+        "oblique" => Some(FontStyle::Oblique),
+        _ => None,
+    }
+}
+
+fn parse_box_shadow(tokens: &[CssToken]) -> Option<BoxShadow> {
+    if first_ident(tokens) == Some("none") {
+        return None;
+    }
+    let mut lengths = Vec::new();
+    let mut color = None;
+    let mut inset = false;
+    for token in tokens {
+        match token {
+            CssToken::Ident(value) if value.eq_ignore_ascii_case("inset") => {
+                inset = true;
+            }
+            CssToken::Ident(value) => {
+                if let Some(parsed) = parse_named_color(value) {
+                    color = Some(parsed);
+                }
+            }
+            CssToken::Hash(value) => {
+                if let Some(parsed) = parse_hex_color(value) {
+                    color = Some(parsed);
+                }
+            }
+            _ => {
+                if let Some(length) = parse_length_token(token) {
+                    lengths.push(length);
+                }
+            }
+        }
+    }
+    if lengths.len() < 2 {
+        return None;
+    }
+    let px = |l: &Length| match l {
+        Length::Px(v) | Length::Percent(v) => *v,
+    };
+    Some(BoxShadow {
+        offset_x: px(&lengths[0]),
+        offset_y: px(&lengths[1]),
+        blur_radius: lengths.get(2).map(px).unwrap_or(0.0),
+        spread_radius: lengths.get(3).map(px).unwrap_or(0.0),
+        color: color.unwrap_or_else(Color::black),
+        inset,
+    })
+}
+
 fn parse_length_list(tokens: &[CssToken]) -> Vec<Length> {
     let mut values = Vec::new();
     for token in tokens {

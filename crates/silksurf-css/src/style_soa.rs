@@ -26,8 +26,8 @@
  */
 
 use crate::{
-    Color, ComputedStyle, Display, Edges, FlexContainerStyle, FlexItemStyle, Length, LengthOrAuto,
-    Overflow, Position,
+    BoxShadow, Color, ComputedStyle, Display, Edges, FlexContainerStyle, FlexItemStyle, FontStyle,
+    FontWeight, Length, LengthOrAuto, Overflow, Position, TextAlign,
 };
 use rustc_hash::FxHashMap;
 use silksurf_dom::NodeId;
@@ -312,6 +312,13 @@ pub(crate) struct ComputedStyleSoA {
     pub(crate) overflow_x: Vec<Overflow>,
     pub(crate) overflow_y: Vec<Overflow>,
     pub(crate) opacity: Vec<f32>,
+    // Text
+    pub(crate) text_align: Vec<TextAlign>,
+    pub(crate) font_weight: Vec<FontWeight>,
+    pub(crate) font_style: Vec<FontStyle>,
+    // Decoration
+    pub(crate) border_radius: Vec<f32>,
+    pub(crate) box_shadow: Vec<Option<BoxShadow>>,
 }
 
 impl Default for ComputedStyleSoA {
@@ -347,6 +354,11 @@ impl ComputedStyleSoA {
             overflow_x: Vec::new(),
             overflow_y: Vec::new(),
             opacity: Vec::new(),
+            text_align: Vec::new(),
+            font_weight: Vec::new(),
+            font_style: Vec::new(),
+            border_radius: Vec::new(),
+            box_shadow: Vec::new(),
         }
     }
 
@@ -378,6 +390,11 @@ impl ComputedStyleSoA {
         self.overflow_x.push(style.overflow_x);
         self.overflow_y.push(style.overflow_y);
         self.opacity.push(style.opacity);
+        self.text_align.push(style.text_align);
+        self.font_weight.push(style.font_weight);
+        self.font_style.push(style.font_style);
+        self.border_radius.push(style.border_radius);
+        self.box_shadow.push(style.box_shadow);
     }
 
     /*
@@ -411,6 +428,11 @@ impl ComputedStyleSoA {
             overflow_x: self.overflow_x[index],
             overflow_y: self.overflow_y[index],
             opacity: self.opacity[index],
+            text_align: self.text_align[index],
+            font_weight: self.font_weight[index],
+            font_style: self.font_style[index],
+            border_radius: self.border_radius[index],
+            box_shadow: self.box_shadow[index],
         })
     }
 
