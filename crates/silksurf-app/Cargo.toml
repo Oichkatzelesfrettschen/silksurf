@@ -11,6 +11,7 @@ silksurf-dom = { path = "../silksurf-dom" }
 silksurf-css = { path = "../silksurf-css" }
 silksurf-layout = { path = "../silksurf-layout" }
 silksurf-render = { path = "../silksurf-render", features = ["parallel"] }
+silksurf-gui = { path = "../silksurf-gui" }
 silksurf-js = { path = "../../silksurf-js" }
 silksurf-core = { path = "../silksurf-core" }
 url = { workspace = true }

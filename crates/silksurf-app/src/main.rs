@@ -65,6 +65,70 @@ fn main() {
     let insecure = args.iter().any(|a| a == "--insecure" || a == "-k");
     let platform_verifier = args.iter().any(|a| a == "--platform-verifier");
     let speculative = args.iter().any(|a| a == "--speculative" || a == "-s");
+    let window_mode = args.iter().any(|a| a == "--window");
+
+    /*
+     * --window  -- open an XCB window, present a placeholder frame, and
+     *              pump the event loop until Close or Escape (keysym 0x09).
+     *
+     * WHY: The full pipeline (fetch -> parse -> layout -> rasterize) goes
+     * to stderr today.  P6.S2/S3 wires the rasterizer output to a real
+     * X11 drawable so the developer experience matches expectations of a
+     * browser ("show me the page in a window").  This early exit keeps
+     * the network/JS path entirely separate so a regression on either side
+     * does not break the other -- a strict cleanroom seam.
+     *
+     * HOW: cornflower-blue (0x6495ED) fill via silksurf_render::fill_scalar
+     * is the placeholder.  P6.S4 swaps it for the real rasterized buffer
+     * sourced from the same fused pipeline that the headless mode uses.
+     *
+     * The XcbWindow::new() error path is the only thing that can panic
+     * here on a headless box, so we surface it as a clean stderr message
+     * and exit code 1 -- never panic.
+     */
+    if window_mode {
+        match silksurf_gui::XcbWindow::new("silksurf", 1280, 720) {
+            Ok(mut window) => {
+                let pixel_count = 1280usize * 720usize;
+                let mut pixels: Vec<u32> = vec![0; pixel_count];
+                // Cornflower blue, ARGB. The high byte (0xFF) is alpha; the
+                // server ignores alpha for opaque windows but downstream
+                // SHM/composite paths require it set.
+                silksurf_render::fill_scalar(&mut pixels, 0xFF6495ED);
+                window.present(&pixels);
+
+                /*
+                 * Re-presentation on Expose is intentionally NOT wired in
+                 * this slice: the event-loop handler signature is
+                 * `FnMut(Event) -> ControlFlow` (no &mut to window or
+                 * framebuffer), so we cannot call window.present() from
+                 * inside it without violating the borrow checker.  P6.S4
+                 * extends the handler signature to a redraw closure;
+                 * until then, the BackPixel(white_pixel) on the window
+                 * gives a sensible fallback when the WM unmaps/remaps.
+                 */
+                let mut event_loop = silksurf_gui::EventLoop::new();
+                let run_result = event_loop.run(&mut window, |event| match event {
+                    silksurf_gui::Event::Close => silksurf_gui::ControlFlow::Exit,
+                    // X11 keycode 0x09 is Escape on a US keyboard layout.
+                    // Real keysym translation lands in P6.S4 (xkbcommon).
+                    silksurf_gui::Event::KeyPress { keysym: 0x09 } => {
+                        silksurf_gui::ControlFlow::Exit
+                    }
+                    _ => silksurf_gui::ControlFlow::Continue,
+                });
+                if let Err(err) = run_result {
+                    eprintln!("[SilkSurf] window event loop error: {err}");
+                    std::process::exit(1);
+                }
+                return;
+            }
+            Err(err) => {
+                eprintln!("[SilkSurf] --window: cannot open display: {err}");
+                std::process::exit(1);
+            }
+        }
+    }
 
     /*
      * --tls-ca-file <path>  -- append a PEM CA bundle to the default trust store.
