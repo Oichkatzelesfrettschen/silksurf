@@ -37,10 +37,10 @@
 )]
 
 use rustc_hash::FxHashMap;
-use silksurf_css::{Color, ComputedStyle};
+use silksurf_css::{BoxShadow as CssBoxShadow, Color, ComputedStyle};
 use silksurf_dom::{Dom, NodeId, NodeKind};
 use silksurf_layout::{LayoutTree, Rect};
-use tiny_skia::{FillRule, Paint, PathBuilder, PixmapMut, Transform};
+use tiny_skia::{FillRule, GradientStop, LinearGradient, Paint, PathBuilder, PixmapMut, Point, SpreadMode, Transform};
 
 /// Type-batched rasterization (feature "batched-raster").
 ///
@@ -93,6 +93,27 @@ pub enum DisplayItem {
         radii: [f32; 4],
         color: Color,
     },
+    /// CSS box-shadow drop shadow (outset only; inset is deferred).
+    ///
+    /// `rect` is the element's content rect. Renderers compute the shadow's
+    /// actual bounds from the CSS offset and spread fields inside `shadow`.
+    /// Scalar paths fall back to a solid rect fill; the tiny-skia path will
+    /// add blur in a future pass.
+    BoxShadow {
+        rect: Rect,
+        shadow: CssBoxShadow,
+    },
+    /// CSS linear-gradient background.
+    ///
+    /// `angle` follows the CSS convention: 0.0 = to top, 90.0 = to right.
+    /// `stops` is a list of (position [0.0, 1.0], color) pairs in order.
+    /// Scalar paths fill with the first stop color; the tiny-skia path
+    /// renders the gradient through the full element rect.
+    LinearGradient {
+        rect: Rect,
+        angle: f32,
+        stops: Vec<(f32, Color)>,
+    },
 }
 
 pub fn build_display_list(
@@ -129,11 +150,29 @@ fn build_display_list_for_box(
         silksurf_layout::BoxType::BlockNode(node_id)
         | silksurf_layout::BoxType::InlineNode(node_id) => {
             if let Some(style) = styles.get(&node_id) {
+                let content_rect = layout.dimensions().content;
+                // Box-shadow paints below the background (CSS paint order).
+                if let Some(shadow) = style.box_shadow {
+                    if !shadow.inset {
+                        list.items.push(DisplayItem::BoxShadow {
+                            rect: content_rect,
+                            shadow,
+                        });
+                    }
+                }
                 if style.background_color.a > 0 {
-                    list.items.push(DisplayItem::SolidColor {
-                        rect: layout.dimensions().content,
-                        color: style.background_color,
-                    });
+                    if style.border_radius > 0.0 {
+                        list.items.push(DisplayItem::RoundedRect {
+                            rect: content_rect,
+                            radii: [style.border_radius; 4],
+                            color: style.background_color,
+                        });
+                    } else {
+                        list.items.push(DisplayItem::SolidColor {
+                            rect: content_rect,
+                            color: style.background_color,
+                        });
+                    }
                 }
                 if let Ok(node) = dom.node(node_id) {
                     if let NodeKind::Text { .. } = node.kind() {
@@ -146,7 +185,7 @@ fn build_display_list_for_box(
                             _ => 16.0,
                         };
                         list.items.push(DisplayItem::Text {
-                            rect: layout.dimensions().content,
+                            rect: content_rect,
                             node: node_id,
                             text_len,
                             text: text_content,
@@ -208,6 +247,18 @@ pub fn rasterize_damage(
             DisplayItem::RoundedRect { rect, color, .. } => {
                 fill_rect(&mut buffer, width, height, *rect, *color);
             }
+            DisplayItem::BoxShadow { rect, shadow } => {
+                if !shadow.inset {
+                    let shadow_rect = box_shadow_rect(*rect, shadow);
+                    fill_rect(&mut buffer, width, height, shadow_rect, shadow.color);
+                }
+            }
+            DisplayItem::LinearGradient { rect, stops, .. } => {
+                // Scalar fallback: fill with first stop color.
+                if let Some(pair) = stops.first() {
+                    fill_rect(&mut buffer, width, height, *rect, pair.1);
+                }
+            }
         }
     }
     buffer
@@ -218,6 +269,8 @@ fn item_rect(item: &DisplayItem) -> Rect {
         DisplayItem::SolidColor { rect, .. } => *rect,
         DisplayItem::Text { rect, .. } => *rect,
         DisplayItem::RoundedRect { rect, .. } => *rect,
+        DisplayItem::BoxShadow { rect, shadow } => box_shadow_rect(*rect, shadow),
+        DisplayItem::LinearGradient { rect, .. } => *rect,
     }
 }
 
@@ -685,10 +738,17 @@ pub fn rasterize_parallel_into(
             if !rect_intersects(item_r, tile_rect) {
                 continue;
             }
-            let color = match item {
-                DisplayItem::SolidColor { color, .. } => color,
-                DisplayItem::Text { color, .. } => color,
-                DisplayItem::RoundedRect { color, .. } => color,
+            // Extract a solid fill color for each item type. BoxShadow uses
+            // shadow.color; LinearGradient uses its first stop as a scalar
+            // fallback (the tiny-skia path renders the full gradient).
+            let fill_color: Color = match item {
+                DisplayItem::SolidColor { color, .. } => *color,
+                DisplayItem::Text { color, .. } => *color,
+                DisplayItem::RoundedRect { color, .. } => *color,
+                DisplayItem::BoxShadow { shadow, .. } => shadow.color,
+                DisplayItem::LinearGradient { stops, .. } => {
+                    stops.first().map(|pair| pair.1).unwrap_or(Color { r: 0, g: 0, b: 0, a: 0 })
+                }
             };
 
             // Clip to tile bounds
@@ -703,7 +763,7 @@ pub fn rasterize_parallel_into(
                 continue;
             }
 
-            let pixel_bytes = [color.r, color.g, color.b, color.a];
+            let pixel_bytes = [fill_color.r, fill_color.g, fill_color.b, fill_color.a];
             let width_u = width as usize;
 
             for y in y0..y1 {
@@ -827,6 +887,49 @@ pub fn rasterize_skia_into(display_list: &DisplayList, width: u32, height: u32, 
                     (rect.x, rect.y),
                 );
             }
+            DisplayItem::BoxShadow { rect, shadow } => {
+                // Inset shadows require clipping stencil work; deferred.
+                if shadow.inset {
+                    continue;
+                }
+                let shadow_rect = box_shadow_rect(*rect, shadow);
+                let Some(sk_r) = sk_rect(shadow_rect) else {
+                    continue;
+                };
+                let paint = sk_paint(shadow.color);
+                pixmap.fill_rect(sk_r, &paint, Transform::identity(), None);
+            }
+            DisplayItem::LinearGradient { rect, angle, stops } => {
+                if stops.is_empty() {
+                    continue;
+                }
+                let Some(sk_r) = sk_rect(*rect) else {
+                    continue;
+                };
+                let (start, end) = gradient_endpoints(*rect, *angle);
+                let grad_stops: Vec<GradientStop> = stops
+                    .iter()
+                    .map(|(pos, color)| {
+                        GradientStop::new(
+                            *pos,
+                            tiny_skia::Color::from_rgba8(color.r, color.g, color.b, color.a),
+                        )
+                    })
+                    .collect();
+                let Some(gradient) = LinearGradient::new(
+                    start,
+                    end,
+                    grad_stops,
+                    SpreadMode::Pad,
+                    Transform::identity(),
+                ) else {
+                    continue;
+                };
+                let mut paint = Paint::default();
+                paint.anti_alias = true;
+                paint.shader = gradient;
+                pixmap.fill_rect(sk_r, &paint, Transform::identity(), None);
+            }
         }
     }
 }
@@ -918,4 +1021,39 @@ fn rounded_rect_path(rect: Rect, radii: [f32; 4]) -> Option<tiny_skia::Path> {
 
     pb.close();
     pb.finish()
+}
+
+/// Compute the shadow's fill rect from the element rect and CSS shadow params.
+///
+/// Expands the element rect by `spread_radius` on all sides, then offsets by
+/// `(offset_x, offset_y)`. Blur is not applied here; the scalar paths use this
+/// rect for a solid fill fallback. `rasterize_skia_into` will add blur in a
+/// future pass. Used by both `item_rect` (for tile culling) and the scalar
+/// rasterization paths.
+fn box_shadow_rect(element_rect: Rect, shadow: &CssBoxShadow) -> Rect {
+    let spread = shadow.spread_radius;
+    Rect {
+        x: element_rect.x + shadow.offset_x - spread,
+        y: element_rect.y + shadow.offset_y - spread,
+        width: element_rect.width + 2.0 * spread,
+        height: element_rect.height + 2.0 * spread,
+    }
+}
+
+/// Compute gradient line endpoints for a CSS linear-gradient angle.
+///
+/// CSS angle convention: 0.0 = to top, 90.0 = to right, 180.0 = to bottom.
+/// The gradient line passes through the center of `rect`. Its half-length is
+/// `|half_w * sin(theta)| + |half_h * cos(theta)|`, which projects the box
+/// corners onto the gradient direction (CSS spec section 6.1).
+fn gradient_endpoints(rect: Rect, angle_deg: f32) -> (Point, Point) {
+    let cx = rect.x + rect.width * 0.5;
+    let cy = rect.y + rect.height * 0.5;
+    let theta = angle_deg.to_radians();
+    let dx = theta.sin();
+    let dy = -theta.cos();
+    let half_len = (rect.width * 0.5 * dx.abs()) + (rect.height * 0.5 * dy.abs());
+    let start = Point::from_xy(cx - dx * half_len, cy - dy * half_len);
+    let end = Point::from_xy(cx + dx * half_len, cy + dy * half_len);
+    (start, end)
 }
