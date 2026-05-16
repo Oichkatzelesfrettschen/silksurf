@@ -9,6 +9,7 @@ members = [
   "crates/silksurf-dom",
   "crates/silksurf-layout",
   "crates/silksurf-render",
+  "crates/silksurf-text",
   "crates/silksurf-gui",
   "crates/silksurf-net",
   "crates/silksurf-tls",
@@ -57,6 +58,26 @@ unicode-linebreak = "0.1"
 # WHATWG-conformant HTML parser (Servo lineage, html5lib test suite).
 # Used by silksurf-html TreeSink adapter to replace the hand-written tokenizer.
 html5ever = "0.38"
+# CPU-only 2D rasterizer (Skia subset, pure Rust). Used by silksurf-render
+# for anti-aliased path fill via PixmapMut::from_bytes wrapping the tile buffer.
+tiny-skia = "0.12"
+# Unicode-aware text shaping and layout (Servo/Mozilla lineage). Used by
+# silksurf-text for measure_text and rasterize_glyphs via SwashCache.
+cosmic-text = "0.19"
+# High-performance CSS Flexbox + Grid layout (Bevy/Dioxus/Slint lineage).
+# Used by silksurf-layout TaffyLayout to replace the hand-written flex algorithm.
+taffy = "0.10"
+# Cross-platform windowing and event loop (Bevy/Alacritty/wgpu lineage).
+# Used by silksurf-gui winit-backend to replace the XCB-only event loop.
+winit = "0.30"
+# Cross-platform software pixel buffer; surface.buffer_mut() -> &mut [u32].
+# Used by silksurf-gui winit-backend to present rasterizer output.
+softbuffer = "0.4"
+# ECMA-262 2024+ compliant JS engine (pure Rust, Servo/Mozilla lineage).
+# Used by silksurf-js boa_backend as the production JS runtime; replaces
+# the hand-written bytecode VM which is preserved behind the legacy-vm feature.
+boa_engine = "0.21"
+boa_runtime = "0.21"
 
 [profile.dev]
 opt-level = 1

@@ -11,6 +11,8 @@ silksurf-dom = { path = "../silksurf-dom" }
 silksurf-layout = { path = "../silksurf-layout" }
 rustc-hash = { workspace = true }
 rayon = { workspace = true, optional = true }
+tiny-skia = { workspace = true }
+silksurf-text = { path = "../silksurf-text" }
 
 [features]
 default = []

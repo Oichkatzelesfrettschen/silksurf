@@ -28,8 +28,8 @@
  */
 use crate::cascade_view::CascadeView;
 use crate::{
-    AttributeOperator, AttributeSelector, Combinator, CompoundSelector, Selector, SelectorIdent,
-    SelectorList, SelectorModifier, TypeSelector,
+    AttributeOperator, AttributeSelector, Combinator, CompoundSelector, PseudoClassArg, Selector,
+    SelectorIdent, SelectorList, SelectorModifier, TypeSelector,
 };
 use silksurf_dom::{Attribute, AttributeName, Dom, NodeId, NodeKind};
 
@@ -64,6 +64,27 @@ pub fn selector_specificity(selector: &Selector) -> Specificity {
                 SelectorModifier::Class(_)
                 | SelectorModifier::Attribute(_)
                 | SelectorModifier::PseudoClass(_) => spec.classes += 1,
+                SelectorModifier::FunctionalPseudoClass { name, arg } => {
+                    // CSS Selectors L4: :where() contributes 0 specificity.
+                    // :not(), :is(), :has() use the max specificity of their args.
+                    // :nth-child() and structural functions count as one class.
+                    let lower = name.as_str().to_ascii_lowercase();
+                    match lower.as_str() {
+                        "where" => {}
+                        "not" | "is" | "has" => {
+                            if let PseudoClassArg::SelectorList(list) = arg {
+                                if let Some(max) =
+                                    list.selectors.iter().map(selector_specificity).max()
+                                {
+                                    spec.ids += max.ids;
+                                    spec.classes += max.classes;
+                                    spec.elements += max.elements;
+                                }
+                            }
+                        }
+                        _ => spec.classes += 1,
+                    }
+                }
             }
         }
     }
@@ -256,6 +277,9 @@ fn matches_modifier_with_view(
         // Attribute selectors and pseudo-classes need raw DOM access
         SelectorModifier::Attribute(attribute) => matches_attribute(dom, node, attribute),
         SelectorModifier::PseudoClass(name) => matches_pseudo_class(dom, node, name),
+        SelectorModifier::FunctionalPseudoClass { name, arg } => {
+            matches_functional_pseudo_class(dom, node, name, arg)
+        }
     }
 }
 
@@ -265,6 +289,9 @@ fn matches_modifier(dom: &Dom, node: NodeId, modifier: &SelectorModifier) -> boo
         SelectorModifier::Id(name) => matches_id(dom, node, name),
         SelectorModifier::Attribute(attribute) => matches_attribute(dom, node, attribute),
         SelectorModifier::PseudoClass(name) => matches_pseudo_class(dom, node, name),
+        SelectorModifier::FunctionalPseudoClass { name, arg } => {
+            matches_functional_pseudo_class(dom, node, name, arg)
+        }
     }
 }
 
@@ -347,8 +374,176 @@ fn matches_pseudo_class(dom: &Dom, node: NodeId, name: &SelectorIdent) -> bool {
         "first-child" => is_first_child(dom, node),
         "last-child" => is_last_child(dom, node),
         "only-child" => is_only_child(dom, node),
+        "first-of-type" => is_first_of_type(dom, node),
+        "last-of-type" => is_last_of_type(dom, node),
+        "only-of-type" => is_first_of_type(dom, node) && is_last_of_type(dom, node),
         _ => false,
     }
+}
+
+fn matches_functional_pseudo_class(
+    dom: &Dom,
+    node: NodeId,
+    name: &SelectorIdent,
+    arg: &PseudoClassArg,
+) -> bool {
+    let lower = name.as_str().to_ascii_lowercase();
+    match lower.as_str() {
+        "nth-child" => matches!(arg, PseudoClassArg::Nth(nth) if nth.matches(element_child_index(dom, node))),
+        "nth-last-child" => {
+            matches!(arg, PseudoClassArg::Nth(nth) if nth.matches(element_child_index_from_end(dom, node)))
+        }
+        "nth-of-type" => {
+            matches!(arg, PseudoClassArg::Nth(nth) if nth.matches(element_child_index_of_type(dom, node)))
+        }
+        "nth-last-of-type" => {
+            matches!(arg, PseudoClassArg::Nth(nth) if nth.matches(element_child_index_of_type_from_end(dom, node)))
+        }
+        "not" => match arg {
+            PseudoClassArg::SelectorList(list) => !matches_selector_list(dom, node, list),
+            _ => false,
+        },
+        "is" | "where" => match arg {
+            PseudoClassArg::SelectorList(list) => matches_selector_list(dom, node, list),
+            _ => false,
+        },
+        "has" => match arg {
+            PseudoClassArg::SelectorList(list) => matches_has(dom, node, list),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+// :has() -- true when any descendant of node matches the selector list.
+fn matches_has(dom: &Dom, node: NodeId, list: &SelectorList) -> bool {
+    let children = match dom.children(node).ok() {
+        Some(c) => c,
+        None => return false,
+    };
+    for child in children {
+        if matches_selector_list(dom, *child, list) {
+            return true;
+        }
+        if matches_has(dom, *child, list) {
+            return true;
+        }
+    }
+    false
+}
+
+// Returns 1-based position of node among element siblings from the start.
+fn element_child_index(dom: &Dom, node: NodeId) -> usize {
+    let parent = match dom.parent(node).ok().flatten() {
+        Some(p) => p,
+        None => return 0,
+    };
+    let siblings = match dom.children(parent).ok() {
+        Some(s) => s,
+        None => return 0,
+    };
+    let mut index = 0usize;
+    for sibling in siblings {
+        if dom.element_name(*sibling).ok().flatten().is_some() {
+            index += 1;
+        }
+        if *sibling == node {
+            return index;
+        }
+    }
+    0
+}
+
+// Returns 1-based position of node among element siblings from the end.
+fn element_child_index_from_end(dom: &Dom, node: NodeId) -> usize {
+    let parent = match dom.parent(node).ok().flatten() {
+        Some(p) => p,
+        None => return 0,
+    };
+    let siblings = match dom.children(parent).ok() {
+        Some(s) => s,
+        None => return 0,
+    };
+    let mut index = 0usize;
+    for sibling in siblings.iter().rev() {
+        if dom.element_name(*sibling).ok().flatten().is_some() {
+            index += 1;
+        }
+        if *sibling == node {
+            return index;
+        }
+    }
+    0
+}
+
+// Returns 1-based position of node among siblings with the same tag, from start.
+fn element_child_index_of_type(dom: &Dom, node: NodeId) -> usize {
+    let tag = match dom.element_name(node).ok().flatten() {
+        Some(t) => t.to_owned(),
+        None => return 0,
+    };
+    let parent = match dom.parent(node).ok().flatten() {
+        Some(p) => p,
+        None => return 0,
+    };
+    let siblings = match dom.children(parent).ok() {
+        Some(s) => s,
+        None => return 0,
+    };
+    let mut index = 0usize;
+    for sibling in siblings {
+        let same_tag = dom
+            .element_name(*sibling)
+            .ok()
+            .flatten()
+            .is_some_and(|t| t == tag);
+        if same_tag {
+            index += 1;
+        }
+        if *sibling == node {
+            return index;
+        }
+    }
+    0
+}
+
+// Returns 1-based position of node among siblings with the same tag, from end.
+fn element_child_index_of_type_from_end(dom: &Dom, node: NodeId) -> usize {
+    let tag = match dom.element_name(node).ok().flatten() {
+        Some(t) => t.to_owned(),
+        None => return 0,
+    };
+    let parent = match dom.parent(node).ok().flatten() {
+        Some(p) => p,
+        None => return 0,
+    };
+    let siblings = match dom.children(parent).ok() {
+        Some(s) => s,
+        None => return 0,
+    };
+    let mut index = 0usize;
+    for sibling in siblings.iter().rev() {
+        let same_tag = dom
+            .element_name(*sibling)
+            .ok()
+            .flatten()
+            .is_some_and(|t| t == tag);
+        if same_tag {
+            index += 1;
+        }
+        if *sibling == node {
+            return index;
+        }
+    }
+    0
+}
+
+fn is_first_of_type(dom: &Dom, node: NodeId) -> bool {
+    element_child_index_of_type(dom, node) == 1
+}
+
+fn is_last_of_type(dom: &Dom, node: NodeId) -> bool {
+    element_child_index_of_type_from_end(dom, node) == 1
 }
 
 fn is_root(dom: &Dom, node: NodeId) -> bool {

@@ -1,4 +1,21 @@
 /*
+ * DEPRECATED: This module is preserved for reference and reverse-engineering.
+ *
+ * Production JS execution has moved to boa_engine (src/boa_backend/mod.rs).
+ * This hand-written VM is NOT built unless the "legacy-vm" feature is enabled.
+ * It is NOT MAINTAINED going forward; API and behaviour may bitrot over time.
+ *
+ * WHY KEPT: The VM contains custom optimization patterns (register allocation,
+ * NaN-boxing, shape/IC tagging) that may inform future hot-path extensions
+ * layered on top of boa_engine's NativeFunction/NativeObject extension points.
+ * Retaining the source is cheaper than reconstructing it from git history when
+ * a specific optimization needs to be studied or ported.
+ *
+ * HOW TO ENABLE: cargo build --features legacy-vm
+ *   (do NOT enable in production or CI; treat as an internal research tool)
+ */
+
+/*
  * vm/mod.rs -- Bytecode virtual machine (register-based, function-pointer dispatch).
  *
  * WHY: Executes compiled JavaScript bytecode. Register-based (not stack-based)
