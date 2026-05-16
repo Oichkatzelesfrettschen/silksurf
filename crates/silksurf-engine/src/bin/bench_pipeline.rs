@@ -33,6 +33,7 @@ use silksurf_layout::Rect;
 use silksurf_layout::neighbor_table::LayoutNeighborTable;
 use silksurf_layout::{LayoutTree, build_layout_tree};
 use silksurf_render::{build_display_list, rasterize_parallel, rasterize_parallel_into};
+use std::process::Command;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -108,7 +109,73 @@ const VIEWPORT: Rect = Rect {
     height: 800.0,
 };
 
+/*
+ * emit_history_record -- write one NDJSON line to history.ndjson.
+ *
+ * WHY: bench_pipeline previously emitted only human-readable text, which broke
+ * the pipeline: append_history.py and check_perf_regression.sh exist but had
+ * nothing to read. The `--emit json` flag closes the gap by writing one record
+ * conforming to perf/schema.json to stdout (caller pipes it via Make target).
+ *
+ * Metric mapping (documented here as the canonical source of truth):
+ *   fused_pipeline_us -- ws_per (FusedWorkspace steady-state, iter 0 excluded)
+ *   css_cache_hit_us  -- cascade_only_per (ws_per minus table.rebuild(); cascade
+ *                        with pre-parsed stylesheet, zero CSS re-parsing cost)
+ *   full_render_us    -- fused_per + raster_reuse_per (cold fused + steady-state
+ *                        rasterize, buffer pre-allocated; the cached re-render
+ *                        budget measured against the <500us target)
+ */
+fn emit_history_record(
+    fused_pipeline_us: f64,
+    css_cache_hit_us: f64,
+    full_render_us: f64,
+    profile: &str,
+) {
+    // git rev-parse HEAD for the 40-char SHA.
+    let git_sha = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "0".repeat(40));
+
+    // rustc --version for the toolchain string.
+    let rust_version = Command::new("rustc")
+        .arg("--version")
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    // ISO-8601 UTC timestamp via date -u.
+    let timestamp = Command::new("date")
+        .args(["-u", "+%Y-%m-%dT%H:%M:%SZ"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "1970-01-01T00:00:00Z".to_string());
+
+    // Emit single JSON line; no external crate needed for this simple record.
+    // serde_json is available as a workspace dep but the format is trivial enough
+    // to build with format! and avoids the need for a derive.
+    println!(
+        "{{\"git_sha\":{git_sha:?},\"timestamp\":{timestamp:?},\"rust_version\":{rust_version:?},\"profile\":{profile:?},\"metrics\":{{\"fused_pipeline_us\":{fused_pipeline_us:.3},\"css_cache_hit_us\":{css_cache_hit_us:.3},\"full_render_us\":{full_render_us:.3}}}}}",
+    );
+}
+
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let emit_json = args.iter().any(|a| a == "--emit" || a == "--emit=json");
+    // release vs debug for the schema profile field
+    let build_profile = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    };
+
     // Pre-parse HTML and CSS once -- both paths operate on the same DOM snapshot.
     // This isolates cascade/layout/paint performance from parsing performance.
     let template_doc = parse_html(BENCH_HTML).expect("parse html");
@@ -516,6 +583,17 @@ fn main() {
         "  alloc savings:{:>8?}  per-frame  (eliminated by buffer reuse)",
         alloc_overhead
     );
+
+    // --emit json: write one NDJSON history record conforming to perf/schema.json.
+    // Pipe to perf/history.ndjson via `make perf-baselines` or manually:
+    //   cargo run --release -p silksurf-engine --bin bench_pipeline -- --emit json \
+    //     >> perf/history.ndjson
+    if emit_json {
+        let fused_us = ws_per.as_nanos() as f64 / 1000.0;
+        let cache_hit_us = cascade_only_per.as_nanos() as f64 / 1000.0;
+        let full_render_us = (fused_per + raster_reuse_per).as_nanos() as f64 / 1000.0;
+        emit_history_record(fused_us, cache_hit_us, full_render_us, build_profile);
+    }
 }
 
 /// Approximate node count for display (parse once outside any timing section).

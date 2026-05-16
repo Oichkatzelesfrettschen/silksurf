@@ -679,6 +679,48 @@ a Wayland backend lands.
 
 ---
 
+## AD-011: Reserved -- Merged into AD-008 (Stable-Rust Migration)
+
+**Status**: Superseded  
+**Disposition**: The original ADR outline for MSRV toolchain formalization was
+consolidated into AD-008 during the SNAZZY-WAFFLE Wave 1 pass. This number is
+reserved to preserve the contiguous registry; the content lives in AD-008.
+
+---
+
+## AD-012: Reserved -- Merged into AD-009 (Strict-Local-Only CI)
+
+**Status**: Superseded  
+**Disposition**: The original ADR outline for pre-commit/pre-push hook policy was
+consolidated into AD-009 during Wave 1. Content lives in AD-009.
+
+---
+
+## AD-013: Reserved -- Merged into AD-010 (XCB-Only GUI)
+
+**Status**: Superseded  
+**Disposition**: The original ADR outline for the XCB backend formalization was
+consolidated into AD-010 during Wave 1. Content lives in AD-010.
+
+---
+
+## AD-014: Reserved -- Merged into AD-020 (SilkError)
+
+**Status**: Superseded  
+**Disposition**: The original ADR outline for the error-type unification strategy
+was consolidated into AD-020 (Workspace-Wide Canonical Error) during Wave 1.
+
+---
+
+## AD-015: Reserved -- Pending (Proxy/Reflect JavaScript Semantics)
+
+**Status**: Proposed  
+**Disposition**: Covers the decision to defer JS Proxy and Reflect to a future
+wave pending test262 conformance measurement. No implementation changes have
+landed yet; the ADR will be filed when the implementation work begins.
+
+---
+
 ## AD-016: Fused Render Pipeline (FusedWorkspace)
 
 **Status**: Accepted

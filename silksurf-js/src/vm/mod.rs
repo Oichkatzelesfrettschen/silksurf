@@ -1215,7 +1215,14 @@ fn invoke_generator(
     // 2. Save the current call_stack so the sub-execute starts from
     //    scratch.  Snapshot the absolute register slots we are about to
     //    overwrite.
+    //
+    //    Also record try_handlers depth: op_enter_try pushes handlers and
+    //    op_leave_try pops them.  If the body throws an uncaught exception
+    //    any handlers pushed before the throw site are left on the stack.
+    //    Truncating back to the watermark prevents these stale handlers from
+    //    being dispatched in the caller's context (H1).
     let saved_call_stack = std::mem::take(&mut vm.call_stack);
+    let try_handlers_watermark = vm.try_handlers.len();
     let snapshot_len = vm.registers.len().min(256);
     let saved_registers: Vec<Value> = vm.registers[..snapshot_len].to_vec();
 
@@ -1248,15 +1255,18 @@ fn invoke_generator(
         "generator yield stack underflow: nested construction lost ordering",
     );
 
-    // 6. Restore the saved register window and call_stack BEFORE
-    //    inspecting run_result so that an error path leaves the VM
-    //    coherent.
+    // 6. Restore the saved register window, call_stack, and try_handlers
+    //    BEFORE inspecting run_result so that an error path leaves the VM
+    //    coherent.  Truncate try_handlers to the watermark recorded in step 2
+    //    to discard any stale handlers left by an uncaught throw inside the
+    //    body (see H1 in the SNAZZY-WAFFLE Wave-6 code-review report).
     for (i, value) in saved_registers.into_iter().enumerate() {
         if i < vm.registers.len() {
             vm.registers[i] = value;
         }
     }
     vm.call_stack = saved_call_stack;
+    vm.try_handlers.truncate(try_handlers_watermark);
 
     // 7. Propagate any error.  Halted from the sub-execute is normal
     //    completion of the body; the body's return value is captured in
@@ -1320,6 +1330,11 @@ fn run_generator_body(
             vm.call_stack.pop();
             if vm.call_stack.is_empty() {
                 let r0 = vm.registers.first().cloned().unwrap_or(Value::Undefined);
+                // Drain microtasks here to mirror the Halted arm below (H2):
+                // Promise reactions enqueued by the body must run before the
+                // caller's context is restored; draining here keeps the queue
+                // empty at invoke_generator's step-6 restore point.
+                vm.microtasks.drain();
                 return Ok(r0);
             }
             continue;
@@ -4024,6 +4039,38 @@ mod tests {
             assert!((n - 36.0).abs() < f64::EPSILON, "expected 36, got {n}");
         } else {
             panic!("expected number 36, got {v:?}");
+        }
+    }
+
+    // H1 regression: a generator body that uses try/catch must not leave
+    // stale TryHandlers on vm.try_handlers after construction.  Before the
+    // fix, throw-inside-generator caused the handler to persist, so the next
+    // unrelated throw in caller code dispatched into the wrong chunk.
+    #[test]
+    fn test_generator_try_handlers_do_not_leak() {
+        // Construct a generator whose body uses try/catch (normal completion).
+        // If any TryHandler leaks onto the VM stack, a subsequent throw from
+        // caller code would mis-dispatch -- resulting in a wrong result or panic.
+        let v = run_and_get_result(
+            "function* safe() {\
+                 try { yield 1; } catch(e) { yield -1; }\
+                 yield 2;\
+             }\
+             var out = 0;\
+             for (var x of safe()) { out = out + x; }\
+             try { throw 999; } catch(e) { out = out + e; }\
+             window.result = out;",
+        );
+        // UNWRAP-OK: test fixture; run_and_get_result only fails on compile/parse errors in the literal above.
+        let v = v.expect("script failed");
+        // 1 + 2 + 999 = 1002
+        if let Value::Number(n) = v {
+            assert!(
+                (n - 1002.0).abs() < f64::EPSILON,
+                "expected 1002, got {n}: try_handlers may have leaked"
+            );
+        } else {
+            panic!("expected number 1002, got {v:?}");
         }
     }
 }

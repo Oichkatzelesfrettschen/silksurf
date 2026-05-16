@@ -371,8 +371,9 @@
 ## Phase-3 Engine Pipeline Terms (added 2026-04-30)
 
 ### CascadeView
+**Aliases**: CascadeView SoA, cascade SoA projection
 **Type**: Structure-of-Arrays projection
-**Definition**: SoA materialization of cascade-relevant DOM fields (tag, id_index, class_start, class_count, parent_id) in a flat 40-byte-per-node array. Built once per render and consumed by the cascade pass; replaces the 168-byte `Node` fetch inside the matching hot path. Fits 1 cache line per entry; gives ~4.2x compression vs the AoS Node read.
+**Definition**: SoA materialization of cascade-relevant DOM fields (tag, id_index, class_start, class_count, parent_id) in a flat 40-byte-per-node array. Built once per render and consumed by the cascade pass; replaces the 168-byte `Node` fetch inside the matching hot path. Fits 1 cache line per entry; gives ~4.2x compression vs the AoS Node read. The term "CascadeView SoA" is used throughout ADRs and runbooks to refer to this structure and its SoA layout strategy.
 **SilkSurf Usage**: `crates/silksurf-css/src/cascade_view.rs`; consumed by `silksurf-engine::fused_pipeline::FusedWorkspace`.
 **Why it matters**: drove the 9.5us steady-state benchmark (see `docs/PERFORMANCE.md`).
 
