@@ -274,6 +274,21 @@ const SKIP_FEATURES: &[&str] = &[
     "symbols-as-weakmap-keys",
     "change-array-by-copy",
     "array-grouping",
+    // Tail call optimization -- boa 0.21 does not implement TCO
+    "tail-call-optimization",
+    // Iterator proposals not yet in boa 0.21
+    "joint-iteration",
+    "iterator-sequencing",
+    // Uint8Array base64/hex proposal (2024) -- not in boa 0.21
+    "uint8array-base64",
+    // RegExp.escape proposal -- not in boa 0.21
+    "RegExp.escape",
+    // Error.isError proposal -- not in boa 0.21
+    "Error.isError",
+    // JSON.parse with source info -- not in boa 0.21
+    "json-parse-with-source",
+    // Align detached-buffer semantics -- spec change boa 0.21 predates
+    "align-detached-buffer-semantics-with-web-reality",
 ];
 
 // ---------------------------------------------------------------------------
@@ -555,8 +570,10 @@ fn collect_js_files(dir: &Path, out: &mut Vec<PathBuf>) {
         } else if path.extension().is_some_and(|e| e == "js") {
             // _FIXTURE.js files are auxiliary modules imported by module tests;
             // they are not standalone executable tests.
+            // Files with unicode-17.0.0 in the stem test Unicode 17.0.0 codepoints
+            // that boa's tables predate; skip by filename rather than feature flag.
             let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-            if !stem.ends_with("_FIXTURE") {
+            if !stem.ends_with("_FIXTURE") && !stem.contains("unicode-17.0.0") {
                 out.push(path);
             }
         }

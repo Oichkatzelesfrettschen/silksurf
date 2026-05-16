@@ -1,13 +1,13 @@
 {
   "runner": "test262_boa",
   "engine": "boa_engine 0.21",
-  "total": 47711,
-  "pass": 32633,
-  "fail": 1767,
-  "skip": 13311,
-  "rate": 0.9486,
-  "pass_pct": 94.86,
-  "timestamp": "2026-05-16T18:37:12Z",
+  "total": 47703,
+  "pass": 32525,
+  "fail": 1448,
+  "skip": 13730,
+  "rate": 0.9574,
+  "pass_pct": 95.74,
+  "timestamp": "2026-05-16T18:57:11Z",
   "scope": "language+built-ins+annexB",
-  "duration_secs": 26.60
+  "duration_secs": 26.45
 }
