@@ -54,6 +54,9 @@ hickory-proto = { version = "0.26.0-beta.3", features = ["dnssec-ring"] }
 # existing peer; bidi and linebreak complete the minimal i18n triad.
 unicode-bidi = "0.3"
 unicode-linebreak = "0.1"
+# WHATWG-conformant HTML parser (Servo lineage, html5lib test suite).
+# Used by silksurf-html TreeSink adapter to replace the hand-written tokenizer.
+html5ever = "0.38"
 
 [profile.dev]
 opt-level = 1

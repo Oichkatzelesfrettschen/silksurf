@@ -8,9 +8,11 @@
 use memchr::{memchr, memchr2, memchr3};
 
 mod tree_builder;
+pub mod treesink;
 
 pub use tree_builder::TreeBuildError;
 pub use tree_builder::TreeBuilder;
+pub use treesink::parse_html;
 
 /*
  * MAX_TOKENS_PER_FEED -- DoS bound on Tokenizer::feed output size.
