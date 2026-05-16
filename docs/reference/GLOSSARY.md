@@ -419,6 +419,307 @@
 
 ---
 
+## API Reference
+
+Public types and functions exposed at crate-root lib.rs boundaries. Entries
+here satisfy the `scripts/lint_glossary.sh` hard gate. Each entry is a
+brief operator-facing description; deep rationale lives in the crate OPERATIONS.md
+files and the relevant ADRs.
+
+### append_child
+**Type**: DOM mutation function
+**Definition**: Attaches a node as the last child of a parent element in the DOM tree. Must be called inside a `with_mutation_batch` for the generation counter to advance.
+
+### ArenaVec
+**Type**: Arena-backed collection
+**Definition**: Vec-like container whose backing memory comes from the `SilkArena` bump allocator. Elements are never individually freed; the whole arena is released at once. Used for short-lived collections in the parse and layout passes.
+
+### Attribute
+**Type**: DOM data structure
+**Definition**: An HTML or XML element attribute: a name (`AttributeName`) plus a string value. Stored as a flat slice on the element node.
+
+### AttributeName
+**Type**: Interned atom type
+**Definition**: An `Atom` identifying an HTML or XML attribute name (e.g., `class`, `href`, `id`). Interned via `SilkInterner` so equality is a pointer compare.
+
+### BasicClient
+**Type**: HTTP client variant
+**Definition**: HTTP client without TLS configuration. Plain HTTP (port 80) only. Suitable for local testing; not for production fetches.
+
+### begin_mutation_batch
+**Type**: DOM API function
+**Definition**: Opens a DOM mutation batch. Mutations made while the batch is open are buffered; the generation counter advances and dirty nodes are flushed when `end_mutation_batch` is called at depth zero. Prefer `with_mutation_batch` which handles pairing automatically.
+
+### build_display_list
+**Type**: Layout-to-render function
+**Definition**: Converts a styled and laid-out DOM into a flat `Vec<DisplayItem>`. Each item is a draw command (background fill, border, text run, image). Consumed by the rasterizer.
+
+### build_layout_tree
+**Type**: Layout engine entry point
+**Definition**: Constructs the `LayoutTree` from a `&Dom` and a computed-style map. Respects `Dom::generation()` for staleness detection. See silksurf-layout OPERATIONS.md.
+
+### build_layout_tree_incremental
+**Type**: Incremental layout function
+**Definition**: Variant of `build_layout_tree` that reuses unchanged subtrees when only a subset of DOM nodes are dirty. Gated by the generation-gated rebuild mechanism in `FusedWorkspace`.
+
+### child_elements
+**Type**: DOM traversal function
+**Definition**: Returns an iterator over the element-type children of a DOM node. Skips `Text`, `Comment`, and `DocumentType` nodes.
+
+### create_comment
+**Type**: DOM allocation function
+**Definition**: Allocates a new `Comment` node in the DOM tree. Returns a `NodeId`. Must be wired into the tree with `append_child` or `insert_before`.
+
+### create_doctype
+**Type**: DOM allocation function
+**Definition**: Allocates a new `DocumentType` node (the `<!DOCTYPE>` declaration) in the DOM. Typically called by the HTML tree builder.
+
+### create_document
+**Type**: DOM allocation function
+**Definition**: Allocates the root `Document` node for a new DOM tree. The starting point for any parse.
+
+### create_element
+**Type**: DOM allocation function
+**Definition**: Allocates a new `Element` node with a given tag name in the default (HTML) namespace. Returns a `NodeId`.
+
+### create_element_ns
+**Type**: DOM allocation function
+**Definition**: Allocates a new `Element` node in a specified XML namespace (SVG, MathML, etc.). Used by the HTML5 tree builder for foreign content.
+
+### CssError
+**Type**: Error type
+**Definition**: Error returned by CSS tokenizer, parser, and cascade operations. Variants cover `UnexpectedToken`, `InvalidValue`, `UnsupportedSelector`, and `Io`. Converts to `SilkError::Css` at workspace boundaries.
+
+### CssToken
+**Type**: Lexical unit
+**Definition**: Single token produced by the CSS tokenizer. Variants: `Ident`, `Function`, `AtKeyword`, `String`, `Url`, `Delim`, `Number`, `Percentage`, `Dimension`, `Whitespace`, `Comment`, `CDO`, `CDC`, `Colon`, `Semicolon`, `Comma`, `OpenBrace`, `CloseBrace`, `OpenParen`, `CloseParen`, `OpenBracket`, `CloseBracket`, `EOF`.
+
+### CssTokenizer
+**Type**: Streaming lexer
+**Definition**: Tokenizes CSS source text into a sequence of `CssToken`s following the CSS Syntax Level 3 specification. Advances by calling `next_token()`.
+
+### DisplayItem
+**Type**: Render command
+**Definition**: A single draw command in a display list. Variants: `Rect` (filled rectangle for background or border), `Text` (positioned text run), `Image` (decoded image at a rect). Consumed by the rasterizer.
+
+### DisplayListTiles
+**Type**: Tiled display list partition
+**Definition**: A `DisplayList` that has been subdivided into 64x64 pixel tiles for parallel rasterization. Built by `DisplayList::with_tiles(width, height, 64)`. Each tile holds a clipped subset of `DisplayItem`s.
+
+### DomError
+**Type**: Error type
+**Definition**: Error returned by DOM tree manipulation operations (node-not-found, invalid parent, detached node, etc.). Converts to `SilkError::Html` at workspace boundaries.
+
+### EdgeSizes
+**Type**: Layout geometry type
+**Definition**: Four-sided inset values `{ top, right, bottom, left }` used to represent margin, padding, and border widths in the layout engine. Values are floating-point pixels in the viewport coordinate space.
+
+### element_name
+**Type**: DOM query function
+**Definition**: Returns the tag name string of an element node (e.g., `"div"`, `"span"`). Returns `None` for non-element nodes.
+
+### EngineError
+**Type**: Error type
+**Definition**: Error type returned by the engine-level fused pipeline. Wraps `SilkError` with additional pipeline context (which stage failed).
+
+### EnginePipeline
+**Type**: Fused pipeline type
+**Definition**: The integrated style+layout+paint pipeline in `silksurf-engine`. Accepts a `&Dom` and `&Stylesheet`; returns `FusedOutput` (styles, layout geometry, display list). See `fused_pipeline.rs`.
+
+### fetch_parallel
+**Type**: HTTP client function
+**Definition**: Issues multiple HTTP requests concurrently, optionally multiplexed over a single HTTP/2 connection when requests share the same host. Returns results in request order.
+
+### fixed_from_f32
+**Type**: Layout unit conversion
+**Definition**: Converts an `f32` pixel value to a fixed-point layout unit (26.6 or similar sub-pixel format). Used at the boundary between CSS length computation and the layout engine.
+
+### fixed_to_f32
+**Type**: Layout unit conversion
+**Definition**: Converts a fixed-point layout unit back to `f32` pixels. Used when passing layout geometry to the rasterizer.
+
+### HttpMethod
+**Type**: HTTP vocabulary enum
+**Definition**: Enum of HTTP request methods: `Get`, `Post`, `Put`, `Delete`, `Head`, `Options`, `Patch`. Used in `HttpRequest`.
+
+### HttpRequest
+**Type**: HTTP request structure
+**Definition**: Typed HTTP request: method (`HttpMethod`), URL string, header map, optional body bytes. Consumed by the network client.
+
+### HttpResponse
+**Type**: HTTP response structure
+**Definition**: Typed HTTP response: status code (u16), header map, body bytes (`Vec<u8>`). Produced by the network client after a successful fetch.
+
+### insert_before
+**Type**: DOM mutation function
+**Definition**: Inserts a node into the DOM tree immediately before an existing sibling node. Must be called inside a `with_mutation_batch`.
+
+### LayoutBox
+**Type**: Layout tree node
+**Definition**: A single positioned rectangular box in the layout tree. Carries a reference to its DOM `NodeId`, the computed `Rect` (position and size), and the box type (block, inline, text). Linked into `LayoutTree`.
+
+### LayoutTree
+**Type**: Layout output structure
+**Definition**: The full tree of `LayoutBox` nodes produced by the layout engine. Root corresponds to the document node. Used by `build_display_list` to generate render commands.
+
+### length_to_px
+**Type**: CSS unit conversion function
+**Definition**: Converts a CSS length value in any unit (em, rem, px, %, vh, vw, pt, etc.) to an absolute pixel float given the current font metrics and viewport dimensions.
+
+### linear_to_srgb
+**Type**: Color conversion function
+**Definition**: Converts a linear-light float in [0, 1] to an sRGB-encoded u8 [0, 255] using the IEC 61966-2-1 transfer function. Inverse of `srgb_to_linear`. Applied when writing composited pixels back to the framebuffer.
+
+### linebreak_opportunities
+**Type**: Unicode text function
+**Definition**: Returns the set of Unicode line-break opportunity positions in a text run according to UAX #14. Used by the inline layout engine to determine where to wrap text.
+
+### materialize_resolve_table
+**Type**: DOM phase-boundary function
+**Definition**: Snapshots the `SilkInterner` into the lock-free monotonic resolve table (`Vec<SmallString>`). Must be called after every `into_dom()` and every `end_mutation_batch()`. Without it, `resolve_fast` panics. See silksurf-dom OPERATIONS.md.
+
+### Namespace
+**Type**: XML/HTML namespace type
+**Definition**: Identifies the namespace of a DOM element or attribute: `Html`, `Svg`, `MathMl`, `Xml`, or `XmlNs`. Used by `create_element_ns` and the tree builder's foreign-content handling.
+
+### NetError
+**Type**: Error type
+**Definition**: Error returned by network fetch, connection, DNS resolution, and TLS operations. Variants cover `Io`, `Tls`, `Http`, `Timeout`, `DnsResolution`. Converts to `SilkError::Net`.
+
+### new_h2_with_extra_ca_file
+**Type**: HTTP/2 client constructor
+**Definition**: Constructs an HTTP/2 client that appends a PEM CA bundle from a file to the default Mozilla trust store. For private PKI environments.
+
+### new_insecure
+**Type**: HTTP client constructor
+**Definition**: Constructs an HTTP/1.1 client with TLS certificate verification disabled. Intended for local development and testing only.
+
+### new_insecure_h2
+**Type**: HTTP/2 client constructor
+**Definition**: Constructs an HTTP/2 client with TLS certificate verification disabled. Intended for local development and testing only.
+
+### new_platform_verifier
+**Type**: HTTP client constructor
+**Definition**: Constructs an HTTP/1.1 client that delegates certificate verification to the OS trust store (rustls-platform-verifier). Required by the `platform-verifier` feature flag.
+
+### new_platform_verifier_h2
+**Type**: HTTP/2 client constructor
+**Definition**: HTTP/2 variant of `new_platform_verifier`.
+
+### new_platform_verifier_h2_with_extra_ca_file
+**Type**: HTTP/2 client constructor
+**Definition**: HTTP/2 client using the OS trust store plus an additional PEM CA bundle.
+
+### new_platform_verifier_with_extra_ca_file
+**Type**: HTTP client constructor
+**Definition**: HTTP/1.1 client using the OS trust store plus an additional PEM CA bundle.
+
+### new_with_extra_ca_file
+**Type**: HTTP client constructor
+**Definition**: Constructs an HTTP/1.1 client that appends a PEM CA bundle from a file to the default Mozilla trust store. Accepts path forms `--tls-ca-file /path` and `--tls-ca-file=/path`.
+
+### next_sibling
+**Type**: DOM traversal function
+**Definition**: Returns the `NodeId` of the next sibling in the DOM tree, or `None` if this node is the last child.
+
+### NodeKind
+**Type**: DOM discriminant enum
+**Definition**: Discriminates DOM node types: `Element { tag, attrs }`, `Text { text }`, `Comment { data }`, `Document`, `DocumentType { name, public_id, system_id }`. Returned by `Dom::node(id)`.
+
+### ParsedDocument
+**Type**: HTML parse output
+**Definition**: Output of `silksurf_engine::parse_html()`: the `Dom` tree plus the `NodeId` of the root document node. The dom has `resolve_table` already materialized.
+
+### previous_sibling
+**Type**: DOM traversal function
+**Definition**: Returns the `NodeId` of the preceding sibling in the DOM tree, or `None` if this node is the first child.
+
+### rasterize_damage
+**Type**: Rasterizer function
+**Definition**: Rasterizes only the tiles of a `DisplayListTiles` that intersect a given damage `Rect`. Skips tiles outside the damage area. Used for incremental screen updates.
+
+### rasterize_parallel
+**Type**: Rasterizer function
+**Definition**: Rasterizes all tiles in a `DisplayListTiles` in parallel using Rayon. Returns a newly allocated `Vec<u8>` of `width * height * 4` bytes (ARGB). See silksurf-render OPERATIONS.md.
+
+### rasterize_parallel_into
+**Type**: Rasterizer function
+**Definition**: Rasterizes all tiles into a caller-supplied `Vec<u8>`. Avoids the 4 MB allocation on subsequent frames by reusing the same buffer. Preferred over `rasterize_parallel` in interactive render loops.
+
+### remove_child
+**Type**: DOM mutation function
+**Definition**: Detaches a child node from its parent in the DOM tree. The node is retained in the arena; call within a `with_mutation_batch` for correct generation tracking.
+
+### render_document
+**Type**: Engine pipeline function
+**Definition**: Runs the full fused style+layout+paint+raster pipeline on a `Dom`. Returns `RenderOutput` with the pixel buffer and layout metrics.
+
+### render_document_incremental
+**Type**: Engine pipeline function
+**Definition**: Re-renders only the dirty subtree of a DOM after a mutation batch. Uses `Dom::generation()` and the dirty-node set to skip unchanged subtrees.
+
+### render_document_incremental_from_dom
+**Type**: Engine pipeline function
+**Definition**: Incremental render starting from a pre-built `Dom` reference rather than a URL. Used when the caller already holds the parsed DOM (e.g., after a revalidation diff).
+
+### RenderOutput
+**Type**: Engine output structure
+**Definition**: Output of a render pass: `pixels: Vec<u8>` (ARGB framebuffer, `width * height * 4` bytes), `layout: LayoutTree`, `display_list: DisplayListTiles`, `styled_count: usize`.
+
+### root_store_diagnostics
+**Type**: TLS diagnostic function
+**Definition**: Inspects the rustls root certificate store and returns a `RootStoreDiagnostics` record. Used by `tls-probe` to report trust-store composition.
+
+### RootStoreDiagnostics
+**Type**: TLS diagnostic structure
+**Definition**: Diagnostic record for the TLS root certificate store: `count` (number of trusted root CAs), `source` (Mozilla bundle, OS store, or extra file), `errors` (malformed certificates).
+
+### RustlsProvider
+**Type**: Cryptography provider enum
+**Definition**: Selects the cryptography backend for rustls: `Ring` (default, Google ring library) or `AwsLcRs` (aws-lc-rs, FIPS-capable). Set at client construction time.
+
+### set_attribute
+**Type**: DOM mutation function
+**Definition**: Sets or replaces an attribute on a DOM element node. Creates the attribute if absent; overwrites the value if present. Must be called inside a `with_mutation_batch`.
+
+### srgb_to_linear
+**Type**: Color conversion function
+**Definition**: Converts an sRGB-encoded u8 [0, 255] to a linear-light f32 [0, 1] using the IEC 61966-2-1 transfer function. Applied before blending in the compositor.
+
+### style_generation
+**Type**: Cache coherence counter
+**Definition**: Monotonic u64 counter embedded in the `Dom` generation word. Advances on every `end_mutation_batch()`. Downstream caches (CascadeView, FusedWorkspace) compare their stored generation against this value to detect staleness.
+
+### take_dirty_nodes
+**Type**: DOM change detection function
+**Definition**: Returns the set of `NodeId`s marked dirty since the last call, and clears the set. Used by the incremental render pipeline to determine which subtrees to re-cascade.
+
+### TlsConfig
+**Type**: TLS configuration structure
+**Definition**: rustls `ClientConfig` wrapper: specifies cipher suites, certificate verifier (Mozilla bundle, OS store, or insecure), and ALPN protocol list (`["h2", "http/1.1"]` for H2-capable clients).
+
+### TlsConfigError
+**Type**: Error type
+**Definition**: Error returned when constructing a `TlsConfig` fails: malformed CA file, missing platform verifier support, or invalid cipher suite selection.
+
+### TokenizeError
+**Type**: Error type
+**Definition**: Error returned by the CSS or HTML tokenizer. Variants: `UnexpectedEof`, `InvalidUtf8`, `UnterminatedString`, `InvalidEscape`. Converts to `SilkError::Css` or `SilkError::Html`.
+
+### unpremultiply
+**Type**: Color conversion function
+**Definition**: Reverses alpha-premultiplication on a linear-light pixel: divides each RGB channel by the alpha value. Applied after compositing, before writing back to the sRGB framebuffer. A no-op when alpha is 255 (fully opaque).
+
+### with_interner_mut
+**Type**: DOM accessor function
+**Definition**: Acquires a mutable reference to the `Dom`'s `SilkInterner` within a closure. Safe to call at any time; the returned atoms are valid until the next `materialize_resolve_table()`. See silksurf-dom OPERATIONS.md.
+
+### with_mutation_batch
+**Type**: DOM mutation helper
+**Definition**: Opens a mutation batch, runs the supplied closure with mutable DOM access, then calls `end_mutation_batch()`. Advances `dom.generation()` and flushes the dirty-node set at depth zero. Preferred over manual `begin_mutation_batch` / `end_mutation_batch` pairing.
+
+---
+
 ## See Also
 
 - `/README.md` - Project overview

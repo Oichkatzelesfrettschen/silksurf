@@ -5,6 +5,38 @@
 # for temporary builds, but for persistence, we use a relative path.
 target-dir = "target"
 
+# ---------------------------------------------------------------------------
+# Compiler caching (sccache)
+# ---------------------------------------------------------------------------
+# sccache wraps rustc: each translation unit is keyed by its source hash,
+# compiler flags, and rustc version. Cache hits skip compilation entirely.
+# Cold builds prime the cache; subsequent builds after small changes
+# typically hit 85-95% of prior compilation units.
+#
+# Prerequisite: sccache must be on PATH.
+#   Arch Linux:  pacman -S sccache
+#   Cargo:       cargo install sccache --locked
+#   Verify:      sccache --show-stats
+#
+# Bypass for a single build (e.g. to measure true compile time):
+#   RUSTC_WRAPPER="" cargo build ...
+#
+# Known limitations:
+#   - proc-macro crates (crate-type = "proc-macro") are excluded by sccache;
+#     they always compile from scratch. This is correct behavior.
+#   - Incremental compilation is incompatible with sccache (disabled below).
+#   - RUSTFLAGS changes invalidate cached units; keep flags consistent.
+#
+# See docs/development/SCCACHE.md for full configuration reference.
+rustc-wrapper = "sccache"
+
+[env]
+# Incremental compilation stores per-session state that sccache cannot cache.
+# Mixing incremental with sccache produces stale artifacts or cache misses.
+# force = false: a developer can override with CARGO_INCREMENTAL=1 for a
+# one-off fast iteration session without sccache, without editing this file.
+CARGO_INCREMENTAL = { value = "0", force = false }
+
 # Profile configuration lives in the workspace Cargo.toml -- single source of
 # truth. Do NOT add [profile.*] blocks here; they would silently override the
 # workspace profile and break reproducibility (see ADR-008).

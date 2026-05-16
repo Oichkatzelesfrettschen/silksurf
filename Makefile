@@ -71,9 +71,9 @@ check:
 	cargo fmt --all -- --check
 	@echo "==> clippy -D warnings"
 	$(RUSTFLAGS_DENY) cargo clippy --workspace --all-targets -- $(CLIPPY_DENY)
-	@[ -x scripts/lint_unwrap.sh ] && scripts/lint_unwrap.sh || true
-	@[ -x scripts/lint_unsafe.sh ] && scripts/lint_unsafe.sh || true
-	@[ -x scripts/lint_glossary.sh ] && scripts/lint_glossary.sh || true
+	@if [ -x scripts/lint_unwrap.sh ]; then scripts/lint_unwrap.sh; fi
+	@if [ -x scripts/lint_unsafe.sh ]; then scripts/lint_unsafe.sh; fi
+	@if [ -x scripts/lint_glossary.sh ]; then scripts/lint_glossary.sh; fi
 
 # Workspace tests with -D warnings.
 # Wired into full gate (pre-push hook) via the full target.
