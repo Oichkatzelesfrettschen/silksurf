@@ -14,6 +14,7 @@
  *   - requestAnimationFrame (no-op stub returning fake id)
  *   - document (stub by default; replaced with live DOM when with_dom() is used)
  *   - window / self (alias for globalThis)
+ *   - location / navigator / performance / localStorage (browser-env stubs)
  *
  * HOW:
  *   // Without DOM access (scripts only):
@@ -215,6 +216,116 @@ impl SilkContext {
             .expect("window: install on fresh context cannot fail");
         ctx.register_global_property(js_string!("self"), global_obj, Attribute::all())
             .expect("self: install on fresh context cannot fail");
+
+        // -- location stub ---------------------------------------------------
+        // href/origin/pathname/search/hash default to empty; assign/reload/replace
+        // are no-ops. Scripts that only read location properties will not throw.
+        let location = ObjectInitializer::new(&mut ctx)
+            .property(js_string!("href"), js_string!(""), Attribute::all())
+            .property(js_string!("origin"), js_string!(""), Attribute::all())
+            .property(js_string!("pathname"), js_string!("/"), Attribute::all())
+            .property(js_string!("search"), js_string!(""), Attribute::all())
+            .property(js_string!("hash"), js_string!(""), Attribute::all())
+            .function(
+                NativeFunction::from_fn_ptr(|_, _, _| Ok(JsValue::undefined())),
+                js_string!("assign"),
+                1,
+            )
+            .function(
+                NativeFunction::from_fn_ptr(|_, _, _| Ok(JsValue::undefined())),
+                js_string!("reload"),
+                0,
+            )
+            .function(
+                NativeFunction::from_fn_ptr(|_, _, _| Ok(JsValue::undefined())),
+                js_string!("replace"),
+                1,
+            )
+            .build();
+        // UNWRAP-OK: fresh Context cannot already have a "location" property.
+        ctx.register_global_property(js_string!("location"), location, Attribute::all())
+            .expect("location: install on fresh context cannot fail");
+
+        // -- navigator stub --------------------------------------------------
+        // Minimal subset for feature-detection: userAgent, platform, language,
+        // onLine (true), cookieEnabled (false).
+        let navigator = ObjectInitializer::new(&mut ctx)
+            .property(
+                js_string!("userAgent"),
+                js_string!("SilkSurf/0.1"),
+                Attribute::all(),
+            )
+            .property(
+                js_string!("platform"),
+                js_string!("Linux"),
+                Attribute::all(),
+            )
+            .property(js_string!("language"), js_string!("en"), Attribute::all())
+            .property(js_string!("onLine"), true, Attribute::all())
+            .property(js_string!("cookieEnabled"), false, Attribute::all())
+            .build();
+        // UNWRAP-OK: fresh Context cannot already have a "navigator" property.
+        ctx.register_global_property(js_string!("navigator"), navigator, Attribute::all())
+            .expect("navigator: install on fresh context cannot fail");
+
+        // -- performance stub ------------------------------------------------
+        // performance.now() returns 0.0; mark() and measure() are no-ops.
+        // Scripts that measure relative durations will get zero but not crash.
+        let performance = ObjectInitializer::new(&mut ctx)
+            .function(
+                NativeFunction::from_fn_ptr(|_, _, _| Ok(JsValue::from(0.0f64))),
+                js_string!("now"),
+                0,
+            )
+            .function(
+                NativeFunction::from_fn_ptr(|_, _, _| Ok(JsValue::undefined())),
+                js_string!("mark"),
+                1,
+            )
+            .function(
+                NativeFunction::from_fn_ptr(|_, _, _| Ok(JsValue::undefined())),
+                js_string!("measure"),
+                1,
+            )
+            .build();
+        // UNWRAP-OK: fresh Context cannot already have a "performance" property.
+        ctx.register_global_property(js_string!("performance"), performance, Attribute::all())
+            .expect("performance: install on fresh context cannot fail");
+
+        // -- localStorage stub -----------------------------------------------
+        // All writes are discarded; getItem/key return null; length is 0.
+        // Scripts that guard on localStorage availability will not throw.
+        let local_storage = ObjectInitializer::new(&mut ctx)
+            .property(js_string!("length"), 0u32, Attribute::all())
+            .function(
+                NativeFunction::from_fn_ptr(|_, _, _| Ok(JsValue::null())),
+                js_string!("getItem"),
+                1,
+            )
+            .function(
+                NativeFunction::from_fn_ptr(|_, _, _| Ok(JsValue::undefined())),
+                js_string!("setItem"),
+                2,
+            )
+            .function(
+                NativeFunction::from_fn_ptr(|_, _, _| Ok(JsValue::undefined())),
+                js_string!("removeItem"),
+                1,
+            )
+            .function(
+                NativeFunction::from_fn_ptr(|_, _, _| Ok(JsValue::undefined())),
+                js_string!("clear"),
+                0,
+            )
+            .function(
+                NativeFunction::from_fn_ptr(|_, _, _| Ok(JsValue::null())),
+                js_string!("key"),
+                1,
+            )
+            .build();
+        // UNWRAP-OK: fresh Context cannot already have a "localStorage" property.
+        ctx.register_global_property(js_string!("localStorage"), local_storage, Attribute::all())
+            .expect("localStorage: install on fresh context cannot fail");
 
         Self { ctx }
     }
