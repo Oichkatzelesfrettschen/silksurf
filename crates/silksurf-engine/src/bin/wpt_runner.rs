@@ -237,9 +237,7 @@ fn run_one(path: &Path) -> Outcome {
         "css_class_selector" => check_css_class_selector(&parsed.dom, parsed.document, &source),
         "css_id_selector" => check_css_id_selector(&parsed.dom, parsed.document, &source),
         "css_type_selector" => check_css_type_selector(&parsed.dom, parsed.document, &source),
-        "css_pseudo_nth_child" => {
-            check_css_pseudo_nth_child(&parsed.dom, parsed.document, &source)
-        }
+        "css_pseudo_nth_child" => check_css_pseudo_nth_child(&parsed.dom, parsed.document, &source),
         "css_pseudo_not" => check_css_pseudo_not(&parsed.dom, parsed.document, &source),
         "css_attribute_selector" => {
             check_css_attribute_selector(&parsed.dom, parsed.document, &source)
