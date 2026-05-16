@@ -3,8 +3,8 @@
 //! Pipeline: fetch URL -> parse HTML -> load CSS/JS resources -> create VM
 //! with DOM bridge -> run scripts -> layout -> render (future: XCB window).
 //!
-//! Usage: silksurf-app [URL]
-//! Default URL: https://example.com
+//! Usage: silksurf-app \[URL\]
+//! Default URL: `https://example.com`
 
 /*
  * mimalloc global allocator.
@@ -650,7 +650,7 @@ fn main() {
     }
 }
 
-/// Extract text content from <style> tags.
+/// Extract text content from `<style>` tags.
 /// Extract href values from <link rel="stylesheet"> tags, resolved against base URL.
 fn extract_stylesheet_urls(
     dom: &silksurf_dom::Dom,
@@ -731,7 +731,7 @@ fn collect_style_tags(dom: &silksurf_dom::Dom, node: silksurf_dom::NodeId, css: 
     }
 }
 
-/// Extract text content from inline <script> tags (without src attribute).
+/// Extract text content from inline `<script>` tags (without src attribute).
 fn extract_inline_scripts(dom: &silksurf_dom::Dom, root: silksurf_dom::NodeId) -> Vec<String> {
     let mut scripts = Vec::new();
     collect_script_tags(dom, root, &mut scripts);

@@ -35,11 +35,11 @@ use silksurf_dom::{Dom, NodeId};
 #[derive(Default)]
 pub struct LayoutNeighborTable {
     /// Start index of each BFS level in bfs_order.
-    /// Level i contains bfs_order[level_starts[i]..level_starts[i+1]].
+    /// Level i contains `bfs_order[level_starts[i]..level_starts[i+1]]`.
     /// The last level's end is bfs_order.len() (no sentinel stored).
     /// Use level(i) for safe slice access.
     ///
-    /// WHY flat offsets over Vec<Vec<NodeId>>: eliminates O(depth) inner-Vec
+    /// WHY flat offsets over `Vec<Vec<NodeId>>`: eliminates O(depth) inner-Vec
     /// allocations per call. A 6-level DOM saves 6 heap allocs on every
     /// rebuild() call while level(i) remains O(1) slice arithmetic.
     pub level_starts: Vec<u32>,

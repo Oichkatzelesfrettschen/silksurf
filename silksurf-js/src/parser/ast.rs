@@ -398,7 +398,7 @@ pub enum Expression<'src, 'arena> {
     TemplateLiteral(TemplateLiteral<'src, 'arena>),
     /// Tagged template: tag`hello`
     TaggedTemplate(TaggedTemplateExpression<'src, 'arena>),
-    /// Member expression: obj.prop or obj[prop]
+    /// Member expression: obj.prop or obj\[prop\]
     Member(MemberExpression<'src, 'arena>),
     /// Call expression: fn(args)
     Call(CallExpression<'src, 'arena>),
