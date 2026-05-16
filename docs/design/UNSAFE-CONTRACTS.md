@@ -29,6 +29,14 @@ clean, loom clean, fuzz clean, manually reviewed).
 | 333 | `*ptr.add(idx) = pixel` (tail loop) | `idx < len` from the loop guard; exclusive `&mut` on `row` held by caller | manually reviewed |
 | ~444 | `slice::from_raw_parts_mut(shared.0.add(row_offset), row_len)` | rayon scope guarantees disjoint tile regions; the SendPtr documents the no-mutations invariant | manually reviewed |
 
+#### `fill_row_neon` (aarch64 only) -- U11
+
+| op | invariant | verify |
+|----|-----------|--------|
+| `vdupq_n_u32(pixel)` (inside `unsafe`) | `#[target_feature(enable = "neon")]` + caller's `is_aarch64_feature_detected!("neon")` gate ensures NEON is present; no other precondition | manually reviewed |
+| `vst1q_u32(ptr.add(idx), value)` | `idx + 4 <= len` from loop guard; AArch64 `vst1q_u32` is unaligned-safe; exclusive `&mut row` excludes aliasing | manually reviewed |
+| `*ptr.add(idx) = pixel` (tail) | `idx < len` from loop guard; exclusive `&mut row` | manually reviewed |
+
 ### `crates/silksurf-render/src/lib.rs` -- impl blocks
 
 | op | invariant | verify |

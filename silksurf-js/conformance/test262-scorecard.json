@@ -4,9 +4,9 @@
   "fail": 0,
   "skip": 0,
   "rate": 1.0000,
-  "timestamp": "2026-05-15T14:29:26Z",
+  "timestamp": "2026-05-16T05:36:37Z",
   "runner_version": "synthetic-fixture-v1",
   "runner_kind": "vm",
-  "fixture_dir": "silksurf-js/conformance/test262/fixtures/",
-  "duration_secs": 0.004
+  "fixture_dir": "silksurf-js/conformance/test262/fixtures",
+  "duration_secs": 0.037
 }
