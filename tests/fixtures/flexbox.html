@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+body {
+  background-color: #f8f8f8;
+  margin: 0;
+  padding: 16px;
+}
+
+.row {
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-start;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.row-centered {
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  background-color: #e8e8e8;
+  padding: 8px;
+  border-radius: 4px;
+}
+
+.col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.box {
+  background-color: #4a90e2;
+  color: #ffffff;
+  font-size: 14px;
+  padding: 8px;
+  border-radius: 4px;
+}
+
+.box-green {
+  background-color: #27ae60;
+  color: #ffffff;
+  font-size: 14px;
+  padding: 8px;
+  border-radius: 4px;
+}
+
+.box-red {
+  background-color: #e74c3c;
+  color: #ffffff;
+  font-size: 14px;
+  padding: 8px;
+  border-radius: 4px;
+}
+</style>
+</head>
+<body>
+<div class="row">
+  <div class="box">flex item 1</div>
+  <div class="box">flex item 2</div>
+  <div class="box">flex item 3</div>
+</div>
+<div class="row-centered">
+  <div class="box-green">centered A</div>
+  <div class="box-red">centered B</div>
+</div>
+<div class="col">
+  <div class="box">column item 1</div>
+  <div class="box">column item 2</div>
+</div>
+</body>
+</html>
