@@ -770,12 +770,7 @@ pub fn rasterize_skia(display_list: &DisplayList, width: u32, height: u32) -> Ve
 ///
 /// Resizes `buf` only when `width * height * 4` does not match the current
 /// length, then resets to an opaque white background before painting.
-pub fn rasterize_skia_into(
-    display_list: &DisplayList,
-    width: u32,
-    height: u32,
-    buf: &mut Vec<u8>,
-) {
+pub fn rasterize_skia_into(display_list: &DisplayList, width: u32, height: u32, buf: &mut Vec<u8>) {
     let required = (width * height * 4) as usize;
     if buf.len() != required {
         buf.resize(required, 0xffu8);
@@ -809,9 +804,21 @@ pub fn rasterize_skia_into(
                     continue;
                 };
                 let paint = sk_paint(*color);
-                pixmap.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+                pixmap.fill_path(
+                    &path,
+                    &paint,
+                    FillRule::Winding,
+                    Transform::identity(),
+                    None,
+                );
             }
-            DisplayItem::Text { rect, text, font_size, color, .. } => {
+            DisplayItem::Text {
+                rect,
+                text,
+                font_size,
+                color,
+                ..
+            } => {
                 silksurf_text::rasterize_glyphs(
                     text,
                     *font_size,

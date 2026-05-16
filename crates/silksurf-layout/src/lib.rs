@@ -175,7 +175,9 @@ fn build_layout_box<'a>(
         return None;
     }
     let box_type = match display {
-        Display::Block | Display::Flex | Display::Grid | Display::InlineFlex => BoxType::BlockNode(node),
+        Display::Block | Display::Flex | Display::Grid | Display::InlineFlex => {
+            BoxType::BlockNode(node)
+        }
         Display::Inline => BoxType::InlineNode(node),
         Display::None => BoxType::Anonymous,
     };
@@ -525,7 +527,6 @@ fn inline_text_width_fixed(dom: &Dom, node: NodeId, font_size_fixed: i32) -> i32
     let (width_px, _) = silksurf_text::measure_text(text, font_size_px, None);
     fixed_from_f32(width_px)
 }
-
 
 // ---------------------------------------------------------------------------
 // Unicode text-analysis helpers (AD-023)

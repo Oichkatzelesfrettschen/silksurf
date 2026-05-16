@@ -63,7 +63,9 @@ fn main() {
     let speculative = args.iter().any(|a| a == "--speculative" || a == "-s");
     let window_mode = args.iter().any(|a| a == "--window");
     let winit_mode = args.iter().any(|a| a == "--backend=winit")
-        || args.windows(2).any(|w| w[0] == "--backend" && w[1] == "winit");
+        || args
+            .windows(2)
+            .any(|w| w[0] == "--backend" && w[1] == "winit");
 
     /*
      * --window  -- open an XCB window, present a placeholder frame, and

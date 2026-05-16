@@ -181,8 +181,10 @@ impl FusedWorkspace {
         // Pass 2: layout -- rebuild taffy tree from styles and compute
         // Flexbox/Grid positions, then write absolute rects into node_rects[].
         self.taffy_layout.rebuild(&self.table, &self.styles);
-        self.taffy_layout.compute(dom, &self.styles, &self.table.bfs_order, viewport);
-        self.taffy_layout.write_rects(&self.table.parent_idx, &mut self.node_rects, viewport);
+        self.taffy_layout
+            .compute(dom, &self.styles, &self.table.bfs_order, viewport);
+        self.taffy_layout
+            .write_rects(&self.table.parent_idx, &mut self.node_rects, viewport);
 
         // Pass 3: paint -- emit display items for each visible node.
         for (i, &node) in self.table.bfs_order.iter().enumerate() {

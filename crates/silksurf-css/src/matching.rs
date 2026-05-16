@@ -389,7 +389,9 @@ fn matches_functional_pseudo_class(
 ) -> bool {
     let lower = name.as_str().to_ascii_lowercase();
     match lower.as_str() {
-        "nth-child" => matches!(arg, PseudoClassArg::Nth(nth) if nth.matches(element_child_index(dom, node))),
+        "nth-child" => {
+            matches!(arg, PseudoClassArg::Nth(nth) if nth.matches(element_child_index(dom, node)))
+        }
         "nth-last-child" => {
             matches!(arg, PseudoClassArg::Nth(nth) if nth.matches(element_child_index_from_end(dom, node)))
         }

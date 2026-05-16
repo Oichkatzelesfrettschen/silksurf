@@ -185,7 +185,10 @@ pub enum SelectorModifier {
     Id(SelectorIdent),
     Attribute(AttributeSelector),
     PseudoClass(SelectorIdent),
-    FunctionalPseudoClass { name: SelectorIdent, arg: PseudoClassArg },
+    FunctionalPseudoClass {
+        name: SelectorIdent,
+        arg: PseudoClassArg,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -778,9 +781,7 @@ impl<'a> SelectorParser<'a> {
                 }
             }
             // Signed number emitted as a single token (e.g. "+1" or "-2")
-            Some(CssToken::Number(ref n))
-                if n.starts_with('+') || n.starts_with('-') =>
-            {
+            Some(CssToken::Number(ref n)) if n.starts_with('+') || n.starts_with('-') => {
                 let val = n.parse::<i32>().unwrap_or(0);
                 self.next();
                 val

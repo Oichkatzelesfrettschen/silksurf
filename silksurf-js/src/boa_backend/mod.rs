@@ -26,10 +26,8 @@
  */
 
 use boa_engine::{
-    js_string,
-    object::ObjectInitializer,
+    Context, JsValue, NativeFunction, Source, js_string, object::ObjectInitializer,
     property::Attribute,
-    Context, JsValue, NativeFunction, Source,
 };
 use boa_runtime::Console;
 
@@ -59,6 +57,7 @@ impl SilkContext {
         // -- Console ----------------------------------------------------------
         // boa_runtime provides the W3C-compatible console object.
         let console = Console::init(&mut ctx);
+        // UNWRAP-OK: fresh Context cannot already have a "console" property.
         ctx.register_global_property(js_string!("console"), console, Attribute::all())
             .expect("console: install on fresh context cannot fail");
 
@@ -79,6 +78,7 @@ impl SilkContext {
                 Ok(JsValue::from(0u32))
             }),
         )
+        // UNWRAP-OK: fresh Context cannot already have "setTimeout" defined.
         .expect("setTimeout: install on fresh context cannot fail");
 
         ctx.register_global_callable(
@@ -86,6 +86,7 @@ impl SilkContext {
             1,
             NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined())),
         )
+        // UNWRAP-OK: fresh Context cannot already have "clearTimeout" defined.
         .expect("clearTimeout: install on fresh context cannot fail");
 
         ctx.register_global_callable(
@@ -93,6 +94,7 @@ impl SilkContext {
             2,
             NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::from(0u32))),
         )
+        // UNWRAP-OK: fresh Context cannot already have "setInterval" defined.
         .expect("setInterval: install on fresh context cannot fail");
 
         ctx.register_global_callable(
@@ -100,6 +102,7 @@ impl SilkContext {
             1,
             NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined())),
         )
+        // UNWRAP-OK: fresh Context cannot already have "clearInterval" defined.
         .expect("clearInterval: install on fresh context cannot fail");
 
         ctx.register_global_callable(
@@ -107,6 +110,7 @@ impl SilkContext {
             1,
             NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::from(0u32))),
         )
+        // UNWRAP-OK: fresh Context cannot already have "requestAnimationFrame" defined.
         .expect("requestAnimationFrame: install on fresh context cannot fail");
 
         ctx.register_global_callable(
@@ -114,6 +118,7 @@ impl SilkContext {
             1,
             NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined())),
         )
+        // UNWRAP-OK: fresh Context cannot already have "cancelAnimationFrame" defined.
         .expect("cancelAnimationFrame: install on fresh context cannot fail");
 
         // -- document stub ----------------------------------------------------
@@ -166,6 +171,7 @@ impl SilkContext {
                 1,
             )
             .build();
+        // UNWRAP-OK: fresh Context cannot already have a "document" property.
         ctx.register_global_property(js_string!("document"), document, Attribute::all())
             .expect("document: install on fresh context cannot fail");
 
@@ -173,12 +179,9 @@ impl SilkContext {
         // window and self are aliases for globalThis in a browser context.
         // Cloning JsObject only increments the GC reference count; no copy.
         let global_obj = ctx.global_object().clone();
-        ctx.register_global_property(
-            js_string!("window"),
-            global_obj.clone(),
-            Attribute::all(),
-        )
-        .expect("window: install on fresh context cannot fail");
+        // UNWRAP-OK: fresh Context cannot already have "window" or "self" properties.
+        ctx.register_global_property(js_string!("window"), global_obj.clone(), Attribute::all())
+            .expect("window: install on fresh context cannot fail");
         ctx.register_global_property(js_string!("self"), global_obj, Attribute::all())
             .expect("self: install on fresh context cannot fail");
 

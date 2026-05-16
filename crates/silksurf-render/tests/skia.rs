@@ -3,7 +3,12 @@ use silksurf_layout::Rect;
 use silksurf_render::{DisplayItem, DisplayList, rasterize_skia, rasterize_skia_into};
 
 fn rect(x: f32, y: f32, w: f32, h: f32) -> Rect {
-    Rect { x, y, width: w, height: h }
+    Rect {
+        x,
+        y,
+        width: w,
+        height: h,
+    }
 }
 
 fn color(r: u8, g: u8, b: u8) -> Color {
@@ -11,7 +16,10 @@ fn color(r: u8, g: u8, b: u8) -> Color {
 }
 
 fn empty_list() -> DisplayList {
-    DisplayList { items: vec![], tiles: None }
+    DisplayList {
+        items: vec![],
+        tiles: None,
+    }
 }
 
 /// rasterize_skia produces a buffer of exactly width * height * 4 bytes.
@@ -98,7 +106,10 @@ fn skia_rounded_rect_zero_radii_matches_solid() {
     let r = rect(8.0, 8.0, 16.0, 16.0);
 
     let dl_solid = DisplayList {
-        items: vec![DisplayItem::SolidColor { rect: r, color: green }],
+        items: vec![DisplayItem::SolidColor {
+            rect: r,
+            color: green,
+        }],
         tiles: None,
     };
     let dl_rounded = DisplayList {

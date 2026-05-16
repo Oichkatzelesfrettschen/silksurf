@@ -25,7 +25,10 @@ pub fn rasterize_glyphs(
     }
 
     let mut state = TEXT_STATE.lock().unwrap_or_else(|e| e.into_inner());
-    let crate::TextState { font_system, swash_cache } = &mut *state;
+    let crate::TextState {
+        font_system,
+        swash_cache,
+    } = &mut *state;
 
     let line_height = font_size * 1.2;
     let metrics = Metrics::new(font_size, line_height);
@@ -43,23 +46,18 @@ pub fn rasterize_glyphs(
             let physical = glyph.physical((origin.0, origin.1), 1.0);
             let glyph_color = glyph.color_opt.unwrap_or(text_color);
 
-            swash_cache.with_pixels(
-                font_system,
-                physical.cache_key,
-                glyph_color,
-                |px, py, c| {
-                    let x = physical.x + px;
-                    let y = physical.y + py;
-                    if x < 0 || y < 0 || x >= pw || y >= ph {
-                        return;
-                    }
-                    let idx = y as usize * pw as usize + x as usize;
-                    let pixels = pixmap.pixels_mut();
-                    if let Some(dst) = pixels.get_mut(idx) {
-                        composite_over(dst, c);
-                    }
-                },
-            );
+            swash_cache.with_pixels(font_system, physical.cache_key, glyph_color, |px, py, c| {
+                let x = physical.x + px;
+                let y = physical.y + py;
+                if x < 0 || y < 0 || x >= pw || y >= ph {
+                    return;
+                }
+                let idx = y as usize * pw as usize + x as usize;
+                let pixels = pixmap.pixels_mut();
+                if let Some(dst) = pixels.get_mut(idx) {
+                    composite_over(dst, c);
+                }
+            });
         }
     }
 }
