@@ -22,7 +22,7 @@
  * See: SNAZZY-WAFFLE roadmap TODO(perf): SoA DisplayList.
  */
 
-use silksurf_css::Color;
+use silksurf_css::{BoxShadow as CssBoxShadow, Color};
 use silksurf_dom::NodeId;
 use silksurf_layout::Rect;
 
@@ -55,6 +55,17 @@ pub struct DisplayListBatched {
     /// clockwise order. The scalar rasterizer falls back to fill_rect;
     /// the tiny-skia path renders anti-aliased cubic bezier arcs.
     pub rounded_rects: Vec<(Rect, [f32; 4], Color)>,
+    /// Box-shadow items: (element_rect, shadow_params).
+    ///
+    /// The element rect is stored here; renderers compute the shadow's actual
+    /// fill bounds using the offset and spread fields inside CssBoxShadow.
+    /// Inset shadows are excluded (they require stencil clipping, deferred).
+    pub box_shadows: Vec<(Rect, CssBoxShadow)>,
+    /// Linear-gradient background items: (rect, angle_deg, stops).
+    ///
+    /// angle_deg follows CSS convention (0.0 = to top, 90.0 = to right).
+    /// stops is (position [0.0, 1.0], color). Scalar paths use the first stop.
+    pub linear_gradients: Vec<(Rect, f32, Vec<(f32, Color)>)>,
 }
 
 impl DisplayListBatched {
@@ -74,6 +85,8 @@ impl DisplayListBatched {
         let mut solid_colors: Vec<(Rect, Color)> = Vec::new();
         let mut texts: Vec<(Rect, NodeId, u32, Color)> = Vec::new();
         let mut rounded_rects: Vec<(Rect, [f32; 4], Color)> = Vec::new();
+        let mut box_shadows: Vec<(Rect, CssBoxShadow)> = Vec::new();
+        let mut linear_gradients: Vec<(Rect, f32, Vec<(f32, Color)>)> = Vec::new();
 
         for item in &dl.items {
             match item {
@@ -92,6 +105,14 @@ impl DisplayListBatched {
                 DisplayItem::RoundedRect { rect, radii, color } => {
                     rounded_rects.push((*rect, *radii, *color));
                 }
+                DisplayItem::BoxShadow { rect, shadow } => {
+                    if !shadow.inset {
+                        box_shadows.push((*rect, *shadow));
+                    }
+                }
+                DisplayItem::LinearGradient { rect, angle, stops } => {
+                    linear_gradients.push((*rect, *angle, stops.clone()));
+                }
             }
         }
 
@@ -99,6 +120,8 @@ impl DisplayListBatched {
             solid_colors,
             texts,
             rounded_rects,
+            box_shadows,
+            linear_gradients,
         }
     }
 
@@ -143,6 +166,30 @@ impl DisplayListBatched {
             fill_rect(&mut buffer, width, height, *rect, *color);
         }
 
+        for (element_rect, shadow) in &self.box_shadows {
+            let spread = shadow.spread_radius;
+            let shadow_rect = Rect {
+                x: element_rect.x + shadow.offset_x - spread,
+                y: element_rect.y + shadow.offset_y - spread,
+                width: element_rect.width + 2.0 * spread,
+                height: element_rect.height + 2.0 * spread,
+            };
+            if !rect_intersects(shadow_rect, damage) {
+                continue;
+            }
+            fill_rect(&mut buffer, width, height, shadow_rect, shadow.color);
+        }
+
+        for (rect, _angle, stops) in &self.linear_gradients {
+            if !rect_intersects(*rect, damage) {
+                continue;
+            }
+            // Scalar fallback: fill with first stop color.
+            if let Some(pair) = stops.first() {
+                fill_rect(&mut buffer, width, height, *rect, pair.1);
+            }
+        }
+
         buffer
     }
 
@@ -154,7 +201,11 @@ impl DisplayListBatched {
      * the same source list.
      */
     pub fn item_count(&self) -> usize {
-        self.solid_colors.len() + self.texts.len() + self.rounded_rects.len()
+        self.solid_colors.len()
+            + self.texts.len()
+            + self.rounded_rects.len()
+            + self.box_shadows.len()
+            + self.linear_gradients.len()
     }
 }
 

@@ -196,11 +196,29 @@ impl FusedWorkspace {
             }
             let content_rect = self.node_rects[i];
 
+            // Box-shadow paints below the background (CSS paint order).
+            if let Some(shadow) = style.box_shadow {
+                if !shadow.inset {
+                    self.display_items.push(DisplayItem::BoxShadow {
+                        rect: content_rect,
+                        shadow,
+                    });
+                }
+            }
+
             if style.background_color.a > 0 {
-                self.display_items.push(DisplayItem::SolidColor {
-                    rect: content_rect,
-                    color: style.background_color,
-                });
+                if style.border_radius > 0.0 {
+                    self.display_items.push(DisplayItem::RoundedRect {
+                        rect: content_rect,
+                        radii: [style.border_radius; 4],
+                        color: style.background_color,
+                    });
+                } else {
+                    self.display_items.push(DisplayItem::SolidColor {
+                        rect: content_rect,
+                        color: style.background_color,
+                    });
+                }
             }
 
             if let Ok(dom_node) = dom.node(node)
