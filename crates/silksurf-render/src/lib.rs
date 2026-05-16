@@ -15,8 +15,11 @@
  * has a bucket of display item indices. Damage rasterization only
  * processes tiles that overlap the dirty rectangle.
  *
- * SIMD: fill_row_sse2 uses _mm_set1_epi32 + _mm_storeu_si128 to fill
- * 4 pixels per instruction. Falls back to scalar .fill() on non-x86.
+ * SIMD: fill_row_sse2 (x86/x86_64) uses _mm_set1_epi32 + _mm_storeu_si128
+ * to fill 4 pixels per instruction.  fill_row_neon (aarch64) mirrors this
+ * with vdupq_n_u32 + vst1q_u32.  Both fall back to scalar .fill() when the
+ * feature is absent (sse2 on x86; NEON is mandatory on aarch64 so the
+ * fallback is unreachable in practice, but the code compiles cleanly).
  *
  * DONE(perf): Rayon tile parallelism (Phase 4.6) -- rasterize_parallel{,_into}
  * DONE(perf): Buffer reuse -- rasterize_parallel_into eliminates per-frame alloc
@@ -309,17 +312,19 @@ fn fill_row_u32(row: &mut [u32], pixel: u32) {
             return;
         }
     }
-    // AArch64 NEON path: skeleton. The real implementation will mirror
-    // fill_row_sse2 using `vdupq_n_u32` + `vst1q_u32` from
-    // `std::arch::aarch64`. Tracked in SNAZZY-WAFFLE roadmap P8.S7.
-    // Until that lands, AArch64 falls through to the scalar fallback
-    // below; correctness is unaffected, throughput is lower.
     #[cfg(target_arch = "aarch64")]
     {
-        // TODO(P8.S7): NEON 4-pixel store via vdupq_n_u32 + vst1q_u32.
-        // Gate on std::arch::is_aarch64_feature_detected!("neon") (which
-        // is always true on aarch64-unknown-linux-gnu) and add the
-        // SAFETY: comment + UNSAFE-CONTRACTS.md row.
+        if std::arch::is_aarch64_feature_detected!("neon") {
+            // SAFETY: is_aarch64_feature_detected!("neon") gates the call.
+            // fill_row_neon uses only vdupq_n_u32 + vst1q_u32, both
+            // available whenever NEON is present. NEON is mandatory on every
+            // aarch64-unknown-linux-gnu target so this branch is always taken
+            // in practice; the scalar fallback below is kept for correctness.
+            unsafe {
+                fill_row_neon(row, pixel);
+            }
+            return;
+        }
     }
     row.fill(pixel);
 }
@@ -359,6 +364,55 @@ unsafe fn fill_row_sse2(row: &mut [u32], pixel: u32) {
     while idx < len {
         // SAFETY: idx < len guarantees ptr.add(idx) is in-bounds and we
         // hold the exclusive &mut on row, so the write is sound.
+        unsafe {
+            *ptr.add(idx) = pixel;
+        }
+        idx += 1;
+    }
+}
+
+/*
+ * fill_row_neon -- AArch64 NEON 4-pixel fill (P8.S7).
+ *
+ * WHY: AArch64 carries mandatory NEON; mirroring the SSE2 path closes the
+ * throughput gap on AArch64 Linux / Apple Silicon cross-builds.
+ *
+ * WHAT: vdupq_n_u32 broadcasts the pixel value to a uint32x4_t lane.
+ * vst1q_u32 stores 4 lanes per iteration (16 bytes, unaligned-safe on
+ * AArch64). Tail bytes are stored with scalar writes.
+ *
+ * HOW: Called from fill_row_u32 after is_aarch64_feature_detected!("neon").
+ * See UNSAFE-CONTRACTS.md #U11 for the invariant record.
+ */
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+unsafe fn fill_row_neon(row: &mut [u32], pixel: u32) {
+    use std::arch::aarch64::*;
+
+    let len = row.len();
+    if len == 0 {
+        return;
+    }
+    let mut idx = 0usize;
+    let ptr = row.as_mut_ptr();
+    // SAFETY: vdupq_n_u32 has no preconditions beyond NEON availability,
+    // which the caller has verified via is_aarch64_feature_detected!("neon")
+    // and which the #[target_feature] attribute enforces at the call site.
+    let value = unsafe { vdupq_n_u32(pixel) };
+    while idx + 4 <= len {
+        // SAFETY: idx + 4 <= len guarantees the 4-element window
+        // ptr.add(idx)..ptr.add(idx+4) lies within the slice borrow.
+        // vst1q_u32 is unaligned-safe on AArch64 (no alignment requirement
+        // unlike SSE storeu which documents 1-byte alignment anyway).
+        // We hold the exclusive &mut on row so concurrent aliasing is ruled out.
+        unsafe {
+            vst1q_u32(ptr.add(idx), value);
+        }
+        idx += 4;
+    }
+    while idx < len {
+        // SAFETY: idx < len guarantees ptr.add(idx) is in-bounds; exclusive
+        // &mut on row rules out aliasing.
         unsafe {
             *ptr.add(idx) = pixel;
         }
