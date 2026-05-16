@@ -1508,9 +1508,10 @@ impl<'src, 'arena> Parser<'src, 'arena> {
 
         // Member access (dot)
         if self.match_token(&TokenKind::Dot) {
+            // ECMA-262: property after `.` is an IdentifierName (keywords ok).
             let property = self
                 .arena
-                .alloc(Expression::Identifier(self.parse_identifier()?));
+                .alloc(Expression::Identifier(self.parse_identifier_name()?));
             let end = self.previous.span.end;
             return Ok(Expression::Member(MemberExpression {
                 object: self.arena.alloc(lhs),
@@ -1548,10 +1549,10 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                     span: Span::new(start, end),
                 }));
             }
-            // Optional member: x?.y
+            // Optional member: x?.y -- IdentifierName, same rule as `.y`.
             let property = self
                 .arena
-                .alloc(Expression::Identifier(self.parse_identifier()?));
+                .alloc(Expression::Identifier(self.parse_identifier_name()?));
             let end = self.previous.span.end;
             return Ok(Expression::Member(MemberExpression {
                 object: self.arena.alloc(lhs),
@@ -1753,6 +1754,59 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                 &format!("{:?}", self.current.kind),
             )),
         }
+    }
+
+    /*
+     * parse_identifier_name -- parse an IdentifierName (any keyword or ident).
+     *
+     * WHY: ECMA-262 12.7 MemberExpression : MemberExpression . IdentifierName
+     * permits reserved words after `.` -- so `m.get(k)`, `obj.delete(x)`,
+     * and `arr.set(...)` must all parse despite `get`/`set`/`delete` being
+     * reserved tokens. Without this, builtins whose method names collide
+     * with keywords (Map, Set, WeakMap, WeakSet, etc.) are unreachable
+     * from JS, defeating their entire purpose.
+     *
+     * We synthesize an Identifier from the raw token text, interning it
+     * exactly as the lexer would have done for a non-keyword. The raw
+     * text is preserved so downstream consumers can distinguish keywords
+     * used as property names if they ever need to.
+     *
+     * This is the IdentifierName production -- callers that need a true
+     * identifier (binding name, function parameter) must use
+     * parse_identifier instead, which still rejects keywords.
+     */
+    fn parse_identifier_name(&mut self) -> ParseResult<Identifier<'src>> {
+        if let TokenKind::Identifier(symbol) = &self.current.kind {
+            let sym = *symbol;
+            let token = self.advance();
+            return Ok(Identifier {
+                name: sym,
+                raw: self.text(token.span),
+                span: token.span,
+            });
+        }
+        // Any other token whose raw text is a valid identifier name (i.e.
+        // a keyword) is also accepted as an IdentifierName per the spec.
+        let span = self.current.span;
+        let raw = self.text(span);
+        let is_keyword_name = !raw.is_empty()
+            && raw
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_' || c == '$')
+            && raw
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$');
+        if is_keyword_name {
+            let name = self.lexer.interner_mut().intern(raw);
+            self.advance();
+            return Ok(Identifier { name, raw, span });
+        }
+        Err(ParseError::unexpected_token(
+            self.current.span,
+            vec!["identifier name"],
+            &format!("{:?}", self.current.kind),
+        ))
     }
 
     /// Parse number literal

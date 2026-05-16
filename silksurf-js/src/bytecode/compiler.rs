@@ -1044,6 +1044,20 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                         child.into_parts();
                     self.string_pool = merged_pool;
                     self.next_string_id = merged_next;
+                    /*
+                     * Flag the child chunk as a generator body so the VM's
+                     * op_call diverts invocations to invoke_generator (which
+                     * runs the body eagerly, collects yields, and returns an
+                     * iterator).  Without this flag the body would execute
+                     * as a regular function and yield opcodes would silently
+                     * no-op (no buffer on generator_yield_stack).
+                     *
+                     * See: vm/mod.rs op_call generator-branch.
+                     * See: vm/generator.rs for the eager-strategy rationale.
+                     */
+                    if func.is_generator {
+                        child_chunk.is_generator = true;
+                    }
                     let base_offset = self.child_chunks.len() as u32;
                     let n_nested = nested.len() as u32;
                     for nc in nested {
@@ -1058,11 +1072,20 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                     self.child_chunks.push(child_chunk);
                     let const_idx = self.chunk.add_constant(Constant::Function(func_idx));
                     let func_reg = self.alloc_register();
-                    self.emit(Instruction::new_ri(
-                        Opcode::NewFunction,
-                        func_reg.0,
-                        const_idx,
-                    ));
+                    /*
+                     * Emit NewGenerator for `function*` declarations.
+                     * Functionally identical to NewFunction at construction
+                     * time (both produce a Value::Function); the divergence
+                     * happens at call time when op_call inspects the chunk's
+                     * is_generator flag.  Keeping the opcode distinct makes
+                     * disassembly and tracing clearer.
+                     */
+                    let new_op = if func.is_generator {
+                        Opcode::NewGenerator
+                    } else {
+                        Opcode::NewFunction
+                    };
+                    self.emit(Instruction::new_ri(new_op, func_reg.0, const_idx));
                     // Bind upvalues into the closure: one BindCapture per
                     // captured outer variable, in the same order the inner
                     // function compiled them. See Vm::op_bind_capture.
@@ -1706,6 +1729,15 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 // Merge child string pool additions back into parent
                 self.string_pool = merged_pool;
                 self.next_string_id = merged_next;
+                /*
+                 * Flag the child chunk as a generator body so the VM's
+                 * op_call diverts invocations to invoke_generator.  See the
+                 * matching block in Statement::FunctionDeclaration for the
+                 * full rationale.
+                 */
+                if func.is_generator {
+                    child_chunk.is_generator = true;
+                }
                 // Flatten nested function chunks into parent's child_chunks.
                 // base_offset is where nested[0] will sit in self.child_chunks.
                 let base_offset = self.child_chunks.len() as u32;
@@ -1723,11 +1755,17 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                 let func_idx = base_offset + n_nested;
                 self.child_chunks.push(child_chunk);
                 let const_idx = self.chunk.add_constant(Constant::Function(func_idx));
-                self.emit(Instruction::new_ri(
-                    Opcode::NewFunction,
-                    result_reg.0,
-                    const_idx,
-                ));
+                /*
+                 * Emit NewGenerator for `function*` expressions; see the
+                 * matching emission in Statement::FunctionDeclaration for
+                 * the full rationale.
+                 */
+                let new_op = if func.is_generator {
+                    Opcode::NewGenerator
+                } else {
+                    Opcode::NewFunction
+                };
+                self.emit(Instruction::new_ri(new_op, result_reg.0, const_idx));
                 // BindCapture per upvalue -- see FunctionDeclaration for rationale.
                 for upvalue in &child_upvalues {
                     self.emit(Instruction::new_rr(
@@ -2015,6 +2053,53 @@ impl<'src, 'arena> Compiler<'src, 'arena> {
                     await_expr.span,
                 );
                 Ok(result_reg)
+            }
+            /*
+             * Expression::Yield -- `yield expr` or `yield* expr` inside a
+             * generator function body.
+             *
+             * WHY: The VM's op_yield appends r[src] to the active generator
+             * yield buffer (top of vm.generator_yield_stack), and op_yield_star
+             * delegates: it drains an iterable into the same buffer.  The
+             * compiler's job is to:
+             *   1. Evaluate the argument (or LoadUndefined for bare `yield`).
+             *   2. Allocate a destination register for the yield expression's
+             *      own value (always undefined in eager mode -- documented
+             *      limitation: .next(value) is not plumbed back).
+             *   3. Emit Yield(dst, src) or YieldStar(dst, src) depending on
+             *      whether `yield*` (delegate) is in play.
+             *
+             * Yield only makes sense inside a generator body; the parser
+             * accepts it everywhere syntactically, but at runtime a stray
+             * Yield with no buffer on the stack silently no-ops (and the
+             * dst register still receives undefined).
+             *
+             * See: vm/mod.rs op_yield / op_yield_star.
+             * See: vm/generator.rs build_generator and yield_star_flatten.
+             */
+            Expression::Yield(yield_expr) => {
+                // Source register: argument value (or undefined for `yield;`).
+                let src_reg = if let Some(arg) = &yield_expr.argument {
+                    self.compile_expression(arg)?
+                } else {
+                    let reg = self.alloc_register();
+                    self.emit_at(
+                        Instruction::new_r(Opcode::LoadUndefined, reg.0),
+                        yield_expr.span,
+                    );
+                    reg
+                };
+                let dst_reg = self.alloc_register();
+                let op = if yield_expr.delegate {
+                    Opcode::YieldStar
+                } else {
+                    Opcode::Yield
+                };
+                self.emit_at(
+                    Instruction::new_rr(op, dst_reg.0, src_reg.0),
+                    yield_expr.span,
+                );
+                Ok(dst_reg)
             }
             _ => {
                 let reg = self.alloc_register();

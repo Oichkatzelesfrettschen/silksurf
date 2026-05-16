@@ -30,6 +30,7 @@
  */
 
 use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -93,28 +94,61 @@ pub fn install(global: &mut Object) {
     );
 
     /*
-     * WeakMap / WeakSet stubs.
+     * WeakMap / WeakSet -- pseudo-weak, object-identity keyed.
      *
-     * WHY: React DevTools and some React internals register WeakMap
-     * caches. Our VM's Values are Rc-based (no weak refs), so a true
-     * WeakMap is impossible without a global GC. These stubs accept
-     * the constructor call and return an object with the right API
-     * shape backed by a strong Vec -- effectively a strong Map.
-     * Objects that would be garbage-collected in a real browser may
-     * accumulate here, but for a single-page rendering pass this is
-     * safe (the entire VM is dropped after rendering).
+     * WHY: React DevTools and several React internals (effect-cleanup
+     * registries, component caches) require WeakMap/WeakSet semantics:
+     * keys must be objects, and equality is reference identity, not
+     * structural. The earlier shims aliased these to ordinary Map/Set,
+     * which silently accepted primitive keys and used SameValueZero --
+     * masking bugs and producing the wrong answer when caller code
+     * relied on `weakmap.has({})` returning false.
+     *
+     * Design -- pseudo-weak keying:
+     *
+     *   The key is the raw allocation address of the key object's
+     *   `Rc<RefCell<Object>>`, captured as `usize` via Rc::as_ptr.
+     *   Two `Value::Object` values share a key iff they are the same
+     *   Rc allocation, which is precisely JS reference identity.
+     *   The backing store is `HashMap<usize, Value>` (O(1) lookup),
+     *   not the Vec scan used by Map (O(N)).
+     *
+     *   "Pseudo" because we do not (yet) prune entries when the key
+     *   object is dropped -- a true WeakMap requires a tracing GC to
+     *   observe key reachability, which this VM does not have. Until
+     *   gc_integration.rs gains a live GC, dead entries linger.
+     *
+     *   Hazard -- address reuse: if the user drops the last strong
+     *   reference to a key, the Rc deallocates and a subsequently
+     *   constructed Object may land at the same address. A lookup
+     *   with that new object would then spuriously hit the stale
+     *   entry. This is acceptable for the React rendering use case
+     *   (the entire VM is torn down between renders, so no long-lived
+     *   accumulation), but a real GC must replace this scheme before
+     *   long-running scripts can rely on it.
+     *
+     *   Spec divergence -- non-Object keys: ECMA-262 requires `set`,
+     *   `has`, `delete`, `add` to throw TypeError on primitive keys.
+     *   This VM's NativeFunction signature `Fn(&[Value]) -> Value`
+     *   has no error channel, so we silently no-op (set/add) or
+     *   return false (has/delete). Callers that depend on the throw
+     *   will see incorrect behavior; this is documented and will be
+     *   fixed when the VM grows native-throw support.
+     *
+     * See: gc_integration.rs for the future weak-ref plumbing
+     * See: make_weak_map / make_weak_set below
      */
     global.set_by_str(
         "WeakMap",
         Value::NativeFunction(Rc::new(NativeFunction::new("WeakMap", |args| {
-            make_map(args.first())
+            make_weak_map(args.first())
         }))),
     );
 
     global.set_by_str(
         "WeakSet",
         Value::NativeFunction(Rc::new(NativeFunction::new("WeakSet", |args| {
-            make_set(args.first())
+            make_weak_set(args.first())
         }))),
     );
 
@@ -551,4 +585,390 @@ fn make_set(initial: Option<&Value>) -> Value {
     }
 
     Value::Object(obj)
+}
+
+/*
+ * object_identity -- extract the pseudo-weak key for a Value.
+ *
+ * Returns Some(addr) iff the value is an Object whose Rc allocation
+ * address can serve as an identity key. All other variants yield None
+ * (the WeakMap/WeakSet methods treat None as "not a valid key").
+ *
+ * WHY usize, not Rc: storing the Rc would keep the key object alive,
+ * which is the opposite of weak semantics. The address is observed,
+ * not owned. See the pseudo-weak hazard note above install().
+ */
+fn object_identity(value: &Value) -> Option<usize> {
+    if let Value::Object(rc) = value {
+        Some(Rc::as_ptr(rc) as usize)
+    } else {
+        None
+    }
+}
+
+/*
+ * make_weak_map -- construct a JS WeakMap with object-identity keying.
+ *
+ * Backing store: Rc<RefCell<HashMap<usize, Value>>> shared by every
+ * method closure. Each method extracts the key's identity address and
+ * indexes the hash map; lookups are O(1) amortized.
+ *
+ * Methods (per ECMA-262 24.3):
+ *   get(key)        -> stored value, or undefined if absent / bad key
+ *   set(key, value) -> the WeakMap itself (for chaining)
+ *   has(key)        -> boolean presence
+ *   delete(key)     -> true if removed, false otherwise
+ *
+ * Optional initializer: an Array of [key, value] pairs, matching the
+ * Map convention. Non-Object keys in the initializer are skipped.
+ */
+fn make_weak_map(initial: Option<&Value>) -> Value {
+    let store: Rc<RefCell<HashMap<usize, Value>>> = Rc::new(RefCell::new(HashMap::new()));
+
+    // Pre-populate from an array of [key, value] pairs.
+    if let Some(Value::Object(entries_obj)) = initial {
+        let entries_borrow = entries_obj.borrow();
+        let entries = crate::vm::builtins::array::collect_elements_pub(&entries_borrow);
+        drop(entries_borrow);
+        let mut init_store = store.borrow_mut();
+        for entry in entries {
+            if let Value::Object(pair) = entry {
+                let key_val = pair.borrow().get_by_key(&PropertyKey::Index(0));
+                let val = pair.borrow().get_by_key(&PropertyKey::Index(1));
+                if let Some(addr) = object_identity(&key_val) {
+                    init_store.insert(addr, val);
+                }
+            }
+        }
+    }
+
+    let obj = Rc::new(RefCell::new(Object::new()));
+
+    // WeakMap.prototype.get
+    {
+        let d = Rc::clone(&store);
+        obj.borrow_mut().set_by_str(
+            "get",
+            Value::NativeFunction(Rc::new(NativeFunction::new("WeakMap.get", move |args| {
+                let key = args.first().cloned().unwrap_or(Value::Undefined);
+                let Some(addr) = object_identity(&key) else {
+                    return Value::Undefined;
+                };
+                d.borrow().get(&addr).cloned().unwrap_or(Value::Undefined)
+            }))),
+        );
+    }
+
+    // WeakMap.prototype.set -- chainable (returns the WeakMap itself).
+    {
+        let d = Rc::clone(&store);
+        let obj_clone = Rc::clone(&obj);
+        obj.borrow_mut().set_by_str(
+            "set",
+            Value::NativeFunction(Rc::new(NativeFunction::new("WeakMap.set", move |args| {
+                let key = args.first().cloned().unwrap_or(Value::Undefined);
+                let val = args.get(1).cloned().unwrap_or(Value::Undefined);
+                // Spec: throw TypeError for non-Object key. No throw channel
+                // available -- silently no-op so the chain still works.
+                if let Some(addr) = object_identity(&key) {
+                    d.borrow_mut().insert(addr, val);
+                }
+                Value::Object(Rc::clone(&obj_clone))
+            }))),
+        );
+    }
+
+    // WeakMap.prototype.has
+    {
+        let d = Rc::clone(&store);
+        obj.borrow_mut().set_by_str(
+            "has",
+            Value::NativeFunction(Rc::new(NativeFunction::new("WeakMap.has", move |args| {
+                let key = args.first().cloned().unwrap_or(Value::Undefined);
+                let Some(addr) = object_identity(&key) else {
+                    return Value::Boolean(false);
+                };
+                Value::Boolean(d.borrow().contains_key(&addr))
+            }))),
+        );
+    }
+
+    // WeakMap.prototype.delete
+    {
+        let d = Rc::clone(&store);
+        obj.borrow_mut().set_by_str(
+            "delete",
+            Value::NativeFunction(Rc::new(NativeFunction::new(
+                "WeakMap.delete",
+                move |args| {
+                    let key = args.first().cloned().unwrap_or(Value::Undefined);
+                    let Some(addr) = object_identity(&key) else {
+                        return Value::Boolean(false);
+                    };
+                    Value::Boolean(d.borrow_mut().remove(&addr).is_some())
+                },
+            ))),
+        );
+    }
+
+    Value::Object(obj)
+}
+
+/*
+ * make_weak_set -- construct a JS WeakSet with object-identity membership.
+ *
+ * Backing store: Rc<RefCell<HashSet<usize>>>. Same identity scheme and
+ * same hazards as make_weak_map.
+ *
+ * Methods (per ECMA-262 24.4):
+ *   add(value)    -> the WeakSet itself (for chaining)
+ *   has(value)    -> boolean membership
+ *   delete(value) -> true if removed, false otherwise
+ *
+ * Optional initializer: an Array of objects. Non-Object elements skipped.
+ */
+fn make_weak_set(initial: Option<&Value>) -> Value {
+    let store: Rc<RefCell<HashSet<usize>>> = Rc::new(RefCell::new(HashSet::new()));
+
+    if let Some(Value::Object(arr)) = initial {
+        let arr_borrow = arr.borrow();
+        let elements = crate::vm::builtins::array::collect_elements_pub(&arr_borrow);
+        drop(arr_borrow);
+        let mut init_store = store.borrow_mut();
+        for el in elements {
+            if let Some(addr) = object_identity(&el) {
+                init_store.insert(addr);
+            }
+        }
+    }
+
+    let obj = Rc::new(RefCell::new(Object::new()));
+
+    // WeakSet.prototype.add -- chainable.
+    {
+        let d = Rc::clone(&store);
+        let obj_clone = Rc::clone(&obj);
+        obj.borrow_mut().set_by_str(
+            "add",
+            Value::NativeFunction(Rc::new(NativeFunction::new("WeakSet.add", move |args| {
+                let val = args.first().cloned().unwrap_or(Value::Undefined);
+                // Spec: TypeError for non-Object. No throw channel -- no-op.
+                if let Some(addr) = object_identity(&val) {
+                    d.borrow_mut().insert(addr);
+                }
+                Value::Object(Rc::clone(&obj_clone))
+            }))),
+        );
+    }
+
+    // WeakSet.prototype.has
+    {
+        let d = Rc::clone(&store);
+        obj.borrow_mut().set_by_str(
+            "has",
+            Value::NativeFunction(Rc::new(NativeFunction::new("WeakSet.has", move |args| {
+                let val = args.first().cloned().unwrap_or(Value::Undefined);
+                let Some(addr) = object_identity(&val) else {
+                    return Value::Boolean(false);
+                };
+                Value::Boolean(d.borrow().contains(&addr))
+            }))),
+        );
+    }
+
+    // WeakSet.prototype.delete
+    {
+        let d = Rc::clone(&store);
+        obj.borrow_mut().set_by_str(
+            "delete",
+            Value::NativeFunction(Rc::new(NativeFunction::new(
+                "WeakSet.delete",
+                move |args| {
+                    let val = args.first().cloned().unwrap_or(Value::Undefined);
+                    let Some(addr) = object_identity(&val) else {
+                        return Value::Boolean(false);
+                    };
+                    Value::Boolean(d.borrow_mut().remove(&addr))
+                },
+            ))),
+        );
+    }
+
+    Value::Object(obj)
+}
+
+#[cfg(test)]
+mod tests {
+    //! `WeakMap` / `WeakSet` pseudo-weak keying tests.
+    //!
+    //! WHY: These tests pin down object-identity keying for the new
+    //! `WeakMap` / `WeakSet` implementations.  The earlier stubs aliased
+    //! both to `Map` / `Set`, which silently accepted primitive keys and
+    //! used `SameValueZero`; both properties are forbidden by spec.
+    //!
+    //! Each test compiles a small script through the full pipeline
+    //! (parser -> compiler -> VM) and asserts the value left in
+    //! `window.result`.  See vm/mod.rs `run_and_get_result` for the
+    //! same helper pattern; we re-implement it locally to avoid a
+    //! cross-module dependency on a `#[cfg(test)]` helper.
+
+    use crate::bytecode::{Compiler, Constant};
+    use crate::parser::Parser;
+    use crate::parser::ast_arena::AstArena;
+    use crate::vm::Vm;
+    use crate::vm::value::Value;
+    use std::collections::HashMap as StdHashMap;
+
+    /// Compile and execute `source` against a fresh VM.
+    fn execute(source: &str) -> Value {
+        let arena = AstArena::new();
+        let parser = Parser::new(source, &arena);
+        let (ast, errors) = parser.parse();
+        assert!(errors.is_empty(), "parse errors: {errors:?}");
+        let compiler = Compiler::new();
+        // UNWRAP-OK: compile_with_children only fails for malformed AST,
+        // which our literal scripts cannot produce.
+        let (chunk, child_chunks, string_pool) = compiler
+            .compile_with_children(&ast)
+            .expect("compile failed");
+        let mut vm = Vm::new();
+        let mut str_map: StdHashMap<u32, u32> = StdHashMap::new();
+        for (compiler_id, s) in &string_pool {
+            let vm_id = vm.strings.intern(s.clone());
+            str_map.insert(*compiler_id, vm_id);
+        }
+        let child_base = vm.chunks_len();
+        for mut child in child_chunks {
+            for constant in child.constants_mut() {
+                if let Constant::String(str_id) = constant
+                    && let Some(&vm_id) = str_map.get(str_id)
+                {
+                    *str_id = vm_id;
+                }
+            }
+            vm.add_chunk(child);
+        }
+        let mut main_chunk = chunk;
+        for constant in main_chunk.constants_mut() {
+            match constant {
+                Constant::Function(idx) => *idx += child_base as u32,
+                Constant::String(str_id) => {
+                    if let Some(&vm_id) = str_map.get(str_id) {
+                        *str_id = vm_id;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let chunk_idx = vm.add_chunk(main_chunk);
+        // UNWRAP-OK: literal scripts are well-formed; a failure here
+        // would indicate the VM core regressed, not the WeakMap logic.
+        vm.execute(chunk_idx).expect("execute failed");
+        vm.global.borrow().get_by_str("result").clone()
+    }
+
+    fn as_number(v: &Value) -> f64 {
+        if let Value::Number(n) = v {
+            *n
+        } else {
+            panic!("expected number, got {v:?}")
+        }
+    }
+
+    #[test]
+    fn weakmap_set_and_get_returns_stored_value() {
+        let v = execute(
+            "var m = new WeakMap();\
+             var k = {};\
+             m.set(k, 42);\
+             window.result = m.get(k);",
+        );
+        assert!((as_number(&v) - 42.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn weakmap_has_returns_true_for_present_key() {
+        let v = execute(
+            "var m = new WeakMap();\
+             var k = {};\
+             m.set(k, 1);\
+             window.result = m.has(k) ? 1 : 0;",
+        );
+        assert!((as_number(&v) - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn weakmap_distinct_object_literals_do_not_collide() {
+        // Two `{}` literals allocate two distinct Rc objects: the
+        // pseudo-weak key (Rc::as_ptr) must differ, so has(b) is false.
+        let v = execute(
+            "var m = new WeakMap();\
+             var a = {};\
+             var b = {};\
+             m.set(a, 10);\
+             window.result = m.has(b) ? 1 : 0;",
+        );
+        assert!((as_number(&v) - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn weakmap_delete_returns_true_then_false() {
+        let v = execute(
+            "var m = new WeakMap();\
+             var k = {};\
+             m.set(k, 1);\
+             var first = m.delete(k);\
+             var second = m.delete(k);\
+             window.result = (first && !second) ? 1 : 0;",
+        );
+        assert!((as_number(&v) - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn weakmap_get_returns_undefined_for_primitive_key() {
+        // Spec: TypeError; we lack a throw channel so silently return undefined.
+        // The point is that primitive keys never accidentally hit any entry.
+        let v = execute(
+            "var m = new WeakMap();\
+             m.set(\"hello\", 1);\
+             window.result = (m.get(\"hello\") === undefined) ? 1 : 0;",
+        );
+        assert!((as_number(&v) - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn weakset_add_and_has_returns_true() {
+        let v = execute(
+            "var s = new WeakSet();\
+             var k = {};\
+             s.add(k);\
+             window.result = s.has(k) ? 1 : 0;",
+        );
+        assert!((as_number(&v) - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn weakset_distinct_object_literals_do_not_collide() {
+        let v = execute(
+            "var s = new WeakSet();\
+             var a = {};\
+             var b = {};\
+             s.add(a);\
+             window.result = s.has(b) ? 1 : 0;",
+        );
+        assert!((as_number(&v) - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn weakset_delete_returns_true_then_false() {
+        let v = execute(
+            "var s = new WeakSet();\
+             var k = {};\
+             s.add(k);\
+             var first = s.delete(k);\
+             var second = s.delete(k);\
+             window.result = (first && !second) ? 1 : 0;",
+        );
+        assert!((as_number(&v) - 1.0).abs() < f64::EPSILON);
+    }
 }
