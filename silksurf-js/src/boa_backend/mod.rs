@@ -33,7 +33,7 @@ use boa_engine::{
 };
 use boa_runtime::Console;
 
-/// Production JavaScript execution context backed by boa_engine.
+/// Production JavaScript execution context backed by `boa_engine`.
 ///
 /// Create with `SilkContext::new()`, then call `eval()` for each script chunk.
 /// Call `run_pending_jobs()` after all scripts to drain Promise microtasks.
@@ -48,10 +48,11 @@ impl Default for SilkContext {
 }
 
 impl SilkContext {
-    /// Build a context with SilkSurf host objects pre-installed.
+    /// Build a context with `SilkSurf` host objects pre-installed.
     ///
-    /// Panics only if boa_engine itself is in an inconsistent state (should
+    /// Panics only if `boa_engine` itself is in an inconsistent state (should
     /// never happen on a freshly-constructed Context).
+    #[must_use]
     pub fn new() -> Self {
         let mut ctx = Context::default();
 
@@ -68,13 +69,12 @@ impl SilkContext {
             js_string!("setTimeout"),
             2,
             NativeFunction::from_fn_ptr(|_this, args, ctx| {
-                if let Some(cb) = args.first() {
-                    if let Some(obj) = cb.as_object() {
-                        if obj.is_callable() {
-                            // Best-effort: ignore the return value and any error.
-                            let _ = obj.call(&JsValue::undefined(), &[], ctx);
-                        }
-                    }
+                if let Some(cb) = args.first()
+                    && let Some(obj) = cb.as_object()
+                    && obj.is_callable()
+                {
+                    // Best-effort: ignore the return value and any error.
+                    let _ = obj.call(&JsValue::undefined(), &[], ctx);
                 }
                 Ok(JsValue::from(0u32))
             }),
@@ -188,7 +188,7 @@ impl SilkContext {
     /// Evaluate a JS source string and drain the microtask queue.
     ///
     /// Returns `Ok(())` on success. Returns `Err(message)` on parse or runtime
-    /// error; the message is the boa_engine JsError Display string.
+    /// error; the message is the `boa_engine` `JsError` Display string.
     pub fn eval(&mut self, script: &str) -> Result<(), String> {
         match self.ctx.eval(Source::from_bytes(script.as_bytes())) {
             Ok(_) => {

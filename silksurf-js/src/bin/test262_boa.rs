@@ -290,13 +290,13 @@ impl HarnessCache {
         if let Ok(entries) = std::fs::read_dir(harness_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().is_some_and(|e| e == "js") {
-                    if let (Some(name), Ok(content)) = (
+                if path.extension().is_some_and(|e| e == "js")
+                    && let (Some(name), Ok(content)) = (
                         path.file_name().and_then(|n| n.to_str()),
                         std::fs::read_to_string(&path),
-                    ) {
-                        files.insert(name.to_string(), content);
-                    }
+                    )
+                {
+                    files.insert(name.to_string(), content);
                 }
             }
         }
@@ -709,7 +709,7 @@ fn main() {
                 }
             }
         }
-        if done % report_every == 0 || done == total_files {
+        if done.is_multiple_of(report_every) || done == total_files {
             let pct = done as f64 / total_files as f64 * 100.0;
             eprint!(
                 "\r  {done}/{total_files} ({pct:.0}%)  pass={} fail={} skip={}   ",

@@ -172,28 +172,24 @@ impl ApplicationHandler for WinitApp {
 
                 let pixels = (self.render_fn)(w, h);
 
-                if let Some(surface) = &mut self.surface {
-                    if let (Some(nw), Some(nh)) =
-                        (NonZeroU32::new(w), NonZeroU32::new(h))
-                    {
-                        let _ = surface.resize(nw, nh);
-                        if let Ok(mut buf) = surface.buffer_mut() {
-                            let copy_len = buf.len().min(pixels.len());
-                            buf[..copy_len].copy_from_slice(&pixels[..copy_len]);
-                            let _ = buf.present();
-                        }
+                if let Some(surface) = &mut self.surface
+                    && let (Some(nw), Some(nh)) = (NonZeroU32::new(w), NonZeroU32::new(h))
+                {
+                    let _ = surface.resize(nw, nh);
+                    if let Ok(mut buf) = surface.buffer_mut() {
+                        let copy_len = buf.len().min(pixels.len());
+                        buf[..copy_len].copy_from_slice(&pixels[..copy_len]);
+                        let _ = buf.present();
                     }
                 }
             }
 
             WindowEvent::Resized(size) => {
-                if let Some(surface) = &mut self.surface {
-                    if let (Some(nw), Some(nh)) = (
-                        NonZeroU32::new(size.width),
-                        NonZeroU32::new(size.height),
-                    ) {
-                        let _ = surface.resize(nw, nh);
-                    }
+                if let Some(surface) = &mut self.surface
+                    && let (Some(nw), Some(nh)) =
+                        (NonZeroU32::new(size.width), NonZeroU32::new(size.height))
+                {
+                    let _ = surface.resize(nw, nh);
                 }
                 if let Some(window) = &self.window {
                     window.request_redraw();

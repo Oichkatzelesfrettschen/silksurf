@@ -849,7 +849,7 @@ fn sk_paint(color: Color) -> Paint<'static> {
 /// control-point offset for a quarter-circle of any radius.
 fn rounded_rect_path(rect: Rect, radii: [f32; 4]) -> Option<tiny_skia::Path> {
     // Kappa: cubic bezier control-point factor for quarter-circle approximation.
-    const K: f32 = 0.5522847498;
+    const K: f32 = 0.552_284_8;
 
     let x = rect.x;
     let y = rect.y;
