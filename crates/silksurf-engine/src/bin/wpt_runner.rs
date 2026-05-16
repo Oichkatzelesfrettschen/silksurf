@@ -237,6 +237,15 @@ fn run_one(path: &Path) -> Outcome {
         "css_class_selector" => check_css_class_selector(&parsed.dom, parsed.document, &source),
         "css_id_selector" => check_css_id_selector(&parsed.dom, parsed.document, &source),
         "css_type_selector" => check_css_type_selector(&parsed.dom, parsed.document, &source),
+        "css_pseudo_nth_child" => {
+            check_css_pseudo_nth_child(&parsed.dom, parsed.document, &source)
+        }
+        "css_pseudo_not" => check_css_pseudo_not(&parsed.dom, parsed.document, &source),
+        "css_attribute_selector" => {
+            check_css_attribute_selector(&parsed.dom, parsed.document, &source)
+        }
+        "html_semantic_sections" => check_html_semantic_sections(&parsed.dom, parsed.document),
+        "css_flexbox_display" => check_css_flexbox_display(&parsed.dom, parsed.document, &source),
         other => Outcome::Skip(format!("no check registered for fixture stem '{other}'")),
     }
 }
@@ -711,6 +720,160 @@ fn check_css_type_selector(dom: &Dom, document: NodeId, source: &str) -> Outcome
     } else {
         Outcome::Fail("'p' did not match <p>".to_string())
     }
+}
+
+fn check_css_pseudo_nth_child(dom: &Dom, document: NodeId, source: &str) -> Outcome {
+    let _css = match extract_inline_style(source) {
+        Some(c) => c,
+        None => return Outcome::Skip("no <style> block found".to_string()),
+    };
+    let body = match body_of(dom, document) {
+        Some(b) => b,
+        None => return Outcome::Fail("missing body".to_string()),
+    };
+    let ul = match first_element_child_named(dom, body, "ul") {
+        Some(u) => u,
+        None => return Outcome::Fail("missing <ul>".to_string()),
+    };
+    let items = element_children(dom, ul);
+    if items.len() < 2 {
+        return Outcome::Fail(format!("expected >= 2 <li>, got {}", items.len()));
+    }
+    // The second <li> must have class "target".
+    let second = items[1];
+    let selector = match parse_selector(dom, "li:nth-child(2)") {
+        Some(s) => s,
+        None => return Outcome::Fail("could not parse 'li:nth-child(2)'".to_string()),
+    };
+    if matches_selector_list(dom, second, &selector) {
+        Outcome::Pass
+    } else {
+        Outcome::Fail("'li:nth-child(2)' did not match second <li>".to_string())
+    }
+}
+
+fn check_css_pseudo_not(dom: &Dom, document: NodeId, source: &str) -> Outcome {
+    let _css = match extract_inline_style(source) {
+        Some(c) => c,
+        None => return Outcome::Skip("no <style> block found".to_string()),
+    };
+    let body = match body_of(dom, document) {
+        Some(b) => b,
+        None => return Outcome::Fail("missing body".to_string()),
+    };
+    let divs = element_children(dom, body);
+    if divs.len() < 2 {
+        return Outcome::Fail(format!("expected 2 divs, got {}", divs.len()));
+    }
+    let keep_div = divs[0];
+    let skip_div = divs[1];
+    let sel_not_skip = match parse_selector(dom, "div:not(.skip)") {
+        Some(s) => s,
+        None => return Outcome::Fail("could not parse 'div:not(.skip)'".to_string()),
+    };
+    if !matches_selector_list(dom, keep_div, &sel_not_skip) {
+        return Outcome::Fail("'div:not(.skip)' did not match .keep div".to_string());
+    }
+    if matches_selector_list(dom, skip_div, &sel_not_skip) {
+        return Outcome::Fail("'div:not(.skip)' incorrectly matched .skip div".to_string());
+    }
+    Outcome::Pass
+}
+
+fn check_css_attribute_selector(dom: &Dom, document: NodeId, source: &str) -> Outcome {
+    let _css = match extract_inline_style(source) {
+        Some(c) => c,
+        None => return Outcome::Skip("no <style> block found".to_string()),
+    };
+    let body = match body_of(dom, document) {
+        Some(b) => b,
+        None => return Outcome::Fail("missing body".to_string()),
+    };
+    let divs = element_children(dom, body);
+    if divs.is_empty() {
+        return Outcome::Fail("no div children of body".to_string());
+    }
+    let attr_div = divs[0];
+    let selector = match parse_selector(dom, "[data-role]") {
+        Some(s) => s,
+        None => return Outcome::Fail("could not parse '[data-role]'".to_string()),
+    };
+    if matches_selector_list(dom, attr_div, &selector) {
+        Outcome::Pass
+    } else {
+        Outcome::Fail("'[data-role]' did not match div with data-role attribute".to_string())
+    }
+}
+
+fn check_html_semantic_sections(dom: &Dom, document: NodeId) -> Outcome {
+    let body = match body_of(dom, document) {
+        Some(b) => b,
+        None => return Outcome::Fail("missing body".to_string()),
+    };
+    let main_el = match first_element_child_named(dom, body, "main") {
+        Some(m) => m,
+        None => return Outcome::Fail("missing <main>".to_string()),
+    };
+    if first_element_child_named(dom, main_el, "nav").is_none() {
+        return Outcome::Fail("missing <nav> inside <main>".to_string());
+    }
+    let section = match first_element_child_named(dom, main_el, "section") {
+        Some(s) => s,
+        None => return Outcome::Fail("missing <section> inside <main>".to_string()),
+    };
+    let article = match first_element_child_named(dom, section, "article") {
+        Some(a) => a,
+        None => return Outcome::Fail("missing <article> inside <section>".to_string()),
+    };
+    if first_element_child_named(dom, article, "h1").is_none() {
+        return Outcome::Fail("missing <h1> inside <article>".to_string());
+    }
+    Outcome::Pass
+}
+
+fn check_css_flexbox_display(dom: &Dom, document: NodeId, source: &str) -> Outcome {
+    let css = match extract_inline_style(source) {
+        Some(c) => c,
+        None => return Outcome::Skip("no <style> block found".to_string()),
+    };
+    let stylesheet = match parse_stylesheet(&css) {
+        Ok(s) => s,
+        Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
+    };
+    if stylesheet.rules.len() < 2 {
+        return Outcome::Fail(format!(
+            "expected >= 2 rules (.row, .col), got {}",
+            stylesheet.rules.len()
+        ));
+    }
+    let body = match body_of(dom, document) {
+        Some(b) => b,
+        None => return Outcome::Fail("missing body".to_string()),
+    };
+    let row_div = match first_element_child_named(dom, body, "div") {
+        Some(d) => d,
+        None => return Outcome::Fail("missing row div".to_string()),
+    };
+    // Verify the .row div exists in the DOM with its class attribute.
+    let row_sel = match parse_selector(dom, ".row") {
+        Some(s) => s,
+        None => return Outcome::Fail("could not parse '.row'".to_string()),
+    };
+    if !matches_selector_list(dom, row_div, &row_sel) {
+        return Outcome::Fail("'.row' did not match outermost div".to_string());
+    }
+    let col_sel = match parse_selector(dom, ".col") {
+        Some(s) => s,
+        None => return Outcome::Fail("could not parse '.col'".to_string()),
+    };
+    let col_div = match first_element_child_named(dom, row_div, "div") {
+        Some(d) => d,
+        None => return Outcome::Fail("missing col div inside row".to_string()),
+    };
+    if !matches_selector_list(dom, col_div, &col_sel) {
+        return Outcome::Fail("'.col' did not match inner div".to_string());
+    }
+    Outcome::Pass
 }
 
 // -------------------------------------------------------------------------
