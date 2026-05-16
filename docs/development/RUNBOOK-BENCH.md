@@ -50,33 +50,44 @@ Output goes to `target/criterion/` with HTML reports.
 
 ## Baseline tracking
 
-`perf/baseline.json` is the committed snapshot used by the guardrail
-script. The schema is currently informal; a formal JSON schema lands in
-the SNAZZY-WAFFLE roadmap P3.S2.
+`perf/baseline.json` is a committed snapshot used for high-level reference.
+`perf/history.ndjson` is the append-only rolling history (one record per run,
+conforming to `perf/schema.json`). The regression gate reads from history.ndjson,
+not baseline.json.
 
 ```sh
-make perf-baselines              # regenerate baseline (overwrites)
-make perf-guardrails             # check current vs baseline
-perf/run_baselines.sh            # equivalent to `make perf-baselines`
+make perf-baselines              # run bench suite and append to history.ndjson
+make perf-guardrails             # check guardrail thresholds (binary size etc.)
+scripts/check_perf_regression.sh # compare last two history.ndjson rows (5% gate)
 ```
 
-A rolling-history file (`perf/history.ndjson`, append-only one row per
-run with git SHA + timestamp + metrics) is planned in P3.S2 so trend
-analysis is possible. Until then the baseline is a single-snapshot
-pass/fail check.
+The bench binary now supports `--emit json` which writes one NDJSON record to
+stdout. `make perf-baselines` (via `perf/run_baselines.sh`) pipes this into
+`perf/history.ndjson` automatically. To append a single record manually:
+
+```sh
+cargo run --release -p silksurf-engine --bin bench_pipeline -- --emit json \
+  >> perf/history.ndjson
+```
+
+Metric mapping (canonical definition, see `emit_history_record` in bench_pipeline.rs):
+
+| Schema key | Source | Description |
+|---|---|---|
+| `fused_pipeline_us` | `ws_per` | FusedWorkspace steady-state, iter 0 excluded |
+| `css_cache_hit_us` | `cascade_only_per` | `ws_per - table.rebuild()`, pre-parsed CSS |
+| `full_render_us` | `fused_per + raster_reuse_per` | Cold fused + steady-state rasterize |
 
 ## Local cron
 
 For continuous tracking, install a personal cron:
 
 ```cron
-# Append a perf data point every night at 03:00.
-0 3 * * * cd /path/to/silksurf && /usr/bin/cargo run --release --quiet \
-    -p silksurf-engine --bin bench_pipeline >> ~/.silksurf-bench.log 2>&1
+# Append a perf history record every night at 03:00.
+0 3 * * * cd /path/to/silksurf && \
+  cargo run --release --quiet -p silksurf-engine --bin bench_pipeline -- \
+  --emit json >> perf/history.ndjson 2>/dev/null
 ```
-
-The format will stabilize once the JSON schema lands; until then the log
-contains human-readable fused-pipeline output.
 
 ## What can regress 9.5 us
 
