@@ -23,87 +23,87 @@ pub enum Opcode {
     // ========================================
     // Load/Store (0x00-0x0F)
     // ========================================
-    /// Load constant: r[dst] = constants[idx]
+    /// Load constant: r\[dst\] = constants\[idx\]
     LoadConst = 0x00,
-    /// Load true: r[dst] = true
+    /// Load true: r\[dst\] = true
     LoadTrue = 0x01,
-    /// Load false: r[dst] = false
+    /// Load false: r\[dst\] = false
     LoadFalse = 0x02,
-    /// Load null: r[dst] = null
+    /// Load null: r\[dst\] = null
     LoadNull = 0x03,
-    /// Load undefined: r[dst] = undefined
+    /// Load undefined: r\[dst\] = undefined
     LoadUndefined = 0x04,
-    /// Move: r[dst] = r[src]
+    /// Move: r\[dst\] = r\[src\]
     Mov = 0x05,
-    /// Load small integer: r[dst] = imm16 (sign-extended)
+    /// Load small integer: r\[dst\] = imm16 (sign-extended)
     LoadSmi = 0x06,
-    /// Load zero: r[dst] = 0
+    /// Load zero: r\[dst\] = 0
     LoadZero = 0x07,
-    /// Load one: r[dst] = 1
+    /// Load one: r\[dst\] = 1
     LoadOne = 0x08,
-    /// Load minus one: r[dst] = -1
+    /// Load minus one: r\[dst\] = -1
     LoadMinusOne = 0x09,
 
     // ========================================
     // Arithmetic (0x10-0x1F)
     // ========================================
-    /// Add: r[dst] = r[src1] + r[src2]
+    /// Add: r\[dst\] = r\[src1\] + r\[src2\]
     Add = 0x10,
-    /// Subtract: r[dst] = r[src1] - r[src2]
+    /// Subtract: r\[dst\] = r\[src1\] - r\[src2\]
     Sub = 0x11,
-    /// Multiply: r[dst] = r[src1] * r[src2]
+    /// Multiply: r\[dst\] = r\[src1\] * r\[src2\]
     Mul = 0x12,
-    /// Divide: r[dst] = r[src1] / r[src2]
+    /// Divide: r\[dst\] = r\[src1\] / r\[src2\]
     Div = 0x13,
-    /// Modulo: r[dst] = r[src1] % r[src2]
+    /// Modulo: r\[dst\] = r\[src1\] % r\[src2\]
     Mod = 0x14,
-    /// Exponentiation: r[dst] = r[src1] ** r[src2]
+    /// Exponentiation: r\[dst\] = r\[src1\] ** r\[src2\]
     Pow = 0x15,
-    /// Negate: r[dst] = -r[src]
+    /// Negate: r\[dst\] = -r\[src\]
     Neg = 0x16,
-    /// Increment: r[dst] = r[src] + 1
+    /// Increment: r\[dst\] = r\[src\] + 1
     Inc = 0x17,
-    /// Decrement: r[dst] = r[src] - 1
+    /// Decrement: r\[dst\] = r\[src\] - 1
     Dec = 0x18,
 
     // ========================================
     // Comparison (0x20-0x2F)
     // ========================================
-    /// Loose equality: r[dst] = r[src1] == r[src2]
+    /// Loose equality: r\[dst\] = r\[src1\] == r\[src2\]
     Eq = 0x20,
-    /// Strict equality: r[dst] = r[src1] === r[src2]
+    /// Strict equality: r\[dst\] = r\[src1\] === r\[src2\]
     StrictEq = 0x21,
-    /// Loose inequality: r[dst] = r[src1] != r[src2]
+    /// Loose inequality: r\[dst\] = r\[src1\] != r\[src2\]
     Ne = 0x22,
-    /// Strict inequality: r[dst] = r[src1] !== r[src2]
+    /// Strict inequality: r\[dst\] = r\[src1\] !== r\[src2\]
     StrictNe = 0x23,
-    /// Less than: r[dst] = r[src1] < r[src2]
+    /// Less than: r\[dst\] = r\[src1\] < r\[src2\]
     Lt = 0x24,
-    /// Less than or equal: r[dst] = r[src1] <= r[src2]
+    /// Less than or equal: r\[dst\] = r\[src1\] <= r\[src2\]
     Le = 0x25,
-    /// Greater than: r[dst] = r[src1] > r[src2]
+    /// Greater than: r\[dst\] = r\[src1\] > r\[src2\]
     Gt = 0x26,
-    /// Greater than or equal: r[dst] = r[src1] >= r[src2]
+    /// Greater than or equal: r\[dst\] = r\[src1\] >= r\[src2\]
     Ge = 0x27,
 
     // ========================================
     // Logical/Bitwise (0x30-0x3F)
     // ========================================
-    /// Logical NOT: r[dst] = !r[src]
+    /// Logical NOT: r\[dst\] = !r\[src\]
     Not = 0x30,
-    /// Bitwise NOT: r[dst] = ~r[src]
+    /// Bitwise NOT: r\[dst\] = ~r\[src\]
     BitNot = 0x31,
-    /// Bitwise AND: r[dst] = r[src1] & r[src2]
+    /// Bitwise AND: r\[dst\] = r\[src1\] & r\[src2\]
     BitAnd = 0x32,
-    /// Bitwise OR: r[dst] = r[src1] | r[src2]
+    /// Bitwise OR: r\[dst\] = r\[src1\] | r\[src2\]
     BitOr = 0x33,
-    /// Bitwise XOR: r[dst] = r[src1] ^ r[src2]
+    /// Bitwise XOR: r\[dst\] = r\[src1\] ^ r\[src2\]
     BitXor = 0x34,
-    /// Shift left: r[dst] = r[src1] << r[src2]
+    /// Shift left: r\[dst\] = r\[src1\] << r\[src2\]
     Shl = 0x35,
-    /// Signed right shift: r[dst] = r[src1] >> r[src2]
+    /// Signed right shift: r\[dst\] = r\[src1\] >> r\[src2\]
     Shr = 0x36,
-    /// Unsigned right shift: r[dst] = r[src1] >>> r[src2]
+    /// Unsigned right shift: r\[dst\] = r\[src1\] >>> r\[src2\]
     Ushr = 0x37,
 
     // ========================================
@@ -111,30 +111,30 @@ pub enum Opcode {
     // ========================================
     /// Unconditional jump
     Jmp = 0x40,
-    /// Jump if truthy: if r[cond] then pc += offset
+    /// Jump if truthy: if r\[cond\] then pc += offset
     JmpTrue = 0x41,
-    /// Jump if falsy: if !r[cond] then pc += offset
+    /// Jump if falsy: if !r\[cond\] then pc += offset
     JmpFalse = 0x42,
-    /// Jump if nullish: if r[cond] == null || r[cond] == undefined
+    /// Jump if nullish: if r\[cond\] == null || r\[cond\] == undefined
     JmpNullish = 0x43,
     /// Jump if not nullish
     JmpNotNullish = 0x44,
-    /// Function call: r[dst] = r[callee](r[base]..r[base+argc-1])
+    /// Function call: r\[dst\] = r\[callee\](r\[base\]..r\[base+argc-1\])
     Call = 0x45,
-    /// Method call: r[dst] = r[obj].name(args)
+    /// Method call: r\[dst\] = r\[obj\].name(args)
     CallMethod = 0x46,
     /// Tail call optimization
     TailCall = 0x47,
-    /// Return value: return r[src]
+    /// Return value: return r\[src\]
     Ret = 0x48,
     /// Return undefined
     RetUndefined = 0x49,
-    /// Throw exception: throw r[src]
+    /// Throw exception: throw r\[src\]
     Throw = 0x4A,
-    /// Async return: return Promise.resolve(r[src]) from an async function
+    /// Async return: return Promise.resolve(r\[src\]) from an async function
     ///
     /// WHY: An async function's caller expects a Promise, not the raw return
-    /// value. `AsyncReturn` wraps r[src] in an already-fulfilled Promise and
+    /// value. `AsyncReturn` wraps r\[src\] in an already-fulfilled Promise and
     /// pops the call frame just like Ret. Emitted by the compiler at every
     /// return point of an async function body (including the implicit return
     /// at the end of the body, which uses `LoadUndefined` into a temp reg then
@@ -144,33 +144,33 @@ pub enum Opcode {
     // ========================================
     // Property Access (0x50-0x5F)
     // ========================================
-    /// Get property: r[dst] = r[obj].name (inline cache slot)
+    /// Get property: r\[dst\] = r\[obj\].name (inline cache slot)
     GetProp = 0x50,
-    /// Set property: r[obj].name = r[val] (inline cache slot)
+    /// Set property: r\[obj\].name = r\[val\] (inline cache slot)
     SetProp = 0x51,
-    /// Get element: r[dst] = r[obj][r[key]]
+    /// Get element: r\[dst\] = r\[obj\]\[r\[key\]\]
     GetElem = 0x52,
-    /// Set element: r[obj][r[key]] = r[val]
+    /// Set element: r\[obj\]\[r\[key\]\] = r\[val\]
     SetElem = 0x53,
-    /// Delete property: r[dst] = delete r[obj].name
+    /// Delete property: r\[dst\] = delete r\[obj\].name
     DeleteProp = 0x54,
-    /// Delete element: r[dst] = delete r[obj][r[key]]
+    /// Delete element: r\[dst\] = delete r\[obj\]\[r\[key\]\]
     DeleteElem = 0x55,
-    /// In operator: r[dst] = r[key] in r[obj]
+    /// In operator: r\[dst\] = r\[key\] in r\[obj\]
     In = 0x56,
-    /// Instanceof: r[dst] = r[obj] instanceof r[ctor]
+    /// Instanceof: r\[dst\] = r\[obj\] instanceof r\[ctor\]
     Instanceof = 0x57,
-    /// Typeof: r[dst] = typeof r[src]
+    /// Typeof: r\[dst\] = typeof r\[src\]
     Typeof = 0x58,
 
     // ========================================
     // Object/Array Creation (0x60-0x6F)
     // ========================================
-    /// Create empty object: r[dst] = {}
+    /// Create empty object: r\[dst\] = {}
     NewObject = 0x60,
-    /// Create array: r[dst] = new Array(len)
+    /// Create array: r\[dst\] = new Array(len)
     NewArray = 0x61,
-    /// Create function: r[dst] = `Function(func_idx)`
+    /// Create function: r\[dst\] = `Function(func_idx)`
     NewFunction = 0x62,
     /// Create arrow function
     NewArrow = 0x63,
@@ -180,7 +180,7 @@ pub enum Opcode {
     NewAsync = 0x65,
     /// Create class
     NewClass = 0x66,
-    /// Create `RegExp`: r[dst] = /pattern/flags
+    /// Create `RegExp`: r\[dst\] = /pattern/flags
     NewRegExp = 0x67,
     /// Define property with attributes
     DefineProperty = 0x68,
@@ -188,25 +188,25 @@ pub enum Opcode {
     DefineGetter = 0x69,
     /// Define setter
     DefineSetter = 0x6A,
-    /// Spread into array: [...r[src]]
+    /// Spread into array: \[...r\[src\]\]
     SpreadArray = 0x6B,
-    /// Spread into call: f(...r[src])
+    /// Spread into call: f(...r\[src\])
     SpreadCall = 0x6C,
 
     // ========================================
     // Scope/Environment (0x70-0x7F)
     // ========================================
-    /// Get local: r[dst] = locals[slot]
+    /// Get local: r\[dst\] = locals\[slot\]
     GetLocal = 0x70,
-    /// Set local: locals[slot] = r[src]
+    /// Set local: locals\[slot\] = r\[src\]
     SetLocal = 0x71,
-    /// Get captured variable: r[dst] = captures[depth][slot]
+    /// Get captured variable: r\[dst\] = captures\[depth\]\[slot\]
     GetCapture = 0x72,
-    /// Set captured variable: captures[depth][slot] = r[src]
+    /// Set captured variable: captures\[depth\]\[slot\] = r\[src\]
     SetCapture = 0x73,
-    /// Get global: r[dst] = global.name
+    /// Get global: r\[dst\] = global.name
     GetGlobal = 0x74,
-    /// Set global: global.name = r[src]
+    /// Set global: global.name = r\[src\]
     SetGlobal = 0x75,
     /// Create binding (TDZ-aware)
     CreateBinding = 0x76,
@@ -225,21 +225,21 @@ pub enum Opcode {
     // ========================================
     // Iterators/Generators (0x80-0x8F)
     // ========================================
-    /// Get iterator: r[dst] = r[obj][Symbol.iterator]()
+    /// Get iterator: r\[dst\] = r\[obj\]\[Symbol.iterator\]()
     GetIterator = 0x80,
-    /// Get async iterator: r[dst] = r[obj][Symbol.asyncIterator]()
+    /// Get async iterator: r\[dst\] = r\[obj\]\[Symbol.asyncIterator\]()
     GetAsyncIterator = 0x81,
-    /// Iterator next: r[dst] = r[iter].`next()`
+    /// Iterator next: r\[dst\] = r\[iter\].`next()`
     IterNext = 0x82,
-    /// Check iterator done: r[dst] = r[result].done
+    /// Check iterator done: r\[dst\] = r\[result\].done
     IterDone = 0x83,
-    /// Get iterator value: r[dst] = r[result].value
+    /// Get iterator value: r\[dst\] = r\[result\].value
     IterValue = 0x84,
     /// Close iterator
     IterClose = 0x85,
     /// Yield value
     Yield = 0x86,
-    /// Yield delegate: yield* r[src]
+    /// Yield delegate: yield* r\[src\]
     YieldStar = 0x87,
     /// Await promise
     Await = 0x88,
@@ -257,7 +257,7 @@ pub enum Opcode {
     EnterFinally = 0x93,
     /// Rethrow exception
     Rethrow = 0x94,
-    /// Get exception: r[dst] = current exception
+    /// Get exception: r\[dst\] = current exception
     GetException = 0x95,
 
     // ========================================

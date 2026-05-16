@@ -2,7 +2,7 @@
 //!
 //! WHY: Wall-clock time and OS PRNG state make scheduling and randomized
 //! tests bit-identical only by accident. The two types in this module --
-//! [`Clock`] and [`Rng`] -- give the test author full control over both
+//! `Clock` and `Rng` -- give the test author full control over both
 //! axes so failures reproduce on any host, on any day, in any order.
 //!
 //! Both types are intentionally minimal: no allocator, no threads, no

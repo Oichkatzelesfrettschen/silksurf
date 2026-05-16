@@ -40,6 +40,7 @@ use rustc_hash::FxHashMap;
 use silksurf_css::{Color, ComputedStyle};
 use silksurf_dom::{Dom, NodeId, NodeKind};
 use silksurf_layout::{LayoutTree, Rect};
+use tiny_skia::{FillRule, Paint, PathBuilder, PixmapMut, Transform};
 
 /// Type-batched rasterization (feature "batched-raster").
 ///
@@ -74,6 +75,22 @@ pub enum DisplayItem {
         rect: Rect,
         node: NodeId,
         text_len: u32,
+        /// Shaped text content (UTF-8). Carried for glyph rasterization in
+        /// the tiny-skia path; also available for accessibility consumers.
+        text: String,
+        /// Font size in pixels, from the computed style at display list build
+        /// time. Required by cosmic-text shaping in rasterize_skia_into.
+        font_size: f32,
+        color: Color,
+    },
+    /// Anti-aliased rounded rectangle.
+    ///
+    /// `radii` is `[top-left, top-right, bottom-right, bottom-left]` corner
+    /// radii in CSS clockwise order. Scalar rasterizers fall back to a plain
+    /// `fill_rect`; the tiny-skia path renders anti-aliased cubic bezier arcs.
+    RoundedRect {
+        rect: Rect,
+        radii: [f32; 4],
         color: Color,
     },
 }
@@ -120,14 +137,20 @@ fn build_display_list_for_box(
                 }
                 if let Ok(node) = dom.node(node_id) {
                     if let NodeKind::Text { .. } = node.kind() {
-                        let text_len = match node.kind() {
-                            NodeKind::Text { text } => text.len() as u32,
-                            _ => 0,
+                        let (text_len, text_content) = match node.kind() {
+                            NodeKind::Text { text } => (text.len() as u32, text.to_string()),
+                            _ => (0, String::new()),
+                        };
+                        let font_size_px = match style.font_size {
+                            silksurf_css::Length::Px(px) => px,
+                            _ => 16.0,
                         };
                         list.items.push(DisplayItem::Text {
                             rect: layout.dimensions().content,
                             node: node_id,
                             text_len,
+                            text: text_content,
+                            font_size: font_size_px,
                             color: style.color,
                         });
                     }
@@ -182,6 +205,9 @@ pub fn rasterize_damage(
             DisplayItem::Text { rect, color, .. } => {
                 fill_rect(&mut buffer, width, height, *rect, *color);
             }
+            DisplayItem::RoundedRect { rect, color, .. } => {
+                fill_rect(&mut buffer, width, height, *rect, *color);
+            }
         }
     }
     buffer
@@ -191,6 +217,7 @@ fn item_rect(item: &DisplayItem) -> Rect {
     match item {
         DisplayItem::SolidColor { rect, .. } => *rect,
         DisplayItem::Text { rect, .. } => *rect,
+        DisplayItem::RoundedRect { rect, .. } => *rect,
     }
 }
 
@@ -661,6 +688,7 @@ pub fn rasterize_parallel_into(
             let color = match item {
                 DisplayItem::SolidColor { color, .. } => color,
                 DisplayItem::Text { color, .. } => color,
+                DisplayItem::RoundedRect { color, .. } => color,
             };
 
             // Clip to tile bounds
@@ -722,4 +750,172 @@ pub fn rasterize_parallel(
     let mut buffer = Vec::new();
     rasterize_parallel_into(display_list, width, height, tile_size, &mut buffer);
     buffer
+}
+
+// ============================================================================
+// tiny-skia anti-aliased rasterization path
+// ============================================================================
+
+/// Rasterize a display list into a new RGBA8 buffer using tiny-skia.
+///
+/// Output pixels are premultiplied RGBA8, matching `PixmapMut` conventions.
+/// For fully-opaque colors (alpha == 255) this is identical to straight RGBA.
+pub fn rasterize_skia(display_list: &DisplayList, width: u32, height: u32) -> Vec<u8> {
+    let mut buf = Vec::new();
+    rasterize_skia_into(display_list, width, height, &mut buf);
+    buf
+}
+
+/// Rasterize a display list into a caller-owned buffer using tiny-skia.
+///
+/// Resizes `buf` only when `width * height * 4` does not match the current
+/// length, then resets to an opaque white background before painting.
+pub fn rasterize_skia_into(display_list: &DisplayList, width: u32, height: u32, buf: &mut Vec<u8>) {
+    let required = (width * height * 4) as usize;
+    if buf.len() != required {
+        buf.resize(required, 0xffu8);
+    }
+    // White, fully-opaque background. In premultiplied RGBA8 this is
+    // [255, 255, 255, 255], identical to straight RGBA for alpha = 255.
+    buf.fill(0xffu8);
+
+    debug_assert_eq!(
+        buf.len(),
+        required,
+        "skia buffer length mismatch after resize"
+    );
+
+    let slice = buf.as_mut_slice();
+    let Some(mut pixmap) = PixmapMut::from_bytes(slice, width, height) else {
+        return;
+    };
+
+    for item in &display_list.items {
+        match item {
+            DisplayItem::SolidColor { rect, color } => {
+                let Some(sk_r) = sk_rect(*rect) else {
+                    continue;
+                };
+                let paint = sk_paint(*color);
+                pixmap.fill_rect(sk_r, &paint, Transform::identity(), None);
+            }
+            DisplayItem::RoundedRect { rect, radii, color } => {
+                let Some(path) = rounded_rect_path(*rect, *radii) else {
+                    continue;
+                };
+                let paint = sk_paint(*color);
+                pixmap.fill_path(
+                    &path,
+                    &paint,
+                    FillRule::Winding,
+                    Transform::identity(),
+                    None,
+                );
+            }
+            DisplayItem::Text {
+                rect,
+                text,
+                font_size,
+                color,
+                ..
+            } => {
+                silksurf_text::rasterize_glyphs(
+                    text,
+                    *font_size,
+                    *color,
+                    &mut pixmap,
+                    (rect.x, rect.y),
+                );
+            }
+        }
+    }
+}
+
+/// Convert a layout `Rect` to a tiny-skia `Rect`. Returns `None` for
+/// degenerate rects (zero or negative dimension).
+fn sk_rect(rect: Rect) -> Option<tiny_skia::Rect> {
+    tiny_skia::Rect::from_xywh(rect.x, rect.y, rect.width, rect.height)
+}
+
+/// Build a tiny-skia `Paint` from a `Color`. Anti-aliasing is always on.
+fn sk_paint(color: Color) -> Paint<'static> {
+    let mut paint = Paint::default();
+    paint.set_color_rgba8(color.r, color.g, color.b, color.a);
+    paint.anti_alias = true;
+    paint
+}
+
+/// Construct an anti-aliased rounded rectangle path using cubic bezier arcs.
+///
+/// `radii` is `[top-left, top-right, bottom-right, bottom-left]` in CSS
+/// clockwise order. Each radius is clamped to half the shorter dimension to
+/// prevent arc overlap. Returns `None` only if the `PathBuilder` produces an
+/// empty path (unreachable for non-degenerate input).
+///
+/// Bezier approximation: Kappa = 4/3 * tan(pi/8) ~= 0.5522847498 gives the
+/// control-point offset for a quarter-circle of any radius.
+fn rounded_rect_path(rect: Rect, radii: [f32; 4]) -> Option<tiny_skia::Path> {
+    // Kappa: cubic bezier control-point factor for quarter-circle approximation.
+    const K: f32 = 0.552_284_8;
+
+    let x = rect.x;
+    let y = rect.y;
+    let w = rect.width;
+    let h = rect.height;
+
+    // Clamp every radius so no two adjacent arcs overlap.
+    let max_r = (w * 0.5).min(h * 0.5).max(0.0);
+    let [r_tl, r_tr, r_br, r_bl] = radii.map(|r| r.min(max_r).max(0.0));
+
+    let mut pb = PathBuilder::new();
+
+    // Begin at the end of the top-left arc, travel clockwise.
+    pb.move_to(x + r_tl, y);
+
+    // Top edge -> top-right arc
+    pb.line_to(x + w - r_tr, y);
+    pb.cubic_to(
+        x + w - r_tr * (1.0 - K),
+        y,
+        x + w,
+        y + r_tr * (1.0 - K),
+        x + w,
+        y + r_tr,
+    );
+
+    // Right edge -> bottom-right arc
+    pb.line_to(x + w, y + h - r_br);
+    pb.cubic_to(
+        x + w,
+        y + h - r_br * (1.0 - K),
+        x + w - r_br * (1.0 - K),
+        y + h,
+        x + w - r_br,
+        y + h,
+    );
+
+    // Bottom edge -> bottom-left arc
+    pb.line_to(x + r_bl, y + h);
+    pb.cubic_to(
+        x + r_bl * (1.0 - K),
+        y + h,
+        x,
+        y + h - r_bl * (1.0 - K),
+        x,
+        y + h - r_bl,
+    );
+
+    // Left edge -> top-left arc
+    pb.line_to(x, y + r_tl);
+    pb.cubic_to(
+        x,
+        y + r_tl * (1.0 - K),
+        x + r_tl * (1.0 - K),
+        y,
+        x + r_tl,
+        y,
+    );
+
+    pb.close();
+    pb.finish()
 }

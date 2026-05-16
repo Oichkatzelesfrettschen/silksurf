@@ -21,7 +21,15 @@ publish = false
 # Arch this is the `libxcb` package, on Debian-likes `libxcb1-dev`. The crate
 # is pure-Rust above the FFI boundary so cross-compilation just needs the
 # target's libxcb in the sysroot.
+[features]
+# winit-backend: cross-platform event loop + softbuffer pixel presentation.
+# Adds winit 0.30 (X11/Wayland/macOS/Windows) and softbuffer 0.4 (&mut [u32] surface).
+# The existing XCB backend is always compiled; this adds a second backend.
+winit-backend = ["dep:winit", "dep:softbuffer"]
+
 [dependencies]
 silksurf-core = { path = "../silksurf-core" }
 silksurf-render = { path = "../silksurf-render" }
 xcb = "1.7"
+winit = { workspace = true, optional = true }
+softbuffer = { workspace = true, optional = true }

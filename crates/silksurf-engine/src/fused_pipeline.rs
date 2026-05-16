@@ -1,34 +1,21 @@
 /*
- * fused_pipeline.rs -- single-pass style+layout+paint pipeline.
+ * fused_pipeline.rs -- three-pass style+layout+paint pipeline.
  *
- * WHY: The standard pipeline makes 3 full-DOM traversals:
- *   1. compute_styles(): walk tree, cascade CSS for each node
- *   2. build_layout_tree(): walk tree again, compute box dimensions
- *   3. build_display_list(): walk tree AGAIN, emit paint commands
+ * WHY: Separating cascade from layout allows taffy to see all sibling styles
+ * before computing Flexbox/Grid positions.  The three passes are:
+ *   Pass 1 (cascade): BFS walk, compute ComputedStyle for each node.
+ *   Pass 2 (layout):  Build taffy tree from styles, run Flexbox/Grid solver,
+ *                     write absolute Rect back into node_rects[].
+ *   Pass 3 (paint):   BFS walk over pre-computed rects, emit display items.
  *
- * Each traversal reads from memory written by the previous one. For a 401-node
- * DOM, that's 3 * 401 = 1203 node visits with intermediate data structures
- * (ComputedStyle HashMap + LayoutBox arena + DisplayList Vec).
+ * Pass 1 must complete before Pass 2 (taffy needs all styles).
+ * Pass 2 must complete before Pass 3 (paint needs correct positions).
  *
- * The fused pipeline does all three in ONE BFS pass per tree level:
- *   For each level (root -> children -> grandchildren...):
- *     For each node in this level:
- *       1. Cascade CSS (read parent style, match selectors, apply declarations)
- *       2. Compute box dimensions (margin, padding, border, content rect)
- *       3. Emit display item (SolidColor or Text)
- *
- * Memory bandwidth: 3x reduction (read node data once, not three times).
- * Cache: parent styles remain hot in L1 during child processing.
- *
- * Inspired by the gororoba fused pull-collide kernel which halved memory
- * bandwidth by combining streaming + collision in one pass.
- * See: gororoba_app/crates/gororoba_bevy_lbm/src/soa_solver.rs:280
- * See: gororoba_app/docs/engine_optimizations.md Section 3
- *
- * See: style.rs for standalone cascade
- * See: layout/lib.rs for standalone layout
- * See: render/lib.rs for standalone display list building
- * See: neighbor_table.rs for the BFS-level decomposition this uses
+ * See: crates/silksurf-layout/src/taffy_layout.rs for the taffy adapter.
+ * See: style.rs for standalone cascade.
+ * See: layout/lib.rs for standalone layout.
+ * See: render/lib.rs for standalone display list building.
+ * See: neighbor_table.rs for the BFS-level decomposition this uses.
  */
 
 use silksurf_css::{
@@ -38,6 +25,7 @@ use silksurf_css::{
 use silksurf_dom::{Dom, NodeId, NodeKind};
 use silksurf_layout::Rect;
 use silksurf_layout::neighbor_table::LayoutNeighborTable;
+use silksurf_layout::taffy_layout::TaffyLayout;
 use silksurf_render::DisplayItem;
 
 /*
@@ -47,7 +35,7 @@ use silksurf_render::DisplayItem;
  *   - LayoutNeighborTable: 1 FxHashMap + 4 Vecs (bfs_order, parent_idx,
  *     child_count, level_starts) + FxHashMap insertions for N nodes
  *   - CascadeWorkspace: 3 Vecs (matched_by_rule, candidates, seen)
- *   - Output Vecs: styles, node_rects, block_cursors, display_items
+ *   - Output Vecs: styles, node_rects, display_items
  *
  * FusedWorkspace holds all of these as owned fields.  Each run() call clears
  * them (O(1) capacity-preserving) and refills.  After the first call, no
@@ -79,8 +67,8 @@ pub struct FusedWorkspace {
     cascade_view: CascadeView,
     /// Cascade scratch -- grows to peak rule count, never shrinks.
     cascade_ws: CascadeWorkspace,
-    /// Block-flow cursor per node (internal layout temp, not exposed).
-    block_cursors: Vec<f32>,
+    /// Taffy layout state -- rebuilt when DOM generation changes.
+    taffy_layout: TaffyLayout,
     /// Computed style per BFS-indexed node (valid after run()).
     pub styles: Vec<Option<ComputedStyle>>,
     /// Content rect per BFS-indexed node (valid after run()).
@@ -110,7 +98,7 @@ impl FusedWorkspace {
             table: LayoutNeighborTable::default(),
             cascade_view: CascadeView::new(),
             cascade_ws: CascadeWorkspace::new(0),
-            block_cursors: Vec::new(),
+            taffy_layout: TaffyLayout::new(),
             styles: Vec::new(),
             node_rects: Vec::new(),
             display_items: Vec::new(),
@@ -119,22 +107,23 @@ impl FusedWorkspace {
     }
 
     /*
-     * run -- execute fused style+layout+paint, filling workspace output fields.
+     * run -- execute the three-pass style+layout+paint pipeline.
+     *
+     * Pass 1 (cascade): compute ComputedStyle for every BFS node.
+     * Pass 2 (layout):  run taffy Flexbox/Grid solver, write node_rects[].
+     * Pass 3 (paint):   emit display items from the computed rects.
      *
      * Takes `style_index` as a parameter to allow the caller to cache it
      * across calls when the stylesheet does not change.  Building StyleIndex
-     * is O(rules) -- for 13 rules it is trivial; for ChatGPT-scale stylesheets
-     * (hundreds of rules) the caller should build it once and reuse it.
+     * is O(rules) -- for 13 rules it is trivial; for large stylesheets
+     * the caller should build it once and reuse it.
      *
      * After run() returns:
      *   ws.display_items -- paint commands in BFS order
      *   ws.styles        -- per-node ComputedStyle (BFS indexed)
      *   ws.node_rects    -- per-node content rect (BFS indexed)
      *
-     * Complexity: O(N * R_avg) where N=nodes, R_avg=matching rules per node
      * Allocations: 0 after first call on same or smaller DOM
-     *
-     * See: fused_style_layout_paint for context on algorithm
      */
     pub fn run(
         &mut self,
@@ -147,8 +136,7 @@ impl FusedWorkspace {
         /*
          * Conditional rebuild: skip BFS table and CascadeView materialization
          * when the DOM has not changed since the last run(). This hoists ~2us
-         * of rebuild cost out of the steady-state re-render path (e.g., hover
-         * state changes, media query re-evaluation on the same DOM).
+         * of rebuild cost out of the steady-state re-render path.
          *
          * The DOM's mutation_generation increments on end_mutation_batch() and
          * materialize_resolve_table(). If it matches our cached value, the
@@ -162,30 +150,22 @@ impl FusedWorkspace {
         }
         let n = self.table.len();
 
-        // Resize output/temp Vecs to n.  clear() retains heap allocation when
-        // n <= previous capacity (the common case for stable pages).
         self.styles.clear();
         self.styles.resize(n, None);
         self.node_rects.clear();
         self.node_rects.resize(n, viewport);
-        self.block_cursors.clear();
-        self.block_cursors.resize(n, viewport.y);
         self.display_items.clear();
 
+        // Pass 1: cascade -- compute ComputedStyle for every BFS node.
+        // Each node reads its parent's style (already computed, since BFS
+        // processes parents before children).
         for (i, &node) in self.table.bfs_order.iter().enumerate() {
             let pidx = self.table.parent_idx[i];
-
-            let (parent_style, parent_rect, cursor) = if pidx == u32::MAX {
-                (None, viewport, viewport.y)
+            let parent_style = if pidx == u32::MAX {
+                None
             } else {
-                let p = pidx as usize;
-                (
-                    self.styles[p].as_ref(),
-                    self.node_rects[p],
-                    self.block_cursors[p],
-                )
+                self.styles[pidx as usize].as_ref()
             };
-
             let style = compute_style_for_node_with_workspace(
                 dom,
                 node,
@@ -195,46 +175,26 @@ impl FusedWorkspace {
                 &mut self.cascade_ws,
                 Some(&self.cascade_view),
             );
+            self.styles[i] = Some(style);
+        }
 
+        // Pass 2: layout -- rebuild taffy tree from styles and compute
+        // Flexbox/Grid positions, then write absolute rects into node_rects[].
+        self.taffy_layout.rebuild(&self.table, &self.styles);
+        self.taffy_layout
+            .compute(dom, &self.styles, &self.table.bfs_order, viewport);
+        self.taffy_layout
+            .write_rects(&self.table.parent_idx, &mut self.node_rects, viewport);
+
+        // Pass 3: paint -- emit display items for each visible node.
+        for (i, &node) in self.table.bfs_order.iter().enumerate() {
+            let Some(ref style) = self.styles[i] else {
+                continue;
+            };
             if style.display == Display::None {
-                self.styles[i] = Some(style);
                 continue;
             }
-
-            let margin_top = length_px(style.margin.top);
-            let padding_top = length_px(style.padding.top);
-            let border_top = length_px(style.border.top);
-
-            let x = parent_rect.x
-                + length_px(style.margin.left)
-                + length_px(style.padding.left)
-                + length_px(style.border.left);
-            let y = cursor + margin_top + padding_top + border_top;
-            let width = parent_rect.width
-                - length_px(style.margin.left)
-                - length_px(style.margin.right)
-                - length_px(style.padding.left)
-                - length_px(style.padding.right)
-                - length_px(style.border.left)
-                - length_px(style.border.right);
-            let height = length_px(style.line_height);
-
-            let content_rect = Rect {
-                x,
-                y,
-                width,
-                height,
-            };
-            self.node_rects[i] = content_rect;
-
-            if pidx != u32::MAX {
-                self.block_cursors[pidx as usize] = y
-                    + height
-                    + length_px(style.padding.bottom)
-                    + length_px(style.border.bottom)
-                    + length_px(style.margin.bottom);
-            }
-            self.block_cursors[i] = y;
+            let content_rect = self.node_rects[i];
 
             if style.background_color.a > 0 {
                 self.display_items.push(DisplayItem::SolidColor {
@@ -246,15 +206,19 @@ impl FusedWorkspace {
             if let Ok(dom_node) = dom.node(node)
                 && let NodeKind::Text { text } = dom_node.kind()
             {
+                let font_size_px = match style.font_size {
+                    silksurf_css::Length::Px(px) => px,
+                    _ => 16.0,
+                };
                 self.display_items.push(DisplayItem::Text {
                     rect: content_rect,
                     node,
                     text_len: text.len() as u32,
+                    text: text.to_string(),
+                    font_size: font_size_px,
                     color: style.color,
                 });
             }
-
-            self.styles[i] = Some(style);
         }
     }
 
@@ -269,16 +233,6 @@ impl FusedWorkspace {
     }
 }
 
-/*
- * FusedResult -- output of the single-pass pipeline.
- *
- * All per-node arrays are indexed by BFS order (same as table.bfs_order[i]).
- * To look up a specific node by NodeId, use table.node_to_bfs_idx[&node_id].
- *
- * WHY Vec over FxHashMap: O(1) array index vs O(1)-amortised hash with higher
- * constant -- no hashing, no collision chains, contiguous cache lines.
- * For 50 nodes this is ~3x faster in the parent lookup hot path.
- */
 /*
  * FusedResult -- output of the single-pass pipeline.
  *
@@ -306,11 +260,11 @@ pub struct FusedResult {
 }
 
 /*
- * fused_style_layout_paint -- single BFS pass producing styles + display list.
+ * fused_style_layout_paint -- allocating three-pass pipeline.
  *
- * Uses LayoutNeighborTable for BFS-level traversal. Each level is processed
- * sequentially (parent data must be ready before children), but within a
- * level all nodes are independent and could be parallelized.
+ * Performs style cascade, taffy Flexbox/Grid layout, and display list
+ * construction in three sequential BFS passes.  Each call allocates fresh;
+ * use FusedWorkspace for the zero-alloc steady-state path.
  *
  * Complexity: O(N * R_avg) where N=nodes, R_avg=matching rules per node
  * Memory: O(N) for styles + O(items) for display list
@@ -340,35 +294,18 @@ pub fn fused_style_layout_paint(
     let table = LayoutNeighborTable::build(dom, root);
     let n = table.len();
 
-    /*
-     * Pre-allocate BFS-indexed Vecs -- one slot per node, indexed by flat BFS index.
-     *
-     * WHY: The original implementation used FxHashMap<NodeId, T> for styles,
-     * node_rects, and block_cursors. Each parent lookup in the hot loop required
-     * a hash + equality check (~10-15 cycles). With Vecs, parent lookup is
-     * table.parent_idx[i] (one array read) + Vec index (~2 cycles).
-     * For 50 nodes at 1000 iterations: ~3x reduction in lookup cost.
-     *
-     * parent_idx[i] == u32::MAX means root (no parent); handled explicitly.
-     * See: neighbor_table.rs LayoutNeighborTable::build() for index construction.
-     */
     let mut styles: Vec<Option<ComputedStyle>> = vec![None; n];
     let mut node_rects: Vec<Rect> = vec![viewport; n];
-    let mut block_cursors: Vec<f32> = vec![viewport.y; n];
     let mut display_items: Vec<DisplayItem> = Vec::new();
 
+    // Pass 1: cascade
     for (i, &node) in table.bfs_order.iter().enumerate() {
         let pidx = table.parent_idx[i];
-
-        // O(1) parent data -- no HashMap lookup
-        let (parent_style, parent_rect, cursor) = if pidx == u32::MAX {
-            (None, viewport, viewport.y)
+        let parent_style = if pidx == u32::MAX {
+            None
         } else {
-            let p = pidx as usize;
-            (styles[p].as_ref(), node_rects[p], block_cursors[p])
+            styles[pidx as usize].as_ref()
         };
-
-        // 1. CASCADE: reuses pre-built index and shared workspace (zero alloc after first node)
         let style = compute_style_for_node_with_workspace(
             dom,
             node,
@@ -376,56 +313,27 @@ pub fn fused_style_layout_paint(
             &style_index,
             parent_style,
             &mut cascade_ws,
-            None, // no CascadeView in cold path
+            None,
         );
+        styles[i] = Some(style);
+    }
 
-        // Skip display:none; still store style for child inheritance
+    // Pass 2: taffy layout
+    let mut taffy_layout = TaffyLayout::new();
+    taffy_layout.rebuild(&table, &styles);
+    taffy_layout.compute(dom, &styles, &table.bfs_order, viewport);
+    taffy_layout.write_rects(&table.parent_idx, &mut node_rects, viewport);
+
+    // Pass 3: paint
+    for (i, &node) in table.bfs_order.iter().enumerate() {
+        let Some(ref style) = styles[i] else {
+            continue;
+        };
         if style.display == Display::None {
-            styles[i] = Some(style);
             continue;
         }
+        let content_rect = node_rects[i];
 
-        // 2. LAYOUT: compute position (simplified block flow)
-        let margin_top = length_px(style.margin.top);
-        let padding_top = length_px(style.padding.top);
-        let border_top = length_px(style.border.top);
-
-        let x = parent_rect.x
-            + length_px(style.margin.left)
-            + length_px(style.padding.left)
-            + length_px(style.border.left);
-        let y = cursor + margin_top + padding_top + border_top;
-        let width = parent_rect.width
-            - length_px(style.margin.left)
-            - length_px(style.margin.right)
-            - length_px(style.padding.left)
-            - length_px(style.padding.right)
-            - length_px(style.border.left)
-            - length_px(style.border.right);
-
-        // Estimate height from line-height
-        let height = length_px(style.line_height);
-
-        let content_rect = Rect {
-            x,
-            y,
-            width,
-            height,
-        };
-        node_rects[i] = content_rect;
-
-        // Advance parent's block cursor past this node
-        if pidx != u32::MAX {
-            block_cursors[pidx as usize] = y
-                + height
-                + length_px(style.padding.bottom)
-                + length_px(style.border.bottom)
-                + length_px(style.margin.bottom);
-        }
-        // Seed this node's cursor for its own children
-        block_cursors[i] = y;
-
-        // 3. PAINT: emit display items
         if style.background_color.a > 0 {
             display_items.push(DisplayItem::SolidColor {
                 rect: content_rect,
@@ -436,15 +344,19 @@ pub fn fused_style_layout_paint(
         if let Ok(dom_node) = dom.node(node)
             && let NodeKind::Text { text } = dom_node.kind()
         {
+            let font_size_px = match style.font_size {
+                silksurf_css::Length::Px(px) => px,
+                _ => 16.0,
+            };
             display_items.push(DisplayItem::Text {
                 rect: content_rect,
                 node,
                 text_len: text.len() as u32,
+                text: text.to_string(),
+                font_size: font_size_px,
                 color: style.color,
             });
         }
-
-        styles[i] = Some(style);
     }
 
     FusedResult {
@@ -452,13 +364,6 @@ pub fn fused_style_layout_paint(
         display_items,
         node_rects,
         table,
-    }
-}
-
-fn length_px(length: silksurf_css::Length) -> f32 {
-    match length {
-        silksurf_css::Length::Px(v) => v,
-        silksurf_css::Length::Percent(_) => 0.0,
     }
 }
 

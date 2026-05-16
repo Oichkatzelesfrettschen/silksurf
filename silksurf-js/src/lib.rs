@@ -75,6 +75,8 @@
 static GLOBAL_ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 pub mod bytecode;
+// ffi wraps the hand-written VM; gate it with the same feature.
+#[cfg(feature = "legacy-vm")]
 pub mod ffi;
 pub mod gc;
 pub mod lexer;
@@ -82,7 +84,14 @@ pub mod parser;
 #[cfg(feature = "tracing-full")]
 pub mod tracing_support;
 pub mod verification;
+
+// Hand-written bytecode VM -- deprecated, preserved for reference only.
+// Enable feature "legacy-vm" to compile this module.
+#[cfg(feature = "legacy-vm")]
 pub mod vm;
+
+// Production JS runtime backed by boa_engine (ECMA-262 2024+).
+pub mod boa_backend;
 
 #[cfg(all(target_arch = "wasm32", feature = "wasm"))]
 pub mod wasm;
@@ -94,9 +103,14 @@ pub mod napi;
 pub mod jit;
 
 // Re-exports for convenience
+pub use boa_backend::SilkContext;
 pub use bytecode::{Chunk, ChunkDeserializeError, Instruction, Opcode};
 pub use gc::Arena;
 pub use lexer::{Lexer, Span, Token, TokenKind};
 pub use parser::{Expression, ParseError, Parser, Program, Statement};
+
+// Legacy VM re-exports -- only available with feature "legacy-vm".
+#[cfg(feature = "legacy-vm")]
 pub use vm::snapshot::{SnapshotError, VmSnapshot};
+#[cfg(feature = "legacy-vm")]
 pub use vm::{Vm, VmError, VmResult};

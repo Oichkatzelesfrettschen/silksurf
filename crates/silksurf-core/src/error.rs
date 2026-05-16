@@ -15,9 +15,11 @@
 //! cannot name them.
 //!
 //! HOW: each leaf crate writes
-//!   impl From<MyError> for silksurf_core::SilkError {
-//!       fn from(e: MyError) -> Self { silksurf_core::SilkError::MyDomain(e.to_string()) }
-//!   }
+//! ```ignore
+//! impl From<MyError> for silksurf_core::SilkError {
+//!     fn from(e: MyError) -> Self { silksurf_core::SilkError::MyDomain(e.to_string()) }
+//! }
+//! ```
 //! and `?` works at the workspace boundary.
 
 use thiserror::Error;

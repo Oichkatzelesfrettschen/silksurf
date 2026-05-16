@@ -11,9 +11,12 @@ keywords = ["javascript", "js", "ecmascript", "vm", "interpreter"]
 categories = ["compilers", "parsing", "wasm"]
 readme = "../README.md"
 
-# CLEANROOM NOTICE: This is an independent implementation.
-# No code from Boa, QuickJS, or other JS engines.
-# Design informed by studying patterns, not copying code.
+# CLEANROOM NOTICE (UPDATED): The hand-written VM remains in src/vm/ and is
+# preserved behind the legacy-vm feature for reference and future optimization.
+# Production JS execution now delegates to boa_engine (public crate API only).
+# Using a crate via its public API is categorically different from copying its
+# internals; the cleanroom constraint was a design-phase process safeguard and
+# is lifted here for the production runtime dependency only.
 
 [lib]
 crate-type = ["lib", "staticlib", "cdylib"]
@@ -56,6 +59,10 @@ unicode-xid = "0.2"
 # SIMD-accelerated byte searching (3-6x faster lexer scanning)
 memchr = "2.8"
 
+# ECMAScript-compatible regex engine (Unicode property escapes, lookahead,
+# named captures). Used by String.prototype.match/search/replace and RegExp.
+regress = "0.11"
+
 # -----------------------------------------------------------------------------
 # Compile-Time Utilities
 # -----------------------------------------------------------------------------
@@ -82,6 +89,11 @@ serde_json = { workspace = true }
 silksurf-dom = { path = "../crates/silksurf-dom" }
 silksurf-css = { path = "../crates/silksurf-css" }
 silksurf-net = { path = "../crates/silksurf-net" }
+
+# Production JS engine: ECMA-262 2024+ compliant (register VM, ICs, Promises).
+# boa_runtime provides Console, timers stubs, and other host object scaffolding.
+boa_engine = { workspace = true }
+boa_runtime = { workspace = true }
 
 # Tracing subscriber configuration
 tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
@@ -130,6 +142,11 @@ criterion = { version = "0.8", features = ["html_reports"] }
 
 [features]
 default = []
+
+# Preserve the hand-written bytecode VM for reference and reverse-engineering.
+# NOT built by default. Enable only for research, benchmarking, or comparison
+# against boa_engine. The VM is NOT MAINTAINED going forward; expect bitrot.
+legacy-vm = []
 
 # Full feature set for development
 full = [
@@ -198,6 +215,11 @@ constrained = []
 [[bin]]
 name = "test262"
 path = "src/bin/test262.rs"
+required-features = ["legacy-vm"]
+
+[[bin]]
+name = "test262_boa"
+path = "src/bin/test262_boa.rs"
 
 [[bin]]
 name = "silksurf"
@@ -215,6 +237,7 @@ harness = false
 [[bench]]
 name = "vm_throughput"
 harness = false
+required-features = ["legacy-vm"]
 
 [[bench]]
 name = "interner"

@@ -95,6 +95,54 @@ impl From<SmallString> for SelectorIdent {
     }
 }
 
+/*
+ * NthIndex -- parsed An+B value for :nth-child and related pseudo-classes.
+ *
+ * The CSS Selectors L4 An+B notation: element at 1-based position p matches
+ * when p == a*n + b for some integer n >= 0.
+ *
+ * Special keyword mappings:
+ *   odd  -> a=2, b=1   even -> a=2, b=0
+ *   n    -> a=1, b=0   -n   -> a=-1, b=0
+ */
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct NthIndex {
+    pub a: i32,
+    pub b: i32,
+}
+
+impl NthIndex {
+    pub fn matches(&self, position: usize) -> bool {
+        if position == 0 {
+            return false;
+        }
+        let p = position as i32;
+        if self.a == 0 {
+            return p == self.b;
+        }
+        // n = (p - b) / a must be a non-negative integer.
+        let diff = p - self.b;
+        diff % self.a == 0 && diff / self.a >= 0
+    }
+}
+
+/*
+ * PseudoClassArg -- argument for functional pseudo-classes.
+ *
+ * Nth: an+b argument for :nth-child, :nth-of-type, etc.
+ * SelectorList: selector argument for :not, :is, :where, :has.
+ *
+ * Box<SelectorList> breaks the recursive type: SelectorList contains
+ * Selector which contains CompoundSelector which contains SelectorModifier
+ * which contains FunctionalPseudoClass which contains PseudoClassArg which
+ * would otherwise recursively embed SelectorList.
+ */
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum PseudoClassArg {
+    Nth(NthIndex),
+    SelectorList(Box<SelectorList>),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SelectorList {
     pub selectors: SmallVec<[Selector; 2]>,
@@ -137,6 +185,10 @@ pub enum SelectorModifier {
     Id(SelectorIdent),
     Attribute(AttributeSelector),
     PseudoClass(SelectorIdent),
+    FunctionalPseudoClass {
+        name: SelectorIdent,
+        arg: PseudoClassArg,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -215,6 +267,12 @@ impl SelectorModifier {
             | SelectorModifier::Id(name)
             | SelectorModifier::PseudoClass(name) => name.intern_with(interner),
             SelectorModifier::Attribute(_) => {}
+            SelectorModifier::FunctionalPseudoClass { name, arg } => {
+                name.intern_with(interner);
+                if let PseudoClassArg::SelectorList(list) = arg {
+                    list.intern_with(interner);
+                }
+            }
         }
     }
 
@@ -226,6 +284,12 @@ impl SelectorModifier {
             SelectorModifier::Attribute(attr) => {
                 if let Some(ref mut v) = attr.value {
                     v.clear_atom();
+                }
+            }
+            SelectorModifier::FunctionalPseudoClass { name, arg } => {
+                name.clear_atom();
+                if let PseudoClassArg::SelectorList(list) = arg {
+                    list.strip_atoms();
                 }
             }
         }
@@ -439,17 +503,41 @@ impl<'a> SelectorParser<'a> {
         }))
     }
     fn parse_pseudo_class(&mut self) -> Option<SelectorModifier> {
-        self.next();
+        self.next(); // consume ':'
         if matches!(self.peek(), Some(CssToken::Colon)) {
-            self.next();
+            self.next(); // consume second ':' for pseudo-elements
         }
         match self.next() {
             Some(CssToken::Ident(name)) => {
                 Some(SelectorModifier::PseudoClass(self.make_ident(&name)))
             }
             Some(CssToken::Function(name)) => {
-                self.skip_parens();
-                Some(SelectorModifier::PseudoClass(self.make_ident(&name)))
+                // Route functional pseudo-classes to specific parsers; fall back
+                // to skip_parens for unrecognized functions (pseudo-elements etc.).
+                let lower = name.to_ascii_lowercase();
+                match lower.as_str() {
+                    "nth-child" | "nth-last-child" | "nth-of-type" | "nth-last-of-type" => {
+                        let nth = self.parse_nth_index();
+                        let ident = self.make_ident(&name);
+                        Some(SelectorModifier::FunctionalPseudoClass {
+                            name: ident,
+                            arg: PseudoClassArg::Nth(nth),
+                        })
+                    }
+                    "not" | "is" | "where" | "has" => {
+                        let inner = self.collect_paren_tokens();
+                        let list = parse_selector_list(inner);
+                        let ident = self.make_ident(&name);
+                        Some(SelectorModifier::FunctionalPseudoClass {
+                            name: ident,
+                            arg: PseudoClassArg::SelectorList(Box::new(list)),
+                        })
+                    }
+                    _ => {
+                        self.skip_parens();
+                        Some(SelectorModifier::PseudoClass(self.make_ident(&name)))
+                    }
+                }
             }
             _ => None,
         }
@@ -575,6 +663,130 @@ impl<'a> SelectorParser<'a> {
                 CssToken::Eof => break,
                 _ => {}
             }
+        }
+    }
+
+    // Consume and discard optional trailing whitespace + closing paren.
+    fn skip_parens_close(&mut self) {
+        self.consume_whitespace();
+        if matches!(self.peek(), Some(CssToken::ParenClose)) {
+            self.next();
+        }
+    }
+
+    // Collect tokens inside matching parens (the opening paren was already
+    // consumed by the Function token). Stops and discards the closing paren.
+    fn collect_paren_tokens(&mut self) -> Vec<CssToken> {
+        let mut tokens = Vec::new();
+        let mut depth = 0usize;
+        while let Some(token) = self.next() {
+            match token {
+                CssToken::ParenOpen => {
+                    depth += 1;
+                    tokens.push(CssToken::ParenOpen);
+                }
+                CssToken::ParenClose => {
+                    if depth == 0 {
+                        break;
+                    }
+                    depth -= 1;
+                    tokens.push(CssToken::ParenClose);
+                }
+                CssToken::Eof => break,
+                _ => tokens.push(token),
+            }
+        }
+        tokens
+    }
+
+    // Parse CSS An+B micro-syntax from the current token stream.
+    // Called after the Function token (which consumed the opening paren).
+    // Consumes up to and including the closing ParenClose.
+    fn parse_nth_index(&mut self) -> NthIndex {
+        self.consume_whitespace();
+        match self.peek().cloned() {
+            Some(CssToken::Ident(ident)) => {
+                let lower = ident.to_ascii_lowercase();
+                match lower.as_str() {
+                    "odd" => {
+                        self.next();
+                        self.skip_parens_close();
+                        NthIndex { a: 2, b: 1 }
+                    }
+                    "even" => {
+                        self.next();
+                        self.skip_parens_close();
+                        NthIndex { a: 2, b: 0 }
+                    }
+                    "n" => {
+                        self.next();
+                        let b = self.parse_nth_b_part();
+                        self.skip_parens_close();
+                        NthIndex { a: 1, b }
+                    }
+                    "-n" => {
+                        self.next();
+                        let b = self.parse_nth_b_part();
+                        self.skip_parens_close();
+                        NthIndex { a: -1, b }
+                    }
+                    _ => {
+                        self.skip_parens();
+                        NthIndex { a: 0, b: 0 }
+                    }
+                }
+            }
+            Some(CssToken::Number(n)) => {
+                let b = n.parse::<i32>().unwrap_or(0);
+                self.next();
+                self.skip_parens_close();
+                NthIndex { a: 0, b }
+            }
+            // "2n", "-3n", etc.
+            Some(CssToken::Dimension { value, unit }) if unit.eq_ignore_ascii_case("n") => {
+                let a = value.parse::<i32>().unwrap_or(0);
+                self.next();
+                let b = self.parse_nth_b_part();
+                self.skip_parens_close();
+                NthIndex { a, b }
+            }
+            _ => {
+                self.skip_parens();
+                NthIndex { a: 0, b: 0 }
+            }
+        }
+    }
+
+    // Parse the optional ['+' | '-'] <integer> suffix after the 'n' part.
+    //
+    // The CSS tokenizer may produce either Delim('+') + Number("1") or a
+    // single signed Number("+1") token -- handle both forms.
+    fn parse_nth_b_part(&mut self) -> i32 {
+        self.consume_whitespace();
+        match self.peek().cloned() {
+            Some(CssToken::Delim('+')) => {
+                self.next();
+                self.consume_whitespace();
+                match self.next() {
+                    Some(CssToken::Number(n)) => n.parse::<i32>().unwrap_or(0),
+                    _ => 0,
+                }
+            }
+            Some(CssToken::Delim('-')) => {
+                self.next();
+                self.consume_whitespace();
+                match self.next() {
+                    Some(CssToken::Number(n)) => -(n.parse::<i32>().unwrap_or(0)),
+                    _ => 0,
+                }
+            }
+            // Signed number emitted as a single token (e.g. "+1" or "-2")
+            Some(CssToken::Number(ref n)) if n.starts_with('+') || n.starts_with('-') => {
+                let val = n.parse::<i32>().unwrap_or(0);
+                self.next();
+                val
+            }
+            _ => 0,
         }
     }
 }

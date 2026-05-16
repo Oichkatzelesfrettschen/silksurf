@@ -47,9 +47,9 @@ pub use parser::{
  */
 pub const MAX_CSS_RULES: usize = 50_000;
 pub use selector::{
-    AttributeOperator, AttributeSelector, Combinator, CompoundSelector, Selector, SelectorIdent,
-    SelectorList, SelectorModifier, SelectorStep, TypeSelector, intern_rules, parse_selector_list,
-    parse_selector_list_with_interner, strip_selector_atoms,
+    AttributeOperator, AttributeSelector, Combinator, CompoundSelector, NthIndex, PseudoClassArg,
+    Selector, SelectorIdent, SelectorList, SelectorModifier, SelectorStep, TypeSelector,
+    intern_rules, parse_selector_list, parse_selector_list_with_interner, strip_selector_atoms,
 };
 use smol_str::SmolStr;
 
