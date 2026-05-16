@@ -18,6 +18,8 @@
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+use std::sync::{Arc, Mutex};
+
 use silksurf_engine::fused_pipeline::fused_style_layout_paint;
 use silksurf_engine::parse_html;
 use silksurf_engine::speculative::{FetchOrigin, SpeculativeRenderer};
@@ -382,6 +384,10 @@ fn main() {
         });
     eprintln!("[SilkSurf] CSS parsed in {:?}", css_start.elapsed());
 
+    // 5. Extract inline script text before wrapping Dom for the JS context.
+    let scripts = extract_inline_scripts(&dom, doc_node);
+    eprintln!("[SilkSurf] Found {} inline script(s)", scripts.len());
+
     // Viewport dimensions used by fused pipeline and rasterizer
     let viewport = Rect {
         x: 0.0,
@@ -390,12 +396,13 @@ fn main() {
         height: 800.0,
     };
 
-    // 5. Create JS context backed by boa_engine (ECMA-262 2024+).
-    let mut js_ctx = SilkContext::new();
+    // 6. Create JS context with live DOM bridge (boa_engine + silksurf_dom).
+    //    Arc<Mutex<Dom>> lets the JS context read/write the same DOM that the
+    //    HTML parser built, so getElementById and friends work on real content.
+    let dom_arc = Arc::new(Mutex::new(dom));
+    let mut js_ctx = SilkContext::with_dom(&dom_arc);
 
-    // 6. Extract and execute inline <script> tags.
-    let scripts = extract_inline_scripts(&dom, doc_node);
-    eprintln!("[SilkSurf] Found {} inline script(s)", scripts.len());
+    // 7. Execute inline <script> tags.
     for (i, script) in scripts.iter().enumerate() {
         // Skip very large bundled JS (React, webpack output, etc.).
         // Inline init scripts are usually <4 KB; anything >256 KB is a bundle.
@@ -439,7 +446,9 @@ fn main() {
     //    Replaces separate compute_styles + build_layout_tree + build_display_list calls.
     //    Running post-JS ensures DOM mutations from scripts are visible in the render.
     let fused_start = std::time::Instant::now();
-    let fused = fused_style_layout_paint(&dom, &stylesheet, doc_node, viewport);
+    let dom_guard = dom_arc.lock().unwrap_or_else(|e| e.into_inner());
+    let fused = fused_style_layout_paint(&dom_guard, &stylesheet, doc_node, viewport);
+    drop(dom_guard);
     let fused_elapsed = fused_start.elapsed();
     let styled_count = fused.styles.iter().filter(|s| s.is_some()).count();
     eprintln!(
@@ -547,12 +556,14 @@ fn main() {
                 )
                 .to_string();
                 if let Ok(new_doc) = silksurf_engine::parse_html(&new_html) {
+                    let orig_dom = dom_arc.lock().unwrap_or_else(|e| e.into_inner());
                     let diff = silksurf_dom::diff::diff_doms(
-                        &dom,
+                        &orig_dom,
                         doc_node,
                         &new_doc.dom,
                         new_doc.document,
                     );
+                    drop(orig_dom);
                     if diff.is_empty() {
                         eprintln!(
                             "[SilkSurf] DOM diff: no structural changes (cached render valid)"
