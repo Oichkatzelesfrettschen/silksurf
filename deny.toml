@@ -14,7 +14,13 @@ exclude-dev = false
 [advisories]
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
-ignore = []
+ignore = [
+    # paste is a transitive dependency pulled in by boa_engine 0.21.1
+    # (via boa_string -> paste proc-macro). The advisory is about
+    # maintenance status, not a security vulnerability. We cannot remove
+    # it without upgrading boa_engine to a future release that drops paste.
+    { id = "RUSTSEC-2024-0436", reason = "transitive dep of boa_engine 0.21.1; maintenance-only advisory, no CVE" },
+]
 
 [licenses]
 confidence-threshold = 0.93
