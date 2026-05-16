@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+body {
+  background-color: #ffffff;
+  margin: 24px;
+  color: #222222;
+}
+
+h1 {
+  font-size: 32px;
+  font-weight: bold;
+  color: #111111;
+  margin-bottom: 8px;
+}
+
+h2 {
+  font-size: 22px;
+  font-weight: bold;
+  color: #333333;
+  margin-bottom: 6px;
+}
+
+p {
+  font-size: 16px;
+  line-height: 1.5;
+  color: #444444;
+  margin-bottom: 12px;
+}
+
+.small {
+  font-size: 12px;
+  color: #888888;
+}
+
+.large {
+  font-size: 24px;
+  color: #4a90e2;
+  font-weight: bold;
+}
+
+.italic-text {
+  font-style: italic;
+  color: #666666;
+}
+
+.center {
+  text-align: center;
+  font-size: 18px;
+  background-color: #f0f8ff;
+  padding: 8px;
+  border-radius: 4px;
+}
+</style>
+</head>
+<body>
+<h1>Text Rendering Test</h1>
+<h2>Font sizes and weights</h2>
+<p>This paragraph uses 16px body text. Glyphs should appear as shaped characters, not colored rectangles.</p>
+<p class="small">Small text at 12px. Should be legible if the font system is wired correctly.</p>
+<p class="large">Large bold text at 24px.</p>
+<p class="italic-text">Italic text rendered through font-style: italic.</p>
+<div class="center">center-aligned text in a rounded box</div>
+<h2>Hello, world!</h2>
+<p>If this renders as glyphs, text rasterization (cosmic-text) is working end-to-end.</p>
+</body>
+</html>
