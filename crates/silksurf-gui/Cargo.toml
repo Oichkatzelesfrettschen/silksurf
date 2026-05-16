@@ -5,4 +5,23 @@ edition = "2024"
 rust-version = "1.94.1"
 publish = false
 
+# WHY: Linux-first XCB-only windowing (ADR-010). No winit, no SDL2, no glfw --
+# the smaller surface area lets us measure exactly what XCB calls cost on the
+# render hot path and keeps the binary well below the 10MB target.
+#
+# WHAT: `xcb` 1.7.0 is the latest stable cut of the safe Rust bindings. The
+# `libxcb_v1_14` default feature gates against the libxcb 1.14 ABI baseline
+# that ships on every supported distribution. We do not enable any of the
+# extension features (composite, damage, randr, shm, xfixes) yet -- the P6
+# slice is intentionally limited to base xproto + WM_DELETE_WINDOW so the
+# event loop and PutImage path can be validated end-to-end before opting
+# into the larger extension surface in P6.S4+.
+#
+# HOW: `cargo build -p silksurf-gui` pulls libxcb 1.14+ from the system; on
+# Arch this is the `libxcb` package, on Debian-likes `libxcb1-dev`. The crate
+# is pure-Rust above the FFI boundary so cross-compilation just needs the
+# target's libxcb in the sysroot.
 [dependencies]
+silksurf-core = { path = "../silksurf-core" }
+silksurf-render = { path = "../silksurf-render" }
+xcb = "1.7"
