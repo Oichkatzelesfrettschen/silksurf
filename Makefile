@@ -105,10 +105,10 @@ deny:
 	    && cargo deny check advisories bans licenses sources \
 	    || echo "    (cargo-deny not installed; skipping. Install: cargo install cargo-deny)"
 
-# Build rustdoc.
+# Build rustdoc. RUSTDOCFLAGS='-D warnings' promotes all rustdoc warnings to errors.
 doc:
 	@echo "==> cargo doc"
-	cargo doc --workspace --no-deps --document-private-items
+	RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --document-private-items
 
 # Remove all build artefacts.
 clean:

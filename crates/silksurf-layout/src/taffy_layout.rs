@@ -42,7 +42,7 @@ pub type SilkTaffy = TaffyTree<()>;
 
 /// Cached taffy layout state held inside FusedWorkspace.
 ///
-/// Invariant: taffy_nodes[i] corresponds to bfs_order[i] from the last rebuild().
+/// Invariant: `taffy_nodes[i]` corresponds to `bfs_order[i]` from the last rebuild().
 pub struct TaffyLayout {
     tree: SilkTaffy,
     /// BFS index -> taffy node id.
@@ -186,7 +186,7 @@ impl TaffyLayout {
     ///
     /// taffy's Layout.location is parent-relative, so we accumulate offsets
     /// down the BFS tree (parents are always processed before children in
-    /// BFS order, so node_rects[parent] is already filled when we process child).
+    /// BFS order, so `node_rects[parent]` is already filled when we process child).
     pub fn write_rects(&self, parent_idx: &[u32], node_rects: &mut [Rect], viewport: Rect) {
         let n = self.taffy_nodes.len().min(node_rects.len());
         for i in 0..n {

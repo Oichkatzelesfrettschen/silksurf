@@ -5,8 +5,8 @@
 //!
 //! Design notes:
 //! - All TreeSink methods take `&self` (not `&mut self`); interior
-//!   mutability via RefCell<Inner> is required.
-//! - elem_names stores Box<QualName> so the heap address is stable through
+//!   mutability via `RefCell<Inner>` is required.
+//! - elem_names stores `Box<QualName>` so the heap address is stable through
 //!   HashMap reallocation; this makes the unsafe ptr extension in
 //!   elem_name() sound.
 //! - Text nodes are handled inline via NodeOrText::AppendText; html5ever
@@ -29,7 +29,7 @@ struct Inner {
     dom: Dom,
     errors: Vec<String>,
     /// Stable-address QualName store for elem_name().
-    /// Box<QualName> keeps the QualName at a fixed heap address even when
+    /// `Box<QualName>` keeps the QualName at a fixed heap address even when
     /// the HashMap reallocates its backing buffer; the unsafe pointer
     /// extension in elem_name() relies on this stability guarantee.
     elem_names: HashMap<usize, Box<QualName>>,
