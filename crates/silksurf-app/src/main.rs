@@ -3,8 +3,8 @@
 //! Pipeline: fetch URL -> parse HTML -> load CSS/JS resources -> create VM
 //! with DOM bridge -> run scripts -> layout -> render (future: XCB window).
 //!
-//! Usage: silksurf-app [URL]
-//! Default URL: https://example.com
+//! Usage: silksurf-app \[URL\]
+//! Default URL: `https://example.com`
 
 /*
  * mimalloc global allocator.
@@ -18,14 +18,10 @@
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use silksurf_engine::fused_pipeline::fused_style_layout_paint;
 use silksurf_engine::parse_html;
 use silksurf_engine::speculative::{FetchOrigin, SpeculativeRenderer};
-use silksurf_js::vm::Vm;
-use silksurf_js::vm::dom_bridge;
+use silksurf_js::SilkContext;
 use silksurf_layout::Rect;
 
 fn main() {
@@ -66,6 +62,10 @@ fn main() {
     let platform_verifier = args.iter().any(|a| a == "--platform-verifier");
     let speculative = args.iter().any(|a| a == "--speculative" || a == "-s");
     let window_mode = args.iter().any(|a| a == "--window");
+    let winit_mode = args.iter().any(|a| a == "--backend=winit")
+        || args
+            .windows(2)
+            .any(|w| w[0] == "--backend" && w[1] == "winit");
 
     /*
      * --window  -- open an XCB window, present a placeholder frame, and
@@ -128,6 +128,37 @@ fn main() {
                 std::process::exit(1);
             }
         }
+    }
+
+    /*
+     * --backend=winit  -- open a winit window, present a placeholder frame, and
+     *                     pump the event loop until Close or Escape.
+     *
+     * WHY: winit 0.30 supports X11, Wayland, macOS, and Windows via a single
+     * ApplicationHandler trait.  softbuffer 0.4 exposes `buffer_mut() -> &mut [u32]`
+     * which is the same type as the rasterizer output, making the adapter zero-copy.
+     * This path runs independently of the headless fetch/layout pipeline so either
+     * can be tested and regressed without breaking the other.
+     *
+     * HOW: cargo run -p silksurf-app -- --backend=winit
+     *      cargo run -p silksurf-app -- --backend winit
+     */
+    if winit_mode {
+        match silksurf_gui::WinitWindow::new("silksurf", 1280, 720) {
+            Ok(win) => {
+                win.run(|w, h| {
+                    let mut pixels: Vec<u32> = vec![0u32; (w * h) as usize];
+                    // Cornflower blue (0x6495ED), fully opaque.
+                    silksurf_render::fill_scalar(&mut pixels, 0xFF6495ED);
+                    pixels
+                });
+            }
+            Err(err) => {
+                eprintln!("[SilkSurf] --backend=winit: cannot create window: {err}");
+                std::process::exit(1);
+            }
+        }
+        return;
     }
 
     /*
@@ -359,17 +390,15 @@ fn main() {
         height: 800.0,
     };
 
-    // 5. Create JS VM with DOM bridge (post-CSS, pre-render)
-    let shared_dom = Rc::new(RefCell::new(dom));
-    let mut vm = Vm::new();
-    dom_bridge::install_document(&vm.global, Rc::clone(&shared_dom), doc_node);
+    // 5. Create JS context backed by boa_engine (ECMA-262 2024+).
+    let mut js_ctx = SilkContext::new();
 
-    // 6. Extract and execute inline <script> tags
-    let scripts = extract_inline_scripts(&shared_dom.borrow(), doc_node);
+    // 6. Extract and execute inline <script> tags.
+    let scripts = extract_inline_scripts(&dom, doc_node);
     eprintln!("[SilkSurf] Found {} inline script(s)", scripts.len());
     for (i, script) in scripts.iter().enumerate() {
-        // Skip only very large bundled JS (React, webpack output, etc.).
-        // Inline init scripts are usually <4KB; anything >256KB is a bundle.
+        // Skip very large bundled JS (React, webpack output, etc.).
+        // Inline init scripts are usually <4 KB; anything >256 KB is a bundle.
         const MAX_INLINE_SCRIPT: usize = 256 * 1024;
         if script.len() > MAX_INLINE_SCRIPT {
             eprintln!(
@@ -391,152 +420,26 @@ fn main() {
             );
         }
         let script_start = std::time::Instant::now();
-        // No skip patterns needed -- parser handles ??=, class extends, ?. etc.
-        // Compile and execute
-        let ast_arena = silksurf_js::parser::ast_arena::AstArena::new();
-        let parser = silksurf_js::parser::Parser::new(script, &ast_arena);
-        let (ast, errors) = parser.parse();
-        if !errors.is_empty() {
-            eprintln!("[SilkSurf] Script {i} parse errors: {errors:?}");
-            continue;
-        }
-        let compiler = silksurf_js::bytecode::Compiler::new();
-        match compiler.compile_with_children(&ast) {
-            Ok((chunk, child_chunks, string_pool)) => {
-                // Load compiler's string pool into VM's StringTable.
-                // Build a mapping from compiler IDs to VM IDs.
-                let mut str_map = std::collections::HashMap::new();
-                for (compiler_id, s) in &string_pool {
-                    let vm_id = vm.strings.intern(s.clone());
-                    str_map.insert(*compiler_id, vm_id);
-                }
-                // Add child chunks (function bodies) first so their indices are stable.
-                // CRITICAL: remap both String IDs and Function chunk indices in child chunks.
-                // String IDs: child uses parent string pool (new_with_pool), so str_map covers
-                //   all strings including those added by child/nested compilers.
-                // Function indices: compiler stores indices relative to child_chunks[0].
-                //   After adding to VM at child_base, all Function(idx) -> Function(idx+child_base).
-                let child_base = vm.chunks_len();
-                for mut child in child_chunks {
-                    for constant in child.constants_mut() {
-                        match constant {
-                            silksurf_js::bytecode::Constant::String(str_id) => {
-                                if let Some(&vm_id) = str_map.get(str_id) {
-                                    *str_id = vm_id;
-                                }
-                            }
-                            silksurf_js::bytecode::Constant::Function(idx) => {
-                                *idx += child_base as u32;
-                            }
-                            _ => {}
-                        }
-                    }
-                    vm.add_chunk(child);
-                }
-                // Patch main chunk constants: remap string IDs and function chunk indices
-                let mut main_chunk = chunk;
-                for constant in main_chunk.constants_mut() {
-                    match constant {
-                        silksurf_js::bytecode::Constant::Function(idx) => {
-                            *idx += child_base as u32;
-                        }
-                        silksurf_js::bytecode::Constant::String(str_id) => {
-                            if let Some(&vm_id) = str_map.get(str_id) {
-                                *str_id = vm_id;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                let chunk_idx = vm.add_chunk(main_chunk);
-                match vm.execute(chunk_idx) {
-                    Ok(_) => eprintln!(
-                        "[SilkSurf] Script {i} executed OK ({:?})",
-                        script_start.elapsed()
-                    ),
-                    Err(e) => {
-                        eprintln!(
-                            "[SilkSurf] Script {i} runtime error: {e:?} ({:?})",
-                            script_start.elapsed()
-                        );
-                        // Save failing script to /tmp for analysis
-                        if i == 6 {
-                            std::fs::write("/tmp/chatgpt_script6.js", script).ok();
-                            eprintln!("[SilkSurf] Saved script 6 to /tmp/chatgpt_script6.js");
-                        }
-                    }
-                }
-            }
-            Err(e) => eprintln!("[SilkSurf] Script {i} compile error: {e:?}"),
-        }
-
-        /*
-         * Post-script fixup: inject streamController for ReadableStream.
-         *
-         * WHY: ChatGPT's script 3 does `new ReadableStream({start(controller){
-         * window.__reactRouterContext.streamController = controller}})`.
-         * Since NativeFunction constructors can't invoke JS function callbacks,
-         * the `start` callback never runs and `streamController` is never set.
-         *
-         * We detect this by checking: if __reactRouterContext exists and has
-         * a `stream` property but no `streamController`, inject one.
-         * This unblocks scripts 5, 7, 10 which call enqueue()/close().
-         */
-        {
-            let g = vm.global.borrow();
-            // Check both the global directly and via window (self-referential)
-            let ctx = g.get_by_str("__reactRouterContext");
-            let ctx_type = ctx.type_of();
-            if i == 4 {
-                // After script 3 + 4, check if __reactRouterContext exists
-                let prop_count = g.properties.len();
-                eprintln!(
-                    "[DEBUG] Global has {prop_count} props, __reactRouterContext type: {ctx_type}"
-                );
-            }
-            if let silksurf_js::vm::value::Value::Object(ctx_obj) = &ctx {
-                let sc = ctx_obj.borrow().get_by_str("streamController");
-                if matches!(sc, silksurf_js::vm::value::Value::Undefined) {
-                    // Inject controller with enqueue() and close() stubs
-                    let ctrl = silksurf_js::vm::value::Object::new();
-                    let ctrl_rc = std::rc::Rc::new(std::cell::RefCell::new(ctrl));
-                    {
-                        let mut c = ctrl_rc.borrow_mut();
-                        c.set_by_str(
-                            "enqueue",
-                            silksurf_js::vm::value::Value::NativeFunction(std::rc::Rc::new(
-                                silksurf_js::vm::value::NativeFunction::new("enqueue", |_| {
-                                    silksurf_js::vm::value::Value::Undefined
-                                }),
-                            )),
-                        );
-                        c.set_by_str(
-                            "close",
-                            silksurf_js::vm::value::Value::NativeFunction(std::rc::Rc::new(
-                                silksurf_js::vm::value::NativeFunction::new("close", |_| {
-                                    silksurf_js::vm::value::Value::Undefined
-                                }),
-                            )),
-                        );
-                    }
-                    ctx_obj.borrow_mut().set_by_str(
-                        "streamController",
-                        silksurf_js::vm::value::Value::Object(ctrl_rc),
-                    );
-                }
-            }
+        match js_ctx.eval(script) {
+            Ok(()) => eprintln!(
+                "[SilkSurf] Script {i} executed OK ({:?})",
+                script_start.elapsed()
+            ),
+            Err(e) => eprintln!(
+                "[SilkSurf] Script {i} error: {e} ({:?})",
+                script_start.elapsed()
+            ),
         }
     }
 
-    // 7. Run one tick of the event loop
-    let tick_result = silksurf_js::vm::event_loop::tick(&mut vm.timers, &mut vm.microtasks);
-    eprintln!("[SilkSurf] Event loop tick: {tick_result:?}");
+    // 7. Drain pending microtasks and Promise reactions.
+    js_ctx.run_pending_jobs();
 
     // 8. Fused style+layout+paint: single BFS pass over post-JS DOM.
     //    Replaces separate compute_styles + build_layout_tree + build_display_list calls.
     //    Running post-JS ensures DOM mutations from scripts are visible in the render.
     let fused_start = std::time::Instant::now();
-    let fused = fused_style_layout_paint(&shared_dom.borrow(), &stylesheet, doc_node, viewport);
+    let fused = fused_style_layout_paint(&dom, &stylesheet, doc_node, viewport);
     let fused_elapsed = fused_start.elapsed();
     let styled_count = fused.styles.iter().filter(|s| s.is_some()).count();
     eprintln!(
@@ -645,7 +548,7 @@ fn main() {
                 .to_string();
                 if let Ok(new_doc) = silksurf_engine::parse_html(&new_html) {
                     let diff = silksurf_dom::diff::diff_doms(
-                        &shared_dom.borrow(),
+                        &dom,
                         doc_node,
                         &new_doc.dom,
                         new_doc.document,
@@ -747,7 +650,7 @@ fn main() {
     }
 }
 
-/// Extract text content from <style> tags.
+/// Extract text content from `<style>` tags.
 /// Extract href values from <link rel="stylesheet"> tags, resolved against base URL.
 fn extract_stylesheet_urls(
     dom: &silksurf_dom::Dom,
@@ -828,7 +731,7 @@ fn collect_style_tags(dom: &silksurf_dom::Dom, node: silksurf_dom::NodeId, css: 
     }
 }
 
-/// Extract text content from inline <script> tags (without src attribute).
+/// Extract text content from inline `<script>` tags (without src attribute).
 fn extract_inline_scripts(dom: &silksurf_dom::Dom, root: silksurf_dom::NodeId) -> Vec<String> {
     let mut scripts = Vec::new();
     collect_script_tags(dom, root, &mut scripts);

@@ -5,6 +5,7 @@
 use std::rc::Rc;
 
 use crate::vm::builtins::array::create_array;
+use crate::vm::builtins::regex::{regex_match, regex_search};
 use crate::vm::string::JsString;
 use crate::vm::value::{NativeFunction, Value};
 
@@ -278,11 +279,20 @@ pub fn get_string_method(s: &Rc<JsString>, name: &str) -> Option<Value> {
             }
             Value::string_owned(result)
         })),
-        "match" => Some(Box::new(move |_args: &[Value]| {
-            // Simplified: return null (no regex engine yet)
-            Value::Null
+        "match" => Some(Box::new(move |args: &[Value]| {
+            let pattern = args.first().map_or_else(String::new, |v| {
+                let s = v.to_js_string();
+                s.as_str().unwrap_or("").to_string()
+            });
+            regex_match(&text, &pattern)
         })),
-        "search" => Some(Box::new(move |_args: &[Value]| Value::Number(-1.0))),
+        "search" => Some(Box::new(move |args: &[Value]| {
+            let pattern = args.first().map_or_else(String::new, |v| {
+                let s = v.to_js_string();
+                s.as_str().unwrap_or("").to_string()
+            });
+            regex_search(&text, &pattern)
+        })),
         "localeCompare" => Some(Box::new(move |args: &[Value]| {
             let other = args
                 .first()

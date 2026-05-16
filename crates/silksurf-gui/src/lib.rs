@@ -28,3 +28,8 @@ pub mod window;
 pub use event_loop::EventLoop;
 pub use input::{ControlFlow, Event};
 pub use window::XcbWindow;
+
+#[cfg(feature = "winit-backend")]
+pub mod winit_backend;
+#[cfg(feature = "winit-backend")]
+pub use winit_backend::WinitWindow;

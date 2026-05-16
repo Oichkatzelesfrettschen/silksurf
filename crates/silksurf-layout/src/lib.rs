@@ -30,6 +30,7 @@
 
 pub mod flex;
 pub mod neighbor_table;
+pub mod taffy_layout;
 
 // dim-soa: SoA layout for Dimensions -- cache-friendly reflow support.
 // Exposed as pub so integration tests can reach it via the full path
@@ -174,7 +175,9 @@ fn build_layout_box<'a>(
         return None;
     }
     let box_type = match display {
-        Display::Block | Display::Flex | Display::InlineFlex => BoxType::BlockNode(node),
+        Display::Block | Display::Flex | Display::Grid | Display::InlineFlex => {
+            BoxType::BlockNode(node)
+        }
         Display::Inline => BoxType::InlineNode(node),
         Display::None => BoxType::Anonymous,
     };
@@ -520,25 +523,9 @@ fn inline_text_width_fixed(dom: &Dom, node: NodeId, font_size_fixed: i32) -> i32
         Some(NodeKind::Text { text }) => text,
         _ => return font_size_fixed,
     };
-    let count = collapsed_char_count(text);
-    (count as i32 * font_size_fixed) / 2
-}
-
-fn collapsed_char_count(text: &str) -> usize {
-    let mut count = 0usize;
-    let mut in_whitespace = false;
-    for ch in text.chars() {
-        if ch.is_whitespace() {
-            if !in_whitespace {
-                count += 1;
-                in_whitespace = true;
-            }
-        } else {
-            count += 1;
-            in_whitespace = false;
-        }
-    }
-    count
+    let font_size_px = fixed_to_f32(font_size_fixed);
+    let (width_px, _) = silksurf_text::measure_text(text, font_size_px, None);
+    fixed_from_f32(width_px)
 }
 
 // ---------------------------------------------------------------------------

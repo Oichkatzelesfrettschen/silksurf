@@ -1,4 +1,21 @@
 /*
+ * DEPRECATED: This module is preserved for reference and reverse-engineering.
+ *
+ * Production JS execution has moved to boa_engine (src/boa_backend/mod.rs).
+ * This hand-written VM is NOT built unless the "legacy-vm" feature is enabled.
+ * It is NOT MAINTAINED going forward; API and behaviour may bitrot over time.
+ *
+ * WHY KEPT: The VM contains custom optimization patterns (register allocation,
+ * NaN-boxing, shape/IC tagging) that may inform future hot-path extensions
+ * layered on top of boa_engine's NativeFunction/NativeObject extension points.
+ * Retaining the source is cheaper than reconstructing it from git history when
+ * a specific optimization needs to be studied or ported.
+ *
+ * HOW TO ENABLE: cargo build --features legacy-vm
+ *   (do NOT enable in production or CI; treat as an internal research tool)
+ */
+
+/*
  * vm/mod.rs -- Bytecode virtual machine (register-based, function-pointer dispatch).
  *
  * WHY: Executes compiled JavaScript bytecode. Register-based (not stack-based)
@@ -4072,5 +4089,68 @@ mod tests {
         } else {
             panic!("expected number 1002, got {v:?}");
         }
+    }
+
+    #[test]
+    fn test_string_match_returns_array_on_hit() {
+        // "hello".match("el+") -> ["ell"], index=1
+        let v = run_and_get_result(r#"var m = "hello".match("el+"); window.result = m[0];"#);
+        // UNWRAP-OK: test fixture literal is valid JS.
+        let v = v.expect("script failed");
+        assert!(
+            matches!(&v, Value::String(s) if s.as_str() == Some("ell")),
+            "expected 'ell', got {v:?}"
+        );
+    }
+
+    #[test]
+    fn test_string_match_returns_null_on_miss() {
+        let v = run_and_get_result(
+            r#"var m = "hello".match("xyz"); window.result = m === null ? 1 : 0;"#,
+        );
+        // UNWRAP-OK: test fixture literal is valid JS.
+        let v = v.expect("script failed");
+        assert!(
+            matches!(v, Value::Number(n) if (n - 1.0).abs() < f64::EPSILON),
+            "expected 1 (null check), got {v:?}"
+        );
+    }
+
+    #[test]
+    fn test_string_search_returns_char_index() {
+        // "hello".search("ll") -> 2
+        let v = run_and_get_result(r#"window.result = "hello".search("ll");"#);
+        // UNWRAP-OK: test fixture literal is valid JS.
+        let v = v.expect("script failed");
+        assert!(
+            matches!(v, Value::Number(n) if (n - 2.0).abs() < f64::EPSILON),
+            "expected 2, got {v:?}"
+        );
+    }
+
+    #[test]
+    fn test_string_search_returns_minus_one_on_miss() {
+        let v = run_and_get_result(r#"window.result = "hello".search("xyz");"#);
+        // UNWRAP-OK: test fixture literal is valid JS.
+        let v = v.expect("script failed");
+        assert!(
+            matches!(v, Value::Number(n) if (n - (-1.0)).abs() < f64::EPSILON),
+            "expected -1, got {v:?}"
+        );
+    }
+
+    #[test]
+    fn test_string_match_captures_group() {
+        // Use a character-class pattern to avoid JS string-escape complexity with \d.
+        // "2024-01-15".match("([0-9]+)-([0-9]+)-([0-9]+)") -> result[1] = "2024"
+        let v = run_and_get_result(
+            r#"var m = "2024-01-15".match("([0-9]+)-([0-9]+)-([0-9]+)"); window.result = m[1];"#,
+        );
+        // UNWRAP-OK: test fixture literal is valid JS.
+        let v = v.expect("script failed");
+        assert!(
+            matches!(&v, Value::String(s) if s.as_str() == Some("2024")),
+            "expected '2024', got {v:?}"
+        );
     }
 }
