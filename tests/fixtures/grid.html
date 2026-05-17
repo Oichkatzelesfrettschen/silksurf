@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+body {
+  background-color: #f8f8f8;
+  margin: 0;
+  padding: 16px;
+}
+
+/* 3-column equal-width grid with named gap */
+.grid-3col {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 20px;
+  background-color: #e8e8e8;
+  padding: 8px;
+}
+
+/* Fixed + flexible + auto columns */
+.grid-mixed {
+  display: grid;
+  grid-template-columns: 100px 1fr auto;
+  gap: 8px;
+  margin-bottom: 20px;
+  background-color: #e8e8e8;
+  padding: 8px;
+}
+
+/* 2x2 grid with explicit rows */
+.grid-2x2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 80px 80px;
+  gap: 8px;
+  margin-bottom: 20px;
+  background-color: #e8e8e8;
+  padding: 8px;
+}
+
+/* Spanning item */
+.grid-span {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 20px;
+  background-color: #e8e8e8;
+  padding: 8px;
+}
+
+/* minmax() tracks */
+.grid-minmax {
+  display: grid;
+  grid-template-columns: minmax(80px, 200px) 1fr;
+  gap: 8px;
+  margin-bottom: 20px;
+  background-color: #e8e8e8;
+  padding: 8px;
+}
+
+/* auto-flow: column */
+.grid-col-flow {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: 60px 60px;
+  gap: 8px;
+  margin-bottom: 20px;
+  background-color: #e8e8e8;
+  padding: 8px;
+}
+
+.cell {
+  background-color: #4a90e2;
+  color: #ffffff;
+  font-size: 13px;
+  padding: 8px;
+  border-radius: 3px;
+}
+
+.cell-green  { background-color: #27ae60; color: #ffffff; font-size: 13px; padding: 8px; border-radius: 3px; }
+.cell-red    { background-color: #e74c3c; color: #ffffff; font-size: 13px; padding: 8px; border-radius: 3px; }
+.cell-purple { background-color: #8e44ad; color: #ffffff; font-size: 13px; padding: 8px; border-radius: 3px; }
+
+.span-2 {
+  grid-column: 1 / span 2;
+  background-color: #f39c12;
+  color: #ffffff;
+  font-size: 13px;
+  padding: 8px;
+  border-radius: 3px;
+}
+</style>
+</head>
+<body>
+
+<p style="font-size:14px;margin-bottom:8px;">3-column 1fr grid</p>
+<div class="grid-3col">
+  <div class="cell">A1</div>
+  <div class="cell">A2</div>
+  <div class="cell">A3</div>
+  <div class="cell-green">B1</div>
+  <div class="cell-green">B2</div>
+  <div class="cell-green">B3</div>
+</div>
+
+<p style="font-size:14px;margin-bottom:8px;">Fixed + 1fr + auto columns</p>
+<div class="grid-mixed">
+  <div class="cell">100px</div>
+  <div class="cell-red">1fr</div>
+  <div class="cell-green">auto</div>
+</div>
+
+<p style="font-size:14px;margin-bottom:8px;">2x2 explicit rows (80px each)</p>
+<div class="grid-2x2">
+  <div class="cell">R1C1</div>
+  <div class="cell-green">R1C2</div>
+  <div class="cell-red">R2C1</div>
+  <div class="cell-purple">R2C2</div>
+</div>
+
+<p style="font-size:14px;margin-bottom:8px;">repeat(3,1fr) with colspan span 2</p>
+<div class="grid-span">
+  <div class="span-2">spans 2 columns</div>
+  <div class="cell">C3</div>
+  <div class="cell-green">D1</div>
+  <div class="cell-red">D2</div>
+  <div class="cell-purple">D3</div>
+</div>
+
+<p style="font-size:14px;margin-bottom:8px;">minmax(80px,200px) + 1fr</p>
+<div class="grid-minmax">
+  <div class="cell">minmax</div>
+  <div class="cell-green">1fr</div>
+</div>
+
+<p style="font-size:14px;margin-bottom:8px;">grid-auto-flow: column, 2 explicit rows</p>
+<div class="grid-col-flow">
+  <div class="cell">1</div>
+  <div class="cell-green">2</div>
+  <div class="cell-red">3</div>
+  <div class="cell-purple">4</div>
+</div>
+
+</body>
+</html>
