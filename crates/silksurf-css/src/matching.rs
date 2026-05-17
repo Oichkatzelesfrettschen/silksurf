@@ -369,6 +369,7 @@ fn matches_class(dom: &Dom, node: NodeId, name: &SelectorIdent) -> bool {
 fn matches_pseudo_class(dom: &Dom, node: NodeId, name: &SelectorIdent) -> bool {
     let lower = name.as_str().to_ascii_lowercase();
     match lower.as_str() {
+        // DOM-topology pseudo-classes
         "root" => is_root(dom, node),
         "empty" => is_empty(dom, node),
         "first-child" => is_first_child(dom, node),
@@ -377,8 +378,80 @@ fn matches_pseudo_class(dom: &Dom, node: NodeId, name: &SelectorIdent) -> bool {
         "first-of-type" => is_first_of_type(dom, node),
         "last-of-type" => is_last_of_type(dom, node),
         "only-of-type" => is_first_of_type(dom, node) && is_last_of_type(dom, node),
+        // Interaction-state pseudo-classes: static renderer has no hover/focus
+        // state, so :hover, :focus, :active, :focus-visible, :focus-within,
+        // and :target all evaluate to false. CSS that uses these exclusively
+        // for cosmetic enhancement (e.g. hover colour change) is unaffected
+        // in the rendered layout; only the enhancement is absent.
+        "hover" | "focus" | "active" | "focus-visible" | "focus-within" | "target"
+        | "local-link" => false,
+        // :visited: we have no navigation history in a static renderer.
+        "visited" => false,
+        // :any-link / :link: true when the element is an anchor, area, or link
+        // element with an href attribute present.
+        "any-link" | "link" => {
+            let tag = dom.element_name(node).ok().flatten().unwrap_or("").to_ascii_lowercase();
+            matches!(tag.as_str(), "a" | "area" | "link")
+                && has_attr(dom, node, "href")
+        }
+        // :disabled / :enabled: reflect the disabled attribute on form elements.
+        "disabled" => has_attr(dom, node, "disabled"),
+        "enabled" => !has_attr(dom, node, "disabled"),
+        // :checked: true when input[type=checkbox|radio] has the checked attr,
+        // or <option> has the selected attribute.
+        "checked" => {
+            let tag = dom.element_name(node).ok().flatten().unwrap_or("").to_ascii_lowercase();
+            match tag.as_str() {
+                "input" => has_attr(dom, node, "checked"),
+                "option" => has_attr(dom, node, "selected"),
+                _ => false,
+            }
+        }
+        // :indeterminate: only meaningful for checkboxes set via JS; false
+        // in a static renderer with no script execution.
+        "indeterminate" => false,
+        // :required / :optional: reflect the required attribute.
+        "required" => has_attr(dom, node, "required"),
+        "optional" => {
+            let tag = dom.element_name(node).ok().flatten().unwrap_or("").to_ascii_lowercase();
+            matches!(tag.as_str(), "input" | "select" | "textarea")
+                && !has_attr(dom, node, "required")
+        }
+        // :read-only / :read-write: reflect the readonly attribute.
+        // Elements without a relevant tag are read-only by default in CSS.
+        "read-write" => {
+            let tag = dom.element_name(node).ok().flatten().unwrap_or("").to_ascii_lowercase();
+            matches!(tag.as_str(), "input" | "textarea") && !has_attr(dom, node, "readonly")
+        }
+        "read-only" => {
+            let tag = dom.element_name(node).ok().flatten().unwrap_or("").to_ascii_lowercase();
+            !matches!(tag.as_str(), "input" | "textarea") || has_attr(dom, node, "readonly")
+        }
+        // :placeholder-shown: true when a form element displays its placeholder.
+        // Static renderer has no value; assume placeholder shows when present.
+        "placeholder-shown" => has_attr(dom, node, "placeholder"),
+        // :scope: true for the root element in a stylesheet (same as :root
+        // in a non-scoped context).
+        "scope" => is_root(dom, node),
+        // :defined: always true; custom elements are considered defined in a
+        // static renderer with no custom-element registry.
+        "defined" => true,
+        // Form-validation pseudo-classes: no constraint validation in a static
+        // renderer; default to false so validation styles don't appear.
+        "valid" | "invalid" | "in-range" | "out-of-range" | "user-valid"
+        | "user-invalid" => false,
+        // :playing / :paused: media element playback; false in static render.
+        "playing" | "paused" => false,
         _ => false,
     }
+}
+
+/// Return true when the DOM node has an attribute whose name (case-insensitive)
+/// matches `attr_name`. Presence is sufficient; value is irrelevant.
+fn has_attr(dom: &Dom, node: NodeId, attr_name: &str) -> bool {
+    dom.attributes(node)
+        .map(|attrs| attrs.iter().any(|a| a.name.matches(attr_name)))
+        .unwrap_or(false)
 }
 
 fn matches_functional_pseudo_class(

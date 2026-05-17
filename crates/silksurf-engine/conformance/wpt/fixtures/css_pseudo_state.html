@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+#link { opacity: 0.1; }
+#link:any-link { opacity: 0.9; }
+#nolink { opacity: 0.1; }
+#nolink:any-link { opacity: 0.8; }
+#dis { opacity: 0.1; }
+#dis:disabled { opacity: 0.3; }
+#ena { opacity: 0.1; }
+#ena:enabled { opacity: 0.7; }
+#req { opacity: 0.1; }
+#req:required { opacity: 0.6; }
+#opt { opacity: 0.1; }
+#opt:optional { opacity: 0.5; }
+#para { opacity: 0.1; }
+#para:read-only { opacity: 0.4; }
+</style>
+</head>
+<body>
+<a id="link" href="/page">link</a>
+<a id="nolink">no href</a>
+<input id="dis" disabled type="text">
+<input id="ena" type="text">
+<input id="req" required type="text">
+<input id="opt" type="text">
+<p id="para">paragraph</p>
+</body>
+</html>
