@@ -51,6 +51,7 @@ pub struct CssParser {
 }
 
 impl CssParser {
+    #[must_use] 
     pub fn new(mut tokens: Vec<CssToken>) -> Self {
         if !matches!(tokens.last(), Some(CssToken::Eof)) {
             tokens.push(CssToken::Eof);
@@ -81,9 +82,8 @@ impl CssParser {
     }
 
     fn parse_at_rule(&mut self) -> Option<Rule> {
-        let name = match self.next() {
-            Some(CssToken::AtKeyword(name)) => name,
-            _ => return None,
+        let Some(CssToken::AtKeyword(name)) = self.next() else {
+            return None;
         };
         let mut prelude = Vec::new();
         loop {
@@ -127,7 +127,7 @@ impl CssParser {
                 Some(CssToken::CurlyOpen) => {
                     self.next();
                     let block_tokens = self.consume_block();
-                    let declarations = parse_declarations(block_tokens);
+                    let declarations = parse_declarations(&block_tokens);
                     let selectors = parse_selector_list(selector_tokens);
                     return Some(Rule::Style(StyleRule {
                         selectors,
@@ -239,8 +239,7 @@ pub fn parse_stylesheet_with_interner(
         // Find a safe truncation point (end of a rule block)
         let safe_end = input[..MAX_CSS_BYTES]
             .rfind('}')
-            .map(|pos| pos + 1)
-            .unwrap_or(MAX_CSS_BYTES);
+            .map_or(MAX_CSS_BYTES, |pos| pos + 1);
         &input[..safe_end]
     } else {
         input
@@ -291,13 +290,14 @@ fn decode_stylesheet_bytes(input: &[u8]) -> Cow<'_, str> {
 }
 
 fn sniff_declared_encoding(input: &[u8]) -> Option<&'static Encoding> {
+    const PREFIX: &[u8] = b"@charset";
+
     let mut cursor = 0usize;
     while cursor < input.len() && is_css_whitespace(input[cursor]) {
         cursor += 1;
     }
     let bytes = &input[cursor..];
 
-    const PREFIX: &[u8] = b"@charset";
     if bytes.len() < PREFIX.len() || !bytes[..PREFIX.len()].eq_ignore_ascii_case(PREFIX) {
         return None;
     }
@@ -362,7 +362,7 @@ fn is_css_whitespace(byte: u8) -> bool {
 
 fn parse_at_rule_block(tokens: Vec<CssToken>) -> AtRuleBlock {
     if looks_like_declarations(&tokens) {
-        AtRuleBlock::Declarations(parse_declarations(tokens))
+        AtRuleBlock::Declarations(parse_declarations(&tokens))
     } else {
         let mut parser = CssParser::new(tokens);
         AtRuleBlock::Rules(parser.parse_stylesheet().rules)
@@ -407,7 +407,7 @@ fn looks_like_declarations(tokens: &[CssToken]) -> bool {
     }
     false
 }
-fn parse_declarations(tokens: Vec<CssToken>) -> Vec<Declaration> {
+fn parse_declarations(tokens: &[CssToken]) -> Vec<Declaration> {
     let mut declarations = Vec::new();
     let mut cursor = 0usize;
     while cursor < tokens.len() {
@@ -421,9 +421,9 @@ fn parse_declarations(tokens: Vec<CssToken>) -> Vec<Declaration> {
                 cursor += 1;
                 name.clone()
             }
-            Some(CssToken::AtKeyword(_)) | Some(CssToken::CurlyOpen) | None => break,
+            Some(CssToken::AtKeyword(_) | CssToken::CurlyOpen) | None => break,
             _ => {
-                cursor = skip_component_value(&tokens, cursor);
+                cursor = skip_component_value(tokens, cursor);
                 continue;
             }
         };
@@ -431,7 +431,7 @@ fn parse_declarations(tokens: Vec<CssToken>) -> Vec<Declaration> {
             cursor += 1;
         }
         if !matches!(tokens.get(cursor), Some(CssToken::Colon)) {
-            cursor = skip_component_value(&tokens, cursor);
+            cursor = skip_component_value(tokens, cursor);
             continue;
         }
         cursor += 1;

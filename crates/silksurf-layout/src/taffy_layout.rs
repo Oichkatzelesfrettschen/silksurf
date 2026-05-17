@@ -40,9 +40,9 @@ use crate::{Rect, neighbor_table::LayoutNeighborTable};
 
 pub type SilkTaffy = TaffyTree<()>;
 
-/// Cached taffy layout state held inside FusedWorkspace.
+/// Cached taffy layout state held inside `FusedWorkspace`.
 ///
-/// Invariant: `taffy_nodes[i]` corresponds to `bfs_order[i]` from the last rebuild().
+/// Invariant: `taffy_nodes[i]` corresponds to `bfs_order[i]` from the last `rebuild()`.
 pub struct TaffyLayout {
     tree: SilkTaffy,
     /// BFS index -> taffy node id.
@@ -52,6 +52,7 @@ pub struct TaffyLayout {
 }
 
 impl TaffyLayout {
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             tree: TaffyTree::new(),
@@ -62,7 +63,7 @@ impl TaffyLayout {
 
     /// Reconstruct the taffy tree from BFS table + computed styles.
     ///
-    /// Must be called before compute() whenever the DOM or styles have changed.
+    /// Must be called before `compute()` whenever the DOM or styles have changed.
     pub fn rebuild(&mut self, table: &LayoutNeighborTable, styles: &[Option<ComputedStyle>]) {
         self.tree = TaffyTree::new();
         let n = table.len();
@@ -111,10 +112,7 @@ impl TaffyLayout {
         bfs_order: &[DomNodeId],
         viewport: Rect,
     ) -> bool {
-        let root = match self.taffy_nodes.first().and_then(|n| *n) {
-            Some(r) => r,
-            None => return false,
-        };
+        let Some(root) = self.taffy_nodes.first().and_then(|n| *n) else { return false; };
         let available = Size {
             width: AvailableSpace::Definite(viewport.width),
             height: AvailableSpace::Definite(viewport.height),
@@ -129,28 +127,25 @@ impl TaffyLayout {
             root,
             available,
             |known, avail, taffy_node_id, _ctx, _style| {
-                let bfs_idx = match taffy_to_bfs.get(&taffy_node_id) {
-                    Some(&idx) => idx,
-                    None => return Size::ZERO,
+                let Some(&bfs_idx) = taffy_to_bfs.get(&taffy_node_id) else {
+                    return Size::ZERO;
                 };
 
                 let font_size = styles
                     .get(bfs_idx)
                     .and_then(Option::as_ref)
-                    .map(|s| match s.font_size {
+                    .map_or(16.0, |s| match s.font_size {
                         Length::Px(px) => px,
                         _ => 16.0,
-                    })
-                    .unwrap_or(16.0);
+                    });
 
                 let max_w = match avail.width {
                     AvailableSpace::Definite(w) => Some(w),
                     _ => None,
                 };
 
-                let dom_node_id = match bfs_order.get(bfs_idx) {
-                    Some(&id) => id,
-                    None => return Size::ZERO,
+                let Some(&dom_node_id) = bfs_order.get(bfs_idx) else {
+                    return Size::ZERO;
                 };
 
                 if let Ok(node) = dom.node(dom_node_id)
@@ -167,11 +162,10 @@ impl TaffyLayout {
                 let line_h = styles
                     .get(bfs_idx)
                     .and_then(Option::as_ref)
-                    .map(|s| match s.line_height {
+                    .map_or(16.0, |s| match s.line_height {
                         Length::Px(px) => px,
                         _ => 16.0,
-                    })
-                    .unwrap_or(16.0);
+                    });
 
                 Size {
                     width: known.width.unwrap_or(0.0),
@@ -182,7 +176,7 @@ impl TaffyLayout {
         .is_ok()
     }
 
-    /// Write absolute positions from taffy layout results into node_rects.
+    /// Write absolute positions from taffy layout results into `node_rects`.
     ///
     /// taffy's Layout.location is parent-relative, so we accumulate offsets
     /// down the BFS tree (parents are always processed before children in
@@ -190,14 +184,8 @@ impl TaffyLayout {
     pub fn write_rects(&self, parent_idx: &[u32], node_rects: &mut [Rect], viewport: Rect) {
         let n = self.taffy_nodes.len().min(node_rects.len());
         for i in 0..n {
-            let tn = match self.taffy_nodes[i] {
-                Some(t) => t,
-                None => continue,
-            };
-            let layout = match self.tree.layout(tn) {
-                Ok(l) => l,
-                Err(_) => continue,
-            };
+            let Some(tn) = self.taffy_nodes[i] else { continue; };
+            let Ok(layout) = self.tree.layout(tn) else { continue; };
 
             let (parent_x, parent_y) = if parent_idx[i] == u32::MAX {
                 (viewport.x, viewport.y)
@@ -257,9 +245,9 @@ fn length_pct(l: Length) -> LengthPercentage {
     }
 }
 
-/// Convert a silksurf-css ComputedStyle to a taffy Style.
+/// Convert a silksurf-css `ComputedStyle` to a taffy Style.
 ///
-/// Converts ComputedStyle to taffy::Style for layout computation.
+/// Converts `ComputedStyle` to `taffy::Style` for layout computation.
 ///
 /// Width/height/min/max are converted from `LengthOrAuto` / `Option<Length>` to
 /// taffy Dimension values. AUTO passes through as `Dimension::auto()`.
@@ -275,6 +263,11 @@ fn css_to_taffy_style(style: Option<&ComputedStyle>) -> Style {
         };
     };
 
+    // Inline elements are mapped to Block as a coarse fallback because
+    // taffy 0.10 has no native inline formatting context. Keeping the
+    // arms separate documents the semantic difference; the lint is
+    // suppressed here so future Inline-specific handling stays distinct.
+    #[allow(clippy::match_same_arms)]
     let display = match style.display {
         CssDisplay::Block => TaffyDisplay::Block,
         CssDisplay::Flex | CssDisplay::InlineFlex => TaffyDisplay::Flex,
@@ -305,7 +298,10 @@ fn css_to_taffy_style(style: Option<&ComputedStyle>) -> Style {
         CssJustifyContent::SpaceEvenly => JustifyContent::SpaceEvenly,
     });
 
-    // AlignItems::Baseline does not exist in taffy 0.10; use FlexStart as fallback.
+    // AlignItems::Baseline does not exist in taffy 0.10; use FlexStart as
+    // fallback. Keeping the Baseline arm separate from FlexStart documents
+    // the semantic fallback so a future taffy upgrade can replace it.
+    #[allow(clippy::match_same_arms)]
     let align_items = Some(match style.flex_container.align_items {
         CssAlignItems::Stretch => AlignItems::Stretch,
         CssAlignItems::FlexStart => AlignItems::FlexStart,

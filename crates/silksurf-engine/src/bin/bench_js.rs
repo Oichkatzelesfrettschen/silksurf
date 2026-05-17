@@ -10,6 +10,6 @@ fn main() {
     }
     runtime.run_microtasks().expect("run microtasks");
     let elapsed = start.elapsed();
-    println!("js tasks: {}", iterations);
-    println!("total: {:?}", elapsed);
+    println!("js tasks: {iterations}");
+    println!("total: {elapsed:?}");
 }

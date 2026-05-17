@@ -13,6 +13,6 @@ fn main() {
     }
     let elapsed = start.elapsed();
     let per_iter = elapsed / iterations as u32;
-    println!("css parse iterations: {}", iterations);
-    println!("total: {:?}, per-iter: {:?}", elapsed, per_iter);
+    println!("css parse iterations: {iterations}");
+    println!("total: {elapsed:?}, per-iter: {per_iter:?}");
 }

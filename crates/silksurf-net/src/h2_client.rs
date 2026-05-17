@@ -126,9 +126,7 @@ async fn fetch_h2_parallel_async(
      */
     let negotiated = tls.get_ref().1.alpn_protocol();
     if negotiated != Some(b"h2") {
-        let proto = negotiated
-            .map(|p| String::from_utf8_lossy(p).into_owned())
-            .unwrap_or_else(|| "none".to_string());
+        let proto = negotiated.map_or_else(|| "none".to_string(), |p| String::from_utf8_lossy(p).into_owned());
         return Err(format!("server negotiated '{proto}' not 'h2'"));
     }
 

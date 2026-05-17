@@ -1,12 +1,12 @@
 use silksurf_dom::{Dom, NodeId, NodeKind, TagName};
 use silksurf_html::{Token, Tokenizer, TreeBuilder};
 
-fn find_child_element(dom: &Dom, parent: NodeId, tag: TagName) -> Option<NodeId> {
+fn find_child_element(dom: &Dom, parent: NodeId, tag: &TagName) -> Option<NodeId> {
     let children = dom.children(parent).ok()?;
     children.iter().copied().find(|child| {
         matches!(
-            dom.node(*child).ok().map(|node| node.kind()),
-            Some(NodeKind::Element { name, .. }) if *name == tag
+            dom.node(*child).ok().map(silksurf_dom::Node::kind),
+            Some(NodeKind::Element { name, .. }) if name == tag
         )
     })
 }
@@ -22,9 +22,9 @@ fn builds_dom_tree() {
 
     let dom = builder.dom();
     let doc = builder.document_id();
-    let html = find_child_element(dom, doc, TagName::Html).expect("html element");
+    let html = find_child_element(dom, doc, &TagName::Html).expect("html element");
 
-    let body = find_child_element(dom, html, TagName::Body).expect("body element");
+    let body = find_child_element(dom, html, &TagName::Body).expect("body element");
 
     let body_children = dom.children(body).unwrap();
     assert_eq!(body_children.len(), 1);
@@ -46,9 +46,9 @@ fn builds_attributes() {
 
     let dom = builder.dom();
     let doc = builder.document_id();
-    let html = find_child_element(dom, doc, TagName::Html).expect("html element");
-    let body = find_child_element(dom, html, TagName::Body).expect("body element");
-    let div = find_child_element(dom, body, TagName::Div).expect("div element");
+    let html = find_child_element(dom, doc, &TagName::Html).expect("html element");
+    let body = find_child_element(dom, html, &TagName::Body).expect("body element");
+    let div = find_child_element(dom, body, &TagName::Div).expect("div element");
     let attrs = dom.attributes(div).unwrap();
     assert_eq!(attrs.len(), 1);
     assert_eq!(attrs[0].name.as_str(), "class");
@@ -102,8 +102,8 @@ fn fosters_text_out_of_table() {
 
     let dom = builder.dom();
     let doc = builder.document_id();
-    let html = find_child_element(dom, doc, TagName::Html).expect("html element");
-    let body = find_child_element(dom, html, TagName::Body).expect("body element");
+    let html = find_child_element(dom, doc, &TagName::Html).expect("html element");
+    let body = find_child_element(dom, html, &TagName::Body).expect("body element");
     let body_children = dom.children(body).unwrap();
 
     assert!(!body_children.is_empty());
@@ -172,9 +172,9 @@ fn merges_adjacent_text_nodes() {
 
     let dom = builder.dom();
     let doc = builder.document_id();
-    let html = find_child_element(dom, doc, TagName::Html).expect("html element");
-    let body = find_child_element(dom, html, TagName::Body).expect("body element");
-    let p = find_child_element(dom, body, TagName::P).expect("p element");
+    let html = find_child_element(dom, doc, &TagName::Html).expect("html element");
+    let body = find_child_element(dom, html, &TagName::Body).expect("body element");
+    let p = find_child_element(dom, body, &TagName::P).expect("p element");
     let children = dom.children(p).unwrap();
     assert_eq!(children.len(), 1);
     match dom.node(children[0]).unwrap().kind() {

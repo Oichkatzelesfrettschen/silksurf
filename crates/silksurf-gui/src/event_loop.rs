@@ -40,6 +40,7 @@ pub struct EventLoop {
 
 impl EventLoop {
     /// Construct a new event loop. Cheap; no syscalls.
+    #[must_use] 
     pub fn new() -> Self {
         Self { _reserved: () }
     }
@@ -88,8 +89,8 @@ impl EventLoop {
 
 /// Translate a single XCB event into our normalized `Event`.
 ///
-/// Returns `None` for events we do not surface (KeymapNotify, MapNotify,
-/// ReparentNotify, etc.) -- the loop just polls the next one.
+/// Returns `None` for events we do not surface (`KeymapNotify`, `MapNotify`,
+/// `ReparentNotify`, etc.) -- the loop just polls the next one.
 fn translate_event(
     event: &xcb::Event,
     window: &mut XcbWindow,
@@ -97,14 +98,14 @@ fn translate_event(
 ) -> Option<Event> {
     match event {
         xcb::Event::X(x::Event::Expose(expose)) => Some(Event::Expose {
-            width: expose.width() as u32,
-            height: expose.height() as u32,
+            width: u32::from(expose.width()),
+            height: u32::from(expose.height()),
         }),
         xcb::Event::X(x::Event::KeyPress(key)) => Some(Event::KeyPress {
-            keysym: key.detail() as u32,
+            keysym: u32::from(key.detail()),
         }),
         xcb::Event::X(x::Event::KeyRelease(key)) => Some(Event::KeyRelease {
-            keysym: key.detail() as u32,
+            keysym: u32::from(key.detail()),
         }),
         xcb::Event::X(x::Event::ButtonPress(button)) => Some(Event::MousePress {
             button: button.detail(),
@@ -121,8 +122,8 @@ fn translate_event(
             y: motion.event_y(),
         }),
         xcb::Event::X(x::Event::ConfigureNotify(configure)) => {
-            let new_w = configure.width() as u32;
-            let new_h = configure.height() as u32;
+            let new_w = u32::from(configure.width());
+            let new_h = u32::from(configure.height());
             // Only report a Resize when the size actually changed -- WMs
             // send ConfigureNotify for moves too.
             if new_w != window.width() || new_h != window.height() {

@@ -38,3 +38,6 @@ platform-verifier = ["net", "silksurf-tls/platform-verifier"]
 [[bin]]
 name = "wpt_runner"
 path = "src/bin/wpt_runner.rs"
+
+[lints]
+workspace = true

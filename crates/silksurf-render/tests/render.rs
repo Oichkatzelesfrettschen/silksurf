@@ -75,7 +75,7 @@ fn builds_text_display_items() {
         DisplayItem::Text { node, color, .. }
             if *color == expected
                 && matches!(
-                    dom.node(*node).ok().map(|node| node.kind()),
+                    dom.node(*node).ok().map(silksurf_dom::Node::kind),
                     Some(NodeKind::Text { text }) if text == "Hello"
                 )
     )));

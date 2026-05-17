@@ -27,6 +27,7 @@ use crate::CssToken;
 /// against the given viewport dimensions (pixels).
 ///
 /// Returns true when the media condition applies to this viewport.
+#[must_use] 
 pub fn evaluate_media_query(prelude: &[CssToken], viewport_w: f32, viewport_h: f32) -> bool {
     let toks: Vec<&CssToken> = prelude
         .iter()
@@ -149,7 +150,7 @@ fn media_type_matches(mt: &str) -> bool {
     )
 }
 
-/// Find the closing ParenClose that matches the ParenOpen at `open_at`.
+/// Find the closing `ParenClose` that matches the `ParenOpen` at `open_at`.
 /// Returns the index of the closing token, or `toks.len() - 1` if not found
 /// (graceful degradation for malformed queries).
 fn find_close_paren(toks: &[&CssToken], open_at: usize) -> usize {
@@ -193,6 +194,10 @@ fn eval_feature(inner: &[&CssToken], w: f32, h: f32) -> bool {
 
     // Boolean feature (no colon).
     if colon_pos.is_none() {
+        // The "color" arm is explicit because it is the documented positive
+        // capability we report; the wildcard arm is the safe fallback. The
+        // arms share a value (true) but encode different intent.
+        #[allow(clippy::match_same_arms)]
         return match feature.as_str() {
             "color" => true,
             "monochrome" => false,
@@ -217,6 +222,11 @@ fn eval_feature(inner: &[&CssToken], w: f32, h: f32) -> bool {
         }
     });
 
+    // The dispatcher below has several arms that share a return value
+    // (true) but encode distinct CSS feature semantics; the wildcard arm
+    // is the documented "unknown feature -> apply rules" fallback. Each
+    // explicit arm therefore stays separate.
+    #[allow(clippy::match_same_arms)]
     match feature.as_str() {
         "max-width" | "max-device-width" => px_value.is_none_or(|v| w <= v),
         "min-width" | "min-device-width" => px_value.is_none_or(|v| w >= v),

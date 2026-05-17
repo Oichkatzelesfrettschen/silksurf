@@ -41,6 +41,7 @@ pub struct Specificity {
 }
 
 impl Specificity {
+    #[must_use] 
     pub fn zero() -> Self {
         Self {
             ids: 0,
@@ -155,10 +156,7 @@ fn matches_steps_rev(
     if from == 0 {
         return true;
     }
-    let combinator = match steps[from].combinator {
-        Some(combinator) => combinator,
-        None => return false,
-    };
+    let Some(combinator) = steps[from].combinator else { return false; };
     // Helper: get parent via CascadeView (flat array) or dom.parent() (168-byte Node).
     let get_parent = |n: NodeId| -> Option<NodeId> {
         if let Some(v) = view {
@@ -232,9 +230,8 @@ fn matches_compound(
     }
 
     // Fallback: fetch full Node from DOM
-    let name = match dom.node(node).ok().map(|node| node.kind()) {
-        Some(NodeKind::Element { name, .. }) => name,
-        _ => return false,
+    let Some(NodeKind::Element { name, .. }) = dom.node(node).ok().map(|node| node.kind()) else {
+        return false;
     };
     if let Some(type_selector) = &compound.type_selector {
         match type_selector {
@@ -296,18 +293,9 @@ fn matches_modifier(dom: &Dom, node: NodeId, modifier: &SelectorModifier) -> boo
 }
 
 fn matches_attribute(dom: &Dom, node: NodeId, attribute: &AttributeSelector) -> bool {
-    let attr = match attribute_record(dom, node, &attribute.name) {
-        Some(attr) => attr,
-        None => return false,
-    };
-    let operator = match attribute.operator {
-        Some(operator) => operator,
-        None => return true,
-    };
-    let expected = match attribute.value.as_ref() {
-        Some(expected) => expected,
-        None => return false,
-    };
+    let Some(attr) = attribute_record(dom, node, &attribute.name) else { return false; };
+    let Some(operator) = attribute.operator else { return true; };
+    let Some(expected) = attribute.value.as_ref() else { return false; };
     if let (Some(atom), Some(value_atom)) = (expected.atom(), attr.value_atom) {
         if atom == value_atom {
             return true;
@@ -333,10 +321,7 @@ fn attribute_record<'a>(dom: &'a Dom, node: NodeId, name: &AttributeName) -> Opt
 }
 
 fn matches_id(dom: &Dom, node: NodeId, name: &SelectorIdent) -> bool {
-    let attrs = match dom.attributes(node) {
-        Ok(attrs) => attrs,
-        Err(_) => return false,
-    };
+    let Ok(attrs) = dom.attributes(node) else { return false; };
     let Some(attr) = attrs.iter().find(|attr| attr.name == AttributeName::Id) else {
         return false;
     };
@@ -349,10 +334,7 @@ fn matches_id(dom: &Dom, node: NodeId, name: &SelectorIdent) -> bool {
 }
 
 fn matches_class(dom: &Dom, node: NodeId, name: &SelectorIdent) -> bool {
-    let attrs = match dom.attributes(node) {
-        Ok(attrs) => attrs,
-        Err(_) => return false,
-    };
+    let Ok(attrs) = dom.attributes(node) else { return false; };
     let Some(attr) = attrs.iter().find(|attr| attr.name == AttributeName::Class) else {
         return false;
     };
@@ -366,6 +348,11 @@ fn matches_class(dom: &Dom, node: NodeId, name: &SelectorIdent) -> bool {
         .split_whitespace()
         .any(|part| part == name.as_str())
 }
+// The body of this function is a CSS pseudo-class dispatcher; each arm
+// documents the spec rationale for its return value (especially the
+// false-returning interaction-state and form-validation arms). Merging
+// them would erase the per-arm WHY comments that justify each decision.
+#[allow(clippy::match_same_arms)]
 fn matches_pseudo_class(dom: &Dom, node: NodeId, name: &SelectorIdent) -> bool {
     let lower = name.as_str().to_ascii_lowercase();
     match lower.as_str() {
@@ -476,15 +463,15 @@ fn matches_functional_pseudo_class(
         }
         "not" => match arg {
             PseudoClassArg::SelectorList(list) => !matches_selector_list(dom, node, list),
-            _ => false,
+            PseudoClassArg::Nth(_) => false,
         },
         "is" | "where" => match arg {
             PseudoClassArg::SelectorList(list) => matches_selector_list(dom, node, list),
-            _ => false,
+            PseudoClassArg::Nth(_) => false,
         },
         "has" => match arg {
             PseudoClassArg::SelectorList(list) => matches_has(dom, node, list),
-            _ => false,
+            PseudoClassArg::Nth(_) => false,
         },
         _ => false,
     }
@@ -492,10 +479,7 @@ fn matches_functional_pseudo_class(
 
 // :has() -- true when any descendant of node matches the selector list.
 fn matches_has(dom: &Dom, node: NodeId, list: &SelectorList) -> bool {
-    let children = match dom.children(node).ok() {
-        Some(c) => c,
-        None => return false,
-    };
+    let Some(children) = dom.children(node).ok() else { return false; };
     for child in children {
         if matches_selector_list(dom, *child, list) {
             return true;
@@ -509,14 +493,8 @@ fn matches_has(dom: &Dom, node: NodeId, list: &SelectorList) -> bool {
 
 // Returns 1-based position of node among element siblings from the start.
 fn element_child_index(dom: &Dom, node: NodeId) -> usize {
-    let parent = match dom.parent(node).ok().flatten() {
-        Some(p) => p,
-        None => return 0,
-    };
-    let siblings = match dom.children(parent).ok() {
-        Some(s) => s,
-        None => return 0,
-    };
+    let Some(parent) = dom.parent(node).ok().flatten() else { return 0; };
+    let Some(siblings) = dom.children(parent).ok() else { return 0; };
     let mut index = 0usize;
     for sibling in siblings {
         if dom.element_name(*sibling).ok().flatten().is_some() {
@@ -531,14 +509,8 @@ fn element_child_index(dom: &Dom, node: NodeId) -> usize {
 
 // Returns 1-based position of node among element siblings from the end.
 fn element_child_index_from_end(dom: &Dom, node: NodeId) -> usize {
-    let parent = match dom.parent(node).ok().flatten() {
-        Some(p) => p,
-        None => return 0,
-    };
-    let siblings = match dom.children(parent).ok() {
-        Some(s) => s,
-        None => return 0,
-    };
+    let Some(parent) = dom.parent(node).ok().flatten() else { return 0; };
+    let Some(siblings) = dom.children(parent).ok() else { return 0; };
     let mut index = 0usize;
     for sibling in siblings.iter().rev() {
         if dom.element_name(*sibling).ok().flatten().is_some() {
@@ -557,14 +529,8 @@ fn element_child_index_of_type(dom: &Dom, node: NodeId) -> usize {
         Some(t) => t.to_owned(),
         None => return 0,
     };
-    let parent = match dom.parent(node).ok().flatten() {
-        Some(p) => p,
-        None => return 0,
-    };
-    let siblings = match dom.children(parent).ok() {
-        Some(s) => s,
-        None => return 0,
-    };
+    let Some(parent) = dom.parent(node).ok().flatten() else { return 0; };
+    let Some(siblings) = dom.children(parent).ok() else { return 0; };
     let mut index = 0usize;
     for sibling in siblings {
         let same_tag = dom
@@ -588,14 +554,8 @@ fn element_child_index_of_type_from_end(dom: &Dom, node: NodeId) -> usize {
         Some(t) => t.to_owned(),
         None => return 0,
     };
-    let parent = match dom.parent(node).ok().flatten() {
-        Some(p) => p,
-        None => return 0,
-    };
-    let siblings = match dom.children(parent).ok() {
-        Some(s) => s,
-        None => return 0,
-    };
+    let Some(parent) = dom.parent(node).ok().flatten() else { return 0; };
+    let Some(siblings) = dom.children(parent).ok() else { return 0; };
     let mut index = 0usize;
     for sibling in siblings.iter().rev() {
         let same_tag = dom
@@ -622,10 +582,7 @@ fn is_last_of_type(dom: &Dom, node: NodeId) -> bool {
 }
 
 fn is_root(dom: &Dom, node: NodeId) -> bool {
-    let parent = match dom.parent(node).ok().flatten() {
-        Some(parent) => parent,
-        None => return false,
-    };
+    let Some(parent) = dom.parent(node).ok().flatten() else { return false; };
     dom.node(parent)
         .map(|node| matches!(node.kind(), NodeKind::Document))
         .unwrap_or(false)

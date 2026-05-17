@@ -1,4 +1,4 @@
-//! Core orchestration for the SilkSurf engine.
+//! Core orchestration for the `SilkSurf` engine.
 //!
 //! This crate wires together parsing, layout, rendering, networking,
 //! and the JavaScript runtime. Concrete implementations are introduced
@@ -68,12 +68,14 @@ pub struct EnginePipeline {
 }
 
 impl EnginePipeline {
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             style_cache: StyleCache::new(),
         }
     }
 
+    #[must_use] 
     pub fn style_generation(&self) -> u64 {
         self.style_cache.generation()
     }
@@ -204,12 +206,12 @@ pub fn parse_html(input: &str) -> Result<ParsedDocument, EngineError> {
     Ok(ParsedDocument { dom, document })
 }
 
-pub fn render_document<'a>(
+pub fn render_document(
     document: ParsedDocument,
     stylesheet: Stylesheet,
     viewport: Rect,
-    arena: &'a SilkArena,
-) -> Result<RenderOutput<'a>, EngineError> {
+    arena: &SilkArena,
+) -> Result<RenderOutput<'_>, EngineError> {
     let mut pipeline = EnginePipeline::new();
     pipeline.render_document(document, stylesheet, viewport, arena)
 }

@@ -7,7 +7,7 @@
 //! events without touching libxcb at all.
 //!
 //! WHAT: `Event` covers the seven event kinds the P6 slice cares about
-//! (Expose / KeyPress / KeyRelease / MouseMove / MousePress / MouseRelease /
+//! (Expose / `KeyPress` / `KeyRelease` / `MouseMove` / `MousePress` / `MouseRelease` /
 //! Resize / Close). `ControlFlow` is the handler return value that tells the
 //! pump whether to keep running or exit.
 //!
@@ -40,7 +40,7 @@ pub enum Event {
     MouseRelease { button: u8, x: i16, y: i16 },
     /// Window has been resized by the user or window manager.
     Resize { width: u32, height: u32 },
-    /// The window manager asked us to close (WM_DELETE_WINDOW).
+    /// The window manager asked us to close (`WM_DELETE_WINDOW`).
     Close,
 }
 

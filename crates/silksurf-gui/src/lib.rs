@@ -1,6 +1,6 @@
 //! Windowing, event loop, and platform integration (cleanroom).
 //!
-//! WHY: SilkSurf renders into a CPU-side ARGB framebuffer. To make the
+//! WHY: `SilkSurf` renders into a CPU-side ARGB framebuffer. To make the
 //! result visible on a Linux workstation we need a thin platform layer
 //! that opens a window, ships the framebuffer to the display server,
 //! and pumps input events back. ADR-010 records the decision to do
@@ -9,8 +9,8 @@
 //!
 //! WHAT: Three small modules.
 //!
-//!   * `window`     -- `XcbWindow`: connection + drawable + present().
-//!   * `event_loop` -- `EventLoop`: synchronous wait_for_event pump.
+//!   * `window`     -- `XcbWindow`: connection + drawable + `present()`.
+//!   * `event_loop` -- `EventLoop`: synchronous `wait_for_event` pump.
 //!   * `input`      -- `Event`/`ControlFlow`: normalized event types.
 //!
 //! HOW: Construct an `XcbWindow`, render a frame into a `Vec<u32>`,

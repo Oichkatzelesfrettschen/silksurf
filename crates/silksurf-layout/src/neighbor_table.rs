@@ -34,24 +34,24 @@ use silksurf_dom::{Dom, NodeId};
 /// Pre-computed BFS-level decomposition for parallel layout.
 #[derive(Default)]
 pub struct LayoutNeighborTable {
-    /// Start index of each BFS level in bfs_order.
+    /// Start index of each BFS level in `bfs_order`.
     /// Level i contains `bfs_order[level_starts[i]..level_starts[i+1]]`.
-    /// The last level's end is bfs_order.len() (no sentinel stored).
+    /// The last level's end is `bfs_order.len()` (no sentinel stored).
     /// Use level(i) for safe slice access.
     ///
     /// WHY flat offsets over `Vec<Vec<NodeId>>`: eliminates O(depth) inner-Vec
     /// allocations per call. A 6-level DOM saves 6 heap allocs on every
-    /// rebuild() call while level(i) remains O(1) slice arithmetic.
+    /// `rebuild()` call while level(i) remains O(1) slice arithmetic.
     pub level_starts: Vec<u32>,
     /// For each node (by flat BFS index), the index of its parent in the flat array.
-    /// Root has parent_idx = u32::MAX (sentinel).
+    /// Root has `parent_idx` = `u32::MAX` (sentinel).
     pub parent_idx: Vec<u32>,
     /// Flat BFS-order list of all node IDs.
     pub bfs_order: Vec<NodeId>,
     /// Number of children per node (by flat BFS index).
     pub child_count: Vec<u16>,
-    /// Reverse map: NodeId -> flat BFS index.
-    /// Enables O(1) node lookup for callers that hold a NodeId.
+    /// Reverse map: `NodeId` -> flat BFS index.
+    /// Enables O(1) node lookup for callers that hold a `NodeId`.
     pub node_to_bfs_idx: rustc_hash::FxHashMap<NodeId, u32>,
 }
 
@@ -157,6 +157,7 @@ impl LayoutNeighborTable {
      *
      * Complexity: O(1)
      */
+    #[must_use] 
     pub fn level(&self, i: usize) -> &[NodeId] {
         let start = self.level_starts[i] as usize;
         let end = if i + 1 < self.level_starts.len() {
@@ -168,16 +169,19 @@ impl LayoutNeighborTable {
     }
 
     /// Total number of nodes.
+    #[must_use] 
     pub fn len(&self) -> usize {
         self.bfs_order.len()
     }
 
     /// Check if empty.
+    #[must_use] 
     pub fn is_empty(&self) -> bool {
         self.bfs_order.is_empty()
     }
 
     /// Number of BFS depth levels.
+    #[must_use] 
     pub fn depth(&self) -> usize {
         self.level_starts.len()
     }

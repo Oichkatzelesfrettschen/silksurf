@@ -11,7 +11,7 @@
 //!   * Reject malformed PEM input.
 //!   * Accept a known-good single-cert PEM (the workspace bundles
 //!     webpki-roots so we always have one).
-//!   * Verify root_store_diagnostics returns non-zero counts on a
+//!   * Verify `root_store_diagnostics` returns non-zero counts on a
 //!     normally-configured host.
 
 use silksurf_tls::{TlsConfig, TlsConfigError, root_store_diagnostics};
@@ -37,8 +37,8 @@ fn extra_ca_file_rejects_empty() {
     let tmp = tempfile_pem(b"");
     let result = TlsConfig::new_with_extra_ca_file(&tmp);
     match result {
-        Err(TlsConfigError::NoCertificates { .. })
-        | Err(TlsConfigError::NoUsableCertificates { .. }) => {}
+        Err(TlsConfigError::NoCertificates { .. } |
+TlsConfigError::NoUsableCertificates { .. }) => {}
         other => panic!("expected NoCertificates / NoUsableCertificates error, got {other:?}"),
     }
 }
@@ -48,9 +48,8 @@ fn extra_ca_file_rejects_malformed_pem() {
     let tmp = tempfile_pem(b"not a real PEM file -- just bytes\n");
     let result = TlsConfig::new_with_extra_ca_file(&tmp);
     match result {
-        Err(TlsConfigError::NoCertificates { .. })
-        | Err(TlsConfigError::NoUsableCertificates { .. })
-        | Err(TlsConfigError::Io(_)) => {}
+        Err(TlsConfigError::NoCertificates { .. } |
+TlsConfigError::NoUsableCertificates { .. } | TlsConfigError::Io(_)) => {}
         other => panic!("expected NoCertificates / NoUsableCertificates / Io error, got {other:?}"),
     }
 }
@@ -66,7 +65,7 @@ fn config_new_succeeds_on_default_host() {
 
 /// Write `bytes` to a uniquely-named tempfile under /tmp and return the path.
 /// Best-effort: if /tmp is unwritable the test will surface the underlying
-/// io::Error via the assertion in the caller.
+/// `io::Error` via the assertion in the caller.
 fn tempfile_pem(bytes: &[u8]) -> PathBuf {
     use std::time::{SystemTime, UNIX_EPOCH};
     let nanos = SystemTime::now()

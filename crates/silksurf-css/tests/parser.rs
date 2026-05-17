@@ -7,9 +7,8 @@ use silksurf_dom::TagName;
 fn parses_style_rule_declarations() {
     let sheet = parse_stylesheet("body { color: red !important; margin: 0 }").unwrap();
     assert_eq!(sheet.rules.len(), 1);
-    let rule = match &sheet.rules[0] {
-        Rule::Style(rule) => rule,
-        _ => panic!("expected style rule"),
+    let Rule::Style(rule) = &sheet.rules[0] else {
+        panic!("expected style rule");
     };
 
     assert_eq!(rule.selectors.selectors.len(), 1);
@@ -44,9 +43,8 @@ fn parses_at_rule_blocks() {
 
     assert_eq!(sheet.rules.len(), 2);
 
-    let media = match &sheet.rules[0] {
-        Rule::At(rule) => rule,
-        _ => panic!("expected at-rule"),
+    let Rule::At(media) = &sheet.rules[0] else {
+        panic!("expected at-rule");
     };
     match &media.block {
         Some(AtRuleBlock::Rules(rules)) => {
@@ -55,9 +53,8 @@ fn parses_at_rule_blocks() {
         _ => panic!("expected nested rules"),
     }
 
-    let font = match &sheet.rules[1] {
-        Rule::At(rule) => rule,
-        _ => panic!("expected at-rule"),
+    let Rule::At(font) = &sheet.rules[1] else {
+        panic!("expected at-rule");
     };
     match &font.block {
         Some(AtRuleBlock::Declarations(decls)) => {
@@ -72,9 +69,8 @@ fn parses_at_rule_blocks() {
 fn parses_multiple_selectors() {
     let sheet = parse_stylesheet("h1, h2.title { margin: 0; }").unwrap();
     assert_eq!(sheet.rules.len(), 1);
-    let rule = match &sheet.rules[0] {
-        Rule::Style(rule) => rule,
-        _ => panic!("expected style rule"),
+    let Rule::Style(rule) = &sheet.rules[0] else {
+        panic!("expected style rule");
     };
     assert_eq!(rule.selectors.selectors.len(), 2);
 
@@ -117,7 +113,7 @@ body { content: ""#
         .iter()
         .find_map(|rule| match rule {
             Rule::Style(rule) => Some(rule),
-            _ => None,
+            Rule::At(_) => None,
         })
         .expect("expected style rule");
     assert_eq!(rule.declarations.len(), 1);

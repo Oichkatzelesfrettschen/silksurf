@@ -57,7 +57,6 @@ fn linebreak_opportunities_basic() {
     // break there.  Mandatory end-of-text break at 11 is also expected.
     assert!(
         breaks.contains(&6),
-        "expected a break opportunity at byte 6 (after 'Hello '), got {:?}",
-        breaks
+        "expected a break opportunity at byte 6 (after 'Hello '), got {breaks:?}"
     );
 }

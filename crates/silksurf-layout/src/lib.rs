@@ -85,6 +85,7 @@ pub struct Dimensions {
 }
 
 impl Dimensions {
+    #[must_use] 
     pub fn margin_box(&self) -> Rect {
         Rect {
             x: self.content.x - self.margin.left,
@@ -124,6 +125,12 @@ pub struct LayoutTree<'a> {
     pub root: &'a LayoutBox<'a>,
 }
 
+// The styles map is pinned to FxHashMap throughout the layout pipeline
+// for performance (FxHasher is significantly faster on small integer
+// keys like NodeId than the default SipHash). Loosening the parameter
+// to a generic BuildHasher would require propagating the type parameter
+// through every inner function on the layout-tree builder.
+#[allow(clippy::implicit_hasher)]
 pub fn build_layout_tree<'a>(
     arena: &'a SilkArena,
     dom: &Dom,
@@ -137,6 +144,10 @@ pub fn build_layout_tree<'a>(
     Some(LayoutTree { root: root_box })
 }
 
+// See note on build_layout_tree above; the styles map type is pinned to
+// FxHashMap for performance and propagating a generic hasher parameter
+// through every internal builder is not worth the API noise.
+#[allow(clippy::implicit_hasher)]
 pub fn build_layout_tree_incremental<'a>(
     arena: &'a SilkArena,
     dom: &Dom,
@@ -157,7 +168,7 @@ fn build_layout_box<'a>(
     styles: &FxHashMap<NodeId, ComputedStyle>,
     node: NodeId,
 ) -> Option<&'a LayoutBox<'a>> {
-    let display = match dom.node(node).ok().map(|node| node.kind()) {
+    let display = match dom.node(node).ok().map(silksurf_dom::Node::kind) {
         Some(NodeKind::Document) => Display::Block,
         Some(NodeKind::Text { .. }) => Display::Inline,
         Some(NodeKind::Element { name, .. }) => {
@@ -195,7 +206,7 @@ fn build_layout_box<'a>(
         children,
     }))
 }
-impl<'a> LayoutBox<'a> {
+impl LayoutBox<'_> {
     pub fn dimensions(&self) -> Dimensions {
         self.dimensions.get()
     }
@@ -540,9 +551,8 @@ fn edges_from_fixed(edges: EdgeSizesFixed) -> EdgeSizes {
 }
 
 fn inline_text_width_fixed(dom: &Dom, node: NodeId, font_size_fixed: i32) -> i32 {
-    let text = match dom.node(node).ok().map(|node| node.kind()) {
-        Some(NodeKind::Text { text }) => text,
-        _ => return font_size_fixed,
+    let Some(NodeKind::Text { text }) = dom.node(node).ok().map(silksurf_dom::Node::kind) else {
+        return font_size_fixed;
     };
     let font_size_px = fixed_to_f32(font_size_fixed);
     let (width_px, _) = silksurf_text::measure_text(text, font_size_px, None);
@@ -563,13 +573,14 @@ fn inline_text_width_fixed(dom: &Dom, node: NodeId, font_size_fixed: i32) -> i32
 // from being dead dependencies.
 // ---------------------------------------------------------------------------
 
-/// bidi_level -- return the Unicode paragraph embedding level for `text`.
+/// `bidi_level` -- return the Unicode paragraph embedding level for `text`.
 ///
 /// WHY: An embedding level of 0 means left-to-right (the common case);
 /// 1 means right-to-left.  The layout engine must know this before it
 /// can position inline boxes correctly under UAX #9.
 ///
-/// Returns 0 for empty input (no BiDi runs -> LTR default per UAX #9 SS2).
+/// Returns 0 for empty input (no `BiDi` runs -> LTR default per UAX #9 SS2).
+#[must_use] 
 pub fn bidi_level(text: &str) -> u8 {
     if text.is_empty() {
         return 0;
@@ -581,7 +592,7 @@ pub fn bidi_level(text: &str) -> u8 {
     para.level.number()
 }
 
-/// linebreak_opportunities -- return byte offsets where line breaks are
+/// `linebreak_opportunities` -- return byte offsets where line breaks are
 /// permitted according to UAX #14.
 ///
 /// WHY: The inline-layout pass must know which byte positions are legal
@@ -593,6 +604,7 @@ pub fn bidi_level(text: &str) -> u8 {
 /// The returned offsets are the byte indices *after* the last code unit
 /// that may appear on the preceding line (matching the unicode-linebreak
 /// crate convention).
+#[must_use] 
 pub fn linebreak_opportunities(text: &str) -> Vec<usize> {
     linebreaks(text)
         .filter_map(|(offset, opportunity)| {

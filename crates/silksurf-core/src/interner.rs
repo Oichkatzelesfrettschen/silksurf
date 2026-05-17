@@ -16,6 +16,7 @@ impl Atom {
     /// Raw index for direct array access into a materialized resolve table.
     /// SAFETY: only valid against the interner that created this atom.
     #[inline]
+    #[must_use] 
     pub fn raw(self) -> u32 {
         self.0
     }
@@ -27,6 +28,7 @@ pub struct SilkInterner {
 }
 
 impl SilkInterner {
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             ids: HashMap::new(),
@@ -56,17 +58,20 @@ impl SilkInterner {
             .expect("invalid Atom: symbol not found in interner")
     }
 
+    #[must_use] 
     pub fn len(&self) -> usize {
         self.values.len()
     }
 
+    #[must_use] 
     pub fn is_empty(&self) -> bool {
         self.values.is_empty()
     }
 
-    /// Direct slice access to all interned values, indexed by Atom::raw().
-    /// Used by Dom::materialize_resolve_table() to bulk-copy new atoms
-    /// into the lock-free resolve table without per-atom RwLock acquire.
+    /// Direct slice access to all interned values, indexed by `Atom::raw()`.
+    /// Used by `Dom::materialize_resolve_table()` to bulk-copy new atoms
+    /// into the lock-free resolve table without per-atom `RwLock` acquire.
+    #[must_use] 
     pub fn values_slice(&self) -> &[SmallString] {
         &self.values
     }
@@ -91,5 +96,5 @@ pub fn should_intern_identifier(value: &str) -> bool {
     !value
         .as_bytes()
         .iter()
-        .any(|byte| byte.is_ascii_whitespace())
+        .any(u8::is_ascii_whitespace)
 }

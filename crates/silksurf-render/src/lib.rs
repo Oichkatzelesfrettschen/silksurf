@@ -82,7 +82,7 @@ pub enum DisplayItem {
         /// the tiny-skia path; also available for accessibility consumers.
         text: String,
         /// Font size in pixels, from the computed style at display list build
-        /// time. Required by cosmic-text shaping in rasterize_skia_into.
+        /// time. Required by cosmic-text shaping in `rasterize_skia_into`.
         font_size: f32,
         color: Color,
     },
@@ -119,6 +119,11 @@ pub enum DisplayItem {
     },
 }
 
+// The styles map is pinned to FxHashMap by the layout/render pipeline
+// for performance (FxHasher on NodeId integer keys vs default SipHash).
+// Loosening this to a generic BuildHasher would force the same change
+// through every inner display-list builder.
+#[allow(clippy::implicit_hasher)]
 pub fn build_display_list(
     dom: &Dom,
     styles: &FxHashMap<NodeId, ComputedStyle>,
@@ -134,6 +139,7 @@ pub fn build_display_list(
 }
 
 impl DisplayList {
+    #[must_use] 
     pub fn with_tiles(mut self, width: u32, height: u32, tile_size: u32) -> Self {
         if width == 0 || height == 0 || tile_size == 0 {
             return self;
@@ -180,7 +186,7 @@ fn build_display_list_for_box(
                 if let Ok(node) = dom.node(node_id) {
                     if let NodeKind::Text { .. } = node.kind() {
                         let (text_len, text_content) = match node.kind() {
-                            NodeKind::Text { text } => (text.len() as u32, text.to_string()),
+                            NodeKind::Text { text } => (text.len() as u32, text.clone()),
                             _ => (0, String::new()),
                         };
                         let font_size_px = match style.font_size {
@@ -207,6 +213,7 @@ fn build_display_list_for_box(
     }
 }
 
+#[must_use] 
 pub fn rasterize(display_list: &DisplayList, width: u32, height: u32) -> Vec<u8> {
     let damage = Rect {
         x: 0.0,
@@ -217,6 +224,7 @@ pub fn rasterize(display_list: &DisplayList, width: u32, height: u32) -> Vec<u8>
     rasterize_damage(display_list, width, height, damage)
 }
 
+#[must_use] 
 pub fn rasterize_damage(
     display_list: &DisplayList,
     width: u32,
@@ -240,6 +248,11 @@ pub fn rasterize_damage(
         if !rect_intersects(rect, damage) {
             continue;
         }
+        // The Text and RoundedRect arms currently degrade to a solid fill,
+        // matching the scalar pre-shaping pipeline. Keeping them as separate
+        // arms documents the planned divergence (text shaping, corner
+        // antialiasing) and ensures the dispatcher stays in one place.
+        #[allow(clippy::match_same_arms)]
         match item {
             DisplayItem::SolidColor { rect, color } => {
                 fill_rect(&mut buffer, width, height, *rect, *color);
@@ -269,11 +282,11 @@ pub fn rasterize_damage(
 
 fn item_rect(item: &DisplayItem) -> Rect {
     match item {
-        DisplayItem::SolidColor { rect, .. } => *rect,
-        DisplayItem::Text { rect, .. } => *rect,
-        DisplayItem::RoundedRect { rect, .. } => *rect,
+        DisplayItem::SolidColor { rect, .. }
+        | DisplayItem::Text { rect, .. }
+        | DisplayItem::RoundedRect { rect, .. }
+        | DisplayItem::LinearGradient { rect, .. } => *rect,
         DisplayItem::BoxShadow { rect, shadow } => box_shadow_rect(*rect, shadow),
-        DisplayItem::LinearGradient { rect, .. } => *rect,
     }
 }
 
@@ -366,8 +379,14 @@ fn fill_rect(buffer: &mut [u8], width: u32, height: u32, rect: Rect, color: Colo
     // exact number of u32-sized chunks that fit. The returned slice
     // covers the same memory as `buffer` for its lifetime; we hold the
     // exclusive &mut borrow on `buffer` so no aliasing is possible.
+    // SAFETY for the cast: framebuffer allocation is always 4-byte aligned
+    // because Vec<u8>::as_mut_ptr() returns a pointer to a u32-aligned
+    // allocation (the framebuffer is sized in u32 units; see comment above).
+    // clippy::cast_ptr_alignment fires conservatively for any u8 -> wider
+    // pointer cast even when the underlying allocation guarantees alignment.
+    #[allow(clippy::cast_ptr_alignment)]
     let buffer_u32 =
-        unsafe { std::slice::from_raw_parts_mut(buffer.as_mut_ptr() as *mut u32, len_u32) };
+        unsafe { std::slice::from_raw_parts_mut(buffer.as_mut_ptr().cast::<u32>(), len_u32) };
 
     for y in y0..y1 {
         if y < 0 || y >= height as i32 {
@@ -418,7 +437,7 @@ unsafe fn fill_row_sse2(row: &mut [u32], pixel: u32) {
     #[cfg(target_arch = "x86")]
     use std::arch::x86::*;
     #[cfg(target_arch = "x86_64")]
-    use std::arch::x86_64::*;
+    use std::arch::x86_64::{_mm_set1_epi32, __m128i, _mm_storeu_si128};
 
     let len = row.len();
     if len == 0 {
@@ -435,7 +454,8 @@ unsafe fn fill_row_sse2(row: &mut [u32], pixel: u32) {
         // *mut __m128i is sound because u32 is 4-byte aligned and 4*u32 =
         // 16 bytes which __m128i expects (and _mm_storeu_si128 tolerates
         // unaligned pointers anyway).
-        let dst = unsafe { ptr.add(idx) } as *mut __m128i;
+        #[allow(clippy::cast_ptr_alignment)]
+        let dst = unsafe { ptr.add(idx) }.cast::<__m128i>();
         // SAFETY: dst points to 16 valid writable bytes (4 * u32) within
         // the row borrow held by the caller; storeu does not require
         // alignment.
@@ -561,8 +581,9 @@ pub fn fill_simd(buf: &mut [u32], color: u32) {
  * See: IEC 61966-2-1:1999, section 4.2.
  * See: docs/design/COLOR.md, section "sRGB <-> Linear Conversion".
  */
+#[must_use] 
 pub fn srgb_to_linear(c: u8) -> f32 {
-    let c_f = c as f32 / 255.0;
+    let c_f = f32::from(c) / 255.0;
     let linear = if c_f <= 0.04045 {
         c_f / 12.92
     } else {
@@ -586,9 +607,10 @@ pub fn srgb_to_linear(c: u8) -> f32 {
  * See: IEC 61966-2-1:1999, section 4.2.
  * See: docs/design/COLOR.md, section "sRGB <-> Linear Conversion".
  */
+#[must_use] 
 pub fn linear_to_srgb(c: f32) -> u8 {
     let c_clamped = c.clamp(0.0, 1.0);
-    let encoded = if c_clamped <= 0.0031308 {
+    let encoded = if c_clamped <= 0.003_130_8 {
         c_clamped * 12.92
     } else {
         1.055 * c_clamped.powf(1.0 / 2.4) - 0.055
@@ -616,10 +638,11 @@ pub fn linear_to_srgb(c: f32) -> u8 {
  * See: Porter, T. and Duff, T. "Compositing Digital Images." SIGGRAPH 1984.
  * See: docs/design/COLOR.md, section "Alpha Premultiplication Policy".
  */
+#[must_use] 
 pub fn premultiply(r: u8, g: u8, b: u8, a: u8) -> (u8, u8, u8) {
-    let alpha = a as u32;
+    let alpha = u32::from(a);
     let premult = |c: u8| -> u8 {
-        let ca = c as u32 * alpha + 127;
+        let ca = u32::from(c) * alpha + 127;
         ((ca + (ca >> 8)) >> 8) as u8
     };
     (premult(r), premult(g), premult(b))
@@ -638,14 +661,15 @@ pub fn premultiply(r: u8, g: u8, b: u8, a: u8) -> (u8, u8, u8) {
  *
  * See: docs/design/COLOR.md, section "Alpha Premultiplication Policy".
  */
+#[must_use] 
 pub fn unpremultiply(r: u8, g: u8, b: u8, a: u8) -> (u8, u8, u8) {
     if a == 0 {
         return (0, 0, 0);
     }
-    let alpha = a as u32;
+    let alpha = u32::from(a);
     let unpremult = |c: u8| -> u8 {
         // round(c * 255 / a), clamped to [0, 255]
-        let numerator = c as u32 * 255 + (alpha / 2);
+        let numerator = u32::from(c) * 255 + (alpha / 2);
         (numerator / alpha).min(255) as u8
     };
     (unpremult(r), unpremult(g), unpremult(b))
@@ -674,6 +698,20 @@ pub fn unpremultiply(r: u8, g: u8, b: u8, a: u8) -> (u8, u8, u8) {
  * See: gororoba soa_solver.rs:280 for the reuse-buffer pattern.
  */
 #[cfg(feature = "parallel")]
+// Wrapper to make a raw pointer Send/Sync inside the parallel raster loop.
+// SAFETY: per-tile writes target disjoint regions, so concurrent writers
+// never alias the same byte; see rasterize_parallel_into for the partition.
+struct SendPtr(*mut u8, usize);
+
+// SAFETY: the SendPtr instance is only shared with the parallel rayon
+// closure below, which partitions the underlying buffer into disjoint
+// rectangular tiles. No two threads ever write to the same byte.
+unsafe impl Send for SendPtr {}
+
+// SAFETY: shared by reference into the parallel closure; the read-only
+// (pointer, length) pair is immutable from the closure's perspective.
+unsafe impl Sync for SendPtr {}
+
 pub fn rasterize_parallel_into(
     display_list: &DisplayList,
     width: u32,
@@ -700,11 +738,6 @@ pub fn rasterize_parallel_into(
     // The SendPtr wrapper (see gororoba pattern) makes this safe to send across threads.
     let buf_ptr = buf.as_mut_ptr();
     let buf_len = buf.len();
-
-    // Wrapper to make raw pointer Send (safe because writes are disjoint)
-    struct SendPtr(*mut u8, usize);
-    unsafe impl Send for SendPtr {}
-    unsafe impl Sync for SendPtr {}
 
     let shared = &SendPtr(buf_ptr, buf_len);
 
@@ -745,17 +778,17 @@ pub fn rasterize_parallel_into(
             // shadow.color; LinearGradient uses its first stop as a scalar
             // fallback (the tiny-skia path renders the full gradient).
             let fill_color: Color = match item {
-                DisplayItem::SolidColor { color, .. } => *color,
-                DisplayItem::Text { color, .. } => *color,
-                DisplayItem::RoundedRect { color, .. } => *color,
+                DisplayItem::SolidColor { color, .. }
+                | DisplayItem::Text { color, .. }
+                | DisplayItem::RoundedRect { color, .. } => *color,
                 DisplayItem::BoxShadow { shadow, .. } => shadow.color,
                 DisplayItem::LinearGradient { stops, .. } => {
-                    stops.first().map(|pair| pair.1).unwrap_or(Color {
+                    stops.first().map_or(Color {
                         r: 0,
                         g: 0,
                         b: 0,
                         a: 0,
-                    })
+                    }, |pair| pair.1)
                 }
             };
 
@@ -809,6 +842,7 @@ pub fn rasterize_parallel_into(
  * See: gororoba_app/crates/gororoba_bevy_lbm/src/soa_solver.rs:1254
  */
 #[cfg(feature = "parallel")]
+#[must_use] 
 pub fn rasterize_parallel(
     display_list: &DisplayList,
     width: u32,
@@ -828,6 +862,7 @@ pub fn rasterize_parallel(
 ///
 /// Output pixels are premultiplied RGBA8, matching `PixmapMut` conventions.
 /// For fully-opaque colors (alpha == 255) this is identical to straight RGBA.
+#[must_use] 
 pub fn rasterize_skia(display_list: &DisplayList, width: u32, height: u32) -> Vec<u8> {
     let mut buf = Vec::new();
     rasterize_skia_into(display_list, width, height, &mut buf);

@@ -220,10 +220,7 @@ fn run_one(path: &Path) -> Outcome {
         Err(e) => return Outcome::Fail(format!("parse error: {e:?}")),
     };
 
-    let stem = match path.file_stem().and_then(|s| s.to_str()) {
-        Some(s) => s,
-        None => return Outcome::Skip("non-utf8 stem".to_string()),
-    };
+    let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else { return Outcome::Skip("non-utf8 stem".to_string()); };
 
     match stem {
         "html_basic_structure" => check_html_basic_structure(&parsed.dom, parsed.document),
@@ -352,10 +349,7 @@ fn element_children(dom: &Dom, parent: NodeId) -> Vec<NodeId> {
 }
 
 fn collect_text(dom: &Dom, root: NodeId, out: &mut String) {
-    let node = match dom.node(root) {
-        Ok(n) => n,
-        Err(_) => return,
-    };
+    let Ok(node) = dom.node(root) else { return; };
     if let NodeKind::Text { text } = node.kind() {
         out.push_str(text);
     }
@@ -418,14 +412,8 @@ fn attribute_value(dom: &Dom, node: NodeId, name: &str) -> Option<String> {
 // -------------------------------------------------------------------------
 
 fn check_html_basic_structure(dom: &Dom, document: NodeId) -> Outcome {
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing html > body".to_string()),
-    };
-    let p = match first_element_child_named(dom, body, "p") {
-        Some(p) => p,
-        None => return Outcome::Fail("missing body > p".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing html > body".to_string()); };
+    let Some(p) = first_element_child_named(dom, body, "p") else { return Outcome::Fail("missing body > p".to_string()); };
     let mut text = String::new();
     collect_text(dom, p, &mut text);
     if text.trim() == "hello" {
@@ -436,10 +424,7 @@ fn check_html_basic_structure(dom: &Dom, document: NodeId) -> Outcome {
 }
 
 fn check_html_nested_divs(dom: &Dom, document: NodeId) -> Outcome {
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
     let mut depth = 0usize;
     let mut current = body;
     loop {
@@ -466,14 +451,10 @@ fn check_html_nested_divs(dom: &Dom, document: NodeId) -> Outcome {
 }
 
 fn check_html_void_elements(dom: &Dom, document: NodeId) -> Outcome {
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
     for tag in &["br", "hr", "img"] {
-        let element = match first_element_child_named(dom, body, tag) {
-            Some(e) => e,
-            None => return Outcome::Fail(format!("missing void element <{tag}>")),
+        let Some(element) = first_element_child_named(dom, body, tag) else {
+            return Outcome::Fail(format!("missing void element <{tag}>"));
         };
         let kids = dom.children(element).map(|c| c.len()).unwrap_or(usize::MAX);
         if kids != 0 {
@@ -484,14 +465,8 @@ fn check_html_void_elements(dom: &Dom, document: NodeId) -> Outcome {
 }
 
 fn check_html_attributes(dom: &Dom, document: NodeId) -> Outcome {
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
-    let div = match first_element_child_named(dom, body, "div") {
-        Some(d) => d,
-        None => return Outcome::Fail("missing div".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
+    let Some(div) = first_element_child_named(dom, body, "div") else { return Outcome::Fail("missing div".to_string()); };
     let class = attribute_value(dom, div, "class");
     let id = attribute_value(dom, div, "id");
     if class.as_deref() == Some("foo") && id.as_deref() == Some("bar") {
@@ -504,10 +479,7 @@ fn check_html_attributes(dom: &Dom, document: NodeId) -> Outcome {
 }
 
 fn check_html_comments(dom: &Dom, document: NodeId) -> Outcome {
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
     /*
      * Per tree_builder.rs, comments are dropped (not inserted as DOM
      * Comment nodes). Validate that no Comment node landed under body
@@ -517,10 +489,7 @@ fn check_html_comments(dom: &Dom, document: NodeId) -> Outcome {
         // Treat as PASS as well -- spec allows Comment nodes; we just
         // want to confirm parser does not corrupt subsequent siblings.
     }
-    let p = match first_element_child_named(dom, body, "p") {
-        Some(p) => p,
-        None => return Outcome::Fail("missing <p> after comment".to_string()),
-    };
+    let Some(p) = first_element_child_named(dom, body, "p") else { return Outcome::Fail("missing <p> after comment".to_string()); };
     let mut text = String::new();
     collect_text(dom, p, &mut text);
     if text.trim() == "visible" {
@@ -531,10 +500,7 @@ fn check_html_comments(dom: &Dom, document: NodeId) -> Outcome {
 }
 
 fn check_html_headings(dom: &Dom, document: NodeId) -> Outcome {
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
     for tag in &["h1", "h2", "h3"] {
         if first_element_child_named(dom, body, tag).is_none() {
             return Outcome::Fail(format!("missing <{tag}>"));
@@ -544,14 +510,8 @@ fn check_html_headings(dom: &Dom, document: NodeId) -> Outcome {
 }
 
 fn check_html_list(dom: &Dom, document: NodeId, list_tag: &str, expected_items: usize) -> Outcome {
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
-    let list = match first_element_child_named(dom, body, list_tag) {
-        Some(l) => l,
-        None => return Outcome::Fail(format!("missing <{list_tag}>")),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
+    let Some(list) = first_element_child_named(dom, body, list_tag) else { return Outcome::Fail(format!("missing <{list_tag}>")); };
     let li_count = count_descendants_named(dom, list, "li");
     if li_count == expected_items {
         Outcome::Pass
@@ -561,14 +521,8 @@ fn check_html_list(dom: &Dom, document: NodeId, list_tag: &str, expected_items: 
 }
 
 fn check_html_table(dom: &Dom, document: NodeId) -> Outcome {
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
-    let table = match first_element_child_named(dom, body, "table") {
-        Some(t) => t,
-        None => return Outcome::Fail("missing <table>".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
+    let Some(table) = first_element_child_named(dom, body, "table") else { return Outcome::Fail("missing <table>".to_string()); };
     let trs = count_descendants_named(dom, table, "tr");
     let ths = count_descendants_named(dom, table, "th");
     let tds = count_descendants_named(dom, table, "td");
@@ -582,22 +536,10 @@ fn check_html_table(dom: &Dom, document: NodeId) -> Outcome {
 }
 
 fn check_html_form(dom: &Dom, document: NodeId) -> Outcome {
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
-    let form = match first_element_child_named(dom, body, "form") {
-        Some(f) => f,
-        None => return Outcome::Fail("missing <form>".to_string()),
-    };
-    let input = match first_element_child_named(dom, form, "input") {
-        Some(i) => i,
-        None => return Outcome::Fail("missing <input>".to_string()),
-    };
-    let button = match first_element_child_named(dom, form, "button") {
-        Some(b) => b,
-        None => return Outcome::Fail("missing <button>".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
+    let Some(form) = first_element_child_named(dom, body, "form") else { return Outcome::Fail("missing <form>".to_string()); };
+    let Some(input) = first_element_child_named(dom, form, "input") else { return Outcome::Fail("missing <input>".to_string()); };
+    let Some(button) = first_element_child_named(dom, form, "button") else { return Outcome::Fail("missing <button>".to_string()); };
     let name = attribute_value(dom, input, "name");
     let btype = attribute_value(dom, button, "type");
     if name.as_deref() == Some("q") && btype.as_deref() == Some("submit") {
@@ -608,14 +550,8 @@ fn check_html_form(dom: &Dom, document: NodeId) -> Outcome {
 }
 
 fn check_html_script_tag(dom: &Dom, document: NodeId) -> Outcome {
-    let head = match head_of(dom, document) {
-        Some(h) => h,
-        None => return Outcome::Fail("missing head".to_string()),
-    };
-    let script = match first_element_child_named(dom, head, "script") {
-        Some(s) => s,
-        None => return Outcome::Fail("missing <script>".to_string()),
-    };
+    let Some(head) = head_of(dom, document) else { return Outcome::Fail("missing head".to_string()); };
+    let Some(script) = first_element_child_named(dom, head, "script") else { return Outcome::Fail("missing <script>".to_string()); };
     /*
      * The tokenizer keeps script body verbatim as a single text child;
      * validating presence of "var ignored" both confirms script tag
@@ -631,14 +567,8 @@ fn check_html_script_tag(dom: &Dom, document: NodeId) -> Outcome {
 }
 
 fn check_html_anchor(dom: &Dom, document: NodeId) -> Outcome {
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
-    let anchor = match first_element_child_named(dom, body, "a") {
-        Some(a) => a,
-        None => return Outcome::Fail("missing <a>".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
+    let Some(anchor) = first_element_child_named(dom, body, "a") else { return Outcome::Fail("missing <a>".to_string()); };
     let href = attribute_value(dom, anchor, "href");
     if href.as_deref() == Some("https://example.com/") {
         Outcome::Pass
@@ -648,14 +578,8 @@ fn check_html_anchor(dom: &Dom, document: NodeId) -> Outcome {
 }
 
 fn check_html_text_entities(dom: &Dom, document: NodeId) -> Outcome {
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
-    let p = match first_element_child_named(dom, body, "p") {
-        Some(p) => p,
-        None => return Outcome::Fail("missing <p>".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
+    let Some(p) = first_element_child_named(dom, body, "p") else { return Outcome::Fail("missing <p>".to_string()); };
     let mut text = String::new();
     collect_text(dom, p, &mut text);
     if text.contains('&') && text.contains('<') {
@@ -708,10 +632,7 @@ fn parse_selector(dom: &Dom, css_selector: &str) -> Option<SelectorList> {
 }
 
 fn check_css_class_selector(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block found".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block found".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
@@ -719,18 +640,9 @@ fn check_css_class_selector(dom: &Dom, document: NodeId, source: &str) -> Outcom
     if stylesheet.rules.is_empty() {
         return Outcome::Fail("stylesheet has zero rules".to_string());
     }
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
-    let div = match first_element_child_named(dom, body, "div") {
-        Some(d) => d,
-        None => return Outcome::Fail("missing <div>".to_string()),
-    };
-    let selector = match parse_selector(dom, ".foo") {
-        Some(s) => s,
-        None => return Outcome::Fail("could not parse '.foo'".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
+    let Some(div) = first_element_child_named(dom, body, "div") else { return Outcome::Fail("missing <div>".to_string()); };
+    let Some(selector) = parse_selector(dom, ".foo") else { return Outcome::Fail("could not parse '.foo'".to_string()); };
     if matches_selector_list(dom, div, &selector) {
         Outcome::Pass
     } else {
@@ -739,22 +651,10 @@ fn check_css_class_selector(dom: &Dom, document: NodeId, source: &str) -> Outcom
 }
 
 fn check_css_id_selector(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let _css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block found".to_string()),
-    };
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
-    let div = match first_element_child_named(dom, body, "div") {
-        Some(d) => d,
-        None => return Outcome::Fail("missing <div>".to_string()),
-    };
-    let selector = match parse_selector(dom, "#main") {
-        Some(s) => s,
-        None => return Outcome::Fail("could not parse '#main'".to_string()),
-    };
+    let Some(_css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block found".to_string()); };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
+    let Some(div) = first_element_child_named(dom, body, "div") else { return Outcome::Fail("missing <div>".to_string()); };
+    let Some(selector) = parse_selector(dom, "#main") else { return Outcome::Fail("could not parse '#main'".to_string()); };
     if matches_selector_list(dom, div, &selector) {
         Outcome::Pass
     } else {
@@ -763,22 +663,10 @@ fn check_css_id_selector(dom: &Dom, document: NodeId, source: &str) -> Outcome {
 }
 
 fn check_css_type_selector(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let _css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block found".to_string()),
-    };
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
-    let p = match first_element_child_named(dom, body, "p") {
-        Some(p) => p,
-        None => return Outcome::Fail("missing <p>".to_string()),
-    };
-    let selector = match parse_selector(dom, "p") {
-        Some(s) => s,
-        None => return Outcome::Fail("could not parse 'p'".to_string()),
-    };
+    let Some(_css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block found".to_string()); };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
+    let Some(p) = first_element_child_named(dom, body, "p") else { return Outcome::Fail("missing <p>".to_string()); };
+    let Some(selector) = parse_selector(dom, "p") else { return Outcome::Fail("could not parse 'p'".to_string()); };
     if matches_selector_list(dom, p, &selector) {
         Outcome::Pass
     } else {
@@ -787,27 +675,17 @@ fn check_css_type_selector(dom: &Dom, document: NodeId, source: &str) -> Outcome
 }
 
 fn check_css_pseudo_nth_child(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let _css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block found".to_string()),
-    };
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
-    let ul = match first_element_child_named(dom, body, "ul") {
-        Some(u) => u,
-        None => return Outcome::Fail("missing <ul>".to_string()),
-    };
+    let Some(_css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block found".to_string()); };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
+    let Some(ul) = first_element_child_named(dom, body, "ul") else { return Outcome::Fail("missing <ul>".to_string()); };
     let items = element_children(dom, ul);
     if items.len() < 2 {
         return Outcome::Fail(format!("expected >= 2 <li>, got {}", items.len()));
     }
     // The second <li> must have class "target".
     let second = items[1];
-    let selector = match parse_selector(dom, "li:nth-child(2)") {
-        Some(s) => s,
-        None => return Outcome::Fail("could not parse 'li:nth-child(2)'".to_string()),
+    let Some(selector) = parse_selector(dom, "li:nth-child(2)") else {
+        return Outcome::Fail("could not parse 'li:nth-child(2)'".to_string());
     };
     if matches_selector_list(dom, second, &selector) {
         Outcome::Pass
@@ -817,23 +695,16 @@ fn check_css_pseudo_nth_child(dom: &Dom, document: NodeId, source: &str) -> Outc
 }
 
 fn check_css_pseudo_not(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let _css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block found".to_string()),
-    };
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
+    let Some(_css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block found".to_string()); };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
     let divs = element_children(dom, body);
     if divs.len() < 2 {
         return Outcome::Fail(format!("expected 2 divs, got {}", divs.len()));
     }
     let keep_div = divs[0];
     let skip_div = divs[1];
-    let sel_not_skip = match parse_selector(dom, "div:not(.skip)") {
-        Some(s) => s,
-        None => return Outcome::Fail("could not parse 'div:not(.skip)'".to_string()),
+    let Some(sel_not_skip) = parse_selector(dom, "div:not(.skip)") else {
+        return Outcome::Fail("could not parse 'div:not(.skip)'".to_string());
     };
     if !matches_selector_list(dom, keep_div, &sel_not_skip) {
         return Outcome::Fail("'div:not(.skip)' did not match .keep div".to_string());
@@ -845,23 +716,14 @@ fn check_css_pseudo_not(dom: &Dom, document: NodeId, source: &str) -> Outcome {
 }
 
 fn check_css_attribute_selector(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let _css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block found".to_string()),
-    };
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
+    let Some(_css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block found".to_string()); };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
     let divs = element_children(dom, body);
     if divs.is_empty() {
         return Outcome::Fail("no div children of body".to_string());
     }
     let attr_div = divs[0];
-    let selector = match parse_selector(dom, "[data-role]") {
-        Some(s) => s,
-        None => return Outcome::Fail("could not parse '[data-role]'".to_string()),
-    };
+    let Some(selector) = parse_selector(dom, "[data-role]") else { return Outcome::Fail("could not parse '[data-role]'".to_string()); };
     if matches_selector_list(dom, attr_div, &selector) {
         Outcome::Pass
     } else {
@@ -870,24 +732,16 @@ fn check_css_attribute_selector(dom: &Dom, document: NodeId, source: &str) -> Ou
 }
 
 fn check_html_semantic_sections(dom: &Dom, document: NodeId) -> Outcome {
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
-    let main_el = match first_element_child_named(dom, body, "main") {
-        Some(m) => m,
-        None => return Outcome::Fail("missing <main>".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
+    let Some(main_el) = first_element_child_named(dom, body, "main") else { return Outcome::Fail("missing <main>".to_string()); };
     if first_element_child_named(dom, main_el, "nav").is_none() {
         return Outcome::Fail("missing <nav> inside <main>".to_string());
     }
-    let section = match first_element_child_named(dom, main_el, "section") {
-        Some(s) => s,
-        None => return Outcome::Fail("missing <section> inside <main>".to_string()),
+    let Some(section) = first_element_child_named(dom, main_el, "section") else {
+        return Outcome::Fail("missing <section> inside <main>".to_string());
     };
-    let article = match first_element_child_named(dom, section, "article") {
-        Some(a) => a,
-        None => return Outcome::Fail("missing <article> inside <section>".to_string()),
+    let Some(article) = first_element_child_named(dom, section, "article") else {
+        return Outcome::Fail("missing <article> inside <section>".to_string());
     };
     if first_element_child_named(dom, article, "h1").is_none() {
         return Outcome::Fail("missing <h1> inside <article>".to_string());
@@ -896,10 +750,7 @@ fn check_html_semantic_sections(dom: &Dom, document: NodeId) -> Outcome {
 }
 
 fn check_css_flexbox_display(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block found".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block found".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
@@ -910,29 +761,16 @@ fn check_css_flexbox_display(dom: &Dom, document: NodeId, source: &str) -> Outco
             stylesheet.rules.len()
         ));
     }
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
-    let row_div = match first_element_child_named(dom, body, "div") {
-        Some(d) => d,
-        None => return Outcome::Fail("missing row div".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
+    let Some(row_div) = first_element_child_named(dom, body, "div") else { return Outcome::Fail("missing row div".to_string()); };
     // Verify the .row div exists in the DOM with its class attribute.
-    let row_sel = match parse_selector(dom, ".row") {
-        Some(s) => s,
-        None => return Outcome::Fail("could not parse '.row'".to_string()),
-    };
+    let Some(row_sel) = parse_selector(dom, ".row") else { return Outcome::Fail("could not parse '.row'".to_string()); };
     if !matches_selector_list(dom, row_div, &row_sel) {
         return Outcome::Fail("'.row' did not match outermost div".to_string());
     }
-    let col_sel = match parse_selector(dom, ".col") {
-        Some(s) => s,
-        None => return Outcome::Fail("could not parse '.col'".to_string()),
-    };
-    let col_div = match first_element_child_named(dom, row_div, "div") {
-        Some(d) => d,
-        None => return Outcome::Fail("missing col div inside row".to_string()),
+    let Some(col_sel) = parse_selector(dom, ".col") else { return Outcome::Fail("could not parse '.col'".to_string()); };
+    let Some(col_div) = first_element_child_named(dom, row_div, "div") else {
+        return Outcome::Fail("missing col div inside row".to_string());
     };
     if !matches_selector_list(dom, col_div, &col_sel) {
         return Outcome::Fail("'.col' did not match inner div".to_string());
@@ -941,10 +779,7 @@ fn check_css_flexbox_display(dom: &Dom, document: NodeId, source: &str) -> Outco
 }
 
 fn check_css_linear_gradient(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block found".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block found".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
@@ -956,10 +791,7 @@ fn check_css_linear_gradient(dom: &Dom, document: NodeId, source: &str) -> Outco
             stylesheet.rules.len()
         ));
     }
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
     // For each class, find the div, match selector, then verify cascade produces background_image.
     let checks: &[(&str, &str)] = &[
         (".grad-angle", "grad-angle"),
@@ -969,19 +801,13 @@ fn check_css_linear_gradient(dom: &Dom, document: NodeId, source: &str) -> Outco
     ];
     let children = element_children(dom, body);
     for (selector, class) in checks {
-        let sel = match parse_selector(dom, selector) {
-            Some(s) => s,
-            None => return Outcome::Fail(format!("could not parse selector '{selector}'")),
-        };
+        let Some(sel) = parse_selector(dom, selector) else { return Outcome::Fail(format!("could not parse selector '{selector}'")); };
         let matched = children
             .iter()
             .copied()
             .find(|&c| matches_selector_list(dom, c, &sel));
-        let node = match matched {
-            Some(n) => n,
-            None => {
-                return Outcome::Fail(format!("no element matched '{selector}' (class={class})"));
-            }
+        let Some(node) = matched else {
+            return Outcome::Fail(format!("no element matched '{selector}' (class={class})"));
         };
         let style = compute_style_for_node(dom, node, &stylesheet, None);
         if style.background_image.is_none() {
@@ -994,51 +820,33 @@ fn check_css_linear_gradient(dom: &Dom, document: NodeId, source: &str) -> Outco
 }
 
 fn check_css_sizing(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block found".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block found".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
     };
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
     let children = element_children(dom, body);
 
     // .w100 must have width = Length(Px(100.0))
-    let w100_sel = match parse_selector(dom, ".w100") {
-        Some(s) => s,
-        None => return Outcome::Fail("could not parse .w100 selector".to_string()),
-    };
+    let Some(w100_sel) = parse_selector(dom, ".w100") else { return Outcome::Fail("could not parse .w100 selector".to_string()); };
     let w100 = children
         .iter()
         .copied()
         .find(|&c| matches_selector_list(dom, c, &w100_sel));
-    let node = match w100 {
-        Some(n) => n,
-        None => return Outcome::Fail("no element matched .w100".to_string()),
-    };
+    let Some(node) = w100 else { return Outcome::Fail("no element matched .w100".to_string()); };
     let style = compute_style_for_node(dom, node, &stylesheet, None);
     if !matches!(style.width, LengthOrAuto::Length(_)) {
         return Outcome::Fail(format!("width not Length for .w100: {:?}", style.width));
     }
 
     // .auto must have width = Auto
-    let auto_sel = match parse_selector(dom, ".auto") {
-        Some(s) => s,
-        None => return Outcome::Fail("could not parse .auto selector".to_string()),
-    };
+    let Some(auto_sel) = parse_selector(dom, ".auto") else { return Outcome::Fail("could not parse .auto selector".to_string()); };
     let auto_node = children
         .iter()
         .copied()
         .find(|&c| matches_selector_list(dom, c, &auto_sel));
-    let node = match auto_node {
-        Some(n) => n,
-        None => return Outcome::Fail("no element matched .auto".to_string()),
-    };
+    let Some(node) = auto_node else { return Outcome::Fail("no element matched .auto".to_string()); };
     let style = compute_style_for_node(dom, node, &stylesheet, None);
     if !matches!(style.width, LengthOrAuto::Auto) {
         return Outcome::Fail(format!("width not Auto for .auto: {:?}", style.width));
@@ -1048,18 +856,12 @@ fn check_css_sizing(dom: &Dom, document: NodeId, source: &str) -> Outcome {
 }
 
 fn check_css_border_rendering(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block found".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block found".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
     };
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
     let children = element_children(dom, body);
 
     let cases: &[(&str, BorderStyle)] = &[
@@ -1070,17 +872,13 @@ fn check_css_border_rendering(dom: &Dom, document: NodeId, source: &str) -> Outc
         (".double", BorderStyle::Double),
     ];
     for (selector, expected) in cases {
-        let sel = match parse_selector(dom, selector) {
-            Some(s) => s,
-            None => return Outcome::Fail(format!("could not parse selector '{selector}'")),
-        };
-        let node = match children
+        let Some(sel) = parse_selector(dom, selector) else { return Outcome::Fail(format!("could not parse selector '{selector}'")); };
+        let Some(node) = children
             .iter()
             .copied()
             .find(|&c| matches_selector_list(dom, c, &sel))
-        {
-            Some(n) => n,
-            None => return Outcome::Fail(format!("no element matched '{selector}'")),
+        else {
+            return Outcome::Fail(format!("no element matched '{selector}'"));
         };
         let style = compute_style_for_node(dom, node, &stylesheet, None);
         if style.border_style != *expected {
@@ -1094,18 +892,12 @@ fn check_css_border_rendering(dom: &Dom, document: NodeId, source: &str) -> Outc
 }
 
 fn check_css_text_decoration(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block found".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block found".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
     };
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
     let children = element_children(dom, body);
 
     let cases: &[(&str, TextDecoration)] = &[
@@ -1115,17 +907,13 @@ fn check_css_text_decoration(dom: &Dom, document: NodeId, source: &str) -> Outco
         (".none", TextDecoration::None),
     ];
     for (selector, expected) in cases {
-        let sel = match parse_selector(dom, selector) {
-            Some(s) => s,
-            None => return Outcome::Fail(format!("could not parse selector '{selector}'")),
-        };
-        let node = match children
+        let Some(sel) = parse_selector(dom, selector) else { return Outcome::Fail(format!("could not parse selector '{selector}'")); };
+        let Some(node) = children
             .iter()
             .copied()
             .find(|&c| matches_selector_list(dom, c, &sel))
-        {
-            Some(n) => n,
-            None => return Outcome::Fail(format!("no element matched '{selector}'")),
+        else {
+            return Outcome::Fail(format!("no element matched '{selector}'"));
         };
         let style = compute_style_for_node(dom, node, &stylesheet, None);
         if style.text_decoration != *expected {
@@ -1139,18 +927,12 @@ fn check_css_text_decoration(dom: &Dom, document: NodeId, source: &str) -> Outco
 }
 
 fn check_css_white_space(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block found".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block found".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
     };
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
     let children = element_children(dom, body);
 
     let cases: &[(&str, WhiteSpace)] = &[
@@ -1161,17 +943,13 @@ fn check_css_white_space(dom: &Dom, document: NodeId, source: &str) -> Outcome {
         (".pre-line", WhiteSpace::PreLine),
     ];
     for (selector, expected) in cases {
-        let sel = match parse_selector(dom, selector) {
-            Some(s) => s,
-            None => return Outcome::Fail(format!("could not parse selector '{selector}'")),
-        };
-        let node = match children
+        let Some(sel) = parse_selector(dom, selector) else { return Outcome::Fail(format!("could not parse selector '{selector}'")); };
+        let Some(node) = children
             .iter()
             .copied()
             .find(|&c| matches_selector_list(dom, c, &sel))
-        {
-            Some(n) => n,
-            None => return Outcome::Fail(format!("no element matched '{selector}'")),
+        else {
+            return Outcome::Fail(format!("no element matched '{selector}'"));
         };
         let style = compute_style_for_node(dom, node, &stylesheet, None);
         if style.white_space != *expected {
@@ -1185,18 +963,12 @@ fn check_css_white_space(dom: &Dom, document: NodeId, source: &str) -> Outcome {
 }
 
 fn check_css_visibility(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block found".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block found".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
     };
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
     let children = element_children(dom, body);
 
     let cases: &[(&str, Visibility)] = &[
@@ -1205,17 +977,13 @@ fn check_css_visibility(dom: &Dom, document: NodeId, source: &str) -> Outcome {
         (".collapse", Visibility::Collapse),
     ];
     for (selector, expected) in cases {
-        let sel = match parse_selector(dom, selector) {
-            Some(s) => s,
-            None => return Outcome::Fail(format!("could not parse selector '{selector}'")),
-        };
-        let node = match children
+        let Some(sel) = parse_selector(dom, selector) else { return Outcome::Fail(format!("could not parse selector '{selector}'")); };
+        let Some(node) = children
             .iter()
             .copied()
             .find(|&c| matches_selector_list(dom, c, &sel))
-        {
-            Some(n) => n,
-            None => return Outcome::Fail(format!("no element matched '{selector}'")),
+        else {
+            return Outcome::Fail(format!("no element matched '{selector}'"));
         };
         let style = compute_style_for_node(dom, node, &stylesheet, None);
         if style.visibility != *expected {
@@ -1229,32 +997,22 @@ fn check_css_visibility(dom: &Dom, document: NodeId, source: &str) -> Outcome {
 }
 
 fn check_css_border_shorthand(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block found".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block found".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
     };
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
     let children = element_children(dom, body);
 
     // .full should have border_style=Solid AND border_color with r=255
-    let full_sel = match parse_selector(dom, ".full") {
-        Some(s) => s,
-        None => return Outcome::Fail("could not parse .full".to_string()),
-    };
-    let node = match children
+    let Some(full_sel) = parse_selector(dom, ".full") else { return Outcome::Fail("could not parse .full".to_string()); };
+    let Some(node) = children
         .iter()
         .copied()
         .find(|&c| matches_selector_list(dom, c, &full_sel))
-    {
-        Some(n) => n,
-        None => return Outcome::Fail("no element matched .full".to_string()),
+    else {
+        return Outcome::Fail("no element matched .full".to_string());
     };
     let style = compute_style_for_node(dom, node, &stylesheet, None);
     if style.border_style != BorderStyle::Solid {
@@ -1277,17 +1035,13 @@ fn check_css_border_shorthand(dom: &Dom, document: NodeId, source: &str) -> Outc
     }
 
     // .dashed should have border_style=Dashed
-    let dashed_sel = match parse_selector(dom, ".dashed") {
-        Some(s) => s,
-        None => return Outcome::Fail("could not parse .dashed".to_string()),
-    };
-    let node = match children
+    let Some(dashed_sel) = parse_selector(dom, ".dashed") else { return Outcome::Fail("could not parse .dashed".to_string()); };
+    let Some(node) = children
         .iter()
         .copied()
         .find(|&c| matches_selector_list(dom, c, &dashed_sel))
-    {
-        Some(n) => n,
-        None => return Outcome::Fail("no element matched .dashed".to_string()),
+    else {
+        return Outcome::Fail("no element matched .dashed".to_string());
     };
     let style = compute_style_for_node(dom, node, &stylesheet, None);
     if style.border_style != BorderStyle::Dashed {
@@ -1301,37 +1055,26 @@ fn check_css_border_shorthand(dom: &Dom, document: NodeId, source: &str) -> Outc
 }
 
 fn check_css_flex_shorthand(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block found".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block found".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
     };
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
     // The items are inside a flex container div; get the container's children.
-    let flex_container = match element_children(dom, body).into_iter().next() {
-        Some(c) => c,
-        None => return Outcome::Fail("no flex container child".to_string()),
+    let Some(flex_container) = element_children(dom, body).into_iter().next() else {
+        return Outcome::Fail("no flex container child".to_string());
     };
     let children = element_children(dom, flex_container);
 
     // .flex1 should have grow=1, basis=0px
-    let sel1 = match parse_selector(dom, ".flex1") {
-        Some(s) => s,
-        None => return Outcome::Fail("could not parse .flex1".to_string()),
-    };
-    let node = match children
+    let Some(sel1) = parse_selector(dom, ".flex1") else { return Outcome::Fail("could not parse .flex1".to_string()); };
+    let Some(node) = children
         .iter()
         .copied()
         .find(|&c| matches_selector_list(dom, c, &sel1))
-    {
-        Some(n) => n,
-        None => return Outcome::Fail("no element matched .flex1".to_string()),
+    else {
+        return Outcome::Fail("no element matched .flex1".to_string());
     };
     let style = compute_style_for_node(dom, node, &stylesheet, None);
     if (style.flex_item.flex_grow - 1.0).abs() > 0.01 {
@@ -1348,17 +1091,13 @@ fn check_css_flex_shorthand(dom: &Dom, document: NodeId, source: &str) -> Outcom
     }
 
     // .none should have grow=0, shrink=0, basis=auto
-    let none_sel = match parse_selector(dom, ".none") {
-        Some(s) => s,
-        None => return Outcome::Fail("could not parse .none".to_string()),
-    };
-    let node = match children
+    let Some(none_sel) = parse_selector(dom, ".none") else { return Outcome::Fail("could not parse .none".to_string()); };
+    let Some(node) = children
         .iter()
         .copied()
         .find(|&c| matches_selector_list(dom, c, &none_sel))
-    {
-        Some(n) => n,
-        None => return Outcome::Fail("no element matched .none".to_string()),
+    else {
+        return Outcome::Fail("no element matched .none".to_string());
     };
     let style = compute_style_for_node(dom, node, &stylesheet, None);
     if style.flex_item.flex_grow > 0.01 {
@@ -1388,18 +1127,11 @@ fn check_css_flex_shorthand(dom: &Dom, document: NodeId, source: &str) -> Outcom
 // -------------------------------------------------------------------------
 
 fn check_html_malformed_unclosed(dom: &Dom, document: NodeId) -> Outcome {
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
+    let Some(div) = first_element_child_named(dom, body, "div") else {
+        return Outcome::Fail("missing div: unclosed tags should be auto-closed".to_string());
     };
-    let div = match first_element_child_named(dom, body, "div") {
-        Some(d) => d,
-        None => return Outcome::Fail("missing div: unclosed tags should be auto-closed".to_string()),
-    };
-    let p = match first_element_child_named(dom, div, "p") {
-        Some(p) => p,
-        None => return Outcome::Fail("missing p inside div".to_string()),
-    };
+    let Some(p) = first_element_child_named(dom, div, "p") else { return Outcome::Fail("missing p inside div".to_string()); };
     if first_element_child_named(dom, p, "span").is_none() {
         return Outcome::Fail("missing span inside p".to_string());
     }
@@ -1410,10 +1142,7 @@ fn check_html_implicit_head_body(dom: &Dom, document: NodeId) -> Outcome {
     if head_of(dom, document).is_none() {
         return Outcome::Fail("html5ever should create implicit <head>".to_string());
     }
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("html5ever should create implicit <body>".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("html5ever should create implicit <body>".to_string()); };
     if first_element_child_named(dom, body, "p").is_none() {
         return Outcome::Fail("missing <p> in implicitly-created body".to_string());
     }
@@ -1421,14 +1150,8 @@ fn check_html_implicit_head_body(dom: &Dom, document: NodeId) -> Outcome {
 }
 
 fn check_html_data_attributes(dom: &Dom, document: NodeId) -> Outcome {
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
-    let div = match first_element_child_named(dom, body, "div") {
-        Some(d) => d,
-        None => return Outcome::Fail("missing div".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
+    let Some(div) = first_element_child_named(dom, body, "div") else { return Outcome::Fail("missing div".to_string()); };
     match attribute_value(dom, div, "data-role") {
         Some(v) if v == "main" => {}
         Some(v) => return Outcome::Fail(format!("data-role: expected 'main', got '{v}'")),
@@ -1443,13 +1166,9 @@ fn check_html_data_attributes(dom: &Dom, document: NodeId) -> Outcome {
 }
 
 fn check_html_mixed_case(dom: &Dom, document: NodeId) -> Outcome {
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body (case-insensitive parse failed)".to_string()),
-    };
-    let div = match first_element_child_named(dom, body, "div") {
-        Some(d) => d,
-        None => return Outcome::Fail("missing div from uppercased <DIV>".to_string()),
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body (case-insensitive parse failed)".to_string()); };
+    let Some(div) = first_element_child_named(dom, body, "div") else {
+        return Outcome::Fail("missing div from uppercased <DIV>".to_string());
     };
     match attribute_value(dom, div, "id") {
         Some(v) if v == "target" => {}
@@ -1464,31 +1183,20 @@ fn check_html_mixed_case(dom: &Dom, document: NodeId) -> Outcome {
 }
 
 fn check_html_table_implicit_tbody(dom: &Dom, document: NodeId) -> Outcome {
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
-    let table = match first_element_child_named(dom, body, "table") {
-        Some(t) => t,
-        None => return Outcome::Fail("missing table".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
+    let Some(table) = first_element_child_named(dom, body, "table") else { return Outcome::Fail("missing table".to_string()); };
     // html5ever always inserts an implicit <tbody> between <table> and <tr>.
-    let tbody = match first_element_child_named(dom, table, "tbody") {
-        Some(t) => t,
-        None => return Outcome::Fail("html5ever should insert implicit <tbody>".to_string()),
+    let Some(tbody) = first_element_child_named(dom, table, "tbody") else {
+        return Outcome::Fail("html5ever should insert implicit <tbody>".to_string());
     };
-    let tr = match first_element_child_named(dom, tbody, "tr") {
-        Some(t) => t,
-        None => return Outcome::Fail("missing <tr> inside <tbody>".to_string()),
-    };
+    let Some(tr) = first_element_child_named(dom, tbody, "tr") else { return Outcome::Fail("missing <tr> inside <tbody>".to_string()); };
     let tds = element_children(dom, tr)
         .into_iter()
         .filter(|&c| {
             dom.element_name(c)
                 .ok()
                 .flatten()
-                .map(|n| n.eq_ignore_ascii_case("td"))
-                .unwrap_or(false)
+                .is_some_and(|n| n.eq_ignore_ascii_case("td"))
         })
         .count();
     if tds != 2 {
@@ -1498,22 +1206,13 @@ fn check_html_table_implicit_tbody(dom: &Dom, document: NodeId) -> Outcome {
 }
 
 fn check_html_boolean_attributes(dom: &Dom, document: NodeId) -> Outcome {
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
-    let input = match first_element_child_named(dom, body, "input") {
-        Some(i) => i,
-        None => return Outcome::Fail("missing input".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
+    let Some(input) = first_element_child_named(dom, body, "input") else { return Outcome::Fail("missing input".to_string()); };
     // Boolean attribute is present; value may be "" or "disabled".
     if attribute_value(dom, input, "disabled").is_none() {
         return Outcome::Fail("'disabled' boolean attribute not preserved on input".to_string());
     }
-    let button = match first_element_child_named(dom, body, "button") {
-        Some(b) => b,
-        None => return Outcome::Fail("missing button".to_string()),
-    };
+    let Some(button) = first_element_child_named(dom, body, "button") else { return Outcome::Fail("missing button".to_string()); };
     if attribute_value(dom, button, "disabled").is_none() {
         return Outcome::Fail("'disabled' boolean attribute not preserved on button".to_string());
     }
@@ -1521,10 +1220,7 @@ fn check_html_boolean_attributes(dom: &Dom, document: NodeId) -> Outcome {
 }
 
 fn check_html_misnested_formatting(dom: &Dom, document: NodeId) -> Outcome {
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
     // The adoption agency algorithm for <b>bold<i>bold-italic</b>italic</i>
     // produces: body > b > [text, i > text], i > text
     // Verify body has both a <b> and an <i> as direct children.
@@ -1542,10 +1238,7 @@ fn check_html_misnested_formatting(dom: &Dom, document: NodeId) -> Outcome {
 }
 
 fn check_html_multiple_classes(dom: &Dom, document: NodeId) -> Outcome {
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
     let divs = element_children(dom, body);
     if divs.len() < 2 {
         return Outcome::Fail(format!("expected 2 divs, got {}", divs.len()));
@@ -1568,26 +1261,14 @@ fn check_html_multiple_classes(dom: &Dom, document: NodeId) -> Outcome {
 // -------------------------------------------------------------------------
 
 fn check_css_pseudo_is(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
     };
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
-    let box_div = match first_element_child_named(dom, body, "div") {
-        Some(d) => d,
-        None => return Outcome::Fail("missing .box div".to_string()),
-    };
-    let h1 = match first_element_child_named(dom, box_div, "h1") {
-        Some(h) => h,
-        None => return Outcome::Fail("missing h1 inside .box".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
+    let Some(box_div) = first_element_child_named(dom, body, "div") else { return Outcome::Fail("missing .box div".to_string()); };
+    let Some(h1) = first_element_child_named(dom, box_div, "h1") else { return Outcome::Fail("missing h1 inside .box".to_string()); };
     // :is(h1, h2, h3) inside .box should match h1 and give it color red.
     let style = compute_style_for_node(dom, h1, &stylesheet, None);
     let red = silksurf_css::Color { r: 255, g: 0, b: 0, a: 255 };
@@ -1601,22 +1282,13 @@ fn check_css_pseudo_is(dom: &Dom, document: NodeId, source: &str) -> Outcome {
 }
 
 fn check_css_pseudo_where(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
     };
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
-    let p = match first_element_child_named(dom, body, "p") {
-        Some(p) => p,
-        None => return Outcome::Fail("missing p".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
+    let Some(p) = first_element_child_named(dom, body, "p") else { return Outcome::Fail("missing p".to_string()); };
     // :where(p) has 0 specificity; plain `p` (specificity 1) wins -> red.
     let style = compute_style_for_node(dom, p, &stylesheet, None);
     let red = silksurf_css::Color { r: 255, g: 0, b: 0, a: 255 };
@@ -1630,25 +1302,15 @@ fn check_css_pseudo_where(dom: &Dom, document: NodeId, source: &str) -> Outcome 
 }
 
 fn check_css_child_combinator(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
     };
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
-    let parent = match first_element_child_named(dom, body, "div") {
-        Some(d) => d,
-        None => return Outcome::Fail("missing .parent div".to_string()),
-    };
-    let direct_child = match first_element_child_named(dom, parent, "div") {
-        Some(d) => d,
-        None => return Outcome::Fail("missing direct .child div".to_string()),
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
+    let Some(parent) = first_element_child_named(dom, body, "div") else { return Outcome::Fail("missing .parent div".to_string()); };
+    let Some(direct_child) = first_element_child_named(dom, parent, "div") else {
+        return Outcome::Fail("missing direct .child div".to_string());
     };
     let red = silksurf_css::Color { r: 255, g: 0, b: 0, a: 255 };
     let style = compute_style_for_node(dom, direct_child, &stylesheet, None);
@@ -1675,18 +1337,12 @@ fn check_css_child_combinator(dom: &Dom, document: NodeId, source: &str) -> Outc
 }
 
 fn check_css_adjacent_sibling(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
     };
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
     let red = silksurf_css::Color { r: 255, g: 0, b: 0, a: 255 };
     let children = element_children(dom, body);
     // children: [.ref, .target#yes, .target#no]
@@ -1710,18 +1366,12 @@ fn check_css_adjacent_sibling(dom: &Dom, document: NodeId, source: &str) -> Outc
 }
 
 fn check_css_general_sibling(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
     };
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
     let red = silksurf_css::Color { r: 255, g: 0, b: 0, a: 255 };
     let children = element_children(dom, body);
     // children: [.ref, .target#t1, .other, .target#t2]
@@ -1741,18 +1391,12 @@ fn check_css_general_sibling(dom: &Dom, document: NodeId, source: &str) -> Outco
 }
 
 fn check_css_multiple_class(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
     };
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
     let children = element_children(dom, body);
     if children.len() < 2 {
         return Outcome::Fail(format!("expected 2 divs, got {}", children.len()));
@@ -1779,18 +1423,12 @@ fn check_css_multiple_class(dom: &Dom, document: NodeId, source: &str) -> Outcom
 }
 
 fn check_css_specificity(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
     };
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
     let children = element_children(dom, body);
     if children.len() < 3 {
         return Outcome::Fail(format!("expected 3 divs, got {}", children.len()));
@@ -1818,18 +1456,12 @@ fn check_css_specificity(dom: &Dom, document: NodeId, source: &str) -> Outcome {
 // -------------------------------------------------------------------------
 
 fn check_css_overflow(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
     };
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
     let children = element_children(dom, body);
     if children.len() < 4 {
         return Outcome::Fail(format!("expected 4 divs, got {}", children.len()));
@@ -1853,18 +1485,12 @@ fn check_css_overflow(dom: &Dom, document: NodeId, source: &str) -> Outcome {
 }
 
 fn check_css_opacity(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
     };
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
     let children = element_children(dom, body);
     if children.len() < 3 {
         return Outcome::Fail(format!("expected 3 divs, got {}", children.len()));
@@ -1883,18 +1509,12 @@ fn check_css_opacity(dom: &Dom, document: NodeId, source: &str) -> Outcome {
 }
 
 fn check_css_z_index(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
     };
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
     let children = element_children(dom, body);
     if children.len() < 3 {
         return Outcome::Fail(format!("expected 3 divs, got {}", children.len()));
@@ -1913,18 +1533,12 @@ fn check_css_z_index(dom: &Dom, document: NodeId, source: &str) -> Outcome {
 }
 
 fn check_css_position(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
     };
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
     let children = element_children(dom, body);
     if children.len() < 3 {
         return Outcome::Fail(format!("expected 3 divs, got {}", children.len()));
@@ -1948,18 +1562,12 @@ fn check_css_position(dom: &Dom, document: NodeId, source: &str) -> Outcome {
 }
 
 fn check_css_border_radius(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
     };
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
     let children = element_children(dom, body);
     if children.len() < 3 {
         return Outcome::Fail(format!("expected 3 divs, got {}", children.len()));
@@ -2052,33 +1660,23 @@ fn rfc3339_now() -> String {
 }
 
 fn check_css_em_rem_units(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block found".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block found".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
     };
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
     let children = element_children(dom, body);
 
     // html { font-size: 20px }  =>  rem base = 20px
     // .em1 { font-size: 2em }   =>  parent = body = 1rem = 20px  =>  2*20 = 40px
-    let em1_sel = match parse_selector(dom, ".em1") {
-        Some(s) => s,
-        None => return Outcome::Fail("could not parse .em1 selector".to_string()),
-    };
-    let node = match children
+    let Some(em1_sel) = parse_selector(dom, ".em1") else { return Outcome::Fail("could not parse .em1 selector".to_string()); };
+    let Some(node) = children
         .iter()
         .copied()
         .find(|&c| matches_selector_list(dom, c, &em1_sel))
-    {
-        Some(n) => n,
-        None => return Outcome::Fail("no element matched .em1".to_string()),
+    else {
+        return Outcome::Fail("no element matched .em1".to_string());
     };
     let style = compute_style_for_node(dom, node, &stylesheet, None);
     // Without full document-tree cascade, em resolves against 16px default.
@@ -2091,17 +1689,13 @@ fn check_css_em_rem_units(dom: &Dom, document: NodeId, source: &str) -> Outcome 
     }
 
     // .em2 { margin-left: 1.5em }  =>  margin resolves to Px, not Em.
-    let em2_sel = match parse_selector(dom, ".em2") {
-        Some(s) => s,
-        None => return Outcome::Fail("could not parse .em2 selector".to_string()),
-    };
-    let node = match children
+    let Some(em2_sel) = parse_selector(dom, ".em2") else { return Outcome::Fail("could not parse .em2 selector".to_string()); };
+    let Some(node) = children
         .iter()
         .copied()
         .find(|&c| matches_selector_list(dom, c, &em2_sel))
-    {
-        Some(n) => n,
-        None => return Outcome::Fail("no element matched .em2".to_string()),
+    else {
+        return Outcome::Fail("no element matched .em2".to_string());
     };
     let style = compute_style_for_node(dom, node, &stylesheet, None);
     if !matches!(
@@ -2115,17 +1709,13 @@ fn check_css_em_rem_units(dom: &Dom, document: NodeId, source: &str) -> Outcome 
     }
 
     // .rem1 { font-size: 1.5rem }  =>  resolves to Px.
-    let rem1_sel = match parse_selector(dom, ".rem1") {
-        Some(s) => s,
-        None => return Outcome::Fail("could not parse .rem1 selector".to_string()),
-    };
-    let node = match children
+    let Some(rem1_sel) = parse_selector(dom, ".rem1") else { return Outcome::Fail("could not parse .rem1 selector".to_string()); };
+    let Some(node) = children
         .iter()
         .copied()
         .find(|&c| matches_selector_list(dom, c, &rem1_sel))
-    {
-        Some(n) => n,
-        None => return Outcome::Fail("no element matched .rem1".to_string()),
+    else {
+        return Outcome::Fail("no element matched .rem1".to_string());
     };
     let style = compute_style_for_node(dom, node, &stylesheet, None);
     if !matches!(style.font_size, Length::Px(_)) {
@@ -2136,17 +1726,13 @@ fn check_css_em_rem_units(dom: &Dom, document: NodeId, source: &str) -> Outcome 
     }
 
     // .rem2 { padding-top: 2rem }  =>  padding resolves to Px.
-    let rem2_sel = match parse_selector(dom, ".rem2") {
-        Some(s) => s,
-        None => return Outcome::Fail("could not parse .rem2 selector".to_string()),
-    };
-    let node = match children
+    let Some(rem2_sel) = parse_selector(dom, ".rem2") else { return Outcome::Fail("could not parse .rem2 selector".to_string()); };
+    let Some(node) = children
         .iter()
         .copied()
         .find(|&c| matches_selector_list(dom, c, &rem2_sel))
-    {
-        Some(n) => n,
-        None => return Outcome::Fail("no element matched .rem2".to_string()),
+    else {
+        return Outcome::Fail("no element matched .rem2".to_string());
     };
     let style = compute_style_for_node(dom, node, &stylesheet, None);
     if !matches!(style.padding.top, Length::Px(_)) {
@@ -2160,35 +1746,27 @@ fn check_css_em_rem_units(dom: &Dom, document: NodeId, source: &str) -> Outcome 
 }
 
 fn check_css_individual_margins(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block found".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block found".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
     };
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
     let children: Vec<NodeId> = match dom.children(body) {
         Ok(c) => c.to_vec(),
         Err(_) => return Outcome::Fail("could not get body children".to_string()),
     };
 
     // .shorthand { margin: 10px 20px 30px 40px } -- four-value shorthand expands to all four sides.
-    let shorthand_sel = match parse_selector(dom, ".shorthand") {
-        Some(s) => s,
-        None => return Outcome::Fail("could not parse .shorthand selector".to_string()),
+    let Some(shorthand_sel) = parse_selector(dom, ".shorthand") else {
+        return Outcome::Fail("could not parse .shorthand selector".to_string());
     };
-    let node = match children
+    let Some(node) = children
         .iter()
         .copied()
         .find(|&c| matches_selector_list(dom, c, &shorthand_sel))
-    {
-        Some(n) => n,
-        None => return Outcome::Fail("no element matched .shorthand".to_string()),
+    else {
+        return Outcome::Fail("no element matched .shorthand".to_string());
     };
     let style = compute_style_for_node(dom, node, &stylesheet, None);
     if style.margin.top != silksurf_css::LengthOrAuto::Length(Length::Px(10.0)) {
@@ -2217,17 +1795,15 @@ fn check_css_individual_margins(dom: &Dom, document: NodeId, source: &str) -> Ou
     }
 
     // .override { margin: 5px; margin-top: 15px } -- individual side overrides shorthand.
-    let override_sel = match parse_selector(dom, ".override") {
-        Some(s) => s,
-        None => return Outcome::Fail("could not parse .override selector".to_string()),
+    let Some(override_sel) = parse_selector(dom, ".override") else {
+        return Outcome::Fail("could not parse .override selector".to_string());
     };
-    let node = match children
+    let Some(node) = children
         .iter()
         .copied()
         .find(|&c| matches_selector_list(dom, c, &override_sel))
-    {
-        Some(n) => n,
-        None => return Outcome::Fail("no element matched .override".to_string()),
+    else {
+        return Outcome::Fail("no element matched .override".to_string());
     };
     let style = compute_style_for_node(dom, node, &stylesheet, None);
     if style.margin.top != silksurf_css::LengthOrAuto::Length(Length::Px(15.0)) {
@@ -2244,17 +1820,15 @@ fn check_css_individual_margins(dom: &Dom, document: NodeId, source: &str) -> Ou
     }
 
     // .auto-side { margin-left: auto; margin-right: auto } -- auto margins preserved.
-    let auto_sel = match parse_selector(dom, ".auto-side") {
-        Some(s) => s,
-        None => return Outcome::Fail("could not parse .auto-side selector".to_string()),
+    let Some(auto_sel) = parse_selector(dom, ".auto-side") else {
+        return Outcome::Fail("could not parse .auto-side selector".to_string());
     };
-    let node = match children
+    let Some(node) = children
         .iter()
         .copied()
         .find(|&c| matches_selector_list(dom, c, &auto_sel))
-    {
-        Some(n) => n,
-        None => return Outcome::Fail("no element matched .auto-side".to_string()),
+    else {
+        return Outcome::Fail("no element matched .auto-side".to_string());
     };
     let style = compute_style_for_node(dom, node, &stylesheet, None);
     if style.margin.left != silksurf_css::LengthOrAuto::Auto {
@@ -2271,17 +1845,15 @@ fn check_css_individual_margins(dom: &Dom, document: NodeId, source: &str) -> Ou
     }
 
     // .pad-sides { padding-top: 4px; ... } -- individual padding sides.
-    let pad_sel = match parse_selector(dom, ".pad-sides") {
-        Some(s) => s,
-        None => return Outcome::Fail("could not parse .pad-sides selector".to_string()),
+    let Some(pad_sel) = parse_selector(dom, ".pad-sides") else {
+        return Outcome::Fail("could not parse .pad-sides selector".to_string());
     };
-    let node = match children
+    let Some(node) = children
         .iter()
         .copied()
         .find(|&c| matches_selector_list(dom, c, &pad_sel))
-    {
-        Some(n) => n,
-        None => return Outcome::Fail("no element matched .pad-sides".to_string()),
+    else {
+        return Outcome::Fail("no element matched .pad-sides".to_string());
     };
     let style = compute_style_for_node(dom, node, &stylesheet, None);
     if style.padding.top != Length::Px(4.0) {
@@ -2313,10 +1885,7 @@ fn check_css_individual_margins(dom: &Dom, document: NodeId, source: &str) -> Ou
 }
 
 fn check_css_named_colors(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block found".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block found".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
@@ -2341,17 +1910,11 @@ fn check_css_named_colors(dom: &Dom, document: NodeId, source: &str) -> Outcome 
         (".c-magenta", (255, 0, 255)),
     ];
     for &(selector, (er, eg, eb)) in cases {
-        let sel = match parse_selector(dom, selector) {
-            Some(s) => s,
-            None => {
-                return Outcome::Fail(format!("could not parse selector {selector}"));
-            }
+        let Some(sel) = parse_selector(dom, selector) else {
+            return Outcome::Fail(format!("could not parse selector {selector}"));
         };
-        let node = match find_element(dom, document, &sel) {
-            Some(n) => n,
-            None => {
-                return Outcome::Fail(format!("no element matched {selector}"));
-            }
+        let Some(node) = find_element(dom, document, &sel) else {
+            return Outcome::Fail(format!("no element matched {selector}"));
         };
         let style = compute_style_for_node(dom, node, &stylesheet, None);
         let c = style.color;
@@ -2379,10 +1942,7 @@ fn find_element(dom: &Dom, root: NodeId, sel: &SelectorList) -> Option<NodeId> {
 }
 
 fn check_css_cascade_keywords(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block found".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block found".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
@@ -2398,10 +1958,7 @@ fn check_css_cascade_keywords(dom: &Dom, document: NodeId, source: &str) -> Outc
     };
 
     // `color: inherit` on child of `.parent { color: red }` -> red.
-    let inherit_color = match get_style("inherit-color") {
-        Some(s) => s,
-        None => return Outcome::Fail("element #inherit-color not found".to_string()),
-    };
+    let Some(inherit_color) = get_style("inherit-color") else { return Outcome::Fail("element #inherit-color not found".to_string()); };
     let red = Color { r: 255, g: 0, b: 0, a: 255 };
     if inherit_color.color != red {
         return Outcome::Fail(format!(
@@ -2411,9 +1968,8 @@ fn check_css_cascade_keywords(dom: &Dom, document: NodeId, source: &str) -> Outc
     }
 
     // `display: inherit` on child of `.parent { display: flex }` -> Flex.
-    let inherit_display = match get_style("inherit-display") {
-        Some(s) => s,
-        None => return Outcome::Fail("element #inherit-display not found".to_string()),
+    let Some(inherit_display) = get_style("inherit-display") else {
+        return Outcome::Fail("element #inherit-display not found".to_string());
     };
     if inherit_display.display != Display::Flex {
         return Outcome::Fail(format!(
@@ -2423,10 +1979,7 @@ fn check_css_cascade_keywords(dom: &Dom, document: NodeId, source: &str) -> Outc
     }
 
     // `color: initial` -> CSS initial value for color = black.
-    let initial_color = match get_style("initial-color") {
-        Some(s) => s,
-        None => return Outcome::Fail("element #initial-color not found".to_string()),
-    };
+    let Some(initial_color) = get_style("initial-color") else { return Outcome::Fail("element #initial-color not found".to_string()); };
     let black = Color { r: 0, g: 0, b: 0, a: 255 };
     if initial_color.color != black {
         return Outcome::Fail(format!(
@@ -2436,10 +1989,7 @@ fn check_css_cascade_keywords(dom: &Dom, document: NodeId, source: &str) -> Outc
     }
 
     // `color: unset` -- color is inherited -> unset = inherit -> red.
-    let unset_color = match get_style("unset-color") {
-        Some(s) => s,
-        None => return Outcome::Fail("element #unset-color not found".to_string()),
-    };
+    let Some(unset_color) = get_style("unset-color") else { return Outcome::Fail("element #unset-color not found".to_string()); };
     if unset_color.color != red {
         return Outcome::Fail(format!(
             "#unset-color: expected red (unset=inherit for inherited prop), got {:?}",
@@ -2448,10 +1998,7 @@ fn check_css_cascade_keywords(dom: &Dom, document: NodeId, source: &str) -> Outc
     }
 
     // `display: unset` -- display is not inherited -> unset = initial -> Inline.
-    let unset_display = match get_style("unset-display") {
-        Some(s) => s,
-        None => return Outcome::Fail("element #unset-display not found".to_string()),
-    };
+    let Some(unset_display) = get_style("unset-display") else { return Outcome::Fail("element #unset-display not found".to_string()); };
     if unset_display.display != Display::Inline {
         return Outcome::Fail(format!(
             "#unset-display: expected Inline (unset=initial for non-inherited), got {:?}",
@@ -2463,10 +2010,7 @@ fn check_css_cascade_keywords(dom: &Dom, document: NodeId, source: &str) -> Outc
 }
 
 fn check_css_individual_borders(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block found".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block found".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
@@ -2480,10 +2024,7 @@ fn check_css_individual_borders(dom: &Dom, document: NodeId, source: &str) -> Ou
     };
 
     // #a { border-top: 3px solid red } -> top=3px, others=0
-    let a = match get_style("a") {
-        Some(s) => s,
-        None => return Outcome::Fail("element #a not found".to_string()),
-    };
+    let Some(a) = get_style("a") else { return Outcome::Fail("element #a not found".to_string()); };
     if a.border.top != Length::Px(3.0) {
         return Outcome::Fail(format!(
             "#a border-top: expected 3px, got {:?}",
@@ -2501,10 +2042,7 @@ fn check_css_individual_borders(dom: &Dom, document: NodeId, source: &str) -> Ou
     }
 
     // #b { border-right: 5px } -> right=5px
-    let b = match get_style("b") {
-        Some(s) => s,
-        None => return Outcome::Fail("element #b not found".to_string()),
-    };
+    let Some(b) = get_style("b") else { return Outcome::Fail("element #b not found".to_string()); };
     if b.border.right != Length::Px(5.0) {
         return Outcome::Fail(format!(
             "#b border-right: expected 5px, got {:?}",
@@ -2513,10 +2051,7 @@ fn check_css_individual_borders(dom: &Dom, document: NodeId, source: &str) -> Ou
     }
 
     // #c { border-bottom: 2px } -> bottom=2px
-    let c = match get_style("c") {
-        Some(s) => s,
-        None => return Outcome::Fail("element #c not found".to_string()),
-    };
+    let Some(c) = get_style("c") else { return Outcome::Fail("element #c not found".to_string()); };
     if c.border.bottom != Length::Px(2.0) {
         return Outcome::Fail(format!(
             "#c border-bottom: expected 2px, got {:?}",
@@ -2525,10 +2060,7 @@ fn check_css_individual_borders(dom: &Dom, document: NodeId, source: &str) -> Ou
     }
 
     // #d { border-left: 7px } -> left=7px
-    let d = match get_style("d") {
-        Some(s) => s,
-        None => return Outcome::Fail("element #d not found".to_string()),
-    };
+    let Some(d) = get_style("d") else { return Outcome::Fail("element #d not found".to_string()); };
     if d.border.left != Length::Px(7.0) {
         return Outcome::Fail(format!(
             "#d border-left: expected 7px, got {:?}",
@@ -2537,10 +2069,7 @@ fn check_css_individual_borders(dom: &Dom, document: NodeId, source: &str) -> Ou
     }
 
     // #e { border: 10px; border-top: 4px } -> top=4px, others=10px
-    let e = match get_style("e") {
-        Some(s) => s,
-        None => return Outcome::Fail("element #e not found".to_string()),
-    };
+    let Some(e) = get_style("e") else { return Outcome::Fail("element #e not found".to_string()); };
     if e.border.top != Length::Px(4.0) {
         return Outcome::Fail(format!(
             "#e border-top: expected 4px (individual wins), got {:?}",
@@ -2585,10 +2114,7 @@ fn fused_rect_by_id(
 }
 
 fn check_layout_flex_row_equal(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block found".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block found".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
@@ -2596,18 +2122,9 @@ fn check_layout_flex_row_equal(dom: &Dom, document: NodeId, source: &str) -> Out
     let viewport = Rect { x: 0.0, y: 0.0, width: 1280.0, height: 800.0 };
     let fused = fused_style_layout_paint(dom, &stylesheet, document, viewport);
 
-    let ra = match fused_rect_by_id(&fused, dom, document, "a") {
-        Some(r) => r,
-        None => return Outcome::Fail("#a not found in layout".to_string()),
-    };
-    let rb = match fused_rect_by_id(&fused, dom, document, "b") {
-        Some(r) => r,
-        None => return Outcome::Fail("#b not found in layout".to_string()),
-    };
-    let rc = match fused_rect_by_id(&fused, dom, document, "c") {
-        Some(r) => r,
-        None => return Outcome::Fail("#c not found in layout".to_string()),
-    };
+    let Some(ra) = fused_rect_by_id(&fused, dom, document, "a") else { return Outcome::Fail("#a not found in layout".to_string()); };
+    let Some(rb) = fused_rect_by_id(&fused, dom, document, "b") else { return Outcome::Fail("#b not found in layout".to_string()); };
+    let Some(rc) = fused_rect_by_id(&fused, dom, document, "c") else { return Outcome::Fail("#c not found in layout".to_string()); };
 
     // 3 items with flex:1 in a 300px container each get 100px.
     let expected_w = 100.0_f32;
@@ -2636,10 +2153,7 @@ fn check_layout_flex_row_equal(dom: &Dom, document: NodeId, source: &str) -> Out
 }
 
 fn check_layout_flex_fixed_offset(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block found".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block found".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
@@ -2647,14 +2161,8 @@ fn check_layout_flex_fixed_offset(dom: &Dom, document: NodeId, source: &str) -> 
     let viewport = Rect { x: 0.0, y: 0.0, width: 1280.0, height: 800.0 };
     let fused = fused_style_layout_paint(dom, &stylesheet, document, viewport);
 
-    let ra = match fused_rect_by_id(&fused, dom, document, "a") {
-        Some(r) => r,
-        None => return Outcome::Fail("#a not found in layout".to_string()),
-    };
-    let rb = match fused_rect_by_id(&fused, dom, document, "b") {
-        Some(r) => r,
-        None => return Outcome::Fail("#b not found in layout".to_string()),
-    };
+    let Some(ra) = fused_rect_by_id(&fused, dom, document, "a") else { return Outcome::Fail("#a not found in layout".to_string()); };
+    let Some(rb) = fused_rect_by_id(&fused, dom, document, "b") else { return Outcome::Fail("#b not found in layout".to_string()); };
 
     let tol = 2.0_f32;
     if (ra.width - 60.0).abs() > tol {
@@ -2675,10 +2183,7 @@ fn check_layout_flex_fixed_offset(dom: &Dom, document: NodeId, source: &str) -> 
 }
 
 fn check_layout_flex_column_stack(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block found".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block found".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
@@ -2686,14 +2191,8 @@ fn check_layout_flex_column_stack(dom: &Dom, document: NodeId, source: &str) -> 
     let viewport = Rect { x: 0.0, y: 0.0, width: 1280.0, height: 800.0 };
     let fused = fused_style_layout_paint(dom, &stylesheet, document, viewport);
 
-    let ra = match fused_rect_by_id(&fused, dom, document, "a") {
-        Some(r) => r,
-        None => return Outcome::Fail("#a not found in layout".to_string()),
-    };
-    let rb = match fused_rect_by_id(&fused, dom, document, "b") {
-        Some(r) => r,
-        None => return Outcome::Fail("#b not found in layout".to_string()),
-    };
+    let Some(ra) = fused_rect_by_id(&fused, dom, document, "a") else { return Outcome::Fail("#a not found in layout".to_string()); };
+    let Some(rb) = fused_rect_by_id(&fused, dom, document, "b") else { return Outcome::Fail("#b not found in layout".to_string()); };
 
     let tol = 2.0_f32;
     if (ra.height - 40.0).abs() > tol {
@@ -2714,18 +2213,12 @@ fn check_layout_flex_column_stack(dom: &Dom, document: NodeId, source: &str) -> 
 }
 
 fn check_css_media_screen(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
     };
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
     let children = element_children(dom, body);
     if children.is_empty() {
         return Outcome::Fail("missing #box div".to_string());
@@ -2744,18 +2237,12 @@ fn check_css_media_screen(dom: &Dom, document: NodeId, source: &str) -> Outcome 
 }
 
 fn check_css_media_width(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
     };
-    let body = match body_of(dom, document) {
-        Some(b) => b,
-        None => return Outcome::Fail("missing body".to_string()),
-    };
+    let Some(body) = body_of(dom, document) else { return Outcome::Fail("missing body".to_string()); };
     let children = element_children(dom, body);
     if children.len() < 2 {
         return Outcome::Fail(format!("expected 2 divs, got {}", children.len()));
@@ -2785,10 +2272,7 @@ fn check_css_media_width(dom: &Dom, document: NodeId, source: &str) -> Outcome {
 }
 
 fn check_css_pseudo_state(dom: &Dom, document: NodeId, source: &str) -> Outcome {
-    let css = match extract_inline_style(source) {
-        Some(c) => c,
-        None => return Outcome::Skip("no <style> block".to_string()),
-    };
+    let Some(css) = extract_inline_style(source) else { return Outcome::Skip("no <style> block".to_string()); };
     let stylesheet = match parse_stylesheet(&css) {
         Ok(s) => s,
         Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
@@ -2808,10 +2292,7 @@ fn check_css_pseudo_state(dom: &Dom, document: NodeId, source: &str) -> Outcome 
     };
 
     let opacity_of = |id_val: &str| -> f32 {
-        let n = match node_by_id(id_val) {
-            Some(n) => n,
-            None => return -1.0,
-        };
+        let Some(n) = node_by_id(id_val) else { return -1.0; };
         compute_style_for_node(dom, n, &stylesheet, None).opacity
     };
 

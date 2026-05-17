@@ -35,6 +35,8 @@ use silksurf_dom::{Dom, NodeId, NodeKind};
 
 use crate::{Rect, length_or_auto_to_px, length_to_px};
 use rustc_hash::FxHashMap;
+use std::collections::HashMap;
+use std::hash::BuildHasher;
 
 /// A resolved flex item for layout computation.
 struct FlexItem {
@@ -69,19 +71,16 @@ struct FlexLine {
 
 /// Compute flexbox layout for a flex container.
 ///
-/// Returns a map of NodeId -> (Rect content area, EdgeSizes margin/padding/border).
-pub fn layout_flex_container(
+/// Returns a map of `NodeId` -> (Rect content area, `EdgeSizes` margin/padding/border).
+pub fn layout_flex_container<S: BuildHasher>(
     dom: &Dom,
-    styles: &FxHashMap<NodeId, ComputedStyle>,
+    styles: &HashMap<NodeId, ComputedStyle, S>,
     container_node: NodeId,
     containing: Rect,
 ) -> FxHashMap<NodeId, FlexLayoutResult> {
     let mut results = FxHashMap::default();
 
-    let container_style = match styles.get(&container_node) {
-        Some(s) => s,
-        None => return results,
-    };
+    let Some(container_style) = styles.get(&container_node) else { return results; };
 
     let flex = &container_style.flex_container;
     let is_row = matches!(
@@ -113,10 +112,7 @@ pub fn layout_flex_container(
 
     let mut items: Vec<FlexItem> = Vec::with_capacity(children.len());
     for child in &children {
-        let child_style = match styles.get(child) {
-            Some(s) => s,
-            None => continue,
-        };
+        let Some(child_style) = styles.get(child) else { continue; };
         if child_style.display == Display::None {
             continue;
         }

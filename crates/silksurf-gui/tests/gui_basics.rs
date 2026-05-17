@@ -30,11 +30,11 @@ impl WindowParams {
         Self { width, height }
     }
 
-    fn width(&self) -> u32 {
+    fn width(self) -> u32 {
         self.width
     }
 
-    fn height(&self) -> u32 {
+    fn height(self) -> u32 {
         self.height
     }
 }

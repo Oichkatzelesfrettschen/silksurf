@@ -136,27 +136,21 @@ fn emit_history_record(
         .args(["rev-parse", "HEAD"])
         .output()
         .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|| "0".repeat(40));
+        .and_then(|o| String::from_utf8(o.stdout).ok()).map_or_else(|| "0".repeat(40), |s| s.trim().to_string());
 
     // rustc --version for the toolchain string.
     let rust_version = Command::new("rustc")
         .arg("--version")
         .output()
         .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|| "unknown".to_string());
+        .and_then(|o| String::from_utf8(o.stdout).ok()).map_or_else(|| "unknown".to_string(), |s| s.trim().to_string());
 
     // ISO-8601 UTC timestamp via date -u.
     let timestamp = Command::new("date")
         .args(["-u", "+%Y-%m-%dT%H:%M:%SZ"])
         .output()
         .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|| "1970-01-01T00:00:00Z".to_string());
+        .and_then(|o| String::from_utf8(o.stdout).ok()).map_or_else(|| "1970-01-01T00:00:00Z".to_string(), |s| s.trim().to_string());
 
     // Emit single JSON line; no external crate needed for this simple record.
     // serde_json is available as a workspace dep but the format is trivial enough
@@ -286,8 +280,7 @@ fn main() {
         display_total / ITERATIONS
     );
     println!(
-        "  TOTAL:        {:>8?}  per-iter  ({} display items)",
-        old_per, old_items
+        "  TOTAL:        {old_per:>8?}  per-iter  ({old_items} display items)"
     );
     println!();
 
@@ -319,10 +312,9 @@ fn main() {
     let raster_per = raster_total / ITERATIONS;
 
     println!("--- fused pipeline (style+layout+paint in 1 BFS pass) ---");
-    println!("  fused pass:   {:>8?}  per-iter", fused_per);
+    println!("  fused pass:   {fused_per:>8?}  per-iter");
     println!(
-        "  rasterize:    {:>8?}  per-iter  (fresh alloc each frame)",
-        raster_per
+        "  rasterize:    {raster_per:>8?}  per-iter  (fresh alloc each frame)"
     );
     println!(
         "  TOTAL:        {:>8?}  per-iter  ({} display items)",
@@ -335,8 +327,7 @@ fn main() {
     let speedup = old_per.as_nanos() as f64 / fused_per.as_nanos() as f64;
     println!("=== Speedup cold: fused pass vs 3-pass ===");
     println!(
-        "  {:.2}x  ({:?} -> {:?} per iter)",
-        speedup, old_per, fused_per
+        "  {speedup:.2}x  ({old_per:?} -> {fused_per:?} per iter)"
     );
     println!();
 
@@ -374,21 +365,18 @@ fn main() {
 
     println!("--- fused pipeline (FusedWorkspace, zero-alloc steady-state) ---");
     println!(
-        "  fused pass:   {:>8?}  per-iter  (iter 0 warm-up excluded)",
-        ws_per
+        "  fused pass:   {ws_per:>8?}  per-iter  (iter 0 warm-up excluded)"
     );
-    println!("  display items: {} (same as cold path)", ws_items);
+    println!("  display items: {ws_items} (same as cold path)");
     println!();
 
     let speedup_ws_vs_cold = fused_per.as_nanos() as f64 / ws_per.as_nanos() as f64;
     let speedup_ws_vs_3pass = old_per.as_nanos() as f64 / ws_per.as_nanos() as f64;
     println!(
-        "=== Speedup workspace vs cold fused: {:.2}x ===",
-        speedup_ws_vs_cold
+        "=== Speedup workspace vs cold fused: {speedup_ws_vs_cold:.2}x ==="
     );
     println!(
-        "=== Speedup workspace vs 3-pass:     {:.2}x ===",
-        speedup_ws_vs_3pass
+        "=== Speedup workspace vs 3-pass:     {speedup_ws_vs_3pass:.2}x ==="
     );
     println!();
 
@@ -439,22 +427,18 @@ fn main() {
     let cascade_only_per = ws_per.saturating_sub(rebuild_per);
 
     println!(
-        "--- RCA: sub-phase breakdown of workspace steady-state ({} nodes) ---",
-        n_nodes
+        "--- RCA: sub-phase breakdown of workspace steady-state ({n_nodes} nodes) ---"
     );
     println!(
-        "  table.rebuild():           {:>8?}  per-iter  (FxHashMap clear+50 inserts)",
-        rebuild_per
+        "  table.rebuild():           {rebuild_per:>8?}  per-iter  (FxHashMap clear+50 inserts)"
     );
     println!(
-        "  cascade+layout+paint:      {:>8?}  per-iter  (ws.run minus rebuild)",
-        cascade_only_per
+        "  cascade+layout+paint:      {cascade_only_per:>8?}  per-iter  (ws.run minus rebuild)"
     );
     println!(
-        "  ComputedStyle::default x{}: {:>8?}  per-iter  (SmallVec<SmolStr> -- zero heap alloc)",
-        n_nodes, default_per
+        "  ComputedStyle::default x{n_nodes}: {default_per:>8?}  per-iter  (SmallVec<SmolStr> -- zero heap alloc)"
     );
-    println!("  TOTAL ws.run():            {:>8?}  per-iter", ws_per);
+    println!("  TOTAL ws.run():            {ws_per:>8?}  per-iter");
     println!();
     println!("  APPLIED FIXES: SmolStr font_family (Fix 1), bitvec seen (Fix D),");
     println!("  workspace class_keys (Fix 2), pre-resolved class_strings (Fix 3),");
@@ -462,8 +446,7 @@ fn main() {
     println!();
     let unaccounted = cascade_only_per.saturating_sub(default_per);
     println!(
-        "  cascade+layout+paint minus default overhead: {:>8?}",
-        unaccounted
+        "  cascade+layout+paint minus default overhead: {unaccounted:>8?}"
     );
     println!("  (remaining: selector matching, apply_declaration, layout math)");
     println!();
@@ -515,29 +498,24 @@ fn main() {
     let rwlock_per = rwlock_total / (ITERATIONS - 1);
 
     println!(
-        "  [REF] Vec alloc x{n_class_nodes} (eliminated): {:>8?}  per-iter  (was node_id_class_keys)",
-        class_vec_per
+        "  [REF] Vec alloc x{n_class_nodes} (eliminated): {class_vec_per:>8?}  per-iter  (was node_id_class_keys)"
     );
     println!(
-        "  [REF] RwLock x{n_class_atoms} (eliminated):  {:>8?}  per-iter  (was dom.resolve)",
-        rwlock_per
+        "  [REF] RwLock x{n_class_atoms} (eliminated):  {rwlock_per:>8?}  per-iter  (was dom.resolve)"
     );
     println!();
 
     let sum_known = rebuild_per + default_per + class_vec_per + rwlock_per;
     let true_residual = ws_per.saturating_sub(sum_known);
     println!(
-        "  Known overhead sum:          {:>8?}  (rebuild + default + Vec + RwLock)",
-        sum_known
+        "  Known overhead sum:          {sum_known:>8?}  (rebuild + default + Vec + RwLock)"
     );
     println!(
-        "  Residual (selector + layout): {:>8?}  (pure algorithm work -- target floor)",
-        true_residual
+        "  Residual (selector + layout): {true_residual:>8?}  (pure algorithm work -- target floor)"
     );
     println!();
     println!(
-        "  Fixes applied: SmolStr default (-{:?}), bitvec seen, workspace class_keys,",
-        default_per
+        "  Fixes applied: SmolStr default (-{default_per:?}), bitvec seen, workspace class_keys,"
     );
     println!("  pre-resolved class_strings, fused tag+id+class lookup.");
     println!("  Remaining: flatten DOM memory layout (DOD) for cache locality.");
@@ -571,8 +549,7 @@ fn main() {
 
     println!("=== Buffer reuse (steady-state, pre-allocated 4MB buffer) ===");
     println!(
-        "  rasterize:    {:>8?}  per-iter  (buffer reused, zero alloc)",
-        raster_reuse_per
+        "  rasterize:    {raster_reuse_per:>8?}  per-iter  (buffer reused, zero alloc)"
     );
     println!(
         "  fused+raster: {:>8?}  per-iter  (target: <500us cached re-render)",
@@ -580,8 +557,7 @@ fn main() {
     );
     let alloc_overhead = raster_per.saturating_sub(raster_reuse_per);
     println!(
-        "  alloc savings:{:>8?}  per-frame  (eliminated by buffer reuse)",
-        alloc_overhead
+        "  alloc savings:{alloc_overhead:>8?}  per-frame  (eliminated by buffer reuse)"
     );
 
     // --emit json: write one NDJSON history record conforming to perf/schema.json.

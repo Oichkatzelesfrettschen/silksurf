@@ -9,3 +9,6 @@ publish = false
 silksurf-core = { path = "../silksurf-core" }
 smallvec = { workspace = true }
 serde = { workspace = true }
+
+[lints]
+workspace = true

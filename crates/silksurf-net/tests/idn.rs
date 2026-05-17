@@ -27,7 +27,7 @@ const ACE_HOST: &str = "xn--bcher-kva.example";
 
 /// The Unicode form of the above domain: "b\u{00fc}cher.example"
 /// (U+00FC = LATIN SMALL LETTER U WITH DIAERESIS, i.e. u-umlaut).
-/// The url crate's IDNA processing should encode this to ACE_HOST on parse.
+/// The url crate's IDNA processing should encode this to `ACE_HOST` on parse.
 const UNICODE_HOST: &str = "b\u{00fc}cher.example";
 
 // --------------------------------------------------------------------------
@@ -108,7 +108,7 @@ fn ace_host_no_percent_encoding_introduced() {
 /// crate as a direct dev-dependency, which AD-021 defers.
 ///
 /// When that dep is added, replace this test with a codec round-trip:
-///   idna::domain_to_ascii("bucher\u{fc}.example") == Ok("xn--bcher-kva.example")
+///   `idna::domain_to_ascii("bucher\u{fc}.example`") == Ok("xn--bcher-kva.example")
 ///   idna::domain_to_unicode("xn--bcher-kva.example").0 == "bucheru.example" (approx)
 #[test]
 #[ignore = "AD-021 defers direct idna dep; replace with codec round-trip when idna is a direct dev-dep"]

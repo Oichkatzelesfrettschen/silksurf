@@ -136,6 +136,7 @@ impl Default for CssTokenizer {
 }
 
 impl CssTokenizer {
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             buffer: String::with_capacity(4096),
@@ -770,7 +771,7 @@ impl CssTokenizer {
             let mut value: u32 = 0;
             let mut count = 0usize;
             while cursor < bytes.len() && count < 6 && is_hex_digit(bytes[cursor]) {
-                value = value * 16 + hex_value(bytes[cursor]) as u32;
+                value = value * 16 + u32::from(hex_value(bytes[cursor]));
                 cursor += 1;
                 count += 1;
             }

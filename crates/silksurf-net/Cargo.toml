@@ -19,3 +19,6 @@ tokio-rustls = { workspace = true }
 h2 = { workspace = true }
 bytes = { workspace = true }
 http = { workspace = true }
+
+[lints]
+workspace = true

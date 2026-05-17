@@ -400,7 +400,7 @@ impl HarnessCache {
     }
 
     fn get(&self, name: &str) -> &str {
-        self.files.get(name).map(|s| s.as_str()).unwrap_or("")
+        self.files.get(name).map_or("", std::string::String::as_str)
     }
 
     fn preamble(&self, includes: &[String]) -> String {

@@ -43,9 +43,7 @@ impl HarnessOptions {
 
 impl ExpectationConfig {
     fn load(root: &Path) -> Result<Self, String> {
-        let manifest = env::var("CSS_TEST_EXPECTATIONS")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| root.join(DEFAULT_EXPECTATIONS_FILE));
+        let manifest = env::var("CSS_TEST_EXPECTATIONS").map_or_else(|_| root.join(DEFAULT_EXPECTATIONS_FILE), PathBuf::from);
         if !manifest.exists() {
             return Ok(Self::default());
         }
@@ -278,12 +276,9 @@ impl HarnessSummary {
 
 #[test]
 fn css_harness_compliance() {
-    let base = match env::var("CSS_TESTS_DIR") {
-        Ok(value) => value,
-        Err(_) => {
-            eprintln!("[css-harness] skipped: CSS_TESTS_DIR not set");
-            return;
-        }
+    let Ok(base) = env::var("CSS_TESTS_DIR") else {
+        eprintln!("[css-harness] skipped: CSS_TESTS_DIR not set");
+        return;
     };
 
     let root = PathBuf::from(base);
@@ -377,7 +372,7 @@ fn apply_file_filters(
 
 fn collect_css_files(root: &Path, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
     let mut entries = fs::read_dir(root)?.collect::<Result<Vec<_>, _>>()?;
-    entries.sort_by_key(|entry| entry.path());
+    entries.sort_by_key(std::fs::DirEntry::path);
 
     for entry in entries {
         let path = entry.path();
@@ -517,11 +512,11 @@ fn wildcard_match_handles_common_patterns() {
 #[test]
 fn expectations_override_conventions() {
     let config = ExpectationConfig::parse(
-        r#"
+        r"
         expected-fail invalid/*
         expected-pass invalid/forced-pass.css
         skip support/*
-        "#,
+        ",
         Path::new("inline.expectations"),
     )
     .expect("parse expectations");

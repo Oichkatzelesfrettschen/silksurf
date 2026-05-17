@@ -37,3 +37,6 @@ path = "src/bin/tls_probe.rs"
 
 [features]
 platform-verifier = ["silksurf-engine/platform-verifier"]
+
+[lints]
+workspace = true

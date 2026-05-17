@@ -36,7 +36,7 @@ use winit::{
 /// Cross-platform window backed by winit + softbuffer.
 ///
 /// Call `run()` to enter the event loop. The call blocks until the window
-/// is closed (CloseRequested) or Escape is pressed.
+/// is closed (`CloseRequested`) or Escape is pressed.
 pub struct WinitWindow {
     title: String,
     width: u32,
@@ -44,7 +44,7 @@ pub struct WinitWindow {
 }
 
 impl WinitWindow {
-    /// Create a WinitWindow with the given title and initial size.
+    /// Create a `WinitWindow` with the given title and initial size.
     ///
     /// Returns `SilkError::Engine` if the platform does not support windowing
     /// (e.g., no DISPLAY on a headless CI box). The actual window is created
@@ -59,7 +59,7 @@ impl WinitWindow {
 
     /// Enter the event loop.  Blocks until the window is closed.
     ///
-    /// `render_fn(width, height)` is called on every RedrawRequested event
+    /// `render_fn(width, height)` is called on every `RedrawRequested` event
     /// and must return a pixel buffer of exactly `width * height` u32 values
     /// in 0xAARRGGBB format (same as the silksurf-render rasterizer output).
     ///
@@ -166,11 +166,10 @@ impl ApplicationHandler for WinitApp {
                 let (w, h) = self
                     .window
                     .as_ref()
-                    .map(|win| {
+                    .map_or((self.init_width, self.init_height), |win| {
                         let s = win.inner_size();
                         (s.width, s.height)
-                    })
-                    .unwrap_or((self.init_width, self.init_height));
+                    });
 
                 let pixels = (self.render_fn)(w, h);
 

@@ -9,3 +9,6 @@ publish = false
 cosmic-text = { workspace = true }
 tiny-skia = { workspace = true }
 silksurf-css = { path = "../silksurf-css" }
+
+[lints]
+workspace = true

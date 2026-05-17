@@ -24,7 +24,7 @@ pub fn rasterize_glyphs(
         return;
     }
 
-    let mut state = TEXT_STATE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut state = TEXT_STATE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let crate::TextState {
         font_system,
         swash_cache,
@@ -42,7 +42,7 @@ pub fn rasterize_glyphs(
     let ph = pixmap.height() as i32;
 
     for run in buffer.layout_runs() {
-        for glyph in run.glyphs.iter() {
+        for glyph in run.glyphs {
             let physical = glyph.physical((origin.0, origin.1), 1.0);
             let glyph_color = glyph.color_opt.unwrap_or(text_color);
 
@@ -68,21 +68,21 @@ pub fn rasterize_glyphs(
 /// premultiplied here before the blend so the output satisfies the invariant
 /// `red <= alpha` required by `PremultipliedColorU8`.
 fn composite_over(dst: &mut PremultipliedColorU8, src: CosmicColor) {
-    let sa = src.a() as u32;
+    let sa = u32::from(src.a());
     if sa == 0 {
         return;
     }
 
     // Premultiply source (straight -> premultiplied, rounding to nearest).
-    let sr = (src.r() as u32 * sa + 127) / 255;
-    let sg = (src.g() as u32 * sa + 127) / 255;
-    let sb = (src.b() as u32 * sa + 127) / 255;
+    let sr = (u32::from(src.r()) * sa + 127) / 255;
+    let sg = (u32::from(src.g()) * sa + 127) / 255;
+    let sb = (u32::from(src.b()) * sa + 127) / 255;
 
     let inv_sa = 255 - sa;
-    let dr = dst.red() as u32;
-    let dg = dst.green() as u32;
-    let db = dst.blue() as u32;
-    let da = dst.alpha() as u32;
+    let dr = u32::from(dst.red());
+    let dg = u32::from(dst.green());
+    let db = u32::from(dst.blue());
+    let da = u32::from(dst.alpha());
 
     let out_r = (sr + (dr * inv_sa + 127) / 255).min(255) as u8;
     let out_g = (sg + (dg * inv_sa + 127) / 255).min(255) as u8;

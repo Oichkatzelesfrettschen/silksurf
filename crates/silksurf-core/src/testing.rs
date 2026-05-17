@@ -28,6 +28,7 @@ pub struct Clock {
 
 impl Clock {
     /// Create a clock at `start_nanos` since an arbitrary epoch.
+    #[must_use] 
     pub fn new(start_nanos: u64) -> Self {
         Self {
             now_nanos: start_nanos,
@@ -35,6 +36,7 @@ impl Clock {
     }
 
     /// Read the current virtual time, in nanoseconds.
+    #[must_use] 
     pub fn now_nanos(&self) -> u64 {
         self.now_nanos
     }
@@ -53,7 +55,7 @@ impl Clock {
 /// WHY: Fuzz reductions, randomized property tests, and shuffle-based
 /// schedulers all need a PRNG whose stream depends only on a recorded
 /// seed. We use `xorshift64` (Marsaglia 2003) -- one 64-bit add of
-/// state, three xors, one shift each. ~1 ns per call on x86_64. Period
+/// state, three xors, one shift each. ~1 ns per call on `x86_64`. Period
 /// is 2^64 - 1, which is plenty for test fixtures.
 ///
 /// NOT cryptographically secure. Do NOT use for token generation, key
@@ -70,6 +72,7 @@ impl Rng {
     /// to the all-zero stream forever, so we substitute a fixed sentinel
     /// (the golden-ratio constant 0x9E3779B97F4A7C15) instead of
     /// silently producing garbage.
+    #[must_use] 
     pub fn new(seed: u64) -> Self {
         let state = if seed == 0 {
             0x9E37_79B9_7F4A_7C15
@@ -94,7 +97,7 @@ impl Rng {
 
     /// Produce a uniform double in the half-open interval [0, 1).
     ///
-    /// Implementation: take the high 53 bits of next_u64() (the mantissa
+    /// Implementation: take the high 53 bits of `next_u64()` (the mantissa
     /// width of an IEEE-754 double) and divide by 2^53. This is the
     /// canonical conversion that avoids the off-by-one bias of
     /// `(u64 as f64) / u64::MAX as f64`.

@@ -99,6 +99,7 @@ pub struct Tokenizer {
 }
 
 impl Tokenizer {
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             buffer: String::new(),
@@ -136,7 +137,7 @@ impl Tokenizer {
             }
 
             if self.raw_text_tag.is_some() {
-                if !self.parse_raw_text(&mut tokens)? {
+                if !self.parse_raw_text(&mut tokens) {
                     break;
                 }
                 continue;
@@ -221,7 +222,7 @@ impl Tokenizer {
         }
 
         if self.starts_with_case_insensitive(start + 2, "doctype") {
-            return self.parse_doctype(tokens, start);
+            return Ok(self.parse_doctype(tokens, start));
         }
 
         Err(self.error(
@@ -235,12 +236,12 @@ impl Tokenizer {
         &mut self,
         tokens: &mut Vec<Token>,
         start: usize,
-    ) -> Result<bool, TokenizeError> {
+    ) -> bool {
         let bytes = self.buffer.as_bytes();
         let mut cursor = start + 2 + "doctype".len();
         cursor = self.skip_whitespace(cursor);
         if cursor >= bytes.len() {
-            return Ok(false);
+            return false;
         }
 
         let name_start = cursor;
@@ -248,7 +249,7 @@ impl Tokenizer {
             cursor += 1;
         }
         if cursor >= bytes.len() {
-            return Ok(false);
+            return false;
         }
 
         let name = if cursor > name_start {
@@ -263,7 +264,7 @@ impl Tokenizer {
 
         cursor = self.skip_whitespace(cursor);
         if cursor >= bytes.len() {
-            return Ok(false);
+            return false;
         }
 
         if bytes[cursor] != b'>' {
@@ -275,7 +276,7 @@ impl Tokenizer {
                         public_id = Some(value);
                         cursor = self.skip_whitespace(next);
                     }
-                    QuotedParse::Incomplete => return Ok(false),
+                    QuotedParse::Incomplete => return false,
                     QuotedParse::MissingQuote => {
                         force_quirks = true;
                         cursor = self.skip_to_gt(cursor);
@@ -288,7 +289,7 @@ impl Tokenizer {
                             system_id = Some(value);
                             cursor = next;
                         }
-                        QuotedParse::Incomplete => return Ok(false),
+                        QuotedParse::Incomplete => return false,
                         QuotedParse::MissingQuote => {
                             force_quirks = true;
                             cursor = self.skip_to_gt(cursor);
@@ -303,7 +304,7 @@ impl Tokenizer {
                         system_id = Some(value);
                         cursor = next;
                     }
-                    QuotedParse::Incomplete => return Ok(false),
+                    QuotedParse::Incomplete => return false,
                     QuotedParse::MissingQuote => {
                         force_quirks = true;
                         cursor = self.skip_to_gt(cursor);
@@ -317,7 +318,7 @@ impl Tokenizer {
 
         cursor = self.skip_to_gt(cursor);
         if cursor >= bytes.len() {
-            return Ok(false);
+            return false;
         }
         cursor += 1;
 
@@ -328,7 +329,7 @@ impl Tokenizer {
             force_quirks,
         });
         self.cursor = cursor;
-        Ok(true)
+        true
     }
 
     fn parse_end_tag(
@@ -448,11 +449,8 @@ impl Tokenizer {
         Ok(true)
     }
 
-    fn parse_raw_text(&mut self, tokens: &mut Vec<Token>) -> Result<bool, TokenizeError> {
-        let tag = match self.raw_text_tag.clone() {
-            Some(tag) => tag,
-            None => return Ok(true),
-        };
+    fn parse_raw_text(&mut self, tokens: &mut Vec<Token>) -> bool {
+        let Some(tag) = self.raw_text_tag.clone() else { return true; };
         let bytes = self.buffer.as_bytes();
         let mut cursor = self.cursor;
         while cursor < bytes.len() {
@@ -475,13 +473,13 @@ impl Tokenizer {
                         });
                         self.cursor = end + 1;
                         self.raw_text_tag = None;
-                        return Ok(true);
+                        return true;
                     }
                 }
             }
             cursor += 1;
         }
-        Ok(false)
+        false
     }
 
     fn parse_attribute(&self, start: usize) -> Result<AttributeParse, TokenizeError> {
@@ -526,10 +524,7 @@ impl Tokenizer {
                 cursor += 1;
                 let value_start = cursor;
                 let rest = &bytes[cursor..];
-                let rel = match memchr(quote, rest) {
-                    Some(pos) => pos,
-                    None => return Ok(AttributeParse::Incomplete),
-                };
+                let Some(rel) = memchr(quote, rest) else { return Ok(AttributeParse::Incomplete); };
                 let value_end = cursor + rel;
                 value = decode_character_references(&self.buffer[value_start..value_end]);
                 cursor = value_end + 1;
@@ -639,10 +634,7 @@ impl Tokenizer {
             return QuotedParse::MissingQuote;
         }
         let rest = &bytes[cursor + 1..];
-        let rel = match memchr(quote, rest) {
-            Some(pos) => pos,
-            None => return QuotedParse::Incomplete,
-        };
+        let Some(rel) = memchr(quote, rest) else { return QuotedParse::Incomplete; };
         let end = cursor + 1 + rel;
         let value = self.buffer[cursor + 1..end].to_string();
         QuotedParse::Parsed(value, end + 1)

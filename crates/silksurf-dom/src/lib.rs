@@ -11,12 +11,14 @@ use std::sync::RwLock;
 pub struct NodeId(usize);
 
 impl NodeId {
-    /// Create a NodeId from a raw index. Use only for testing or FFI.
+    /// Create a `NodeId` from a raw index. Use only for testing or FFI.
+    #[must_use] 
     pub fn from_raw(index: usize) -> Self {
         NodeId(index)
     }
 
     /// Get the raw index.
+    #[must_use] 
     pub fn raw(self) -> usize {
         self.0
     }
@@ -27,7 +29,7 @@ impl NodeId {
 /// `value_atoms` and `class_strings` are co-indexed: `class_strings[i]` is the
 /// pre-resolved string for the class token interned as `value_atoms[i]`.
 /// Populated at `set_attribute` time so the cascade hot path can read class
-/// names without acquiring the `interner` RwLock.
+/// names without acquiring the `interner` `RwLock`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Attribute {
     pub name: AttributeName,
@@ -36,7 +38,7 @@ pub struct Attribute {
     pub value_atoms: SmallVec<[Atom; 4]>,
     /// Pre-resolved strings for each atom in `value_atoms` (class tokens only).
     /// Co-indexed: `class_strings[i]` corresponds to `value_atoms[i]`.
-    /// Using these avoids `dom.resolve(atom)` + RwLock in the cascade hot path.
+    /// Using these avoids `dom.resolve(atom)` + `RwLock` in the cascade hot path.
     pub class_strings: SmallVec<[SmallString; 4]>,
 }
 
@@ -105,6 +107,7 @@ pub enum TagName {
 
 impl TagName {
     #[allow(clippy::should_implement_trait)]
+    #[must_use] 
     pub fn from_str(name: &str) -> Self {
         let lower = name.to_ascii_lowercase();
         match lower.as_str() {
@@ -162,6 +165,7 @@ impl TagName {
         }
     }
 
+    #[must_use] 
     pub fn as_str(&self) -> &str {
         match self {
             TagName::Html => "html",
@@ -237,6 +241,7 @@ pub enum AttributeName {
 
 impl AttributeName {
     #[allow(clippy::should_implement_trait)]
+    #[must_use] 
     pub fn from_str(name: &str) -> Self {
         let lower = name.to_ascii_lowercase();
         match lower.as_str() {
@@ -255,6 +260,7 @@ impl AttributeName {
         }
     }
 
+    #[must_use] 
     pub fn as_str(&self) -> &str {
         match self {
             AttributeName::Id => "id",
@@ -272,6 +278,7 @@ impl AttributeName {
         }
     }
 
+    #[must_use] 
     pub fn matches(&self, name: &str) -> bool {
         self.as_str().eq_ignore_ascii_case(name)
     }
@@ -331,7 +338,7 @@ pub struct Node {
 pub struct Dom {
     nodes: Vec<Node>,
     interner: RwLock<SilkInterner>,
-    /// Lock-free resolve table: resolve_table[atom.raw()] = SmallString.
+    /// Lock-free resolve table: `resolve_table`[`atom.raw()`] = `SmallString`.
     /// Materialized from interner at phase boundaries, monotonically growing.
     resolve_table: Vec<SmallString>,
     dirty_nodes: Vec<NodeId>,
@@ -339,9 +346,9 @@ pub struct Dom {
     batch_depth: usize,
     /// Unique instance ID + monotonic mutation counter, combined into a single u64.
     /// High 32 bits: per-instance unique ID (from global atomic counter).
-    /// Low 32 bits: mutation counter (incremented on end_mutation_batch, etc.).
+    /// Low 32 bits: mutation counter (incremented on `end_mutation_batch`, etc.).
     /// Different Dom instances always have different high bits, ensuring
-    /// FusedWorkspace detects DOM replacement even when mutation counts match.
+    /// `FusedWorkspace` detects DOM replacement even when mutation counts match.
     generation: u64,
 }
 
@@ -554,15 +561,6 @@ impl Dom {
         let attr_name = AttributeName::from_str(&name);
         let value: SmallString = value.into();
         let (value_atom, value_atoms, class_strings) = match attr_name {
-            AttributeName::Id => {
-                let atom = if value.is_empty() || !should_intern_identifier(value.as_str()) {
-                    None
-                } else {
-                    // UNWRAP-OK: RwLock poison only on prior-holder panic; propagating preserves the crash invariant.
-                    Some(self.interner.write().unwrap().intern(value.as_str()))
-                };
-                (atom, SmallVec::new(), SmallVec::new())
-            }
             AttributeName::Class => {
                 // Collect atoms and pre-resolved strings in one pass so the
                 // cascade hot path can read class names without the RwLock.
@@ -583,6 +581,7 @@ impl Dom {
                 };
                 (None, atoms, strings)
             }
+            // Id and other attributes share the single-atom intern path.
             _ => {
                 let atom = if value.is_empty() || !should_intern_identifier(value.as_str()) {
                     None
@@ -701,10 +700,7 @@ impl Dom {
     }
 
     pub fn next_sibling(&self, id: NodeId) -> Result<Option<NodeId>, DomError> {
-        let parent = match self.parent(id)? {
-            Some(parent) => parent,
-            None => return Ok(None),
-        };
+        let Some(parent) = self.parent(id)? else { return Ok(None); };
         let siblings = self.children(parent)?;
         for (idx, sibling) in siblings.iter().enumerate() {
             if *sibling == id {
@@ -715,10 +711,7 @@ impl Dom {
     }
 
     pub fn previous_sibling(&self, id: NodeId) -> Result<Option<NodeId>, DomError> {
-        let parent = match self.parent(id)? {
-            Some(parent) => parent,
-            None => return Ok(None),
-        };
+        let Some(parent) = self.parent(id)? else { return Ok(None); };
         let siblings = self.children(parent)?;
         for (idx, sibling) in siblings.iter().enumerate() {
             if *sibling == id {
@@ -792,6 +785,7 @@ impl Dom {
 }
 
 impl Node {
+    #[must_use] 
     pub fn kind(&self) -> &NodeKind {
         &self.kind
     }

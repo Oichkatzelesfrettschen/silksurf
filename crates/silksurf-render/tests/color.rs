@@ -68,7 +68,7 @@
 // ---------------------------------------------------------------------------
 
 fn ref_srgb_to_linear(c: u8) -> f32 {
-    let c_f = c as f32 / 255.0;
+    let c_f = f32::from(c) / 255.0;
     let linear = if c_f <= 0.04045 {
         c_f / 12.92
     } else {
@@ -79,7 +79,7 @@ fn ref_srgb_to_linear(c: u8) -> f32 {
 
 fn ref_linear_to_srgb(c: f32) -> u8 {
     let c_clamped = c.clamp(0.0, 1.0);
-    let encoded = if c_clamped <= 0.0031308 {
+    let encoded = if c_clamped <= 0.003_130_8 {
         c_clamped * 12.92
     } else {
         1.055 * c_clamped.powf(1.0 / 2.4) - 0.055
@@ -88,9 +88,9 @@ fn ref_linear_to_srgb(c: f32) -> u8 {
 }
 
 fn ref_premultiply(r: u8, g: u8, b: u8, a: u8) -> (u8, u8, u8) {
-    let alpha = a as u32;
+    let alpha = u32::from(a);
     let premult = |c: u8| -> u8 {
-        let ca = c as u32 * alpha + 127;
+        let ca = u32::from(c) * alpha + 127;
         ((ca + (ca >> 8)) >> 8) as u8
     };
     (premult(r), premult(g), premult(b))
@@ -100,9 +100,9 @@ fn ref_unpremultiply(r: u8, g: u8, b: u8, a: u8) -> (u8, u8, u8) {
     if a == 0 {
         return (0, 0, 0);
     }
-    let alpha = a as u32;
+    let alpha = u32::from(a);
     let unpremult = |c: u8| -> u8 {
-        let numerator = c as u32 * 255 + (alpha / 2);
+        let numerator = u32::from(c) * 255 + (alpha / 2);
         (numerator / alpha).min(255) as u8
     };
     (unpremult(r), unpremult(g), unpremult(b))
@@ -114,7 +114,7 @@ fn ref_unpremultiply(r: u8, g: u8, b: u8, a: u8) -> (u8, u8, u8) {
 
 /// Pack (a, r, g, b) into a u32 as A<<24 | R<<16 | G<<8 | B.
 fn pack_argb(a: u8, r: u8, g: u8, b: u8) -> u32 {
-    ((a as u32) << 24) | ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
+    (u32::from(a) << 24) | (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b)
 }
 
 /// Unpack a u32 (A<<24 | R<<16 | G<<8 | B) into (a, r, g, b).
@@ -136,10 +136,16 @@ fn unpack_argb(packed: u32) -> (u8, u8, u8, u8) {
 #[test]
 fn srgb_to_linear_boundary_invariants() {
     let black = ref_srgb_to_linear(0);
-    assert_eq!(
-        black, 0.0_f32,
-        "sRGB 0 must map to exactly 0.0 linear (got {black})"
-    );
+    // Exact float compare is intentional: the CSS Color L4 spec requires
+    // an exact 0.0 result for the lower endpoint, and the implementation
+    // takes the explicit linear branch for inputs <= 0.04045 / 12.92.
+    #[allow(clippy::float_cmp)]
+    {
+        assert_eq!(
+            black, 0.0_f32,
+            "sRGB 0 must map to exactly 0.0 linear (got {black})"
+        );
+    }
 
     let white = ref_srgb_to_linear(255);
     // The formula (1.0 + 0.055) / 1.055 = 1.0 exactly in exact arithmetic;
@@ -171,7 +177,7 @@ fn srgb_round_trips_canonical_values() {
     for &(original, label) in cases {
         let linear = ref_srgb_to_linear(original);
         let recovered = ref_linear_to_srgb(linear);
-        let delta = (recovered as i32 - original as i32).unsigned_abs();
+        let delta = (i32::from(recovered) - i32::from(original)).unsigned_abs();
         assert!(
             delta <= 1,
             "{label}: sRGB {original} -> linear {linear} -> sRGB {recovered}, delta {delta} (must be <= 1)"
@@ -192,7 +198,7 @@ fn srgb_round_trip_full_sweep() {
     for c in 0u8..=255 {
         let linear = ref_srgb_to_linear(c);
         let recovered = ref_linear_to_srgb(linear);
-        let delta = (recovered as i32 - c as i32).unsigned_abs();
+        let delta = (i32::from(recovered) - i32::from(c)).unsigned_abs();
         assert!(
             delta <= 1,
             "round-trip failed at u8 {c}: recovered {recovered}, delta {delta}"
@@ -243,9 +249,9 @@ fn premultiply_unpremultiply_round_trip() {
     for &(r, g, b, a, max_delta) in cases {
         let (pr, pg, pb) = ref_premultiply(r, g, b, a);
         let (rr, rg, rb) = ref_unpremultiply(pr, pg, pb, a);
-        let dr = (rr as i32 - r as i32).unsigned_abs();
-        let dg = (rg as i32 - g as i32).unsigned_abs();
-        let db = (rb as i32 - b as i32).unsigned_abs();
+        let dr = (i32::from(rr) - i32::from(r)).unsigned_abs();
+        let dg = (i32::from(rg) - i32::from(g)).unsigned_abs();
+        let db = (i32::from(rb) - i32::from(b)).unsigned_abs();
         assert!(
             dr <= max_delta && dg <= max_delta && db <= max_delta,
             "premultiply({r},{g},{b},{a}) -> unpremultiply: got ({rr},{rg},{rb}), \
