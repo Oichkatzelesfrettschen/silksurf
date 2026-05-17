@@ -218,12 +218,12 @@ fn eval_feature(inner: &[&CssToken], w: f32, h: f32) -> bool {
     });
 
     match feature.as_str() {
-        "max-width" | "max-device-width" => px_value.map_or(true, |v| w <= v),
-        "min-width" | "min-device-width" => px_value.map_or(true, |v| w >= v),
-        "max-height" | "max-device-height" => px_value.map_or(true, |v| h <= v),
-        "min-height" | "min-device-height" => px_value.map_or(true, |v| h >= v),
-        "width" => px_value.map_or(true, |v| (w - v).abs() < 1.0),
-        "height" => px_value.map_or(true, |v| (h - v).abs() < 1.0),
+        "max-width" | "max-device-width" => px_value.is_none_or(|v| w <= v),
+        "min-width" | "min-device-width" => px_value.is_none_or(|v| w >= v),
+        "max-height" | "max-device-height" => px_value.is_none_or(|v| h <= v),
+        "min-height" | "min-device-height" => px_value.is_none_or(|v| h >= v),
+        "width" => px_value.is_none_or(|v| (w - v).abs() < 1.0),
+        "height" => px_value.is_none_or(|v| (h - v).abs() < 1.0),
         "orientation" => match ident_value {
             Some(s) if s.eq_ignore_ascii_case("landscape") => w > h,
             Some(s) if s.eq_ignore_ascii_case("portrait") => w <= h,
@@ -243,10 +243,9 @@ fn eval_feature(inner: &[&CssToken], w: f32, h: f32) -> bool {
             _ => true,
         },
         // prefers-contrast: assume no special contrast preference.
-        "prefers-contrast" => match ident_value {
-            Some(s) if s.eq_ignore_ascii_case("no-preference") => true,
-            _ => false,
-        },
+        "prefers-contrast" => {
+            matches!(ident_value, Some(s) if s.eq_ignore_ascii_case("no-preference"))
+        }
         // Color capability.
         "color" => true,
         "color-gamut" => match ident_value {
@@ -254,10 +253,7 @@ fn eval_feature(inner: &[&CssToken], w: f32, h: f32) -> bool {
             _ => false, // p3, rec2020: we don't report those capabilities
         },
         // Display mode: we render as a plain browser tab.
-        "display-mode" => match ident_value {
-            Some(s) if s.eq_ignore_ascii_case("browser") => true,
-            _ => false,
-        },
+        "display-mode" => matches!(ident_value, Some(s) if s.eq_ignore_ascii_case("browser")),
         // forced-colors, inverted-colors, pointer, hover, any-hover,
         // any-pointer, resolution, update, overflow-block, etc.:
         // unknown -- default to true (safe fallback: apply the rules).
