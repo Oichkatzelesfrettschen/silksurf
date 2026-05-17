@@ -27,13 +27,19 @@ use rustc_hash::FxHashMap;
 use silksurf_css::{
     AlignItems as CssAlignItems, AlignSelf as CssAlignSelf, ComputedStyle, Display as CssDisplay,
     FlexBasis, FlexDirection as CssFlexDirection, FlexWrap as CssFlexWrap,
-    JustifyContent as CssJustifyContent, Length, LengthOrAuto,
+    GridAutoFlow as CssGridAutoFlow, GridLine as CssGridLine,
+    GridTrackMax as CssGridTrackMax, GridTrackMin as CssGridTrackMin,
+    GridTrackSize as CssGridTrackSize, JustifyContent as CssJustifyContent, Length, LengthOrAuto,
 };
 use silksurf_dom::{Dom, NodeId as DomNodeId, NodeKind};
 use taffy::{
     AlignItems, AlignSelf, AvailableSpace, Dimension, Display as TaffyDisplay, FlexDirection,
-    FlexWrap, JustifyContent, LengthPercentage, LengthPercentageAuto, NodeId as TaffyId, Size,
-    Style, TaffyTree, geometry::Rect as TaffyRect,
+    FlexWrap, GridAutoFlow, GridPlacement, GridTemplateComponent, JustifyContent, LengthPercentage,
+    LengthPercentageAuto, Line, MaxTrackSizingFunction, MinTrackSizingFunction, NodeId as TaffyId,
+    Size, Style, TaffyTree, TrackSizingFunction, geometry::Rect as TaffyRect,
+    style_helpers::{TaffyAuto as _, TaffyFitContent as _, TaffyMaxContent as _,
+                   TaffyMinContent as _, fr, length, minmax, percent, line as taffy_line,
+                   span as taffy_span},
 };
 
 use crate::{Rect, neighbor_table::LayoutNeighborTable};
@@ -337,6 +343,48 @@ fn css_to_taffy_style(style: Option<&ComputedStyle>) -> Style {
     let gap_row =
         LengthPercentage::length(style.flex_container.row_gap.max(style.flex_container.gap));
 
+    // CSS Grid container properties.
+    // GridTemplateComponent<String>: String is taffy's DefaultCheapStr for
+    // named-line support; we only produce Single (unnamed) variants here.
+    let grid_template_columns: Vec<GridTemplateComponent<String>> = style
+        .grid_container
+        .template_columns
+        .iter()
+        .map(|t| GridTemplateComponent::Single(track_size_to_taffy(t)))
+        .collect();
+    let grid_template_rows: Vec<GridTemplateComponent<String>> = style
+        .grid_container
+        .template_rows
+        .iter()
+        .map(|t| GridTemplateComponent::Single(track_size_to_taffy(t)))
+        .collect();
+    let grid_auto_columns: Vec<TrackSizingFunction> = style
+        .grid_container
+        .auto_columns
+        .iter()
+        .map(track_size_to_taffy)
+        .collect();
+    let grid_auto_rows: Vec<TrackSizingFunction> = style
+        .grid_container
+        .auto_rows
+        .iter()
+        .map(track_size_to_taffy)
+        .collect();
+    let grid_auto_flow = match style.grid_container.auto_flow {
+        CssGridAutoFlow::Row => GridAutoFlow::Row,
+        CssGridAutoFlow::Column => GridAutoFlow::Column,
+        CssGridAutoFlow::RowDense => GridAutoFlow::RowDense,
+        CssGridAutoFlow::ColumnDense => GridAutoFlow::ColumnDense,
+    };
+    let grid_column: Line<GridPlacement<String>> = Line {
+        start: grid_line_to_taffy(style.grid_item.column_start),
+        end: grid_line_to_taffy(style.grid_item.column_end),
+    };
+    let grid_row: Line<GridPlacement<String>> = Line {
+        start: grid_line_to_taffy(style.grid_item.row_start),
+        end: grid_line_to_taffy(style.grid_item.row_end),
+    };
+
     Style {
         display,
         flex_direction,
@@ -381,7 +429,76 @@ fn css_to_taffy_style(style: Option<&ComputedStyle>) -> Style {
             width: opt_length_dim(style.max_width),
             height: opt_length_dim(style.max_height),
         },
+        grid_template_columns,
+        grid_template_rows,
+        grid_auto_columns,
+        grid_auto_rows,
+        grid_auto_flow,
+        grid_column,
+        grid_row,
         ..Default::default()
+    }
+}
+
+/// Convert a silksurf-css `GridTrackSize` to a taffy `TrackSizingFunction`.
+fn track_size_to_taffy(track: &CssGridTrackSize) -> TrackSizingFunction {
+    match track {
+        CssGridTrackSize::Auto => TrackSizingFunction::AUTO,
+        CssGridTrackSize::MinContent => TrackSizingFunction::MIN_CONTENT,
+        CssGridTrackSize::MaxContent => TrackSizingFunction::MAX_CONTENT,
+        CssGridTrackSize::Length(Length::Px(px)) => length(*px),
+        CssGridTrackSize::Length(Length::Percent(p)) => percent(*p / 100.0),
+        CssGridTrackSize::Length(Length::Em(_) | Length::Rem(_)) => {
+            unreachable!("em/rem units must be resolved at cascade time before layout")
+        }
+        CssGridTrackSize::Fr(fr_val) => fr(*fr_val),
+        CssGridTrackSize::Minmax(min, max) => {
+            minmax(grid_track_min_to_taffy(*min), grid_track_max_to_taffy(*max))
+        }
+        CssGridTrackSize::FitContent(Length::Px(px)) => {
+            TrackSizingFunction::fit_content(LengthPercentage::length(*px))
+        }
+        CssGridTrackSize::FitContent(Length::Percent(p)) => {
+            TrackSizingFunction::fit_content(LengthPercentage::percent(*p / 100.0))
+        }
+        CssGridTrackSize::FitContent(Length::Em(_) | Length::Rem(_)) => {
+            unreachable!("em/rem units must be resolved at cascade time before layout")
+        }
+    }
+}
+
+fn grid_track_min_to_taffy(min: CssGridTrackMin) -> MinTrackSizingFunction {
+    match min {
+        CssGridTrackMin::Auto => MinTrackSizingFunction::AUTO,
+        CssGridTrackMin::MinContent => MinTrackSizingFunction::MIN_CONTENT,
+        CssGridTrackMin::MaxContent => MinTrackSizingFunction::MAX_CONTENT,
+        CssGridTrackMin::Length(Length::Px(px)) => MinTrackSizingFunction::length(px),
+        CssGridTrackMin::Length(Length::Percent(p)) => MinTrackSizingFunction::percent(p / 100.0),
+        CssGridTrackMin::Length(Length::Em(_) | Length::Rem(_)) => {
+            unreachable!("em/rem units must be resolved at cascade time before layout")
+        }
+    }
+}
+
+fn grid_track_max_to_taffy(max: CssGridTrackMax) -> MaxTrackSizingFunction {
+    match max {
+        CssGridTrackMax::Auto => MaxTrackSizingFunction::AUTO,
+        CssGridTrackMax::MinContent => MaxTrackSizingFunction::MIN_CONTENT,
+        CssGridTrackMax::MaxContent => MaxTrackSizingFunction::MAX_CONTENT,
+        CssGridTrackMax::Length(Length::Px(px)) => MaxTrackSizingFunction::length(px),
+        CssGridTrackMax::Length(Length::Percent(p)) => MaxTrackSizingFunction::percent(p / 100.0),
+        CssGridTrackMax::Length(Length::Em(_) | Length::Rem(_)) => {
+            unreachable!("em/rem units must be resolved at cascade time before layout")
+        }
+        CssGridTrackMax::Fr(fr_val) => MaxTrackSizingFunction::fr(fr_val),
+    }
+}
+
+fn grid_line_to_taffy(line: CssGridLine) -> GridPlacement<String> {
+    match line {
+        CssGridLine::Auto => GridPlacement::Auto,
+        CssGridLine::Line(n) => taffy_line(n),
+        CssGridLine::Span(s) => taffy_span(s),
     }
 }
 

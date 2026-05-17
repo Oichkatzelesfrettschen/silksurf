@@ -131,6 +131,91 @@ pub struct FlexContainerStyle {
     pub column_gap: f32,
 }
 
+// ---------------------------------------------------------------------------
+// CSS Grid types
+// ---------------------------------------------------------------------------
+
+/// A single CSS grid track sizing function (one track in grid-template-columns
+/// or grid-template-rows, or one entry in grid-auto-rows/columns).
+///
+/// Maps 1:1 to taffy::TrackSizingFunction / MinTrackSizingFunction /
+/// MaxTrackSizingFunction at layout time (see taffy_layout.rs).
+#[derive(Debug, Clone, PartialEq)]
+pub enum GridTrackSize {
+    Auto,
+    MinContent,
+    MaxContent,
+    /// Fixed px or percent length.
+    Length(Length),
+    /// Fractional unit: `Nfr`.
+    Fr(f32),
+    /// `minmax(min, max)` where min cannot be fr.
+    Minmax(GridTrackMin, GridTrackMax),
+    /// `fit-content(<length-percentage>)`.
+    FitContent(Length),
+}
+
+/// The minimum side of a `minmax()` track.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum GridTrackMin {
+    Auto,
+    MinContent,
+    MaxContent,
+    Length(Length),
+}
+
+/// The maximum side of a `minmax()` track.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum GridTrackMax {
+    Auto,
+    MinContent,
+    MaxContent,
+    Length(Length),
+    Fr(f32),
+}
+
+/// `grid-auto-flow` property values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GridAutoFlow {
+    #[default]
+    Row,
+    Column,
+    RowDense,
+    ColumnDense,
+}
+
+/// `grid-column-start` / `grid-column-end` / `grid-row-start` / `grid-row-end`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GridLine {
+    #[default]
+    Auto,
+    /// Numbered line (`1`, `-2`, etc.).
+    Line(i16),
+    /// `span <integer>`.
+    Span(u16),
+}
+
+/// Container-side grid properties (set on the grid container element).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct GridContainerStyle {
+    pub template_columns: Vec<GridTrackSize>,
+    pub template_rows: Vec<GridTrackSize>,
+    pub auto_columns: Vec<GridTrackSize>,
+    pub auto_rows: Vec<GridTrackSize>,
+    pub auto_flow: GridAutoFlow,
+}
+
+/// Item-side grid properties (set on direct children of a grid container).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GridItemStyle {
+    pub column_start: GridLine,
+    pub column_end: GridLine,
+    pub row_start: GridLine,
+    pub row_end: GridLine,
+}
+
+// ---------------------------------------------------------------------------
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Position {
     #[default]
@@ -377,6 +462,10 @@ pub struct ComputedStyle {
     pub flex_container: FlexContainerStyle,
     // Flex item properties
     pub flex_item: FlexItemStyle,
+    // CSS Grid container properties
+    pub grid_container: GridContainerStyle,
+    // CSS Grid item placement properties
+    pub grid_item: GridItemStyle,
     // Positioning
     pub position: Position,
     pub top: LengthOrAuto,
@@ -432,6 +521,8 @@ impl Default for ComputedStyle {
             border: Edges::all(Length::zero()),
             flex_container: FlexContainerStyle::default(),
             flex_item: FlexItemStyle::default(),
+            grid_container: GridContainerStyle::default(),
+            grid_item: GridItemStyle::default(),
             position: Position::default(),
             top: LengthOrAuto::Auto,
             right: LengthOrAuto::Auto,
@@ -522,6 +613,17 @@ struct CascadedStyle {
     flex_basis: Option<ResolvedProperty<FlexBasis>>,
     align_self: Option<ResolvedProperty<AlignSelf>>,
     order: Option<ResolvedProperty<i32>>,
+    // CSS Grid container
+    grid_template_columns: Option<ResolvedProperty<Vec<GridTrackSize>>>,
+    grid_template_rows: Option<ResolvedProperty<Vec<GridTrackSize>>>,
+    grid_auto_columns: Option<ResolvedProperty<Vec<GridTrackSize>>>,
+    grid_auto_rows: Option<ResolvedProperty<Vec<GridTrackSize>>>,
+    grid_auto_flow: Option<ResolvedProperty<GridAutoFlow>>,
+    // CSS Grid item placement
+    grid_column_start: Option<ResolvedProperty<GridLine>>,
+    grid_column_end: Option<ResolvedProperty<GridLine>>,
+    grid_row_start: Option<ResolvedProperty<GridLine>>,
+    grid_row_end: Option<ResolvedProperty<GridLine>>,
     // Positioning
     position: Option<ResolvedProperty<Position>>,
     top: Option<ResolvedProperty<LengthOrAuto>>,
@@ -891,6 +993,29 @@ impl CascadedStyle {
                     parent.map(|s| s.flex_item.order),
                     0i32,
                 ),
+            },
+            grid_container: GridContainerStyle {
+                template_columns: self
+                    .grid_template_columns
+                    .map_or_else(Vec::new, |p| p.value),
+                template_rows: self
+                    .grid_template_rows
+                    .map_or_else(Vec::new, |p| p.value),
+                auto_columns: self
+                    .grid_auto_columns
+                    .map_or_else(Vec::new, |p| p.value),
+                auto_rows: self.grid_auto_rows.map_or_else(Vec::new, |p| p.value),
+                auto_flow: self
+                    .grid_auto_flow
+                    .map_or(GridAutoFlow::default(), |p| p.value),
+            },
+            grid_item: GridItemStyle {
+                column_start: self
+                    .grid_column_start
+                    .map_or(GridLine::Auto, |p| p.value),
+                column_end: self.grid_column_end.map_or(GridLine::Auto, |p| p.value),
+                row_start: self.grid_row_start.map_or(GridLine::Auto, |p| p.value),
+                row_end: self.grid_row_end.map_or(GridLine::Auto, |p| p.value),
             },
             position: resolve_non_inherited_kw(
                 self.position,
@@ -2874,6 +2999,194 @@ fn apply_declaration(
                 );
             }
         }
+        // CSS Grid container properties
+        PropertyId::GridTemplateColumns => {
+            let tracks = parse_track_list(&declaration.value);
+            if !tracks.is_empty() {
+                apply_property(
+                    &mut cascaded.grid_template_columns,
+                    tracks,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::GridTemplateRows => {
+            let tracks = parse_track_list(&declaration.value);
+            if !tracks.is_empty() {
+                apply_property(
+                    &mut cascaded.grid_template_rows,
+                    tracks,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::GridAutoColumns => {
+            let tracks = parse_track_list(&declaration.value);
+            if !tracks.is_empty() {
+                apply_property(
+                    &mut cascaded.grid_auto_columns,
+                    tracks,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::GridAutoRows => {
+            let tracks = parse_track_list(&declaration.value);
+            if !tracks.is_empty() {
+                apply_property(
+                    &mut cascaded.grid_auto_rows,
+                    tracks,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::GridAutoFlow => {
+            if let Some(value) = parse_grid_auto_flow(&declaration.value) {
+                apply_property(
+                    &mut cascaded.grid_auto_flow,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        // CSS Grid item placement
+        PropertyId::GridColumnStart => {
+            if let Some(value) = parse_grid_line(&declaration.value) {
+                apply_property(
+                    &mut cascaded.grid_column_start,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::GridColumnEnd => {
+            if let Some(value) = parse_grid_line(&declaration.value) {
+                apply_property(
+                    &mut cascaded.grid_column_end,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::GridRowStart => {
+            if let Some(value) = parse_grid_line(&declaration.value) {
+                apply_property(
+                    &mut cascaded.grid_row_start,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::GridRowEnd => {
+            if let Some(value) = parse_grid_line(&declaration.value) {
+                apply_property(
+                    &mut cascaded.grid_row_end,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        // Shorthands: grid-column: <start> / <end>; grid-row: <start> / <end>
+        PropertyId::GridColumn => {
+            let (start, end) = parse_grid_placement_shorthand(&declaration.value);
+            if let Some(s) = start {
+                apply_property(
+                    &mut cascaded.grid_column_start,
+                    s,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+            if let Some(e) = end {
+                apply_property(
+                    &mut cascaded.grid_column_end,
+                    e,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::GridRow => {
+            let (start, end) = parse_grid_placement_shorthand(&declaration.value);
+            if let Some(s) = start {
+                apply_property(
+                    &mut cascaded.grid_row_start,
+                    s,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+            if let Some(e) = end {
+                apply_property(
+                    &mut cascaded.grid_row_end,
+                    e,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        // Shorthand: grid-area: <row-start> / <col-start> / <row-end> / <col-end>
+        PropertyId::GridArea => {
+            let lines = parse_grid_area_shorthand(&declaration.value);
+            if let Some(rs) = lines[0] {
+                apply_property(
+                    &mut cascaded.grid_row_start,
+                    rs,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+            if let Some(cs) = lines[1] {
+                apply_property(
+                    &mut cascaded.grid_column_start,
+                    cs,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+            if let Some(re) = lines[2] {
+                apply_property(
+                    &mut cascaded.grid_row_end,
+                    re,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+            if let Some(ce) = lines[3] {
+                apply_property(
+                    &mut cascaded.grid_column_end,
+                    ce,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
         PropertyId::Unknown => {}
     }
 }
@@ -3830,6 +4143,336 @@ fn hex_to_u8(value: &str) -> Option<u8> {
     u8::from_str_radix(value, 16).ok()
 }
 
+// ---------------------------------------------------------------------------
+// CSS Grid parsing
+// ---------------------------------------------------------------------------
+
+/// Parse a track-list token sequence into a Vec<GridTrackSize>.
+///
+/// Handles: auto, min-content, max-content, <length-percentage>, <flex>,
+/// minmax(<min>, <max>), fit-content(<lp>), and integer repeat().
+///
+/// Whitespace tokens are ignored; unrecognized tokens cause the individual
+/// track to be skipped (graceful degradation).
+fn parse_track_list(tokens: &[CssToken]) -> Vec<GridTrackSize> {
+    let non_ws: Vec<&CssToken> = tokens
+        .iter()
+        .filter(|t| !matches!(t, CssToken::Whitespace))
+        .collect();
+
+    let mut tracks: Vec<GridTrackSize> = Vec::new();
+    let mut i = 0usize;
+    while i < non_ws.len() {
+        match non_ws[i] {
+            CssToken::Ident(kw) => {
+                let lower = kw.to_ascii_lowercase();
+                match lower.as_str() {
+                    "auto" => {
+                        tracks.push(GridTrackSize::Auto);
+                        i += 1;
+                    }
+                    "min-content" => {
+                        tracks.push(GridTrackSize::MinContent);
+                        i += 1;
+                    }
+                    "max-content" => {
+                        tracks.push(GridTrackSize::MaxContent);
+                        i += 1;
+                    }
+                    "none" => {
+                        // grid-template: none -- empty track list
+                        return Vec::new();
+                    }
+                    _ => {
+                        i += 1; // skip named line or unknown ident
+                    }
+                }
+            }
+            CssToken::Dimension { value, unit } if unit.eq_ignore_ascii_case("px") => {
+                if let Ok(px) = value.parse::<f32>() {
+                    tracks.push(GridTrackSize::Length(Length::Px(px)));
+                }
+                i += 1;
+            }
+            CssToken::Dimension { value, unit } if unit.eq_ignore_ascii_case("fr") => {
+                if let Ok(fr) = value.parse::<f32>() {
+                    tracks.push(GridTrackSize::Fr(fr));
+                }
+                i += 1;
+            }
+            CssToken::Percentage(value) => {
+                if let Ok(pct) = value.parse::<f32>() {
+                    tracks.push(GridTrackSize::Length(Length::Percent(pct)));
+                }
+                i += 1;
+            }
+            CssToken::Function(name) if name.eq_ignore_ascii_case("minmax") => {
+                // Collect tokens until the matching ParenClose.
+                let (inner, consumed) = collect_function_args(&non_ws[i + 1..]);
+                if let Some(track) = parse_minmax_function(&inner) {
+                    tracks.push(track);
+                }
+                i += 1 + consumed;
+            }
+            CssToken::Function(name) if name.eq_ignore_ascii_case("fit-content") => {
+                let (inner, consumed) = collect_function_args(&non_ws[i + 1..]);
+                if let Some(track) = parse_fit_content_function(&inner) {
+                    tracks.push(track);
+                }
+                i += 1 + consumed;
+            }
+            CssToken::Function(name) if name.eq_ignore_ascii_case("repeat") => {
+                let (inner, consumed) = collect_function_args(&non_ws[i + 1..]);
+                let expanded = parse_repeat_function(&inner);
+                tracks.extend(expanded);
+                i += 1 + consumed;
+            }
+            // Skip brackets used for named lines and other tokens we don't handle.
+            _ => {
+                i += 1;
+            }
+        }
+    }
+    tracks
+}
+
+/// Collect tokens inside an already-opened function parenthesis up to the
+/// matching `ParenClose`.  Returns (inner_tokens, tokens_consumed_including_close).
+fn collect_function_args<'a>(tokens: &[&'a CssToken]) -> (Vec<&'a CssToken>, usize) {
+    let mut depth = 1usize;
+    let mut inner = Vec::new();
+    let mut consumed = 0usize;
+    for &tok in tokens {
+        consumed += 1;
+        match tok {
+            CssToken::ParenOpen | CssToken::Function(_) => {
+                depth += 1;
+                inner.push(tok);
+            }
+            CssToken::ParenClose => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+                inner.push(tok);
+            }
+            _ => inner.push(tok),
+        }
+    }
+    (inner, consumed)
+}
+
+/// Parse the argument list of `minmax(<min>, <max>)`.
+fn parse_minmax_function(inner: &[&CssToken]) -> Option<GridTrackSize> {
+    // Split on first comma.
+    let comma_pos = inner.iter().position(|t| matches!(t, CssToken::Comma))?;
+    let min_toks = &inner[..comma_pos];
+    let max_toks = &inner[comma_pos + 1..];
+
+    let min = parse_minmax_min(min_toks)?;
+    let max = parse_minmax_max(max_toks)?;
+    Some(GridTrackSize::Minmax(min, max))
+}
+
+fn parse_minmax_min(tokens: &[&CssToken]) -> Option<GridTrackMin> {
+    let tok = tokens.iter().find(|t| !matches!(t, CssToken::Whitespace))?;
+    match tok {
+        CssToken::Ident(kw) => match kw.to_ascii_lowercase().as_str() {
+            "auto" => Some(GridTrackMin::Auto),
+            "min-content" => Some(GridTrackMin::MinContent),
+            "max-content" => Some(GridTrackMin::MaxContent),
+            _ => None,
+        },
+        CssToken::Dimension { value, unit } if unit.eq_ignore_ascii_case("px") => {
+            value.parse::<f32>().ok().map(|px| GridTrackMin::Length(Length::Px(px)))
+        }
+        CssToken::Percentage(value) => {
+            value.parse::<f32>().ok().map(|p| GridTrackMin::Length(Length::Percent(p)))
+        }
+        _ => None,
+    }
+}
+
+fn parse_minmax_max(tokens: &[&CssToken]) -> Option<GridTrackMax> {
+    let tok = tokens.iter().find(|t| !matches!(t, CssToken::Whitespace))?;
+    match tok {
+        CssToken::Ident(kw) => match kw.to_ascii_lowercase().as_str() {
+            "auto" => Some(GridTrackMax::Auto),
+            "min-content" => Some(GridTrackMax::MinContent),
+            "max-content" => Some(GridTrackMax::MaxContent),
+            _ => None,
+        },
+        CssToken::Dimension { value, unit } if unit.eq_ignore_ascii_case("px") => {
+            value.parse::<f32>().ok().map(|px| GridTrackMax::Length(Length::Px(px)))
+        }
+        CssToken::Dimension { value, unit } if unit.eq_ignore_ascii_case("fr") => {
+            value.parse::<f32>().ok().map(GridTrackMax::Fr)
+        }
+        CssToken::Percentage(value) => {
+            value.parse::<f32>().ok().map(|p| GridTrackMax::Length(Length::Percent(p)))
+        }
+        _ => None,
+    }
+}
+
+/// Parse the argument of `fit-content(<length-percentage>)`.
+fn parse_fit_content_function(inner: &[&CssToken]) -> Option<GridTrackSize> {
+    let tok = inner.iter().find(|t| !matches!(t, CssToken::Whitespace))?;
+    let len = match tok {
+        CssToken::Dimension { value, unit } if unit.eq_ignore_ascii_case("px") => {
+            Length::Px(value.parse::<f32>().ok()?)
+        }
+        CssToken::Percentage(value) => Length::Percent(value.parse::<f32>().ok()?),
+        _ => return None,
+    };
+    Some(GridTrackSize::FitContent(len))
+}
+
+/// Parse `repeat(<count-or-keyword>, <track-list>)`.
+///
+/// Only integer counts are expanded here; `auto-fill` and `auto-fit` are
+/// treated as a single repetition (taffy handles the algorithm from the track
+/// definition, but we represent them as one copy of the inner tracks for now).
+fn parse_repeat_function(inner: &[&CssToken]) -> Vec<GridTrackSize> {
+    let non_ws: Vec<&CssToken> = inner
+        .iter()
+        .copied()
+        .filter(|t| !matches!(t, CssToken::Whitespace))
+        .collect();
+
+    let Some(comma_pos) = non_ws.iter().position(|t| matches!(t, CssToken::Comma)) else {
+        return Vec::new();
+    };
+
+    let count: usize = match non_ws.first() {
+        Some(CssToken::Number(n)) => n.parse::<usize>().unwrap_or(1).min(64),
+        Some(CssToken::Ident(kw))
+            if kw.eq_ignore_ascii_case("auto-fill") || kw.eq_ignore_ascii_case("auto-fit") =>
+        {
+            1
+        }
+        _ => return Vec::new(),
+    };
+
+    // The remainder after the comma is a track-list; reconstruct as owned tokens
+    // and parse recursively.
+    let remainder_owned: Vec<CssToken> = non_ws[comma_pos + 1..]
+        .iter()
+        .map(|&t| t.clone())
+        .collect();
+    let inner_tracks = parse_track_list(&remainder_owned);
+    let inner_len = inner_tracks.len();
+
+    inner_tracks
+        .into_iter()
+        .cycle()
+        .take(inner_len * count)
+        .collect()
+}
+
+fn parse_grid_auto_flow(tokens: &[CssToken]) -> Option<GridAutoFlow> {
+    let non_ws: Vec<&str> = tokens
+        .iter()
+        .filter_map(|t| match t {
+            CssToken::Ident(s) => Some(s.as_str()),
+            _ => None,
+        })
+        .collect();
+
+    match non_ws.as_slice() {
+        [a] if a.eq_ignore_ascii_case("row") => Some(GridAutoFlow::Row),
+        [a] if a.eq_ignore_ascii_case("column") => Some(GridAutoFlow::Column),
+        [a, b] | [b, a]
+            if a.eq_ignore_ascii_case("dense")
+                && b.eq_ignore_ascii_case("row") =>
+        {
+            Some(GridAutoFlow::RowDense)
+        }
+        [a, b] | [b, a]
+            if a.eq_ignore_ascii_case("dense")
+                && b.eq_ignore_ascii_case("column") =>
+        {
+            Some(GridAutoFlow::ColumnDense)
+        }
+        [a] if a.eq_ignore_ascii_case("dense") => Some(GridAutoFlow::RowDense),
+        _ => None,
+    }
+}
+
+/// Parse a single `<grid-line>` value: `auto`, `<integer>`, `span <integer>`.
+fn parse_grid_line(tokens: &[CssToken]) -> Option<GridLine> {
+    // Clone to owned Vec<CssToken> so slice patterns match CssToken variants directly.
+    // Filter both Whitespace and Eof — the tokenizer appends Eof to every output.
+    let non_ws: Vec<CssToken> = tokens
+        .iter()
+        .filter(|t| !matches!(t, CssToken::Whitespace | CssToken::Eof))
+        .cloned()
+        .collect();
+
+    match non_ws.as_slice() {
+        [CssToken::Ident(kw)] if kw.eq_ignore_ascii_case("auto") => Some(GridLine::Auto),
+        [CssToken::Number(n)] => n.parse::<i16>().ok().map(GridLine::Line),
+        [CssToken::Ident(span_kw), CssToken::Number(n)]
+            if span_kw.eq_ignore_ascii_case("span") =>
+        {
+            n.parse::<u16>().ok().map(GridLine::Span)
+        }
+        _ => None,
+    }
+}
+
+/// Parse `grid-column` / `grid-row` shorthand: `<start> / <end>`.
+fn parse_grid_placement_shorthand(tokens: &[CssToken]) -> (Option<GridLine>, Option<GridLine>) {
+    let non_ws: Vec<&CssToken> = tokens
+        .iter()
+        .filter(|t| !matches!(t, CssToken::Whitespace))
+        .collect();
+
+    // Split on slash delimiter.
+    let slash_pos = non_ws
+        .iter()
+        .position(|t| matches!(t, CssToken::Delim('/')));
+
+    if let Some(pos) = slash_pos {
+        let start_toks: Vec<CssToken> = non_ws[..pos].iter().map(|&t| t.clone()).collect();
+        let end_toks: Vec<CssToken> =
+            non_ws[pos + 1..].iter().map(|&t| t.clone()).collect();
+        (parse_grid_line(&start_toks), parse_grid_line(&end_toks))
+    } else {
+        // No slash: single value applies to start; end is auto.
+        let owned: Vec<CssToken> = non_ws.iter().map(|&t| t.clone()).collect();
+        (parse_grid_line(&owned), Some(GridLine::Auto))
+    }
+}
+
+/// Parse `grid-area` shorthand: `<row-start> / <col-start> / <row-end> / <col-end>`.
+///
+/// Returns `[row_start, col_start, row_end, col_end]`.
+fn parse_grid_area_shorthand(tokens: &[CssToken]) -> [Option<GridLine>; 4] {
+    let non_ws: Vec<&CssToken> = tokens
+        .iter()
+        .filter(|t| !matches!(t, CssToken::Whitespace))
+        .collect();
+
+    // Split on slash delimiters.
+    let mut segments: Vec<Vec<CssToken>> = Vec::new();
+    let mut current: Vec<CssToken> = Vec::new();
+    for &tok in &non_ws {
+        if matches!(tok, CssToken::Delim('/')) {
+            segments.push(std::mem::take(&mut current));
+        } else {
+            current.push(tok.clone());
+        }
+    }
+    segments.push(current);
+
+    let mut result: [Option<GridLine>; 4] = [None; 4];
+    for (i, seg) in segments.iter().take(4).enumerate() {
+        result[i] = parse_grid_line(seg);
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use crate::parser::parse_stylesheet;
@@ -3888,5 +4531,126 @@ mod tests {
     fn test_too_few_stops_rejected() {
         let result = gradient_from_rule("a { background-image: linear-gradient(90deg, red); }");
         assert!(result.is_none(), "single stop should be rejected");
+    }
+}
+
+#[cfg(test)]
+mod grid_tests {
+    use super::*;
+    use crate::CssTokenizer;
+
+    fn tokenize(s: &str) -> Vec<CssToken> {
+        let mut tok = CssTokenizer::new();
+        let mut v = tok.feed(s).unwrap_or_default();
+        v.extend(tok.finish().unwrap_or_default());
+        v
+    }
+
+    fn parse_tracks(css_value: &str) -> Vec<GridTrackSize> {
+        parse_track_list(&tokenize(css_value))
+    }
+
+    #[test]
+    fn parse_fr_track_list() {
+        let tracks = parse_tracks("1fr 2fr 1fr");
+        assert_eq!(tracks.len(), 3);
+        assert!(matches!(tracks[0], GridTrackSize::Fr(v) if (v - 1.0).abs() < 0.01));
+        assert!(matches!(tracks[1], GridTrackSize::Fr(v) if (v - 2.0).abs() < 0.01));
+    }
+
+    #[test]
+    fn parse_px_and_auto_track_list() {
+        let tracks = parse_tracks("100px auto 1fr");
+        assert_eq!(tracks.len(), 3);
+        assert!(matches!(tracks[0], GridTrackSize::Length(Length::Px(v)) if (v - 100.0).abs() < 0.01));
+        assert!(matches!(tracks[1], GridTrackSize::Auto));
+        assert!(matches!(tracks[2], GridTrackSize::Fr(_)));
+    }
+
+    #[test]
+    fn parse_minmax_track() {
+        let tracks = parse_tracks("minmax(100px, 1fr)");
+        assert_eq!(tracks.len(), 1);
+        match &tracks[0] {
+            GridTrackSize::Minmax(min, max) => {
+                assert!(matches!(min, GridTrackMin::Length(Length::Px(v)) if (v - 100.0).abs() < 0.01));
+                assert!(matches!(max, GridTrackMax::Fr(v) if (v - 1.0).abs() < 0.01));
+            }
+            other => panic!("expected Minmax, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_repeat_track() {
+        let tracks = parse_tracks("repeat(3, 1fr)");
+        assert_eq!(tracks.len(), 3);
+        assert!(tracks.iter().all(|t| matches!(t, GridTrackSize::Fr(v) if (v - 1.0).abs() < 0.01)));
+    }
+
+    #[test]
+    fn parse_grid_line_auto() {
+        assert_eq!(parse_grid_line(&tokenize("auto")), Some(GridLine::Auto));
+    }
+
+    #[test]
+    fn parse_grid_line_integer() {
+        assert_eq!(parse_grid_line(&tokenize("2")), Some(GridLine::Line(2)));
+    }
+
+    #[test]
+    fn parse_grid_line_span() {
+        assert_eq!(parse_grid_line(&tokenize("span 3")), Some(GridLine::Span(3)));
+    }
+
+    #[test]
+    fn parse_grid_column_shorthand() {
+        let (start, end) = parse_grid_placement_shorthand(&tokenize("1 / 3"));
+        assert_eq!(start, Some(GridLine::Line(1)));
+        assert_eq!(end, Some(GridLine::Line(3)));
+    }
+
+    #[test]
+    fn grid_auto_flow_row() {
+        assert_eq!(parse_grid_auto_flow(&tokenize("row")), Some(GridAutoFlow::Row));
+    }
+
+    #[test]
+    fn grid_auto_flow_column_dense() {
+        assert_eq!(
+            parse_grid_auto_flow(&tokenize("column dense")),
+            Some(GridAutoFlow::ColumnDense)
+        );
+    }
+
+    #[test]
+    fn parse_min_content_max_content() {
+        let tracks = parse_tracks("min-content max-content");
+        assert_eq!(tracks.len(), 2);
+        assert!(matches!(tracks[0], GridTrackSize::MinContent));
+        assert!(matches!(tracks[1], GridTrackSize::MaxContent));
+    }
+
+    #[test]
+    fn parse_fit_content_track() {
+        let tracks = parse_tracks("fit-content(200px)");
+        assert_eq!(tracks.len(), 1);
+        assert!(
+            matches!(&tracks[0], GridTrackSize::FitContent(Length::Px(v)) if (v - 200.0).abs() < 0.01)
+        );
+    }
+
+    #[test]
+    fn parse_grid_area_shorthand_four_values() {
+        let lines = parse_grid_area_shorthand(&tokenize("1 / 2 / 3 / 4"));
+        assert_eq!(lines[0], Some(GridLine::Line(1)));
+        assert_eq!(lines[1], Some(GridLine::Line(2)));
+        assert_eq!(lines[2], Some(GridLine::Line(3)));
+        assert_eq!(lines[3], Some(GridLine::Line(4)));
+    }
+
+    #[test]
+    fn none_track_list_empty() {
+        let tracks = parse_tracks("none");
+        assert!(tracks.is_empty());
     }
 }
