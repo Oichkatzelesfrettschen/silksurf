@@ -20,7 +20,8 @@
  */
 
 use silksurf_css::{
-    SelectorList, compute_style_for_node, matches_selector_list, parse_selector_list_with_interner,
+    BorderStyle, LengthOrAuto, SelectorList, TextDecoration, Visibility, WhiteSpace,
+    compute_style_for_node, matches_selector_list, parse_selector_list_with_interner,
     parse_stylesheet,
 };
 use silksurf_dom::{Dom, NodeId, NodeKind};
@@ -246,6 +247,11 @@ fn run_one(path: &Path) -> Outcome {
         "html_semantic_sections" => check_html_semantic_sections(&parsed.dom, parsed.document),
         "css_flexbox_display" => check_css_flexbox_display(&parsed.dom, parsed.document, &source),
         "css_linear_gradient" => check_css_linear_gradient(&parsed.dom, parsed.document, &source),
+        "css_sizing" => check_css_sizing(&parsed.dom, parsed.document, &source),
+        "css_border_rendering" => check_css_border_rendering(&parsed.dom, parsed.document, &source),
+        "css_text_decoration" => check_css_text_decoration(&parsed.dom, parsed.document, &source),
+        "css_white_space" => check_css_white_space(&parsed.dom, parsed.document, &source),
+        "css_visibility" => check_css_visibility(&parsed.dom, parsed.document, &source),
         other => Outcome::Skip(format!("no check registered for fixture stem '{other}'")),
     }
 }
@@ -923,6 +929,241 @@ fn check_css_linear_gradient(dom: &Dom, document: NodeId, source: &str) -> Outco
         if style.background_image.is_none() {
             return Outcome::Fail(format!(
                 "background_image not set for {selector} after cascade"
+            ));
+        }
+    }
+    Outcome::Pass
+}
+
+fn check_css_sizing(dom: &Dom, document: NodeId, source: &str) -> Outcome {
+    let css = match extract_inline_style(source) {
+        Some(c) => c,
+        None => return Outcome::Skip("no <style> block found".to_string()),
+    };
+    let stylesheet = match parse_stylesheet(&css) {
+        Ok(s) => s,
+        Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
+    };
+    let body = match body_of(dom, document) {
+        Some(b) => b,
+        None => return Outcome::Fail("missing body".to_string()),
+    };
+    let children = element_children(dom, body);
+
+    // .w100 must have width = Length(Px(100.0))
+    let w100_sel = match parse_selector(dom, ".w100") {
+        Some(s) => s,
+        None => return Outcome::Fail("could not parse .w100 selector".to_string()),
+    };
+    let w100 = children
+        .iter()
+        .copied()
+        .find(|&c| matches_selector_list(dom, c, &w100_sel));
+    let node = match w100 {
+        Some(n) => n,
+        None => return Outcome::Fail("no element matched .w100".to_string()),
+    };
+    let style = compute_style_for_node(dom, node, &stylesheet, None);
+    if !matches!(style.width, LengthOrAuto::Length(_)) {
+        return Outcome::Fail(format!("width not Length for .w100: {:?}", style.width));
+    }
+
+    // .auto must have width = Auto
+    let auto_sel = match parse_selector(dom, ".auto") {
+        Some(s) => s,
+        None => return Outcome::Fail("could not parse .auto selector".to_string()),
+    };
+    let auto_node = children
+        .iter()
+        .copied()
+        .find(|&c| matches_selector_list(dom, c, &auto_sel));
+    let node = match auto_node {
+        Some(n) => n,
+        None => return Outcome::Fail("no element matched .auto".to_string()),
+    };
+    let style = compute_style_for_node(dom, node, &stylesheet, None);
+    if !matches!(style.width, LengthOrAuto::Auto) {
+        return Outcome::Fail(format!("width not Auto for .auto: {:?}", style.width));
+    }
+
+    Outcome::Pass
+}
+
+fn check_css_border_rendering(dom: &Dom, document: NodeId, source: &str) -> Outcome {
+    let css = match extract_inline_style(source) {
+        Some(c) => c,
+        None => return Outcome::Skip("no <style> block found".to_string()),
+    };
+    let stylesheet = match parse_stylesheet(&css) {
+        Ok(s) => s,
+        Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
+    };
+    let body = match body_of(dom, document) {
+        Some(b) => b,
+        None => return Outcome::Fail("missing body".to_string()),
+    };
+    let children = element_children(dom, body);
+
+    let cases: &[(&str, BorderStyle)] = &[
+        (".solid", BorderStyle::Solid),
+        (".dashed", BorderStyle::Dashed),
+        (".dotted", BorderStyle::Dotted),
+        (".none", BorderStyle::None),
+        (".double", BorderStyle::Double),
+    ];
+    for (selector, expected) in cases {
+        let sel = match parse_selector(dom, selector) {
+            Some(s) => s,
+            None => return Outcome::Fail(format!("could not parse selector '{selector}'")),
+        };
+        let node = match children
+            .iter()
+            .copied()
+            .find(|&c| matches_selector_list(dom, c, &sel))
+        {
+            Some(n) => n,
+            None => return Outcome::Fail(format!("no element matched '{selector}'")),
+        };
+        let style = compute_style_for_node(dom, node, &stylesheet, None);
+        if style.border_style != *expected {
+            return Outcome::Fail(format!(
+                "border_style mismatch for {selector}: got {:?}, want {expected:?}",
+                style.border_style
+            ));
+        }
+    }
+    Outcome::Pass
+}
+
+fn check_css_text_decoration(dom: &Dom, document: NodeId, source: &str) -> Outcome {
+    let css = match extract_inline_style(source) {
+        Some(c) => c,
+        None => return Outcome::Skip("no <style> block found".to_string()),
+    };
+    let stylesheet = match parse_stylesheet(&css) {
+        Ok(s) => s,
+        Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
+    };
+    let body = match body_of(dom, document) {
+        Some(b) => b,
+        None => return Outcome::Fail("missing body".to_string()),
+    };
+    let children = element_children(dom, body);
+
+    let cases: &[(&str, TextDecoration)] = &[
+        (".underline", TextDecoration::Underline),
+        (".overline", TextDecoration::Overline),
+        (".line-through", TextDecoration::LineThrough),
+        (".none", TextDecoration::None),
+    ];
+    for (selector, expected) in cases {
+        let sel = match parse_selector(dom, selector) {
+            Some(s) => s,
+            None => return Outcome::Fail(format!("could not parse selector '{selector}'")),
+        };
+        let node = match children
+            .iter()
+            .copied()
+            .find(|&c| matches_selector_list(dom, c, &sel))
+        {
+            Some(n) => n,
+            None => return Outcome::Fail(format!("no element matched '{selector}'")),
+        };
+        let style = compute_style_for_node(dom, node, &stylesheet, None);
+        if style.text_decoration != *expected {
+            return Outcome::Fail(format!(
+                "text_decoration mismatch for {selector}: got {:?}, want {expected:?}",
+                style.text_decoration
+            ));
+        }
+    }
+    Outcome::Pass
+}
+
+fn check_css_white_space(dom: &Dom, document: NodeId, source: &str) -> Outcome {
+    let css = match extract_inline_style(source) {
+        Some(c) => c,
+        None => return Outcome::Skip("no <style> block found".to_string()),
+    };
+    let stylesheet = match parse_stylesheet(&css) {
+        Ok(s) => s,
+        Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
+    };
+    let body = match body_of(dom, document) {
+        Some(b) => b,
+        None => return Outcome::Fail("missing body".to_string()),
+    };
+    let children = element_children(dom, body);
+
+    let cases: &[(&str, WhiteSpace)] = &[
+        (".normal", WhiteSpace::Normal),
+        (".nowrap", WhiteSpace::Nowrap),
+        (".pre", WhiteSpace::Pre),
+        (".pre-wrap", WhiteSpace::PreWrap),
+        (".pre-line", WhiteSpace::PreLine),
+    ];
+    for (selector, expected) in cases {
+        let sel = match parse_selector(dom, selector) {
+            Some(s) => s,
+            None => return Outcome::Fail(format!("could not parse selector '{selector}'")),
+        };
+        let node = match children
+            .iter()
+            .copied()
+            .find(|&c| matches_selector_list(dom, c, &sel))
+        {
+            Some(n) => n,
+            None => return Outcome::Fail(format!("no element matched '{selector}'")),
+        };
+        let style = compute_style_for_node(dom, node, &stylesheet, None);
+        if style.white_space != *expected {
+            return Outcome::Fail(format!(
+                "white_space mismatch for {selector}: got {:?}, want {expected:?}",
+                style.white_space
+            ));
+        }
+    }
+    Outcome::Pass
+}
+
+fn check_css_visibility(dom: &Dom, document: NodeId, source: &str) -> Outcome {
+    let css = match extract_inline_style(source) {
+        Some(c) => c,
+        None => return Outcome::Skip("no <style> block found".to_string()),
+    };
+    let stylesheet = match parse_stylesheet(&css) {
+        Ok(s) => s,
+        Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
+    };
+    let body = match body_of(dom, document) {
+        Some(b) => b,
+        None => return Outcome::Fail("missing body".to_string()),
+    };
+    let children = element_children(dom, body);
+
+    let cases: &[(&str, Visibility)] = &[
+        (".visible", Visibility::Visible),
+        (".hidden", Visibility::Hidden),
+        (".collapse", Visibility::Collapse),
+    ];
+    for (selector, expected) in cases {
+        let sel = match parse_selector(dom, selector) {
+            Some(s) => s,
+            None => return Outcome::Fail(format!("could not parse selector '{selector}'")),
+        };
+        let node = match children
+            .iter()
+            .copied()
+            .find(|&c| matches_selector_list(dom, c, &sel))
+        {
+            Some(n) => n,
+            None => return Outcome::Fail(format!("no element matched '{selector}'")),
+        };
+        let style = compute_style_for_node(dom, node, &stylesheet, None);
+        if style.visibility != *expected {
+            return Outcome::Fail(format!(
+                "visibility mismatch for {selector}: got {:?}, want {expected:?}",
+                style.visibility
             ));
         }
     }

@@ -60,6 +60,22 @@ pub enum PropertyId {
     FontWeight = 37,
     FontStyle = 38,
     BackgroundImage = 39,
+    // Sizing
+    Width = 40,
+    Height = 41,
+    MinWidth = 42,
+    MaxWidth = 43,
+    MinHeight = 44,
+    MaxHeight = 45,
+    // Border rendering
+    BorderColor = 46,
+    BorderStyle = 47,
+    // Text / visual
+    TextDecoration = 48,
+    LetterSpacing = 49,
+    WordSpacing = 50,
+    WhiteSpace = 51,
+    Visibility = 52,
     Unknown = 255,
 }
 
@@ -89,6 +105,8 @@ pub fn lookup_property_id(name: &str) -> PropertyId {
         (b'b', 16) if name.eq_ignore_ascii_case("background-image") => PropertyId::BackgroundImage,
         (b'b', 6) if name.eq_ignore_ascii_case("border") => PropertyId::Border,
         (b'b', 12) if name.eq_ignore_ascii_case("border-width") => PropertyId::BorderWidth,
+        (b'b', 12) if name.eq_ignore_ascii_case("border-color") => PropertyId::BorderColor,
+        (b'b', 12) if name.eq_ignore_ascii_case("border-style") => PropertyId::BorderStyle,
         (b'b', 6) if name.eq_ignore_ascii_case("bottom") => PropertyId::Bottom,
         (b'b', 13) if name.eq_ignore_ascii_case("border-radius") => PropertyId::BorderRadius,
         (b'b', 10) if name.eq_ignore_ascii_case("box-shadow") => PropertyId::BoxShadow,
@@ -108,11 +126,18 @@ pub fn lookup_property_id(name: &str) -> PropertyId {
         (b'g', 3) if name.eq_ignore_ascii_case("gap") => PropertyId::Gap,
         // 'j' prefix
         (b'j', 15) if name.eq_ignore_ascii_case("justify-content") => PropertyId::JustifyContent,
+        // 'h' prefix
+        (b'h', 6) if name.eq_ignore_ascii_case("height") => PropertyId::Height,
         // 'l' prefix
         (b'l', 11) if name.eq_ignore_ascii_case("line-height") => PropertyId::LineHeight,
         (b'l', 4) if name.eq_ignore_ascii_case("left") => PropertyId::Left,
+        (b'l', 13) if name.eq_ignore_ascii_case("letter-spacing") => PropertyId::LetterSpacing,
         // 'm' prefix
         (b'm', 6) if name.eq_ignore_ascii_case("margin") => PropertyId::Margin,
+        (b'm', 9) if name.eq_ignore_ascii_case("min-width") => PropertyId::MinWidth,
+        (b'm', 9) if name.eq_ignore_ascii_case("min-height") => PropertyId::MinHeight,
+        (b'm', 9) if name.eq_ignore_ascii_case("max-width") => PropertyId::MaxWidth,
+        (b'm', 10) if name.eq_ignore_ascii_case("max-height") => PropertyId::MaxHeight,
         // 'o' prefix
         (b'o', 7) if name.eq_ignore_ascii_case("opacity") => PropertyId::Opacity,
         (b'o', 5) if name.eq_ignore_ascii_case("order") => PropertyId::Order,
@@ -128,6 +153,13 @@ pub fn lookup_property_id(name: &str) -> PropertyId {
         // 't' prefix
         (b't', 3) if name.eq_ignore_ascii_case("top") => PropertyId::Top,
         (b't', 10) if name.eq_ignore_ascii_case("text-align") => PropertyId::TextAlign,
+        (b't', 15) if name.eq_ignore_ascii_case("text-decoration") => PropertyId::TextDecoration,
+        // 'v' prefix
+        (b'v', 10) if name.eq_ignore_ascii_case("visibility") => PropertyId::Visibility,
+        // 'w' prefix
+        (b'w', 5) if name.eq_ignore_ascii_case("width") => PropertyId::Width,
+        (b'w', 11) if name.eq_ignore_ascii_case("word-spacing") => PropertyId::WordSpacing,
+        (b'w', 11) if name.eq_ignore_ascii_case("white-space") => PropertyId::WhiteSpace,
         // 'a' prefix
         (b'a', 11) if name.eq_ignore_ascii_case("align-items") => PropertyId::AlignItems,
         (b'a', 10) if name.eq_ignore_ascii_case("align-self") => PropertyId::AlignSelf,
