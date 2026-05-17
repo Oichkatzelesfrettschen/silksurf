@@ -219,6 +219,18 @@ pub enum Visibility {
     Collapse,
 }
 
+/// CSS-wide cascade keyword: forces a specific cascade behavior regardless of value.
+///
+/// - `inherit`: use the parent element's computed value (even for non-inherited properties)
+/// - `initial`: use the property's initial (spec-defined default) value
+/// - `unset`: `inherit` for inherited properties, `initial` for non-inherited
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CascadeKeyword {
+    Inherit,
+    Initial,
+    Unset,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BoxShadow {
     pub offset_x: f32,
@@ -467,6 +479,10 @@ impl<T: Clone> ResolvedProperty<T> {
 
 #[derive(Default)]
 struct CascadedStyle {
+    /// CSS-wide keyword overrides (inherit/initial/unset) keyed by PropertyId.
+    /// When a keyword is set with higher cascade priority than the typed slot,
+    /// resolve() applies keyword behavior instead of the typed value.
+    keyword_slots: FxHashMap<crate::property_id::PropertyId, ResolvedProperty<CascadeKeyword>>,
     display: Option<ResolvedProperty<Display>>,
     color: Option<ResolvedProperty<Color>>,
     background_color: Option<ResolvedProperty<Color>>,
@@ -599,10 +615,15 @@ impl CascadedStyle {
      * Copy fields use the static directly; non-Copy (font_family) clones only
      * when needed (rare: only when no cascade value and no parent inheritance).
      */
-    fn resolve(self, parent: Option<&ComputedStyle>, rem_base_px: f32) -> ComputedStyle {
+    fn resolve(mut self, parent: Option<&ComputedStyle>, rem_base_px: f32) -> ComputedStyle {
+        use crate::property_id::PropertyId;
         static FALLBACK: std::sync::LazyLock<ComputedStyle> =
             std::sync::LazyLock::new(ComputedStyle::default);
         let fallback = &*FALLBACK;
+
+        // Extract keyword_slots so we can borrow it while moving other fields out of self.
+        let keyword_slots = std::mem::take(&mut self.keyword_slots);
+        let ks = &keyword_slots;
 
         // font-size: em is relative to the *parent* font-size (CSS spec).
         let parent_font_size_px = parent
@@ -611,11 +632,23 @@ impl CascadedStyle {
                 _ => 16.0,
             })
             .unwrap_or(16.0);
-        let raw_font_size = self
-            .font_size
-            .map(|entry| entry.value)
-            .or_else(|| parent.map(|s| s.font_size))
-            .unwrap_or(fallback.font_size);
+        // font-size is inherited; also check for a cascade keyword override.
+        let raw_font_size = {
+            let fs_kw = ks.get(&PropertyId::FontSize);
+            if keyword_beats_typed(fs_kw, &self.font_size) {
+                match fs_kw.unwrap().value {
+                    CascadeKeyword::Inherit | CascadeKeyword::Unset => {
+                        parent.map(|s| s.font_size).unwrap_or(fallback.font_size)
+                    }
+                    CascadeKeyword::Initial => fallback.font_size,
+                }
+            } else {
+                self.font_size
+                    .map(|entry| entry.value)
+                    .or_else(|| parent.map(|s| s.font_size))
+                    .unwrap_or(fallback.font_size)
+            }
+        };
         // For font-size: Percent means percent of parent font-size (same as em).
         let resolved_font_size = match raw_font_size {
             Length::Em(m) => Length::Px(m * parent_font_size_px),
@@ -630,178 +663,527 @@ impl CascadedStyle {
         };
 
         ComputedStyle {
-            display: self
-                .display
-                .map(|entry| entry.value)
-                .unwrap_or(fallback.display),
-            color: self
-                .color
-                .map(|entry| entry.value)
-                .or_else(|| parent.map(|style| style.color))
-                .unwrap_or(fallback.color),
-            background_color: self
-                .background_color
-                .map(|entry| entry.value)
-                .unwrap_or(fallback.background_color),
+            display: resolve_non_inherited_kw(
+                self.display,
+                ks.get(&PropertyId::Display),
+                parent.map(|s| s.display),
+                fallback.display,
+            ),
+            color: resolve_inherited_kw(
+                self.color,
+                ks.get(&PropertyId::Color),
+                parent.map(|s| s.color),
+                fallback.color,
+            ),
+            background_color: resolve_non_inherited_kw(
+                self.background_color,
+                ks.get(&PropertyId::BackgroundColor),
+                parent.map(|s| s.background_color),
+                fallback.background_color,
+            ),
             font_size: resolved_font_size,
             line_height: resolve_length(
-                self.line_height
-                    .map(|entry| entry.value)
-                    .or_else(|| parent.map(|style| style.line_height))
-                    .unwrap_or(resolved_font_size),
+                {
+                    let lh_kw = ks.get(&PropertyId::LineHeight);
+                    if keyword_beats_typed(lh_kw, &self.line_height) {
+                        match lh_kw.unwrap().value {
+                            CascadeKeyword::Inherit | CascadeKeyword::Unset => {
+                                parent.map(|s| s.line_height).unwrap_or(resolved_font_size)
+                            }
+                            CascadeKeyword::Initial => resolved_font_size,
+                        }
+                    } else {
+                        self.line_height
+                            .map(|entry| entry.value)
+                            .or_else(|| parent.map(|style| style.line_height))
+                            .unwrap_or(resolved_font_size)
+                    }
+                },
                 em_px,
                 rem_base_px,
             ),
-            font_family: self
-                .font_family
-                .map(|entry| entry.value)
-                .or_else(|| parent.map(|style| style.font_family.clone()))
-                .unwrap_or_else(|| fallback.font_family.clone()),
+            font_family: {
+                let ff_kw = ks.get(&PropertyId::FontFamily);
+                if keyword_beats_typed(ff_kw, &self.font_family) {
+                    match ff_kw.unwrap().value {
+                        CascadeKeyword::Inherit | CascadeKeyword::Unset => parent
+                            .map(|s| s.font_family.clone())
+                            .unwrap_or_else(|| fallback.font_family.clone()),
+                        CascadeKeyword::Initial => fallback.font_family.clone(),
+                    }
+                } else {
+                    self.font_family
+                        .map(|entry| entry.value)
+                        .or_else(|| parent.map(|style| style.font_family.clone()))
+                        .unwrap_or_else(|| fallback.font_family.clone())
+                }
+            },
             margin: {
                 let zero = LengthOrAuto::Length(Length::Px(0.0));
                 resolve_margins(
-                    self.margin_top.map(|e| e.value).unwrap_or(zero),
-                    self.margin_right.map(|e| e.value).unwrap_or(zero),
-                    self.margin_bottom.map(|e| e.value).unwrap_or(zero),
-                    self.margin_left.map(|e| e.value).unwrap_or(zero),
+                    resolve_non_inherited_kw(
+                        self.margin_top,
+                        ks.get(&PropertyId::MarginTop),
+                        parent.map(|p| p.margin.top),
+                        zero,
+                    ),
+                    resolve_non_inherited_kw(
+                        self.margin_right,
+                        ks.get(&PropertyId::MarginRight),
+                        parent.map(|p| p.margin.right),
+                        zero,
+                    ),
+                    resolve_non_inherited_kw(
+                        self.margin_bottom,
+                        ks.get(&PropertyId::MarginBottom),
+                        parent.map(|p| p.margin.bottom),
+                        zero,
+                    ),
+                    resolve_non_inherited_kw(
+                        self.margin_left,
+                        ks.get(&PropertyId::MarginLeft),
+                        parent.map(|p| p.margin.left),
+                        zero,
+                    ),
                     em_px,
                     rem_base_px,
                 )
             },
             padding: resolve_edges(
                 Edges {
-                    top: self.padding_top.map(|e| e.value).unwrap_or(Length::Px(0.0)),
-                    right: self
-                        .padding_right
-                        .map(|e| e.value)
-                        .unwrap_or(Length::Px(0.0)),
-                    bottom: self
-                        .padding_bottom
-                        .map(|e| e.value)
-                        .unwrap_or(Length::Px(0.0)),
-                    left: self
-                        .padding_left
-                        .map(|e| e.value)
-                        .unwrap_or(Length::Px(0.0)),
+                    top: resolve_non_inherited_kw(
+                        self.padding_top,
+                        ks.get(&PropertyId::PaddingTop),
+                        parent.map(|p| p.padding.top),
+                        Length::Px(0.0),
+                    ),
+                    right: resolve_non_inherited_kw(
+                        self.padding_right,
+                        ks.get(&PropertyId::PaddingRight),
+                        parent.map(|p| p.padding.right),
+                        Length::Px(0.0),
+                    ),
+                    bottom: resolve_non_inherited_kw(
+                        self.padding_bottom,
+                        ks.get(&PropertyId::PaddingBottom),
+                        parent.map(|p| p.padding.bottom),
+                        Length::Px(0.0),
+                    ),
+                    left: resolve_non_inherited_kw(
+                        self.padding_left,
+                        ks.get(&PropertyId::PaddingLeft),
+                        parent.map(|p| p.padding.left),
+                        Length::Px(0.0),
+                    ),
                 },
                 em_px,
                 rem_base_px,
             ),
             border: resolve_edges(
-                self.border
-                    .map(|entry| entry.value)
-                    .unwrap_or(fallback.border),
+                resolve_non_inherited_kw(
+                    self.border,
+                    ks.get(&PropertyId::Border),
+                    parent.map(|p| p.border),
+                    fallback.border,
+                ),
                 em_px,
                 rem_base_px,
             ),
             flex_container: FlexContainerStyle {
-                direction: self.flex_direction.map(|e| e.value).unwrap_or_default(),
-                wrap: self.flex_wrap.map(|e| e.value).unwrap_or_default(),
-                justify_content: self.justify_content.map(|e| e.value).unwrap_or_default(),
-                align_items: self.align_items.map(|e| e.value).unwrap_or_default(),
-                gap: self.gap.map(|e| e.value).unwrap_or(0.0),
-                row_gap: self.row_gap.map(|e| e.value).unwrap_or(0.0),
-                column_gap: self.column_gap.map(|e| e.value).unwrap_or(0.0),
+                direction: resolve_non_inherited_kw(
+                    self.flex_direction,
+                    ks.get(&PropertyId::FlexDirection),
+                    parent.map(|s| s.flex_container.direction),
+                    FlexDirection::default(),
+                ),
+                wrap: resolve_non_inherited_kw(
+                    self.flex_wrap,
+                    ks.get(&PropertyId::FlexWrap),
+                    parent.map(|s| s.flex_container.wrap),
+                    FlexWrap::default(),
+                ),
+                justify_content: resolve_non_inherited_kw(
+                    self.justify_content,
+                    ks.get(&PropertyId::JustifyContent),
+                    parent.map(|s| s.flex_container.justify_content),
+                    JustifyContent::default(),
+                ),
+                align_items: resolve_non_inherited_kw(
+                    self.align_items,
+                    ks.get(&PropertyId::AlignItems),
+                    parent.map(|s| s.flex_container.align_items),
+                    AlignItems::default(),
+                ),
+                gap: resolve_non_inherited_kw(
+                    self.gap,
+                    ks.get(&PropertyId::Gap),
+                    parent.map(|s| s.flex_container.gap),
+                    0.0f32,
+                ),
+                row_gap: resolve_non_inherited_kw(
+                    self.row_gap,
+                    ks.get(&PropertyId::RowGap),
+                    parent.map(|s| s.flex_container.row_gap),
+                    0.0f32,
+                ),
+                column_gap: resolve_non_inherited_kw(
+                    self.column_gap,
+                    ks.get(&PropertyId::ColumnGap),
+                    parent.map(|s| s.flex_container.column_gap),
+                    0.0f32,
+                ),
             },
             flex_item: FlexItemStyle {
-                flex_grow: self.flex_grow.map(|e| e.value).unwrap_or(0.0),
-                flex_shrink: self.flex_shrink.map(|e| e.value).unwrap_or(1.0),
-                flex_basis: self.flex_basis.map(|e| e.value).unwrap_or_default(),
-                align_self: self.align_self.map(|e| e.value).unwrap_or_default(),
-                order: self.order.map(|e| e.value).unwrap_or(0),
+                flex_grow: resolve_non_inherited_kw(
+                    self.flex_grow,
+                    ks.get(&PropertyId::FlexGrow),
+                    parent.map(|s| s.flex_item.flex_grow),
+                    0.0f32,
+                ),
+                flex_shrink: resolve_non_inherited_kw(
+                    self.flex_shrink,
+                    ks.get(&PropertyId::FlexShrink),
+                    parent.map(|s| s.flex_item.flex_shrink),
+                    1.0f32,
+                ),
+                flex_basis: resolve_non_inherited_kw(
+                    self.flex_basis,
+                    ks.get(&PropertyId::FlexBasis),
+                    parent.map(|s| s.flex_item.flex_basis),
+                    FlexBasis::default(),
+                ),
+                align_self: resolve_non_inherited_kw(
+                    self.align_self,
+                    ks.get(&PropertyId::AlignSelf),
+                    parent.map(|s| s.flex_item.align_self),
+                    AlignSelf::default(),
+                ),
+                order: resolve_non_inherited_kw(
+                    self.order,
+                    ks.get(&PropertyId::Order),
+                    parent.map(|s| s.flex_item.order),
+                    0i32,
+                ),
             },
-            position: self.position.map(|e| e.value).unwrap_or_default(),
+            position: resolve_non_inherited_kw(
+                self.position,
+                ks.get(&PropertyId::Position),
+                parent.map(|s| s.position),
+                Position::default(),
+            ),
             top: resolve_length_or_auto(
-                self.top.map(|e| e.value).unwrap_or_default(),
+                resolve_non_inherited_kw(
+                    self.top,
+                    ks.get(&PropertyId::Top),
+                    parent.map(|s| s.top),
+                    LengthOrAuto::Auto,
+                ),
                 em_px,
                 rem_base_px,
             ),
             right: resolve_length_or_auto(
-                self.right_offset.map(|e| e.value).unwrap_or_default(),
+                resolve_non_inherited_kw(
+                    self.right_offset,
+                    ks.get(&PropertyId::Right),
+                    parent.map(|s| s.right),
+                    LengthOrAuto::Auto,
+                ),
                 em_px,
                 rem_base_px,
             ),
             bottom: resolve_length_or_auto(
-                self.bottom.map(|e| e.value).unwrap_or_default(),
+                resolve_non_inherited_kw(
+                    self.bottom,
+                    ks.get(&PropertyId::Bottom),
+                    parent.map(|s| s.bottom),
+                    LengthOrAuto::Auto,
+                ),
                 em_px,
                 rem_base_px,
             ),
             left: resolve_length_or_auto(
-                self.left_offset.map(|e| e.value).unwrap_or_default(),
+                resolve_non_inherited_kw(
+                    self.left_offset,
+                    ks.get(&PropertyId::Left),
+                    parent.map(|s| s.left),
+                    LengthOrAuto::Auto,
+                ),
                 em_px,
                 rem_base_px,
             ),
-            z_index: self.z_index.map(|e| e.value).unwrap_or(0),
+            z_index: resolve_non_inherited_kw(
+                self.z_index,
+                ks.get(&PropertyId::ZIndex),
+                parent.map(|s| s.z_index),
+                0i32,
+            ),
             width: resolve_length_or_auto(
-                self.width.map(|e| e.value).unwrap_or(LengthOrAuto::Auto),
+                resolve_non_inherited_kw(
+                    self.width,
+                    ks.get(&PropertyId::Width),
+                    parent.map(|s| s.width),
+                    LengthOrAuto::Auto,
+                ),
                 em_px,
                 rem_base_px,
             ),
             height: resolve_length_or_auto(
-                self.height.map(|e| e.value).unwrap_or(LengthOrAuto::Auto),
+                resolve_non_inherited_kw(
+                    self.height,
+                    ks.get(&PropertyId::Height),
+                    parent.map(|s| s.height),
+                    LengthOrAuto::Auto,
+                ),
                 em_px,
                 rem_base_px,
             ),
             min_width: resolve_length(
-                self.min_width.map(|e| e.value).unwrap_or(Length::Px(0.0)),
+                resolve_non_inherited_kw(
+                    self.min_width,
+                    ks.get(&PropertyId::MinWidth),
+                    parent.map(|s| s.min_width),
+                    Length::Px(0.0),
+                ),
                 em_px,
                 rem_base_px,
             ),
             max_width: resolve_opt_length(
-                self.max_width.map(|e| e.value).unwrap_or(None),
+                resolve_non_inherited_kw(
+                    self.max_width,
+                    ks.get(&PropertyId::MaxWidth),
+                    parent.map(|s| s.max_width),
+                    None,
+                ),
                 em_px,
                 rem_base_px,
             ),
             min_height: resolve_length(
-                self.min_height.map(|e| e.value).unwrap_or(Length::Px(0.0)),
+                resolve_non_inherited_kw(
+                    self.min_height,
+                    ks.get(&PropertyId::MinHeight),
+                    parent.map(|s| s.min_height),
+                    Length::Px(0.0),
+                ),
                 em_px,
                 rem_base_px,
             ),
             max_height: resolve_opt_length(
-                self.max_height.map(|e| e.value).unwrap_or(None),
+                resolve_non_inherited_kw(
+                    self.max_height,
+                    ks.get(&PropertyId::MaxHeight),
+                    parent.map(|s| s.max_height),
+                    None,
+                ),
                 em_px,
                 rem_base_px,
             ),
-            overflow_x: self.overflow_x.map(|e| e.value).unwrap_or_default(),
-            overflow_y: self.overflow_y.map(|e| e.value).unwrap_or_default(),
-            border_color: self
-                .border_color
-                .map(|e| e.value)
-                .unwrap_or_else(Color::black),
-            border_style: self.border_style.map(|e| e.value).unwrap_or_default(),
-            opacity: self.opacity.map(|e| e.value).unwrap_or(1.0),
-            visibility: self.visibility.map(|e| e.value).unwrap_or_default(),
-            text_align: self
-                .text_align
-                .map(|e| e.value)
-                .or_else(|| parent.map(|s| s.text_align))
-                .unwrap_or_default(),
-            font_weight: self
-                .font_weight
-                .map(|e| e.value)
-                .or_else(|| parent.map(|s| s.font_weight))
-                .unwrap_or_default(),
-            font_style: self
-                .font_style
-                .map(|e| e.value)
-                .or_else(|| parent.map(|s| s.font_style))
-                .unwrap_or_default(),
-            text_decoration: self
-                .text_decoration
-                .map(|e| e.value)
-                .or_else(|| parent.map(|s| s.text_decoration))
-                .unwrap_or_default(),
-            letter_spacing: self.letter_spacing.map(|e| e.value).unwrap_or(0.0),
-            word_spacing: self.word_spacing.map(|e| e.value).unwrap_or(0.0),
-            white_space: self
-                .white_space
-                .map(|e| e.value)
-                .or_else(|| parent.map(|s| s.white_space))
-                .unwrap_or_default(),
-            border_radius: self.border_radius.map(|e| e.value).unwrap_or(0.0),
-            box_shadow: self.box_shadow.map(|e| e.value),
-            background_image: self.background_image.map(|e| e.value),
+            overflow_x: resolve_non_inherited_kw(
+                self.overflow_x,
+                ks.get(&PropertyId::OverflowX),
+                parent.map(|s| s.overflow_x),
+                Overflow::default(),
+            ),
+            overflow_y: resolve_non_inherited_kw(
+                self.overflow_y,
+                ks.get(&PropertyId::OverflowY),
+                parent.map(|s| s.overflow_y),
+                Overflow::default(),
+            ),
+            border_color: resolve_non_inherited_kw(
+                self.border_color,
+                ks.get(&PropertyId::BorderColor),
+                parent.map(|s| s.border_color),
+                Color::black(),
+            ),
+            border_style: resolve_non_inherited_kw(
+                self.border_style,
+                ks.get(&PropertyId::BorderStyle),
+                parent.map(|s| s.border_style),
+                BorderStyle::default(),
+            ),
+            opacity: resolve_non_inherited_kw(
+                self.opacity,
+                ks.get(&PropertyId::Opacity),
+                parent.map(|s| s.opacity),
+                1.0f32,
+            ),
+            visibility: resolve_non_inherited_kw(
+                self.visibility,
+                ks.get(&PropertyId::Visibility),
+                parent.map(|s| s.visibility),
+                Visibility::default(),
+            ),
+            text_align: resolve_inherited_kw(
+                self.text_align,
+                ks.get(&PropertyId::TextAlign),
+                parent.map(|s| s.text_align),
+                TextAlign::default(),
+            ),
+            font_weight: resolve_inherited_kw(
+                self.font_weight,
+                ks.get(&PropertyId::FontWeight),
+                parent.map(|s| s.font_weight),
+                FontWeight::default(),
+            ),
+            font_style: resolve_inherited_kw(
+                self.font_style,
+                ks.get(&PropertyId::FontStyle),
+                parent.map(|s| s.font_style),
+                FontStyle::default(),
+            ),
+            text_decoration: resolve_inherited_kw(
+                self.text_decoration,
+                ks.get(&PropertyId::TextDecoration),
+                parent.map(|s| s.text_decoration),
+                TextDecoration::default(),
+            ),
+            letter_spacing: resolve_non_inherited_kw(
+                self.letter_spacing,
+                ks.get(&PropertyId::LetterSpacing),
+                parent.map(|s| s.letter_spacing),
+                0.0f32,
+            ),
+            word_spacing: resolve_non_inherited_kw(
+                self.word_spacing,
+                ks.get(&PropertyId::WordSpacing),
+                parent.map(|s| s.word_spacing),
+                0.0f32,
+            ),
+            white_space: resolve_inherited_kw(
+                self.white_space,
+                ks.get(&PropertyId::WhiteSpace),
+                parent.map(|s| s.white_space),
+                WhiteSpace::default(),
+            ),
+            border_radius: resolve_non_inherited_kw(
+                self.border_radius,
+                ks.get(&PropertyId::BorderRadius),
+                parent.map(|s| s.border_radius),
+                0.0f32,
+            ),
+            box_shadow: {
+                let bs_kw = ks.get(&PropertyId::BoxShadow);
+                if keyword_beats_typed(bs_kw, &self.box_shadow) {
+                    match bs_kw.unwrap().value {
+                        CascadeKeyword::Inherit => parent.and_then(|s| s.box_shadow.clone()),
+                        CascadeKeyword::Initial | CascadeKeyword::Unset => None,
+                    }
+                } else {
+                    self.box_shadow.map(|e| e.value)
+                }
+            },
+            background_image: {
+                let bi_kw = ks.get(&PropertyId::BackgroundImage);
+                if keyword_beats_typed(bi_kw, &self.background_image) {
+                    match bi_kw.unwrap().value {
+                        CascadeKeyword::Inherit => {
+                            parent.and_then(|s| s.background_image.clone())
+                        }
+                        CascadeKeyword::Initial | CascadeKeyword::Unset => None,
+                    }
+                } else {
+                    self.background_image.map(|e| e.value)
+                }
+            },
         }
+    }
+}
+
+/*
+ * detect_cascade_keyword -- check whether a declaration value is a CSS-wide keyword.
+ *
+ * CSS-wide keywords (inherit, initial, unset) apply before any property-specific
+ * parsing. They are case-insensitive and valid on every property.
+ */
+fn detect_cascade_keyword(tokens: &[CssToken]) -> Option<CascadeKeyword> {
+    for token in tokens {
+        if let CssToken::Ident(ident) = token {
+            match ident.to_ascii_lowercase().as_str() {
+                "inherit" => return Some(CascadeKeyword::Inherit),
+                "initial" => return Some(CascadeKeyword::Initial),
+                "unset" => return Some(CascadeKeyword::Unset),
+                _ => {}
+            }
+        }
+    }
+    None
+}
+
+fn apply_keyword(
+    slots: &mut FxHashMap<crate::property_id::PropertyId, ResolvedProperty<CascadeKeyword>>,
+    pid: crate::property_id::PropertyId,
+    keyword: CascadeKeyword,
+    important: bool,
+    specificity: Specificity,
+    order: usize,
+) {
+    let candidate = ResolvedProperty {
+        value: keyword,
+        important,
+        specificity,
+        order,
+    };
+    match slots.get(&pid) {
+        Some(existing) if !existing.should_override(&candidate) => {}
+        _ => {
+            slots.insert(pid, candidate);
+        }
+    }
+}
+
+// Returns true if the keyword entry wins over the typed entry in cascade priority.
+fn keyword_beats<T>(kw: &ResolvedProperty<CascadeKeyword>, typed: &ResolvedProperty<T>) -> bool {
+    if kw.important != typed.important {
+        return kw.important;
+    }
+    if kw.specificity != typed.specificity {
+        return kw.specificity > typed.specificity;
+    }
+    kw.order > typed.order
+}
+
+fn keyword_beats_typed<T>(
+    kw: Option<&ResolvedProperty<CascadeKeyword>>,
+    typed: &Option<ResolvedProperty<T>>,
+) -> bool {
+    match (kw, typed) {
+        (None, _) => false,
+        (Some(_), None) => true,
+        (Some(kw_prop), Some(typed_prop)) => keyword_beats(kw_prop, typed_prop),
+    }
+}
+
+// Resolve an inherited CSS property, applying cascade keyword if it wins.
+fn resolve_inherited_kw<T: Clone>(
+    typed: Option<ResolvedProperty<T>>,
+    kw: Option<&ResolvedProperty<CascadeKeyword>>,
+    parent_val: Option<T>,
+    initial: T,
+) -> T {
+    if keyword_beats_typed(kw, &typed) {
+        match kw.unwrap().value {
+            CascadeKeyword::Inherit | CascadeKeyword::Unset => parent_val.unwrap_or(initial),
+            CascadeKeyword::Initial => initial,
+        }
+    } else {
+        typed.map(|e| e.value).or(parent_val).unwrap_or(initial)
+    }
+}
+
+// Resolve a non-inherited CSS property, applying cascade keyword if it wins.
+fn resolve_non_inherited_kw<T: Clone>(
+    typed: Option<ResolvedProperty<T>>,
+    kw: Option<&ResolvedProperty<CascadeKeyword>>,
+    parent_val: Option<T>,
+    initial: T,
+) -> T {
+    if keyword_beats_typed(kw, &typed) {
+        match kw.unwrap().value {
+            CascadeKeyword::Inherit => parent_val.unwrap_or(initial),
+            CascadeKeyword::Initial | CascadeKeyword::Unset => initial,
+        }
+    } else {
+        typed.map(|e| e.value).unwrap_or(initial)
     }
 }
 
@@ -1572,6 +1954,63 @@ fn apply_declaration(
     order: usize,
 ) {
     use crate::property_id::PropertyId;
+
+    // CSS-wide keyword values: inherit, initial, unset.
+    // Detected before property-specific parsing; stored in keyword_slots.
+    // Shorthands expand to all affected longhand PropertyIds.
+    if let Some(keyword) = detect_cascade_keyword(&declaration.value) {
+        if declaration.property_id == PropertyId::Unknown {
+            return;
+        }
+        let (imp, sp, ord) = (declaration.important, specificity, order);
+        let kw = keyword;
+        let ks = &mut cascaded.keyword_slots;
+        match declaration.property_id {
+            PropertyId::Margin => {
+                apply_keyword(ks, PropertyId::MarginTop, kw, imp, sp, ord);
+                apply_keyword(ks, PropertyId::MarginRight, kw, imp, sp, ord);
+                apply_keyword(ks, PropertyId::MarginBottom, kw, imp, sp, ord);
+                apply_keyword(ks, PropertyId::MarginLeft, kw, imp, sp, ord);
+            }
+            PropertyId::Padding => {
+                apply_keyword(ks, PropertyId::PaddingTop, kw, imp, sp, ord);
+                apply_keyword(ks, PropertyId::PaddingRight, kw, imp, sp, ord);
+                apply_keyword(ks, PropertyId::PaddingBottom, kw, imp, sp, ord);
+                apply_keyword(ks, PropertyId::PaddingLeft, kw, imp, sp, ord);
+            }
+            PropertyId::Overflow => {
+                apply_keyword(ks, PropertyId::OverflowX, kw, imp, sp, ord);
+                apply_keyword(ks, PropertyId::OverflowY, kw, imp, sp, ord);
+            }
+            PropertyId::Gap => {
+                apply_keyword(ks, PropertyId::Gap, kw, imp, sp, ord);
+                apply_keyword(ks, PropertyId::RowGap, kw, imp, sp, ord);
+                apply_keyword(ks, PropertyId::ColumnGap, kw, imp, sp, ord);
+            }
+            PropertyId::FlexFlow => {
+                apply_keyword(ks, PropertyId::FlexDirection, kw, imp, sp, ord);
+                apply_keyword(ks, PropertyId::FlexWrap, kw, imp, sp, ord);
+            }
+            PropertyId::Flex => {
+                apply_keyword(ks, PropertyId::FlexGrow, kw, imp, sp, ord);
+                apply_keyword(ks, PropertyId::FlexShrink, kw, imp, sp, ord);
+                apply_keyword(ks, PropertyId::FlexBasis, kw, imp, sp, ord);
+            }
+            PropertyId::Border => {
+                apply_keyword(ks, PropertyId::Border, kw, imp, sp, ord);
+                apply_keyword(ks, PropertyId::BorderStyle, kw, imp, sp, ord);
+                apply_keyword(ks, PropertyId::BorderColor, kw, imp, sp, ord);
+            }
+            PropertyId::BorderWidth => {
+                apply_keyword(ks, PropertyId::Border, kw, imp, sp, ord);
+            }
+            pid => {
+                apply_keyword(ks, pid, kw, imp, sp, ord);
+            }
+        }
+        return;
+    }
+
     match declaration.property_id {
         PropertyId::Display => {
             if let Some(value) = parse_display(&declaration.value) {
