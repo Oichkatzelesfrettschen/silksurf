@@ -453,22 +453,26 @@ fn main() {
     let display_list = silksurf_render::DisplayList {
         items: fused.display_items,
         tiles: None,
-    }
-    .with_tiles(1280, 800, 64);
+    };
 
     /*
-     * 9. Tile-parallel rasterization via Rayon (disjoint tile regions, no sync).
+     * 9. Full-quality rasterization via tiny-skia.
      *
-     * WHY rasterize_parallel_into: in an interactive browser, raster_buf would
-     * be held across frames and reused, eliminating the ~1ms cold 4MB allocation
-     * on every frame. The CLI only renders once per process but uses the correct
-     * API so the architecture is ready for an interactive render loop.
+     * WHY rasterize_skia_into: provides anti-aliased path rendering, correct
+     * linear gradients, rounded-corner arcs, box-shadow fills, and shaped
+     * glyph compositing via cosmic-text. The parallel tile path uses scalar
+     * solid-color fills which cannot render these correctly.
      *
-     * See: silksurf_render::rasterize_parallel_into for buffer-reuse semantics.
+     * TEXT_STATE (cosmic-text FontSystem) holds a global mutex; rasterization
+     * must therefore be single-threaded. If tile-parallel rendering is
+     * re-enabled in future, text items must be gathered and rasterized before
+     * the rayon tile dispatch.
+     *
+     * See: silksurf_render::rasterize_skia_into for buffer-reuse semantics.
      */
     let raster_start = std::time::Instant::now();
     let mut raster_buf: Vec<u8> = Vec::new();
-    silksurf_render::rasterize_parallel_into(&display_list, 1280, 800, 64, &mut raster_buf);
+    silksurf_render::rasterize_skia_into(&display_list, 1280, 800, &mut raster_buf);
     let raster_elapsed = raster_start.elapsed();
     eprintln!(
         "[SilkSurf] Rasterized: {} bytes in {:?}",
@@ -650,13 +654,11 @@ fn main() {
                         let new_display_list = silksurf_render::DisplayList {
                             items: new_fused.display_items,
                             tiles: None,
-                        }
-                        .with_tiles(1280, 800, 64);
-                        silksurf_render::rasterize_parallel_into(
+                        };
+                        silksurf_render::rasterize_skia_into(
                             &new_display_list,
                             1280,
                             800,
-                            64,
                             &mut raster_buf,
                         );
                         let raster_elapsed = raster_t0.elapsed();
