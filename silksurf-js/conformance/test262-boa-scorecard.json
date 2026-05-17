@@ -2,12 +2,12 @@
   "runner": "test262_boa",
   "engine": "boa_engine 0.21",
   "total": 47703,
-  "pass": 33389,
-  "fail": 212,
-  "skip": 14102,
-  "rate": 0.9937,
-  "pass_pct": 99.37,
-  "timestamp": "2026-05-17T03:52:20Z",
+  "pass": 33098,
+  "fail": 62,
+  "skip": 14543,
+  "rate": 0.9981,
+  "pass_pct": 99.81,
+  "timestamp": "2026-05-17T05:19:43Z",
   "scope": "language+built-ins+annexB",
-  "duration_secs": 31.32
+  "duration_secs": 16.58
 }

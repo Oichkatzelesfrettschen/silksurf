@@ -1088,7 +1088,7 @@ impl CascadedStyle {
                 let bs_kw = ks.get(&PropertyId::BoxShadow);
                 if keyword_beats_typed(bs_kw, &self.box_shadow) {
                     match bs_kw.unwrap().value {
-                        CascadeKeyword::Inherit => parent.and_then(|s| s.box_shadow.clone()),
+                        CascadeKeyword::Inherit => parent.and_then(|s| s.box_shadow),
                         CascadeKeyword::Initial | CascadeKeyword::Unset => None,
                     }
                 } else {
