@@ -20,8 +20,8 @@
  */
 
 use silksurf_css::{
-    BorderStyle, LengthOrAuto, SelectorList, TextDecoration, Visibility, WhiteSpace,
-    compute_style_for_node, matches_selector_list, parse_selector_list_with_interner,
+    BorderStyle, FlexBasis, Length, LengthOrAuto, SelectorList, TextDecoration, Visibility,
+    WhiteSpace, compute_style_for_node, matches_selector_list, parse_selector_list_with_interner,
     parse_stylesheet,
 };
 use silksurf_dom::{Dom, NodeId, NodeKind};
@@ -252,6 +252,8 @@ fn run_one(path: &Path) -> Outcome {
         "css_text_decoration" => check_css_text_decoration(&parsed.dom, parsed.document, &source),
         "css_white_space" => check_css_white_space(&parsed.dom, parsed.document, &source),
         "css_visibility" => check_css_visibility(&parsed.dom, parsed.document, &source),
+        "css_border_shorthand" => check_css_border_shorthand(&parsed.dom, parsed.document, &source),
+        "css_flex_shorthand" => check_css_flex_shorthand(&parsed.dom, parsed.document, &source),
         other => Outcome::Skip(format!("no check registered for fixture stem '{other}'")),
     }
 }
@@ -1167,6 +1169,161 @@ fn check_css_visibility(dom: &Dom, document: NodeId, source: &str) -> Outcome {
             ));
         }
     }
+    Outcome::Pass
+}
+
+fn check_css_border_shorthand(dom: &Dom, document: NodeId, source: &str) -> Outcome {
+    let css = match extract_inline_style(source) {
+        Some(c) => c,
+        None => return Outcome::Skip("no <style> block found".to_string()),
+    };
+    let stylesheet = match parse_stylesheet(&css) {
+        Ok(s) => s,
+        Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
+    };
+    let body = match body_of(dom, document) {
+        Some(b) => b,
+        None => return Outcome::Fail("missing body".to_string()),
+    };
+    let children = element_children(dom, body);
+
+    // .full should have border_style=Solid AND border_color with r=255
+    let full_sel = match parse_selector(dom, ".full") {
+        Some(s) => s,
+        None => return Outcome::Fail("could not parse .full".to_string()),
+    };
+    let node = match children
+        .iter()
+        .copied()
+        .find(|&c| matches_selector_list(dom, c, &full_sel))
+    {
+        Some(n) => n,
+        None => return Outcome::Fail("no element matched .full".to_string()),
+    };
+    let style = compute_style_for_node(dom, node, &stylesheet, None);
+    if style.border_style != BorderStyle::Solid {
+        return Outcome::Fail(format!(
+            "border_style not Solid for .full: {:?}",
+            style.border_style
+        ));
+    }
+    if style.border_color.r != 255 {
+        return Outcome::Fail(format!(
+            "border_color.r not 255 for .full: {:?}",
+            style.border_color
+        ));
+    }
+    if !matches!(style.border.top, Length::Px(v) if (v - 2.0).abs() < 0.01) {
+        return Outcome::Fail(format!(
+            "border.top not 2px for .full: {:?}",
+            style.border.top
+        ));
+    }
+
+    // .dashed should have border_style=Dashed
+    let dashed_sel = match parse_selector(dom, ".dashed") {
+        Some(s) => s,
+        None => return Outcome::Fail("could not parse .dashed".to_string()),
+    };
+    let node = match children
+        .iter()
+        .copied()
+        .find(|&c| matches_selector_list(dom, c, &dashed_sel))
+    {
+        Some(n) => n,
+        None => return Outcome::Fail("no element matched .dashed".to_string()),
+    };
+    let style = compute_style_for_node(dom, node, &stylesheet, None);
+    if style.border_style != BorderStyle::Dashed {
+        return Outcome::Fail(format!(
+            "border_style not Dashed for .dashed: {:?}",
+            style.border_style
+        ));
+    }
+
+    Outcome::Pass
+}
+
+fn check_css_flex_shorthand(dom: &Dom, document: NodeId, source: &str) -> Outcome {
+    let css = match extract_inline_style(source) {
+        Some(c) => c,
+        None => return Outcome::Skip("no <style> block found".to_string()),
+    };
+    let stylesheet = match parse_stylesheet(&css) {
+        Ok(s) => s,
+        Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
+    };
+    let body = match body_of(dom, document) {
+        Some(b) => b,
+        None => return Outcome::Fail("missing body".to_string()),
+    };
+    // The items are inside a flex container div; get the container's children.
+    let flex_container = match element_children(dom, body).into_iter().next() {
+        Some(c) => c,
+        None => return Outcome::Fail("no flex container child".to_string()),
+    };
+    let children = element_children(dom, flex_container);
+
+    // .flex1 should have grow=1, basis=0px
+    let sel1 = match parse_selector(dom, ".flex1") {
+        Some(s) => s,
+        None => return Outcome::Fail("could not parse .flex1".to_string()),
+    };
+    let node = match children
+        .iter()
+        .copied()
+        .find(|&c| matches_selector_list(dom, c, &sel1))
+    {
+        Some(n) => n,
+        None => return Outcome::Fail("no element matched .flex1".to_string()),
+    };
+    let style = compute_style_for_node(dom, node, &stylesheet, None);
+    if (style.flex_item.flex_grow - 1.0).abs() > 0.01 {
+        return Outcome::Fail(format!(
+            "flex-grow not 1 for .flex1: {}",
+            style.flex_item.flex_grow
+        ));
+    }
+    if !matches!(style.flex_item.flex_basis, FlexBasis::Length(Length::Px(v)) if v.abs() < 0.01) {
+        return Outcome::Fail(format!(
+            "flex-basis not 0px for .flex1: {:?}",
+            style.flex_item.flex_basis
+        ));
+    }
+
+    // .none should have grow=0, shrink=0, basis=auto
+    let none_sel = match parse_selector(dom, ".none") {
+        Some(s) => s,
+        None => return Outcome::Fail("could not parse .none".to_string()),
+    };
+    let node = match children
+        .iter()
+        .copied()
+        .find(|&c| matches_selector_list(dom, c, &none_sel))
+    {
+        Some(n) => n,
+        None => return Outcome::Fail("no element matched .none".to_string()),
+    };
+    let style = compute_style_for_node(dom, node, &stylesheet, None);
+    if style.flex_item.flex_grow > 0.01 {
+        return Outcome::Fail(format!(
+            "flex-grow not 0 for .none: {}",
+            style.flex_item.flex_grow
+        ));
+    }
+    if style.flex_item.flex_shrink > 0.01 {
+        return Outcome::Fail(format!(
+            "flex-shrink not 0 for .none: {}",
+            style.flex_item.flex_shrink
+        ));
+    }
+    if style.flex_item.flex_basis != FlexBasis::Auto {
+        return Outcome::Fail(format!(
+            "flex-basis not auto for .none: {:?}",
+            style.flex_item.flex_basis
+        ));
+    }
+
     Outcome::Pass
 }
 

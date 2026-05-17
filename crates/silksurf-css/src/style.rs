@@ -1446,7 +1446,37 @@ fn apply_declaration(
                 );
             }
         }
-        PropertyId::Border | PropertyId::BorderWidth => {
+        PropertyId::Border => {
+            let (width, style, color) = parse_border_shorthand(&declaration.value);
+            if let Some(w) = width {
+                apply_property(
+                    &mut cascaded.border,
+                    Edges::all(w),
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+            if let Some(s) = style {
+                apply_property(
+                    &mut cascaded.border_style,
+                    s,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+            if let Some(c) = color {
+                apply_property(
+                    &mut cascaded.border_color,
+                    c,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::BorderWidth => {
             if let Some(value) = parse_edges(&declaration.value) {
                 apply_property(
                     &mut cascaded.border,
@@ -1616,37 +1646,29 @@ fn apply_declaration(
             }
         }
         PropertyId::Flex => {
-            // Shorthand: flex: <grow> [<shrink>] [<basis>]
-            let nums: Vec<f32> = declaration
-                .value
-                .iter()
-                .filter_map(|t| match t {
-                    CssToken::Number(v) => v.parse::<f32>().ok(),
-                    _ => None,
-                })
-                .collect();
-            if !nums.is_empty() {
+            let (grow, shrink, basis) = parse_flex_shorthand(&declaration.value);
+            if let Some(g) = grow {
                 apply_property(
                     &mut cascaded.flex_grow,
-                    nums[0],
+                    g,
                     declaration.important,
                     specificity,
                     order,
                 );
-                if nums.len() > 1 {
-                    apply_property(
-                        &mut cascaded.flex_shrink,
-                        nums[1],
-                        declaration.important,
-                        specificity,
-                        order,
-                    );
-                }
             }
-            if let Some(basis) = parse_flex_basis(&declaration.value) {
+            if let Some(s) = shrink {
+                apply_property(
+                    &mut cascaded.flex_shrink,
+                    s,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+            if let Some(b) = basis {
                 apply_property(
                     &mut cascaded.flex_basis,
-                    basis,
+                    b,
                     declaration.important,
                     specificity,
                     order,
@@ -2417,6 +2439,120 @@ fn gradient_color_stop(tokens: &[&CssToken], auto_pos: f32) -> Option<(f32, Colo
         _ => auto_pos,
     };
     Some((pos, color))
+}
+
+fn parse_flex_shorthand(tokens: &[CssToken]) -> (Option<f32>, Option<f32>, Option<FlexBasis>) {
+    // CSS flex shorthand per spec:
+    //   none          -> 0 0 auto
+    //   auto          -> 1 1 auto
+    //   <n>           -> <n> 1 0  (basis=0 when omitted from shorthand)
+    //   <n> <n>       -> grow shrink 0
+    //   <n> <basis>   -> grow 1 basis
+    //   <n> <n> <basis> -> all three
+    let ident = first_ident(tokens);
+    if ident == Some("none") {
+        return (Some(0.0), Some(0.0), Some(FlexBasis::Auto));
+    }
+    if ident == Some("auto") {
+        return (Some(1.0), Some(1.0), Some(FlexBasis::Auto));
+    }
+
+    let mut numbers: Vec<f32> = Vec::new();
+    let mut basis: Option<FlexBasis> = None;
+    for token in tokens {
+        match token {
+            CssToken::Whitespace => continue,
+            CssToken::Number(v) => {
+                if let Ok(n) = v.parse::<f32>() {
+                    numbers.push(n);
+                }
+            }
+            CssToken::Dimension { value, unit } if unit.eq_ignore_ascii_case("px") => {
+                if let Ok(px) = value.parse::<f32>() {
+                    basis = Some(FlexBasis::Length(Length::Px(px)));
+                }
+            }
+            CssToken::Percentage(value) => {
+                if let Ok(pct) = value.parse::<f32>() {
+                    basis = Some(FlexBasis::Length(Length::Percent(pct)));
+                }
+            }
+            CssToken::Ident(v) if v.eq_ignore_ascii_case("auto") && !numbers.is_empty() => {
+                basis = Some(FlexBasis::Auto);
+            }
+            _ => {}
+        }
+    }
+
+    match (numbers.len(), basis) {
+        (0, _) => (None, None, None),
+        (1, Some(b)) => (Some(numbers[0]), Some(1.0), Some(b)),
+        (1, None) => (
+            Some(numbers[0]),
+            Some(1.0),
+            Some(FlexBasis::Length(Length::Px(0.0))),
+        ),
+        (2, Some(b)) => (Some(numbers[0]), Some(numbers[1]), Some(b)),
+        (2, None) => (
+            Some(numbers[0]),
+            Some(numbers[1]),
+            Some(FlexBasis::Length(Length::Px(0.0))),
+        ),
+        _ => (
+            Some(numbers[0]),
+            Some(numbers[1]),
+            basis.or(Some(FlexBasis::Length(Length::Px(0.0)))),
+        ),
+    }
+}
+
+fn parse_border_shorthand(
+    tokens: &[CssToken],
+) -> (Option<Length>, Option<BorderStyle>, Option<Color>) {
+    let mut width: Option<Length> = None;
+    let mut style: Option<BorderStyle> = None;
+    let mut color: Option<Color> = None;
+    for token in tokens {
+        match token {
+            CssToken::Whitespace => continue,
+            CssToken::Dimension { value, unit } if unit.eq_ignore_ascii_case("px") => {
+                if width.is_none() {
+                    width = value.parse::<f32>().ok().map(Length::Px);
+                }
+            }
+            CssToken::Number(value) if value == "0" => {
+                if width.is_none() {
+                    width = Some(Length::Px(0.0));
+                }
+            }
+            CssToken::Hash(hex) => {
+                if color.is_none() {
+                    color = parse_hex_color(hex);
+                }
+            }
+            CssToken::Ident(value) => {
+                let lower = value.to_ascii_lowercase();
+                if style.is_none() {
+                    style = match lower.as_str() {
+                        "solid" => Some(BorderStyle::Solid),
+                        "dashed" => Some(BorderStyle::Dashed),
+                        "dotted" => Some(BorderStyle::Dotted),
+                        "double" => Some(BorderStyle::Double),
+                        "none" => Some(BorderStyle::None),
+                        _ => None,
+                    };
+                    if style.is_some() {
+                        continue;
+                    }
+                }
+                if color.is_none() {
+                    color = parse_named_color(&lower);
+                }
+            }
+            _ => {}
+        }
+    }
+    (width, style, color)
 }
 
 fn parse_max_dimension(tokens: &[CssToken]) -> Option<Option<Length>> {
