@@ -17,32 +17,18 @@ use silksurf_css::{
     ComputedStyle, CssError, StyleCache, Stylesheet, parse_stylesheet_with_interner,
 };
 use silksurf_dom::{Dom, NodeId};
-use silksurf_html::{TokenizeError, Tokenizer, TreeBuildError, TreeBuilder};
+use silksurf_html::parse_html as html5ever_parse;
 use silksurf_layout::{LayoutTree, Rect, build_layout_tree, build_layout_tree_incremental};
 use silksurf_render::{DisplayList, build_display_list};
 use std::sync::Arc;
 
 #[derive(Debug)]
 pub enum EngineError {
-    Tokenize(TokenizeError),
-    TreeBuild(TreeBuildError),
     Css(CssError),
     Layout(&'static str),
 }
 
 pub use js::{JsError, JsRuntime, JsTask, JsValue, NoopJsRuntime};
-
-impl From<TokenizeError> for EngineError {
-    fn from(error: TokenizeError) -> Self {
-        EngineError::Tokenize(error)
-    }
-}
-
-impl From<TreeBuildError> for EngineError {
-    fn from(error: TreeBuildError) -> Self {
-        EngineError::TreeBuild(error)
-    }
-}
 
 impl From<CssError> for EngineError {
     fn from(error: CssError) -> Self {
@@ -53,11 +39,6 @@ impl From<CssError> for EngineError {
 impl From<EngineError> for silksurf_core::SilkError {
     fn from(e: EngineError) -> Self {
         match e {
-            EngineError::Tokenize(t) => silksurf_core::SilkError::HtmlTokenize {
-                offset: t.offset,
-                message: t.message,
-            },
-            EngineError::TreeBuild(t) => silksurf_core::SilkError::HtmlTreeBuild(format!("{t:?}")),
             EngineError::Css(c) => silksurf_core::SilkError::Css {
                 offset: c.offset,
                 message: c.message,
@@ -217,14 +198,9 @@ impl Default for EnginePipeline {
 }
 
 pub fn parse_html(input: &str) -> Result<ParsedDocument, EngineError> {
-    let mut tokenizer = Tokenizer::new();
-    let mut tokens = tokenizer.feed(input)?;
-    tokens.extend(tokenizer.finish()?);
-
-    let mut builder = TreeBuilder::new();
-    builder.process_tokens(tokens)?;
-    let document = builder.document_id();
-    let dom = builder.into_dom();
+    let dom = html5ever_parse(input);
+    // html5ever always produces a well-formed tree rooted at NodeId(0).
+    let document = NodeId::from_raw(0);
     Ok(ParsedDocument { dom, document })
 }
 
