@@ -258,6 +258,7 @@ fn run_one(path: &Path) -> Outcome {
         "css_individual_margins" => {
             check_css_individual_margins(&parsed.dom, parsed.document, &source)
         }
+        "css_named_colors" => check_css_named_colors(&parsed.dom, parsed.document, &source),
         other => Outcome::Skip(format!("no check registered for fixture stem '{other}'")),
     }
 }
@@ -1660,4 +1661,70 @@ fn check_css_individual_margins(dom: &Dom, document: NodeId, source: &str) -> Ou
     }
 
     Outcome::Pass
+}
+
+fn check_css_named_colors(dom: &Dom, document: NodeId, source: &str) -> Outcome {
+    let css = match extract_inline_style(source) {
+        Some(c) => c,
+        None => return Outcome::Skip("no <style> block found".to_string()),
+    };
+    let stylesheet = match parse_stylesheet(&css) {
+        Ok(s) => s,
+        Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
+    };
+    // Verify a representative set of commonly-used named colors.
+    let cases: &[(&str, (u8, u8, u8))] = &[
+        (".c-orange", (255, 165, 0)),
+        (".c-yellow", (255, 255, 0)),
+        (".c-gray", (128, 128, 128)),
+        (".c-grey", (128, 128, 128)),
+        (".c-purple", (128, 0, 128)),
+        (".c-pink", (255, 192, 203)),
+        (".c-navy", (0, 0, 128)),
+        (".c-teal", (0, 128, 128)),
+        (".c-silver", (192, 192, 192)),
+        (".c-lime", (0, 255, 0)),
+        (".c-aqua", (0, 255, 255)),
+        (".c-cyan", (0, 255, 255)),
+        (".c-maroon", (128, 0, 0)),
+        (".c-olive", (128, 128, 0)),
+        (".c-fuchsia", (255, 0, 255)),
+        (".c-magenta", (255, 0, 255)),
+    ];
+    for &(selector, (er, eg, eb)) in cases {
+        let sel = match parse_selector(dom, selector) {
+            Some(s) => s,
+            None => {
+                return Outcome::Fail(format!("could not parse selector {selector}"));
+            }
+        };
+        let node = match find_element(dom, document, &sel) {
+            Some(n) => n,
+            None => {
+                return Outcome::Fail(format!("no element matched {selector}"));
+            }
+        };
+        let style = compute_style_for_node(dom, node, &stylesheet, None);
+        let c = style.color;
+        if c.r != er || c.g != eg || c.b != eb || c.a != 255 {
+            return Outcome::Fail(format!(
+                "{selector} color expected rgb({er},{eg},{eb}), got rgb({},{},{},a={})",
+                c.r, c.g, c.b, c.a
+            ));
+        }
+    }
+    Outcome::Pass
+}
+
+fn find_element(dom: &Dom, root: NodeId, sel: &SelectorList) -> Option<NodeId> {
+    let children = dom.children(root).ok()?;
+    for &child in children {
+        if matches_selector_list(dom, child, sel) {
+            return Some(child);
+        }
+        if let Some(found) = find_element(dom, child, sel) {
+            return Some(found);
+        }
+    }
+    None
 }
