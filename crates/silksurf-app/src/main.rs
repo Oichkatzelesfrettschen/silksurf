@@ -145,23 +145,8 @@ fn main() {
      * HOW: cargo run -p silksurf-app -- --backend=winit
      *      cargo run -p silksurf-app -- --backend winit
      */
-    if winit_mode {
-        match silksurf_gui::WinitWindow::new("silksurf", 1280, 720) {
-            Ok(win) => {
-                win.run(|w, h| {
-                    let mut pixels: Vec<u32> = vec![0u32; (w * h) as usize];
-                    // Cornflower blue (0x6495ED), fully opaque.
-                    silksurf_render::fill_scalar(&mut pixels, 0xFF6495ED);
-                    pixels
-                });
-            }
-            Err(err) => {
-                eprintln!("[SilkSurf] --backend=winit: cannot create window: {err}");
-                std::process::exit(1);
-            }
-        }
-        return;
-    }
+    // winit mode runs the full pipeline below, then presents the rasterized
+    // buffer in a native window.  No early return here.
 
     /*
      * --tls-ca-file <path>  -- append a PEM CA bundle to the default trust store.
@@ -502,6 +487,39 @@ fn main() {
     eprintln!("============================================\n");
 
     eprintln!("[SilkSurf] Pipeline complete for {url}");
+
+    if winit_mode {
+        /*
+         * Present the rasterized page in a winit/softbuffer native window.
+         *
+         * WHY: raster_buf is RGBA8 (bytes R, G, B, A per pixel).
+         * softbuffer expects Vec<u32> where each u32 is 0xAARRGGBB.
+         * Convert once before the event loop; the closure clones the
+         * pre-rendered buffer on each RedrawRequested event.
+         *
+         * Window is opened at 1280x800 to match the raster dimensions
+         * so every pixel maps 1:1 with no scaling on first display.
+         */
+        let argb: Vec<u32> = raster_buf
+            .chunks_exact(4)
+            .map(|p| {
+                (u32::from(p[3]) << 24)
+                    | (u32::from(p[0]) << 16)
+                    | (u32::from(p[1]) << 8)
+                    | u32::from(p[2])
+            })
+            .collect();
+        match silksurf_gui::WinitWindow::new("silksurf", 1280, 800) {
+            Ok(win) => {
+                win.run(move |_w, _h| argb.clone());
+            }
+            Err(err) => {
+                eprintln!("[SilkSurf] --backend=winit: cannot create window: {err}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
 
     /*
      * Background revalidation result: join here after the render is done.

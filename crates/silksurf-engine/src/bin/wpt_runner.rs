@@ -25,8 +25,10 @@ use silksurf_css::{
     matches_selector_list, parse_selector_list_with_interner, parse_stylesheet,
 };
 use silksurf_dom::{Dom, NodeId, NodeKind};
+use silksurf_engine::fused_pipeline::fused_style_layout_paint;
 use silksurf_engine::parse_html;
 use silksurf_html::{Token as HtmlToken, Tokenizer};
+use silksurf_layout::Rect;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -292,6 +294,16 @@ fn run_one(path: &Path) -> Outcome {
         "css_z_index" => check_css_z_index(&parsed.dom, parsed.document, &source),
         "css_position" => check_css_position(&parsed.dom, parsed.document, &source),
         "css_border_radius" => check_css_border_radius(&parsed.dom, parsed.document, &source),
+        // Taffy layout rect checks
+        "layout_flex_row_equal" => {
+            check_layout_flex_row_equal(&parsed.dom, parsed.document, &source)
+        }
+        "layout_flex_fixed_offset" => {
+            check_layout_flex_fixed_offset(&parsed.dom, parsed.document, &source)
+        }
+        "layout_flex_column_stack" => {
+            check_layout_flex_column_stack(&parsed.dom, parsed.document, &source)
+        }
         other => Outcome::Skip(format!("no check registered for fixture stem '{other}'")),
     }
 }
@@ -2539,5 +2551,158 @@ fn check_css_individual_borders(dom: &Dom, document: NodeId, source: &str) -> Ou
         ));
     }
 
+    Outcome::Pass
+}
+
+// ---------------------------------------------------------------------------
+// Taffy layout rect checks.
+//
+// WHY: cascade-only checks confirm that CSS properties reach ComputedStyle.
+// These checks go further: they run the full fused style+layout pipeline and
+// confirm that taffy places flex items at the correct absolute pixel positions.
+//
+// Pattern: parse inline CSS -> fused_style_layout_paint -> look up node rects
+// by element id -> assert positions/sizes within 2px floating-point tolerance.
+// ---------------------------------------------------------------------------
+
+fn fused_rect_by_id(
+    fused: &silksurf_engine::fused_pipeline::FusedResult,
+    dom: &Dom,
+    document: NodeId,
+    id: &str,
+) -> Option<Rect> {
+    let sel_str = format!("#{id}");
+    let sel = parse_selector(dom, &sel_str)?;
+    let node = find_element(dom, document, &sel)?;
+    let bfs_idx = *fused.table.node_to_bfs_idx.get(&node)? as usize;
+    Some(fused.node_rects[bfs_idx])
+}
+
+fn check_layout_flex_row_equal(dom: &Dom, document: NodeId, source: &str) -> Outcome {
+    let css = match extract_inline_style(source) {
+        Some(c) => c,
+        None => return Outcome::Skip("no <style> block found".to_string()),
+    };
+    let stylesheet = match parse_stylesheet(&css) {
+        Ok(s) => s,
+        Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
+    };
+    let viewport = Rect { x: 0.0, y: 0.0, width: 1280.0, height: 800.0 };
+    let fused = fused_style_layout_paint(dom, &stylesheet, document, viewport);
+
+    let ra = match fused_rect_by_id(&fused, dom, document, "a") {
+        Some(r) => r,
+        None => return Outcome::Fail("#a not found in layout".to_string()),
+    };
+    let rb = match fused_rect_by_id(&fused, dom, document, "b") {
+        Some(r) => r,
+        None => return Outcome::Fail("#b not found in layout".to_string()),
+    };
+    let rc = match fused_rect_by_id(&fused, dom, document, "c") {
+        Some(r) => r,
+        None => return Outcome::Fail("#c not found in layout".to_string()),
+    };
+
+    // 3 items with flex:1 in a 300px container each get 100px.
+    let expected_w = 100.0_f32;
+    let tol = 2.0_f32;
+    for (id, rect) in [("a", ra), ("b", rb), ("c", rc)] {
+        if (rect.width - expected_w).abs() > tol {
+            return Outcome::Fail(format!(
+                "#{id} width expected ~{expected_w}px, got {:.1}",
+                rect.width
+            ));
+        }
+    }
+    if (rb.x - ra.x - expected_w).abs() > tol {
+        return Outcome::Fail(format!(
+            "#b.x offset from #a expected ~{expected_w}px, got {:.1}",
+            rb.x - ra.x
+        ));
+    }
+    if (rc.x - rb.x - expected_w).abs() > tol {
+        return Outcome::Fail(format!(
+            "#c.x offset from #b expected ~{expected_w}px, got {:.1}",
+            rc.x - rb.x
+        ));
+    }
+    Outcome::Pass
+}
+
+fn check_layout_flex_fixed_offset(dom: &Dom, document: NodeId, source: &str) -> Outcome {
+    let css = match extract_inline_style(source) {
+        Some(c) => c,
+        None => return Outcome::Skip("no <style> block found".to_string()),
+    };
+    let stylesheet = match parse_stylesheet(&css) {
+        Ok(s) => s,
+        Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
+    };
+    let viewport = Rect { x: 0.0, y: 0.0, width: 1280.0, height: 800.0 };
+    let fused = fused_style_layout_paint(dom, &stylesheet, document, viewport);
+
+    let ra = match fused_rect_by_id(&fused, dom, document, "a") {
+        Some(r) => r,
+        None => return Outcome::Fail("#a not found in layout".to_string()),
+    };
+    let rb = match fused_rect_by_id(&fused, dom, document, "b") {
+        Some(r) => r,
+        None => return Outcome::Fail("#b not found in layout".to_string()),
+    };
+
+    let tol = 2.0_f32;
+    if (ra.width - 60.0).abs() > tol {
+        return Outcome::Fail(format!("#a width expected 60px, got {:.1}", ra.width));
+    }
+    if (rb.width - 120.0).abs() > tol {
+        return Outcome::Fail(format!("#b width expected 120px, got {:.1}", rb.width));
+    }
+    // #b starts immediately after #a in the flex row.
+    if (rb.x - ra.x - ra.width).abs() > tol {
+        return Outcome::Fail(format!(
+            "#b.x expected ~{:.1} (right of #a), got {:.1}",
+            ra.x + ra.width,
+            rb.x
+        ));
+    }
+    Outcome::Pass
+}
+
+fn check_layout_flex_column_stack(dom: &Dom, document: NodeId, source: &str) -> Outcome {
+    let css = match extract_inline_style(source) {
+        Some(c) => c,
+        None => return Outcome::Skip("no <style> block found".to_string()),
+    };
+    let stylesheet = match parse_stylesheet(&css) {
+        Ok(s) => s,
+        Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
+    };
+    let viewport = Rect { x: 0.0, y: 0.0, width: 1280.0, height: 800.0 };
+    let fused = fused_style_layout_paint(dom, &stylesheet, document, viewport);
+
+    let ra = match fused_rect_by_id(&fused, dom, document, "a") {
+        Some(r) => r,
+        None => return Outcome::Fail("#a not found in layout".to_string()),
+    };
+    let rb = match fused_rect_by_id(&fused, dom, document, "b") {
+        Some(r) => r,
+        None => return Outcome::Fail("#b not found in layout".to_string()),
+    };
+
+    let tol = 2.0_f32;
+    if (ra.height - 40.0).abs() > tol {
+        return Outcome::Fail(format!("#a height expected 40px, got {:.1}", ra.height));
+    }
+    if (rb.height - 80.0).abs() > tol {
+        return Outcome::Fail(format!("#b height expected 80px, got {:.1}", rb.height));
+    }
+    // #b must start at or below the bottom of #a.
+    if rb.y < ra.y + ra.height - tol {
+        return Outcome::Fail(format!(
+            "#b.y={:.1} must be >= #a bottom={:.1}",
+            rb.y,
+            ra.y + ra.height
+        ));
+    }
     Outcome::Pass
 }
