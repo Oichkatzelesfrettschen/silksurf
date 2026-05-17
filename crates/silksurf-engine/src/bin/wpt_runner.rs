@@ -255,6 +255,9 @@ fn run_one(path: &Path) -> Outcome {
         "css_border_shorthand" => check_css_border_shorthand(&parsed.dom, parsed.document, &source),
         "css_flex_shorthand" => check_css_flex_shorthand(&parsed.dom, parsed.document, &source),
         "css_em_rem_units" => check_css_em_rem_units(&parsed.dom, parsed.document, &source),
+        "css_individual_margins" => {
+            check_css_individual_margins(&parsed.dom, parsed.document, &source)
+        }
         other => Outcome::Skip(format!("no check registered for fixture stem '{other}'")),
     }
 }
@@ -1451,7 +1454,10 @@ fn check_css_em_rem_units(dom: &Dom, document: NodeId, source: &str) -> Outcome 
         None => return Outcome::Fail("no element matched .em2".to_string()),
     };
     let style = compute_style_for_node(dom, node, &stylesheet, None);
-    if !matches!(style.margin.left, Length::Px(_)) {
+    if !matches!(
+        style.margin.left,
+        silksurf_css::LengthOrAuto::Length(Length::Px(_))
+    ) {
         return Outcome::Fail(format!(
             ".em2 margin-left was not resolved to Px: {:?}",
             style.margin.left
@@ -1497,6 +1503,159 @@ fn check_css_em_rem_units(dom: &Dom, document: NodeId, source: &str) -> Outcome 
         return Outcome::Fail(format!(
             ".rem2 padding-top was not resolved to Px: {:?}",
             style.padding.top
+        ));
+    }
+
+    Outcome::Pass
+}
+
+fn check_css_individual_margins(dom: &Dom, document: NodeId, source: &str) -> Outcome {
+    let css = match extract_inline_style(source) {
+        Some(c) => c,
+        None => return Outcome::Skip("no <style> block found".to_string()),
+    };
+    let stylesheet = match parse_stylesheet(&css) {
+        Ok(s) => s,
+        Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
+    };
+    let body = match body_of(dom, document) {
+        Some(b) => b,
+        None => return Outcome::Fail("missing body".to_string()),
+    };
+    let children: Vec<NodeId> = match dom.children(body) {
+        Ok(c) => c.to_vec(),
+        Err(_) => return Outcome::Fail("could not get body children".to_string()),
+    };
+
+    // .shorthand { margin: 10px 20px 30px 40px } -- four-value shorthand expands to all four sides.
+    let shorthand_sel = match parse_selector(dom, ".shorthand") {
+        Some(s) => s,
+        None => return Outcome::Fail("could not parse .shorthand selector".to_string()),
+    };
+    let node = match children
+        .iter()
+        .copied()
+        .find(|&c| matches_selector_list(dom, c, &shorthand_sel))
+    {
+        Some(n) => n,
+        None => return Outcome::Fail("no element matched .shorthand".to_string()),
+    };
+    let style = compute_style_for_node(dom, node, &stylesheet, None);
+    if style.margin.top != silksurf_css::LengthOrAuto::Length(Length::Px(10.0)) {
+        return Outcome::Fail(format!(
+            ".shorthand margin-top expected 10px, got {:?}",
+            style.margin.top
+        ));
+    }
+    if style.margin.right != silksurf_css::LengthOrAuto::Length(Length::Px(20.0)) {
+        return Outcome::Fail(format!(
+            ".shorthand margin-right expected 20px, got {:?}",
+            style.margin.right
+        ));
+    }
+    if style.margin.bottom != silksurf_css::LengthOrAuto::Length(Length::Px(30.0)) {
+        return Outcome::Fail(format!(
+            ".shorthand margin-bottom expected 30px, got {:?}",
+            style.margin.bottom
+        ));
+    }
+    if style.margin.left != silksurf_css::LengthOrAuto::Length(Length::Px(40.0)) {
+        return Outcome::Fail(format!(
+            ".shorthand margin-left expected 40px, got {:?}",
+            style.margin.left
+        ));
+    }
+
+    // .override { margin: 5px; margin-top: 15px } -- individual side overrides shorthand.
+    let override_sel = match parse_selector(dom, ".override") {
+        Some(s) => s,
+        None => return Outcome::Fail("could not parse .override selector".to_string()),
+    };
+    let node = match children
+        .iter()
+        .copied()
+        .find(|&c| matches_selector_list(dom, c, &override_sel))
+    {
+        Some(n) => n,
+        None => return Outcome::Fail("no element matched .override".to_string()),
+    };
+    let style = compute_style_for_node(dom, node, &stylesheet, None);
+    if style.margin.top != silksurf_css::LengthOrAuto::Length(Length::Px(15.0)) {
+        return Outcome::Fail(format!(
+            ".override margin-top expected 15px (individual beats shorthand), got {:?}",
+            style.margin.top
+        ));
+    }
+    if style.margin.right != silksurf_css::LengthOrAuto::Length(Length::Px(5.0)) {
+        return Outcome::Fail(format!(
+            ".override margin-right expected 5px (from shorthand), got {:?}",
+            style.margin.right
+        ));
+    }
+
+    // .auto-side { margin-left: auto; margin-right: auto } -- auto margins preserved.
+    let auto_sel = match parse_selector(dom, ".auto-side") {
+        Some(s) => s,
+        None => return Outcome::Fail("could not parse .auto-side selector".to_string()),
+    };
+    let node = match children
+        .iter()
+        .copied()
+        .find(|&c| matches_selector_list(dom, c, &auto_sel))
+    {
+        Some(n) => n,
+        None => return Outcome::Fail("no element matched .auto-side".to_string()),
+    };
+    let style = compute_style_for_node(dom, node, &stylesheet, None);
+    if style.margin.left != silksurf_css::LengthOrAuto::Auto {
+        return Outcome::Fail(format!(
+            ".auto-side margin-left expected Auto, got {:?}",
+            style.margin.left
+        ));
+    }
+    if style.margin.right != silksurf_css::LengthOrAuto::Auto {
+        return Outcome::Fail(format!(
+            ".auto-side margin-right expected Auto, got {:?}",
+            style.margin.right
+        ));
+    }
+
+    // .pad-sides { padding-top: 4px; ... } -- individual padding sides.
+    let pad_sel = match parse_selector(dom, ".pad-sides") {
+        Some(s) => s,
+        None => return Outcome::Fail("could not parse .pad-sides selector".to_string()),
+    };
+    let node = match children
+        .iter()
+        .copied()
+        .find(|&c| matches_selector_list(dom, c, &pad_sel))
+    {
+        Some(n) => n,
+        None => return Outcome::Fail("no element matched .pad-sides".to_string()),
+    };
+    let style = compute_style_for_node(dom, node, &stylesheet, None);
+    if style.padding.top != Length::Px(4.0) {
+        return Outcome::Fail(format!(
+            ".pad-sides padding-top expected 4px, got {:?}",
+            style.padding.top
+        ));
+    }
+    if style.padding.right != Length::Px(8.0) {
+        return Outcome::Fail(format!(
+            ".pad-sides padding-right expected 8px, got {:?}",
+            style.padding.right
+        ));
+    }
+    if style.padding.bottom != Length::Px(12.0) {
+        return Outcome::Fail(format!(
+            ".pad-sides padding-bottom expected 12px, got {:?}",
+            style.padding.bottom
+        ));
+    }
+    if style.padding.left != Length::Px(16.0) {
+        return Outcome::Fail(format!(
+            ".pad-sides padding-left expected 16px, got {:?}",
+            style.padding.left
         ));
     }
 

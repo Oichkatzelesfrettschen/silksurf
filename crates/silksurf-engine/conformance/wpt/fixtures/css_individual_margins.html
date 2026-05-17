@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+.shorthand   { margin: 10px 20px 30px 40px; }
+.override    { margin: 5px; margin-top: 15px; }
+.individual  { margin-top: 8px; margin-right: 16px; margin-bottom: 24px; margin-left: 32px; }
+.auto-side   { margin-left: auto; margin-right: auto; }
+.pad-sides   { padding-top: 4px; padding-right: 8px; padding-bottom: 12px; padding-left: 16px; }
+</style>
+</head>
+<body>
+<div class="shorthand"  id="a">shorthand four-value margin</div>
+<div class="override"   id="b">shorthand then individual override</div>
+<div class="individual" id="c">all four individual margin sides</div>
+<div class="auto-side"  id="d">margin auto centering</div>
+<div class="pad-sides"  id="e">individual padding sides</div>
+</body>
+</html>

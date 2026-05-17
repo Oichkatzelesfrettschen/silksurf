@@ -33,7 +33,7 @@ use silksurf_css::{
 };
 use silksurf_dom::{Dom, NodeId, NodeKind};
 
-use crate::{Rect, length_to_px};
+use crate::{Rect, length_or_auto_to_px, length_to_px};
 use rustc_hash::FxHashMap;
 
 /// A resolved flex item for layout computation.
@@ -122,10 +122,10 @@ pub fn layout_flex_container(
         }
 
         let margin = (
-            length_to_px(child_style.margin.top),
-            length_to_px(child_style.margin.right),
-            length_to_px(child_style.margin.bottom),
-            length_to_px(child_style.margin.left),
+            length_or_auto_to_px(child_style.margin.top),
+            length_or_auto_to_px(child_style.margin.right),
+            length_or_auto_to_px(child_style.margin.bottom),
+            length_or_auto_to_px(child_style.margin.left),
         );
         let padding = (
             length_to_px(child_style.padding.top),
