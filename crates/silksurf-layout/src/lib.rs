@@ -48,7 +48,7 @@ use unicode_linebreak::linebreaks;
 
 use rustc_hash::FxHashMap;
 use silksurf_core::{ArenaVec, SilkArena};
-use silksurf_css::{ComputedStyle, Display, Edges, Length};
+use silksurf_css::{ComputedStyle, Display, Edges, Length, LengthOrAuto, Margins};
 use silksurf_dom::{Dom, NodeId, NodeKind, TagName};
 use std::cell::Cell;
 
@@ -237,7 +237,7 @@ impl<'a> LayoutBox<'a> {
     ) {
         let style = self.style_for(styles);
         let mut dims = self.dimensions();
-        let margin_fixed = edges_to_fixed(&style.margin);
+        let margin_fixed = margins_to_fixed(&style.margin);
         let padding_fixed = edges_to_fixed(&style.padding);
         let border_fixed = edges_to_fixed(&style.border);
         dims.margin = edges_from_fixed(margin_fixed);
@@ -324,7 +324,7 @@ impl<'a> LayoutBox<'a> {
     ) {
         let style = self.style_for(styles);
         let mut dims = self.dimensions();
-        let margin_fixed = edges_to_fixed(&style.margin);
+        let margin_fixed = margins_to_fixed(&style.margin);
         let padding_fixed = edges_to_fixed(&style.padding);
         let border_fixed = edges_to_fixed(&style.border);
         dims.margin = edges_from_fixed(margin_fixed);
@@ -424,7 +424,7 @@ impl<'a> LayoutBox<'a> {
     ) {
         let style = self.style_for(styles);
         let mut dims = self.dimensions();
-        let margin_fixed = edges_to_fixed(&style.margin);
+        let margin_fixed = margins_to_fixed(&style.margin);
         let padding_fixed = edges_to_fixed(&style.padding);
         let border_fixed = edges_to_fixed(&style.border);
         dims.margin = edges_from_fixed(margin_fixed);
@@ -499,6 +499,14 @@ pub(crate) fn length_to_px(length: Length) -> f32 {
     }
 }
 
+/// Convert a `LengthOrAuto` to pixels, treating `auto` as zero.
+pub(crate) fn length_or_auto_to_px(v: LengthOrAuto) -> f32 {
+    match v {
+        LengthOrAuto::Auto => 0.0,
+        LengthOrAuto::Length(l) => length_to_px(l),
+    }
+}
+
 fn length_to_fixed(length: Length) -> i32 {
     fixed_from_f32(length_to_px(length))
 }
@@ -509,6 +517,16 @@ fn edges_to_fixed(edges: &Edges) -> EdgeSizesFixed {
         right: length_to_fixed(edges.right),
         bottom: length_to_fixed(edges.bottom),
         left: length_to_fixed(edges.left),
+    }
+}
+
+/// Convert `Margins` to `EdgeSizesFixed`, treating `auto` margins as zero.
+fn margins_to_fixed(margins: &Margins) -> EdgeSizesFixed {
+    EdgeSizesFixed {
+        top: fixed_from_f32(length_or_auto_to_px(margins.top)),
+        right: fixed_from_f32(length_or_auto_to_px(margins.right)),
+        bottom: fixed_from_f32(length_or_auto_to_px(margins.bottom)),
+        left: fixed_from_f32(length_or_auto_to_px(margins.left)),
     }
 }
 

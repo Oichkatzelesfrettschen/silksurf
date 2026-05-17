@@ -316,6 +316,33 @@ impl Edges {
     }
 }
 
+/// Per-side margin values, each optionally `auto`.
+///
+/// Distinct from `Edges` because margin supports `auto` (used for centering),
+/// while padding and border widths only accept non-negative lengths.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Margins {
+    pub top: LengthOrAuto,
+    pub right: LengthOrAuto,
+    pub bottom: LengthOrAuto,
+    pub left: LengthOrAuto,
+}
+
+impl Margins {
+    pub fn all(v: LengthOrAuto) -> Self {
+        Self {
+            top: v,
+            right: v,
+            bottom: v,
+            left: v,
+        }
+    }
+
+    pub fn zero() -> Self {
+        Self::all(LengthOrAuto::Length(Length::zero()))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComputedStyle {
     pub display: Display,
@@ -324,7 +351,7 @@ pub struct ComputedStyle {
     pub font_size: Length,
     pub line_height: Length,
     pub font_family: SmallVec<[SmolStr; 2]>,
-    pub margin: Edges,
+    pub margin: Margins,
     pub padding: Edges,
     pub border: Edges,
     // Flex container properties
@@ -381,7 +408,7 @@ impl Default for ComputedStyle {
                 v.push(SmolStr::new_static("sans-serif"));
                 v
             },
-            margin: Edges::all(Length::zero()),
+            margin: Margins::zero(),
             padding: Edges::all(Length::zero()),
             border: Edges::all(Length::zero()),
             flex_container: FlexContainerStyle::default(),
@@ -446,8 +473,14 @@ struct CascadedStyle {
     font_size: Option<ResolvedProperty<Length>>,
     line_height: Option<ResolvedProperty<Length>>,
     font_family: Option<ResolvedProperty<SmallVec<[SmolStr; 2]>>>,
-    margin: Option<ResolvedProperty<Edges>>,
-    padding: Option<ResolvedProperty<Edges>>,
+    margin_top: Option<ResolvedProperty<LengthOrAuto>>,
+    margin_right: Option<ResolvedProperty<LengthOrAuto>>,
+    margin_bottom: Option<ResolvedProperty<LengthOrAuto>>,
+    margin_left: Option<ResolvedProperty<LengthOrAuto>>,
+    padding_top: Option<ResolvedProperty<Length>>,
+    padding_right: Option<ResolvedProperty<Length>>,
+    padding_bottom: Option<ResolvedProperty<Length>>,
+    padding_left: Option<ResolvedProperty<Length>>,
     border: Option<ResolvedProperty<Edges>>,
     // Flex container
     flex_direction: Option<ResolvedProperty<FlexDirection>>,
@@ -540,6 +573,22 @@ fn resolve_opt_length(l: Option<Length>, em_px: f32, rem_px: f32) -> Option<Leng
     l.map(|len| resolve_length(len, em_px, rem_px))
 }
 
+fn resolve_margins(
+    top: LengthOrAuto,
+    right: LengthOrAuto,
+    bottom: LengthOrAuto,
+    left: LengthOrAuto,
+    em_px: f32,
+    rem_px: f32,
+) -> Margins {
+    Margins {
+        top: resolve_length_or_auto(top, em_px, rem_px),
+        right: resolve_length_or_auto(right, em_px, rem_px),
+        bottom: resolve_length_or_auto(bottom, em_px, rem_px),
+        left: resolve_length_or_auto(left, em_px, rem_px),
+    }
+}
+
 impl CascadedStyle {
     /*
      * resolve -- produce final ComputedStyle from cascaded values + parent inheritance.
@@ -608,17 +657,33 @@ impl CascadedStyle {
                 .map(|entry| entry.value)
                 .or_else(|| parent.map(|style| style.font_family.clone()))
                 .unwrap_or_else(|| fallback.font_family.clone()),
-            margin: resolve_edges(
-                self.margin
-                    .map(|entry| entry.value)
-                    .unwrap_or(fallback.margin),
-                em_px,
-                rem_base_px,
-            ),
+            margin: {
+                let zero = LengthOrAuto::Length(Length::Px(0.0));
+                resolve_margins(
+                    self.margin_top.map(|e| e.value).unwrap_or(zero),
+                    self.margin_right.map(|e| e.value).unwrap_or(zero),
+                    self.margin_bottom.map(|e| e.value).unwrap_or(zero),
+                    self.margin_left.map(|e| e.value).unwrap_or(zero),
+                    em_px,
+                    rem_base_px,
+                )
+            },
             padding: resolve_edges(
-                self.padding
-                    .map(|entry| entry.value)
-                    .unwrap_or(fallback.padding),
+                Edges {
+                    top: self.padding_top.map(|e| e.value).unwrap_or(Length::Px(0.0)),
+                    right: self
+                        .padding_right
+                        .map(|e| e.value)
+                        .unwrap_or(Length::Px(0.0)),
+                    bottom: self
+                        .padding_bottom
+                        .map(|e| e.value)
+                        .unwrap_or(Length::Px(0.0)),
+                    left: self
+                        .padding_left
+                        .map(|e| e.value)
+                        .unwrap_or(Length::Px(0.0)),
+                },
                 em_px,
                 rem_base_px,
             ),
@@ -1575,9 +1640,51 @@ fn apply_declaration(
             }
         }
         PropertyId::Margin => {
-            if let Some(value) = parse_edges(&declaration.value) {
+            if let Some([top, right, bottom, left]) = parse_margin_edges(&declaration.value) {
+                let (imp, spec, ord) = (declaration.important, specificity, order);
+                apply_property(&mut cascaded.margin_top, top, imp, spec, ord);
+                apply_property(&mut cascaded.margin_right, right, imp, spec, ord);
+                apply_property(&mut cascaded.margin_bottom, bottom, imp, spec, ord);
+                apply_property(&mut cascaded.margin_left, left, imp, spec, ord);
+            }
+        }
+        PropertyId::MarginTop => {
+            if let Some(value) = parse_length_or_auto(&declaration.value) {
                 apply_property(
-                    &mut cascaded.margin,
+                    &mut cascaded.margin_top,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::MarginRight => {
+            if let Some(value) = parse_length_or_auto(&declaration.value) {
+                apply_property(
+                    &mut cascaded.margin_right,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::MarginBottom => {
+            if let Some(value) = parse_length_or_auto(&declaration.value) {
+                apply_property(
+                    &mut cascaded.margin_bottom,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::MarginLeft => {
+            if let Some(value) = parse_length_or_auto(&declaration.value) {
+                apply_property(
+                    &mut cascaded.margin_left,
                     value,
                     declaration.important,
                     specificity,
@@ -1587,8 +1694,50 @@ fn apply_declaration(
         }
         PropertyId::Padding => {
             if let Some(value) = parse_edges(&declaration.value) {
+                let (imp, spec, ord) = (declaration.important, specificity, order);
+                apply_property(&mut cascaded.padding_top, value.top, imp, spec, ord);
+                apply_property(&mut cascaded.padding_right, value.right, imp, spec, ord);
+                apply_property(&mut cascaded.padding_bottom, value.bottom, imp, spec, ord);
+                apply_property(&mut cascaded.padding_left, value.left, imp, spec, ord);
+            }
+        }
+        PropertyId::PaddingTop => {
+            if let Some(value) = parse_length(&declaration.value) {
                 apply_property(
-                    &mut cascaded.padding,
+                    &mut cascaded.padding_top,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::PaddingRight => {
+            if let Some(value) = parse_length(&declaration.value) {
+                apply_property(
+                    &mut cascaded.padding_right,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::PaddingBottom => {
+            if let Some(value) = parse_length(&declaration.value) {
+                apply_property(
+                    &mut cascaded.padding_bottom,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::PaddingLeft => {
+            if let Some(value) = parse_length(&declaration.value) {
+                apply_property(
+                    &mut cascaded.padding_left,
                     value,
                     declaration.important,
                     specificity,
@@ -2804,6 +2953,33 @@ fn parse_edges(tokens: &[CssToken]) -> Option<Edges> {
             bottom: values[2],
             left: values[3],
         }),
+        _ => None,
+    }
+}
+
+fn parse_margin_value_list(tokens: &[CssToken]) -> Vec<LengthOrAuto> {
+    let mut values = Vec::new();
+    for token in tokens {
+        if let CssToken::Ident(ident) = token {
+            if ident.eq_ignore_ascii_case("auto") {
+                values.push(LengthOrAuto::Auto);
+                continue;
+            }
+        }
+        if let Some(length) = parse_length_token(token) {
+            values.push(LengthOrAuto::Length(length));
+        }
+    }
+    values
+}
+
+fn parse_margin_edges(tokens: &[CssToken]) -> Option<[LengthOrAuto; 4]> {
+    let values = parse_margin_value_list(tokens);
+    match values.len() {
+        1 => Some([values[0]; 4]),
+        2 => Some([values[0], values[1], values[0], values[1]]),
+        3 => Some([values[0], values[1], values[2], values[1]]),
+        4 => Some([values[0], values[1], values[2], values[3]]),
         _ => None,
     }
 }

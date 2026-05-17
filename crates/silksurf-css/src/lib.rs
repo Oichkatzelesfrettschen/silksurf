@@ -56,7 +56,7 @@ use smol_str::SmolStr;
 pub use style::{
     AlignItems, AlignSelf, BorderStyle, BoxShadow, CascadeWorkspace, Color, ComputedStyle, Display,
     Edges, FlexBasis, FlexContainerStyle, FlexDirection, FlexItemStyle, FlexWrap, FontStyle,
-    FontWeight, JustifyContent, Length, LengthOrAuto, LinearGradient, Overflow, Position,
+    FontWeight, JustifyContent, Length, LengthOrAuto, LinearGradient, Margins, Overflow, Position,
     StyleCache, StyleIndex, TextAlign, TextDecoration, Visibility, WhiteSpace,
     compute_style_for_node, compute_style_for_node_with_index,
     compute_style_for_node_with_workspace, compute_styles,

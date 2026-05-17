@@ -1,5 +1,5 @@
 use silksurf_core::SilkArena;
-use silksurf_css::{Color, Length, parse_stylesheet_with_interner};
+use silksurf_css::{Color, Length, LengthOrAuto, parse_stylesheet_with_interner};
 use silksurf_dom::{AttributeName, Dom, NodeId};
 use silksurf_engine::{EnginePipeline, parse_html, render};
 use silksurf_layout::{LayoutBox, Rect};
@@ -71,7 +71,10 @@ fn applies_styles_and_skips_display_none() {
     let gone = find_element_by_id(&output.dom, output.document, "gone").expect("gone node");
     let main_style = output.styles.get(&main).expect("main style");
 
-    assert_eq!(main_style.margin.top, Length::Px(12.0));
+    assert_eq!(
+        main_style.margin.top,
+        LengthOrAuto::Length(Length::Px(12.0))
+    );
     assert!(find_layout_box(output.layout.root, gone).is_none());
 }
 

@@ -1,4 +1,6 @@
-use silksurf_css::{Color, Display, Length, compute_styles, parse_stylesheet};
+use silksurf_css::{
+    Color, Display, Length, LengthOrAuto, Margins, compute_styles, parse_stylesheet,
+};
 use silksurf_dom::Dom;
 
 #[test]
@@ -36,11 +38,11 @@ fn cascades_and_inherits() {
     );
     assert_eq!(
         div_style.margin,
-        silksurf_css::Edges {
-            top: Length::Px(4.0),
-            right: Length::Px(8.0),
-            bottom: Length::Px(4.0),
-            left: Length::Px(8.0),
+        Margins {
+            top: LengthOrAuto::Length(Length::Px(4.0)),
+            right: LengthOrAuto::Length(Length::Px(8.0)),
+            bottom: LengthOrAuto::Length(Length::Px(4.0)),
+            left: LengthOrAuto::Length(Length::Px(8.0)),
         }
     );
     assert_eq!(span_style.display, Display::Inline);

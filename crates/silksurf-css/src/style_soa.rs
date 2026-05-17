@@ -27,8 +27,8 @@
 
 use crate::{
     BorderStyle, BoxShadow, Color, ComputedStyle, Display, Edges, FlexContainerStyle,
-    FlexItemStyle, FontStyle, FontWeight, Length, LengthOrAuto, LinearGradient, Overflow, Position,
-    TextAlign, TextDecoration, Visibility, WhiteSpace,
+    FlexItemStyle, FontStyle, FontWeight, Length, LengthOrAuto, LinearGradient, Margins, Overflow,
+    Position, TextAlign, TextDecoration, Visibility, WhiteSpace,
 };
 use rustc_hash::FxHashMap;
 use silksurf_dom::NodeId;
@@ -145,10 +145,13 @@ impl StyleSoA {
             soa.font_size.push(length_to_f32(style.font_size));
             soa.line_height.push(length_to_f32(style.line_height));
 
-            soa.margin_top.push(length_to_f32(style.margin.top));
-            soa.margin_right.push(length_to_f32(style.margin.right));
-            soa.margin_bottom.push(length_to_f32(style.margin.bottom));
-            soa.margin_left.push(length_to_f32(style.margin.left));
+            soa.margin_top.push(length_or_auto_to_f32(style.margin.top));
+            soa.margin_right
+                .push(length_or_auto_to_f32(style.margin.right));
+            soa.margin_bottom
+                .push(length_or_auto_to_f32(style.margin.bottom));
+            soa.margin_left
+                .push(length_or_auto_to_f32(style.margin.left));
             soa.padding_top.push(length_to_f32(style.padding.top));
             soa.padding_right.push(length_to_f32(style.padding.right));
             soa.padding_bottom.push(length_to_f32(style.padding.bottom));
@@ -219,10 +222,13 @@ impl StyleSoA {
             soa.font_size.push(length_to_f32(style.font_size));
             soa.line_height.push(length_to_f32(style.line_height));
 
-            soa.margin_top.push(length_to_f32(style.margin.top));
-            soa.margin_right.push(length_to_f32(style.margin.right));
-            soa.margin_bottom.push(length_to_f32(style.margin.bottom));
-            soa.margin_left.push(length_to_f32(style.margin.left));
+            soa.margin_top.push(length_or_auto_to_f32(style.margin.top));
+            soa.margin_right
+                .push(length_or_auto_to_f32(style.margin.right));
+            soa.margin_bottom
+                .push(length_or_auto_to_f32(style.margin.bottom));
+            soa.margin_left
+                .push(length_or_auto_to_f32(style.margin.left));
             soa.padding_top.push(length_to_f32(style.padding.top));
             soa.padding_right.push(length_to_f32(style.padding.right));
             soa.padding_bottom.push(length_to_f32(style.padding.bottom));
@@ -270,6 +276,14 @@ fn length_to_f32(length: Length) -> f32 {
     }
 }
 
+#[allow(dead_code)]
+fn length_or_auto_to_f32(v: LengthOrAuto) -> f32 {
+    match v {
+        LengthOrAuto::Auto => 0.0,
+        LengthOrAuto::Length(l) => length_to_f32(l),
+    }
+}
+
 /*
  * ComputedStyleSoA -- per-property parallel arrays for ComputedStyle.
  *
@@ -299,7 +313,7 @@ pub(crate) struct ComputedStyleSoA {
     pub(crate) font_size: Vec<Length>,
     pub(crate) line_height: Vec<Length>,
     pub(crate) font_family: Vec<SmallVec<[SmolStr; 2]>>,
-    pub(crate) margin: Vec<Edges>,
+    pub(crate) margin: Vec<Margins>,
     pub(crate) padding: Vec<Edges>,
     pub(crate) border: Vec<Edges>,
     pub(crate) flex_container: Vec<FlexContainerStyle>,

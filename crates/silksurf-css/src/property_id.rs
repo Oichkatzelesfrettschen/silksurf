@@ -76,6 +76,16 @@ pub enum PropertyId {
     WordSpacing = 50,
     WhiteSpace = 51,
     Visibility = 52,
+    // Individual margin sides
+    MarginTop = 53,
+    MarginRight = 54,
+    MarginBottom = 55,
+    MarginLeft = 56,
+    // Individual padding sides
+    PaddingTop = 57,
+    PaddingRight = 58,
+    PaddingBottom = 59,
+    PaddingLeft = 60,
     Unknown = 255,
 }
 
@@ -135,9 +145,13 @@ pub fn lookup_property_id(name: &str) -> PropertyId {
         // 'm' prefix
         (b'm', 6) if name.eq_ignore_ascii_case("margin") => PropertyId::Margin,
         (b'm', 9) if name.eq_ignore_ascii_case("min-width") => PropertyId::MinWidth,
-        (b'm', 9) if name.eq_ignore_ascii_case("min-height") => PropertyId::MinHeight,
         (b'm', 9) if name.eq_ignore_ascii_case("max-width") => PropertyId::MaxWidth,
+        (b'm', 10) if name.eq_ignore_ascii_case("min-height") => PropertyId::MinHeight,
         (b'm', 10) if name.eq_ignore_ascii_case("max-height") => PropertyId::MaxHeight,
+        (b'm', 10) if name.eq_ignore_ascii_case("margin-top") => PropertyId::MarginTop,
+        (b'm', 11) if name.eq_ignore_ascii_case("margin-left") => PropertyId::MarginLeft,
+        (b'm', 12) if name.eq_ignore_ascii_case("margin-right") => PropertyId::MarginRight,
+        (b'm', 13) if name.eq_ignore_ascii_case("margin-bottom") => PropertyId::MarginBottom,
         // 'o' prefix
         (b'o', 7) if name.eq_ignore_ascii_case("opacity") => PropertyId::Opacity,
         (b'o', 5) if name.eq_ignore_ascii_case("order") => PropertyId::Order,
@@ -147,6 +161,10 @@ pub fn lookup_property_id(name: &str) -> PropertyId {
         // 'p' prefix
         (b'p', 7) if name.eq_ignore_ascii_case("padding") => PropertyId::Padding,
         (b'p', 8) if name.eq_ignore_ascii_case("position") => PropertyId::Position,
+        (b'p', 11) if name.eq_ignore_ascii_case("padding-top") => PropertyId::PaddingTop,
+        (b'p', 12) if name.eq_ignore_ascii_case("padding-left") => PropertyId::PaddingLeft,
+        (b'p', 13) if name.eq_ignore_ascii_case("padding-right") => PropertyId::PaddingRight,
+        (b'p', 14) if name.eq_ignore_ascii_case("padding-bottom") => PropertyId::PaddingBottom,
         // 'r' prefix
         (b'r', 5) if name.eq_ignore_ascii_case("right") => PropertyId::Right,
         (b'r', 7) if name.eq_ignore_ascii_case("row-gap") => PropertyId::RowGap,

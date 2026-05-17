@@ -240,6 +240,13 @@ fn length_auto(l: Length) -> LengthPercentageAuto {
     }
 }
 
+fn length_or_auto_lpa(v: LengthOrAuto) -> LengthPercentageAuto {
+    match v {
+        LengthOrAuto::Auto => LengthPercentageAuto::auto(),
+        LengthOrAuto::Length(l) => length_auto(l),
+    }
+}
+
 fn length_pct(l: Length) -> LengthPercentage {
     match l {
         Length::Px(px) => LengthPercentage::length(px),
@@ -345,10 +352,10 @@ fn css_to_taffy_style(style: Option<&ComputedStyle>) -> Style {
         flex_shrink: style.flex_item.flex_shrink,
         flex_basis,
         margin: TaffyRect {
-            left: length_auto(style.margin.left),
-            right: length_auto(style.margin.right),
-            top: length_auto(style.margin.top),
-            bottom: length_auto(style.margin.bottom),
+            left: length_or_auto_lpa(style.margin.left),
+            right: length_or_auto_lpa(style.margin.right),
+            top: length_or_auto_lpa(style.margin.top),
+            bottom: length_or_auto_lpa(style.margin.bottom),
         },
         padding: TaffyRect {
             left: length_pct(style.padding.left),
