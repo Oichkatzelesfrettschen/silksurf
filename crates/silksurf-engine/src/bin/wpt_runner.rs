@@ -21,8 +21,9 @@
 
 use silksurf_css::{
     BorderStyle, Color, Display, FlexBasis, Length, LengthOrAuto, Overflow, Position, SelectorList,
-    TextDecoration, Visibility, WhiteSpace, compute_style_for_node, compute_styles,
-    matches_selector_list, parse_selector_list_with_interner, parse_stylesheet,
+    StyleIndex, TextDecoration, Visibility, WhiteSpace, compute_style_for_node,
+    compute_style_for_node_with_index, compute_styles, matches_selector_list,
+    parse_selector_list_with_interner, parse_stylesheet,
 };
 use silksurf_dom::{Dom, NodeId, NodeKind};
 use silksurf_engine::fused_pipeline::fused_style_layout_paint;
@@ -304,6 +305,9 @@ fn run_one(path: &Path) -> Outcome {
         "layout_flex_column_stack" => {
             check_layout_flex_column_stack(&parsed.dom, parsed.document, &source)
         }
+        // @media query evaluation
+        "css_media_screen" => check_css_media_screen(&parsed.dom, parsed.document, &source),
+        "css_media_width" => check_css_media_width(&parsed.dom, parsed.document, &source),
         other => Outcome::Skip(format!("no check registered for fixture stem '{other}'")),
     }
 }
@@ -2702,6 +2706,77 @@ fn check_layout_flex_column_stack(dom: &Dom, document: NodeId, source: &str) -> 
             "#b.y={:.1} must be >= #a bottom={:.1}",
             rb.y,
             ra.y + ra.height
+        ));
+    }
+    Outcome::Pass
+}
+
+fn check_css_media_screen(dom: &Dom, document: NodeId, source: &str) -> Outcome {
+    let css = match extract_inline_style(source) {
+        Some(c) => c,
+        None => return Outcome::Skip("no <style> block".to_string()),
+    };
+    let stylesheet = match parse_stylesheet(&css) {
+        Ok(s) => s,
+        Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
+    };
+    let body = match body_of(dom, document) {
+        Some(b) => b,
+        None => return Outcome::Fail("missing body".to_string()),
+    };
+    let children = element_children(dom, body);
+    if children.is_empty() {
+        return Outcome::Fail("missing #box div".to_string());
+    }
+    // @media screen applies at 1280x800 (screen type -> true).
+    // @media print does not apply (print type -> false).
+    // Base opacity 0.2 overridden by screen rule to 0.7; print rule ignored.
+    let style = compute_style_for_node(dom, children[0], &stylesheet, None);
+    if (style.opacity - 0.7).abs() > 0.01 {
+        return Outcome::Fail(format!(
+            "@media screen: opacity expected 0.7, got {:.3} (print rule leaked or screen rule dropped)",
+            style.opacity
+        ));
+    }
+    Outcome::Pass
+}
+
+fn check_css_media_width(dom: &Dom, document: NodeId, source: &str) -> Outcome {
+    let css = match extract_inline_style(source) {
+        Some(c) => c,
+        None => return Outcome::Skip("no <style> block".to_string()),
+    };
+    let stylesheet = match parse_stylesheet(&css) {
+        Ok(s) => s,
+        Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
+    };
+    let body = match body_of(dom, document) {
+        Some(b) => b,
+        None => return Outcome::Fail("missing body".to_string()),
+    };
+    let children = element_children(dom, body);
+    if children.len() < 2 {
+        return Outcome::Fail(format!("expected 2 divs, got {}", children.len()));
+    }
+
+    // At 1280px viewport: (min-width: 768px) matches; (max-width: 767px) does not.
+    // Use for_viewport so the test is explicit about the viewport dimensions.
+    let index = StyleIndex::for_viewport(&stylesheet, 1280.0, 800.0);
+    let wide_style =
+        compute_style_for_node_with_index(dom, children[0], &stylesheet, &index, None);
+    let narrow_style =
+        compute_style_for_node_with_index(dom, children[1], &stylesheet, &index, None);
+
+    if (wide_style.opacity - 0.8).abs() > 0.01 {
+        return Outcome::Fail(format!(
+            "@media (min-width:768px) at 1280px: #wide opacity expected 0.8, got {:.3}",
+            wide_style.opacity
+        ));
+    }
+    if (narrow_style.opacity - 0.2).abs() > 0.01 {
+        return Outcome::Fail(format!(
+            "@media (max-width:767px) at 1280px: #narrow opacity expected 0.2, got {:.3} (rule must not apply)",
+            narrow_style.opacity
         ));
     }
     Outcome::Pass

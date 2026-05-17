@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+#wide { opacity: 0.2; }
+#narrow { opacity: 0.2; }
+@media (min-width: 768px) { #wide { opacity: 0.8; } }
+@media (max-width: 767px) { #narrow { opacity: 0.8; } }
+</style>
+</head>
+<body>
+<div id="wide">wide</div>
+<div id="narrow">narrow</div>
+</body>
+</html>
