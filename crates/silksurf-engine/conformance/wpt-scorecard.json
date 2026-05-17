@@ -4,9 +4,9 @@
   "fail": 0,
   "skip": 0,
   "rate": 1.0000,
-  "timestamp": "2026-05-17T01:35:54Z",
+  "timestamp": "2026-05-17T04:03:07Z",
   "runner_version": "0.1.0",
   "runner_kind": "wpt-synthetic",
   "fixture_dir": "crates/silksurf-engine/conformance/wpt/fixtures",
-  "duration_secs": 0.007
+  "duration_secs": 0.008
 }
