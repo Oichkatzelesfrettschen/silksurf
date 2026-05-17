@@ -34,6 +34,7 @@ enum InsertionMode {
 }
 
 impl TreeBuilder {
+    #[must_use] 
     pub fn new() -> Self {
         let mut dom = Dom::new();
         let document = dom.create_document();
@@ -98,7 +99,7 @@ impl TreeBuilder {
                 } => {
                     self.handle_doctype(name, public_id, system_id)?;
                 }
-                Token::Eof => continue,
+                Token::Eof => {}
             }
         }
         Ok(())

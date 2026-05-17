@@ -75,7 +75,7 @@ pub enum HttpMethod {
 }
 
 impl HttpMethod {
-    fn as_str(&self) -> &'static str {
+    fn as_str(self) -> &'static str {
         match self {
             HttpMethod::Get => "GET",
             HttpMethod::Post => "POST",
@@ -102,6 +102,7 @@ pub struct HttpResponse {
 
 impl HttpResponse {
     /// Get a header value by name (case-insensitive).
+    #[must_use] 
     pub fn header(&self, name: &str) -> Option<&str> {
         self.headers
             .iter()
@@ -139,6 +140,7 @@ pub struct BasicClient {
 }
 
 impl BasicClient {
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             tls: Arc::new(RustlsProvider::new()),
@@ -249,9 +251,7 @@ impl NetClient for BasicClient {
             {
                 if let Some(location) = response.header("location") {
                     current_url = parsed
-                        .join(location)
-                        .map(|u| u.to_string())
-                        .unwrap_or_else(|_| location.to_string());
+                        .join(location).map_or_else(|_| location.to_string(), |u| u.to_string());
                     redirects += 1;
                     continue;
                 }
@@ -283,6 +283,7 @@ impl BasicClient {
      * See: h2_client.rs for the H2 implementation
      * See: SpeculativeRenderer::fetch_all_or_speculate for cache integration
      */
+    #[must_use] 
     pub fn fetch_parallel(&self, requests: &[HttpRequest]) -> Vec<Result<HttpResponse, NetError>> {
         if requests.is_empty() {
             return vec![];
@@ -299,7 +300,7 @@ impl BasicClient {
                         .unwrap_or_else(|_| url::Url::parse("https://localhost/").unwrap());
                     h2_client::H2Request {
                         path: parsed.path().to_string(),
-                        query: parsed.query().map(|q| q.to_string()),
+                        query: parsed.query().map(std::string::ToString::to_string),
                         extra_headers: r.headers.clone(),
                     }
                 })
@@ -374,8 +375,7 @@ fn read_response(stream: &mut dyn Read) -> Result<Vec<u8>, NetError> {
                 // DoS bound (P8.S8): cap response body at MAX_RESPONSE_BODY_BYTES.
                 if buf.len() > MAX_RESPONSE_BODY_BYTES {
                     return Err(NetError::new(format!(
-                        "Response exceeds MAX_RESPONSE_BODY_BYTES ({} bytes)",
-                        MAX_RESPONSE_BODY_BYTES
+                        "Response exceeds MAX_RESPONSE_BODY_BYTES ({MAX_RESPONSE_BODY_BYTES} bytes)"
                     )));
                 }
             }
@@ -388,7 +388,7 @@ fn read_response(stream: &mut dyn Read) -> Result<Vec<u8>, NetError> {
     Ok(buf)
 }
 
-/// Parse raw HTTP response bytes into HttpResponse using httparse.
+/// Parse raw HTTP response bytes into `HttpResponse` using httparse.
 fn parse_response(data: &[u8]) -> Result<HttpResponse, NetError> {
     let mut headers = [httparse::EMPTY_HEADER; 64];
     let mut response = httparse::Response::new(&mut headers);

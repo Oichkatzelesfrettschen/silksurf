@@ -1,7 +1,7 @@
-//! TLS adapter layer for SilkSurf (cleanroom).
+//! TLS adapter layer for `SilkSurf` (cleanroom).
 //!
 //! Loads Mozilla root certificates (webpki-roots) plus system certificates
-//! (rustls-native-certs). Provides a configured rustls ClientConfig.
+//! (rustls-native-certs). Provides a configured rustls `ClientConfig`.
 
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::CertificateDer;
@@ -110,6 +110,7 @@ pub struct TlsConfig {
 
 impl TlsConfig {
     /// Create TLS config with Mozilla + system root certificates.
+    #[must_use] 
     pub fn new() -> Self {
         let (roots, _) = build_root_store();
 
@@ -121,12 +122,13 @@ impl TlsConfig {
         }
     }
 
-    /// Create TLS config with ALPN ["h2", "http/1.1"] for HTTP/2 negotiation.
+    /// Create TLS config with ALPN `["h2", "http/1.1"]` for HTTP/2 negotiation.
     ///
     /// WHY: The default config has no ALPN, so servers always fall back to HTTP/1.1.
     /// This variant advertises h2 support; servers that support HTTP/2 will negotiate it.
     /// Used only by the h2 parallel-fetch path in silksurf-net; single-URL fetches
-    /// via BasicClient::fetch continue to use the default (HTTP/1.1) config.
+    /// via `BasicClient::fetch` continue to use the default (HTTP/1.1) config.
+    #[must_use] 
     pub fn new_h2() -> Self {
         let (roots, _) = build_root_store();
         let mut config = ClientConfig::builder()
@@ -234,6 +236,7 @@ impl TlsConfig {
     }
 
     /// Create TLS config that accepts any certificate (INSECURE -- for debugging only).
+    #[must_use] 
     pub fn new_insecure() -> Self {
         let config = ClientConfig::builder()
             .dangerous()
@@ -244,7 +247,8 @@ impl TlsConfig {
         }
     }
 
-    /// Create insecure TLS config with ALPN ["h2", "http/1.1"].
+    /// Create insecure TLS config with ALPN `["h2", "http/1.1"]`.
+    #[must_use] 
     pub fn new_insecure_h2() -> Self {
         let mut config = ClientConfig::builder()
             .dangerous()
@@ -256,6 +260,7 @@ impl TlsConfig {
         }
     }
 
+    #[must_use] 
     pub fn inner(&self) -> Arc<ClientConfig> {
         self.inner.clone()
     }
@@ -267,6 +272,7 @@ impl Default for TlsConfig {
     }
 }
 
+#[must_use] 
 pub fn root_store_diagnostics() -> RootStoreDiagnostics {
     build_root_store().1
 }
@@ -289,7 +295,7 @@ fn build_root_store_with_extra_ca_file(
 
 fn load_extra_ca_file(path: &Path) -> Result<Vec<CertificateDer<'static>>, TlsConfigError> {
     let certs = CertificateDer::pem_file_iter(path)
-        .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
+        .and_then(std::iter::Iterator::collect::<Result<Vec<_>, _>>)
         .map_err(|e| TlsConfigError::Io(std::io::Error::other(e.to_string())))?;
 
     if certs.is_empty() {
@@ -338,6 +344,7 @@ pub struct RustlsProvider {
 }
 
 impl RustlsProvider {
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             config: TlsConfig::new(),
@@ -346,6 +353,7 @@ impl RustlsProvider {
     }
 
     /// Create a provider that skips certificate verification (INSECURE).
+    #[must_use] 
     pub fn new_insecure() -> Self {
         Self {
             config: TlsConfig::new_insecure(),

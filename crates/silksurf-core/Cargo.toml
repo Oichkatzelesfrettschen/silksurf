@@ -16,3 +16,6 @@ criterion = "0.8"
 [[bench]]
 name = "interner"
 harness = false
+
+[lints]
+workspace = true

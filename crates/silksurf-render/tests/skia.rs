@@ -22,7 +22,7 @@ fn empty_list() -> DisplayList {
     }
 }
 
-/// rasterize_skia produces a buffer of exactly width * height * 4 bytes.
+/// `rasterize_skia` produces a buffer of exactly width * height * 4 bytes.
 #[test]
 fn skia_buffer_size() {
     let buf = rasterize_skia(&empty_list(), 32, 16);
@@ -38,7 +38,7 @@ fn skia_white_background() {
     }
 }
 
-/// A SolidColor item paints the interior pixel with the expected color.
+/// A `SolidColor` item paints the interior pixel with the expected color.
 /// For alpha == 255, premultiplied and straight RGBA are identical.
 #[test]
 fn skia_solid_color_fills_interior() {
@@ -64,7 +64,7 @@ fn skia_solid_color_fills_interior() {
     assert_eq!(&buf[off2..off2 + 4], &[255, 255, 255, 255]);
 }
 
-/// rasterize_skia_into reuses the buffer when dimensions are unchanged.
+/// `rasterize_skia_into` reuses the buffer when dimensions are unchanged.
 #[test]
 fn skia_into_reuses_buffer() {
     let dl = empty_list();
@@ -77,7 +77,7 @@ fn skia_into_reuses_buffer() {
     assert_eq!(buf.as_ptr(), ptr_before);
 }
 
-/// A RoundedRect item paints the center of the bounding box.
+/// A `RoundedRect` item paints the center of the bounding box.
 #[test]
 fn skia_rounded_rect_fills_center() {
     let blue = color(0, 0, 200);
@@ -99,7 +99,7 @@ fn skia_rounded_rect_fills_center() {
     assert_eq!(buf[off + 3], 255, "A");
 }
 
-/// A RoundedRect with zero radii behaves identically to a SolidColor rect.
+/// A `RoundedRect` with zero radii behaves identically to a `SolidColor` rect.
 #[test]
 fn skia_rounded_rect_zero_radii_matches_solid() {
     let green = color(0, 180, 0);

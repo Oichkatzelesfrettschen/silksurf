@@ -103,6 +103,7 @@ pub enum PropertyId {
  *
  * Complexity: O(1) average (first-byte dispatch + short string compare)
  */
+#[must_use] 
 pub fn lookup_property_id(name: &str) -> PropertyId {
     // Fast path: match on first byte and length to reduce comparisons
     let bytes = name.as_bytes();

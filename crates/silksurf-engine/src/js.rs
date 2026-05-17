@@ -33,10 +33,12 @@ pub struct NoopJsRuntime {
 }
 
 impl NoopJsRuntime {
+    #[must_use] 
     pub fn new() -> Self {
         Self { tasks: Vec::new() }
     }
 
+    #[must_use] 
     pub fn pending_tasks(&self) -> usize {
         self.tasks.len()
     }

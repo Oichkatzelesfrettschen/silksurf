@@ -20,3 +20,6 @@ parallel = ["rayon"]
 batched-raster = []
 [dev-dependencies]
 silksurf-core = { path = "../silksurf-core" }
+
+[lints]
+workspace = true

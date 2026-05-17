@@ -1,16 +1,16 @@
-//! html5ever TreeSink adapter.
+//! html5ever `TreeSink` adapter.
 //!
-//! Bridges html5ever's WHATWG-conformant HTML5 parser to the silksurf_dom
+//! Bridges html5ever's WHATWG-conformant HTML5 parser to the `silksurf_dom`
 //! arena-allocated DOM tree. The public entry point is `parse_html`.
 //!
 //! Design notes:
-//! - All TreeSink methods take `&self` (not `&mut self`); interior
+//! - All `TreeSink` methods take `&self` (not `&mut self`); interior
 //!   mutability via `RefCell<Inner>` is required.
-//! - elem_names stores `Box<QualName>` so the heap address is stable through
-//!   HashMap reallocation; this makes the unsafe ptr extension in
-//!   elem_name() sound.
-//! - Text nodes are handled inline via NodeOrText::AppendText; html5ever
-//!   does not use a separate create_text_node call.
+//! - `elem_names` stores `Box<QualName>` so the heap address is stable through
+//!   `HashMap` reallocation; this makes the unsafe ptr extension in
+//!   `elem_name()` sound.
+//! - Text nodes are handled inline via `NodeOrText::AppendText`; html5ever
+//!   does not use a separate `create_text_node` call.
 
 use std::borrow::Cow;
 use std::cell::RefCell;
@@ -28,10 +28,10 @@ use silksurf_dom::{Dom, Namespace, NodeId};
 struct Inner {
     dom: Dom,
     errors: Vec<String>,
-    /// Stable-address QualName store for elem_name().
-    /// `Box<QualName>` keeps the QualName at a fixed heap address even when
-    /// the HashMap reallocates its backing buffer; the unsafe pointer
-    /// extension in elem_name() relies on this stability guarantee.
+    /// Stable-address `QualName` store for `elem_name()`.
+    /// `Box<QualName>` keeps the `QualName` at a fixed heap address even when
+    /// the `HashMap` reallocates its backing buffer; the unsafe pointer
+    /// extension in `elem_name()` relies on this stability guarantee.
     elem_names: HashMap<usize, Box<QualName>>,
 }
 
@@ -42,6 +42,7 @@ pub struct SilkDomBuilder {
 }
 
 impl SilkDomBuilder {
+    #[must_use] 
     pub fn new() -> Self {
         let mut dom = Dom::new();
         dom.create_document(); // NodeId(0) = document root
@@ -83,7 +84,7 @@ impl TreeSink for SilkDomBuilder {
         // which is owned by self and is append-only. Box<T> guarantees a
         // stable heap address regardless of HashMap reallocation. self is
         // borrowed for 'a, so the QualName's address is valid for 'a.
-        let qname: &'a QualName = unsafe { &*(qname as *const QualName) };
+        let qname: &'a QualName = unsafe { &*std::ptr::from_ref::<QualName>(qname) };
         qname.expanded()
     }
 
@@ -163,9 +164,8 @@ impl TreeSink for SilkDomBuilder {
     fn append_before_sibling(&self, sibling: &usize, new_node: NodeOrText<usize>) {
         let mut inner = self.inner.borrow_mut();
         let sibling_id = NodeId::from_raw(*sibling);
-        let parent_id = match inner.dom.parent(sibling_id) {
-            Ok(Some(p)) => p,
-            _ => return,
+        let Ok(Some(parent_id)) = inner.dom.parent(sibling_id) else {
+            return;
         };
         match new_node {
             NodeOrText::AppendNode(raw) => {

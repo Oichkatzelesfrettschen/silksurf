@@ -30,7 +30,7 @@ fn main() {
     }
     let elapsed = start.elapsed();
     let per_iter = elapsed / iterations as u32;
-    println!("cascade_guard iterations: {}", iterations);
-    println!("total: {:?}, per-iter: {:?}", elapsed, per_iter);
-    println!("styled nodes: {}", last_count);
+    println!("cascade_guard iterations: {iterations}");
+    println!("total: {elapsed:?}, per-iter: {per_iter:?}");
+    println!("styled nodes: {last_count}");
 }

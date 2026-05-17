@@ -62,7 +62,7 @@ pub struct CachedResponse {
     pub status: u16,
     /// Response headers (for content-type, etc.)
     pub headers: Vec<(String, String)>,
-    /// ETag for conditional revalidation
+    /// `ETag` for conditional revalidation
     pub etag: Option<String>,
     /// Last-Modified for conditional revalidation
     pub last_modified: Option<String>,
@@ -81,6 +81,7 @@ pub struct ResponseCache {
 }
 
 impl ResponseCache {
+    #[must_use] 
     pub fn new() -> Self {
         Self::default()
     }
@@ -103,6 +104,7 @@ impl ResponseCache {
      *
      * See: put_to_disk, load_from_disk below
      */
+    #[must_use] 
     pub fn with_disk(dir: &Path) -> Self {
         let mut cache = Self {
             entries: FxHashMap::default(),
@@ -113,6 +115,7 @@ impl ResponseCache {
     }
 
     /// Get a cached response for the given URL, if available.
+    #[must_use] 
     pub fn get(&self, url: &str) -> Option<&CachedResponse> {
         self.entries.get(url)
     }
@@ -124,8 +127,8 @@ impl ResponseCache {
      * filesystem does not prevent in-memory caching from working.
      */
     pub fn put(&mut self, url: String, response: &super::HttpResponse) {
-        let etag = response.header("etag").map(|s| s.to_string());
-        let last_modified = response.header("last-modified").map(|s| s.to_string());
+        let etag = response.header("etag").map(std::string::ToString::to_string);
+        let last_modified = response.header("last-modified").map(std::string::ToString::to_string);
 
         let entry = CachedResponse {
             body: response.body.clone(),
@@ -145,6 +148,7 @@ impl ResponseCache {
     }
 
     /// Build conditional request headers for revalidation.
+    #[must_use] 
     pub fn conditional_headers(&self, url: &str) -> Vec<(String, String)> {
         let mut headers = Vec::new();
         if let Some(cached) = self.entries.get(url) {
@@ -159,16 +163,19 @@ impl ResponseCache {
     }
 
     /// Number of cached entries.
+    #[must_use] 
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
     /// Check if cache is empty.
+    #[must_use] 
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
     /// Total cached bytes.
+    #[must_use] 
     pub fn total_bytes(&self) -> usize {
         self.entries.values().map(|e| e.body.len()).sum()
     }

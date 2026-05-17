@@ -63,17 +63,17 @@ use silksurf_render::DisplayItem;
 pub struct FusedWorkspace {
     /// BFS traversal table -- rebuilt only when DOM generation changes.
     table: LayoutNeighborTable,
-    /// SoA cascade view -- materialized only when DOM generation changes.
+    /// `SoA` cascade view -- materialized only when DOM generation changes.
     cascade_view: CascadeView,
     /// Cascade scratch -- grows to peak rule count, never shrinks.
     cascade_ws: CascadeWorkspace,
     /// Taffy layout state -- rebuilt when DOM generation changes.
     taffy_layout: TaffyLayout,
-    /// Computed style per BFS-indexed node (valid after run()).
+    /// Computed style per BFS-indexed node (valid after `run()`).
     pub styles: Vec<Option<ComputedStyle>>,
-    /// Content rect per BFS-indexed node (valid after run()).
+    /// Content rect per BFS-indexed node (valid after `run()`).
     pub node_rects: Vec<Rect>,
-    /// Paint commands (valid after run(); order is BFS paint order).
+    /// Paint commands (valid after `run()`; order is BFS paint order).
     pub display_items: Vec<DisplayItem>,
     /// Cached DOM generation to skip rebuild when DOM unchanged.
     dom_generation: u64,
@@ -93,6 +93,7 @@ impl FusedWorkspace {
      * overhead).  The first run() call allocates to fit the given DOM.
      * Subsequent calls with the same or smaller DOM are zero-alloc.
      */
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             table: LayoutNeighborTable::default(),
@@ -181,8 +182,7 @@ impl FusedWorkspace {
                 .element_name(node)
                 .ok()
                 .flatten()
-                .map(|n| n.eq_ignore_ascii_case("html"))
-                .unwrap_or(false)
+                .is_some_and(|n| n.eq_ignore_ascii_case("html"))
                 && let silksurf_css::Length::Px(v) = style.font_size
             {
                 rem_base_px = v;
@@ -250,7 +250,7 @@ impl FusedWorkspace {
                     rect: content_rect,
                     node,
                     text_len: text.len() as u32,
-                    text: text.to_string(),
+                    text: text.clone(),
                     font_size: font_size_px,
                     color: style.color,
                 });
@@ -258,12 +258,14 @@ impl FusedWorkspace {
         }
     }
 
-    /// Number of BFS-ordered nodes from the last run() call.
+    /// Number of BFS-ordered nodes from the last `run()` call.
+    #[must_use] 
     pub fn node_count(&self) -> usize {
         self.table.len()
     }
 
-    /// BFS traversal table from the last run() call.
+    /// BFS traversal table from the last `run()` call.
+    #[must_use] 
     pub fn table(&self) -> &LayoutNeighborTable {
         &self.table
     }
@@ -291,7 +293,7 @@ pub struct FusedResult {
     pub display_items: Vec<DisplayItem>,
     /// Content rect per node in BFS order.
     pub node_rects: Vec<Rect>,
-    /// BFS traversal table; use node_to_bfs_idx for NodeId -> index mapping.
+    /// BFS traversal table; use `node_to_bfs_idx` for `NodeId` -> index mapping.
     pub table: LayoutNeighborTable,
 }
 
@@ -357,8 +359,7 @@ pub fn fused_style_layout_paint(
             .element_name(node)
             .ok()
             .flatten()
-            .map(|n| n.eq_ignore_ascii_case("html"))
-            .unwrap_or(false)
+            .is_some_and(|n| n.eq_ignore_ascii_case("html"))
             && let silksurf_css::Length::Px(v) = style.font_size
         {
             rem_base_px = v;
@@ -406,7 +407,7 @@ pub fn fused_style_layout_paint(
                 rect: content_rect,
                 node,
                 text_len: text.len() as u32,
-                text: text.to_string(),
+                text: text.clone(),
                 font_size: font_size_px,
                 color: style.color,
             });

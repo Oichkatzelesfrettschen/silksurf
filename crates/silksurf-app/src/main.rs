@@ -1,4 +1,4 @@
-//! SilkSurf Rust-native webview entry point.
+//! `SilkSurf` Rust-native webview entry point.
 //!
 //! Pipeline: fetch URL -> parse HTML -> load CSS/JS resources -> create VM
 //! with DOM bridge -> run scripts -> layout -> render (future: XCB window).
@@ -96,7 +96,7 @@ fn main() {
                 // Cornflower blue, ARGB. The high byte (0xFF) is alpha; the
                 // server ignores alpha for opaque windows but downstream
                 // SHM/composite paths require it set.
-                silksurf_render::fill_scalar(&mut pixels, 0xFF6495ED);
+                silksurf_render::fill_scalar(&mut pixels, 0xFF64_95ED);
                 window.present(&pixels);
 
                 /*
@@ -340,7 +340,7 @@ fn main() {
                 css_text.push('\n');
             }
             Ok((resp, _, _)) => {
-                eprintln!("[SilkSurf] Stylesheet {sheet_url}: HTTP {}", resp.status)
+                eprintln!("[SilkSurf] Stylesheet {sheet_url}: HTTP {}", resp.status);
             }
             Err(e) => eprintln!(
                 "[SilkSurf] Stylesheet {sheet_url}: fetch error: {}",
@@ -431,7 +431,7 @@ fn main() {
     //    Replaces separate compute_styles + build_layout_tree + build_display_list calls.
     //    Running post-JS ensures DOM mutations from scripts are visible in the render.
     let fused_start = std::time::Instant::now();
-    let dom_guard = dom_arc.lock().unwrap_or_else(|e| e.into_inner());
+    let dom_guard = dom_arc.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let fused = fused_style_layout_paint(&dom_guard, &stylesheet, doc_node, viewport);
     drop(dom_guard);
     let fused_elapsed = fused_start.elapsed();
@@ -483,10 +483,10 @@ fn main() {
     eprintln!("\n=== PROCESSING BUDGET (excludes network) ===");
     eprintln!(
         "  CSS parse:      {:?}",
-        css_start.elapsed() - fused_elapsed - raster_elapsed
+        css_start.elapsed().checked_sub(fused_elapsed).unwrap().checked_sub(raster_elapsed).unwrap()
     );
-    eprintln!("  Fused pipeline: {:?}", fused_elapsed);
-    eprintln!("  Rasterize:      {:?}", raster_elapsed);
+    eprintln!("  Fused pipeline: {fused_elapsed:?}");
+    eprintln!("  Rasterize:      {raster_elapsed:?}");
     eprintln!("  TOTAL:          {:?}", css_start.elapsed());
     eprintln!("============================================\n");
 
@@ -578,7 +578,7 @@ fn main() {
                 )
                 .to_string();
                 if let Ok(new_doc) = silksurf_engine::parse_html(&new_html) {
-                    let orig_dom = dom_arc.lock().unwrap_or_else(|e| e.into_inner());
+                    let orig_dom = dom_arc.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                     let diff = silksurf_dom::diff::diff_doms(
                         &orig_dom,
                         doc_node,
@@ -666,8 +666,7 @@ fn main() {
                         let total = rerender_t0.elapsed();
                         let new_styled = new_fused.styles.iter().filter(|s| s.is_some()).count();
                         eprintln!(
-                            "[SilkSurf] Re-render ({} styled nodes): CSS {:?} + fused {:?} + raster {:?} = {:?}",
-                            new_styled, css_elapsed, fused_elapsed, raster_elapsed, total,
+                            "[SilkSurf] Re-render ({new_styled} styled nodes): CSS {css_elapsed:?} + fused {fused_elapsed:?} + raster {raster_elapsed:?} = {total:?}",
                         );
                     }
                 }
@@ -781,11 +780,10 @@ fn collect_script_tags(
         // Skip external scripts (src="...") and non-JS types
         let has_src = attrs
             .as_ref()
-            .map(|a| {
+            .is_some_and(|a| {
                 a.iter()
                     .any(|a| a.name == silksurf_dom::AttributeName::from_str("src"))
-            })
-            .unwrap_or(false);
+            });
         let script_type = attrs.as_ref().and_then(|a| {
             a.iter()
                 .find(|a| a.name == silksurf_dom::AttributeName::from_str("type"))
@@ -794,7 +792,7 @@ fn collect_script_tags(
         // Skip JSON-LD, importmap, and other non-JS types
         let is_js = matches!(
             script_type.as_deref(),
-            None | Some("") | Some("text/javascript") | Some("application/javascript")
+            None | Some("" | "text/javascript" | "application/javascript")
         );
 
         if !has_src && is_js {

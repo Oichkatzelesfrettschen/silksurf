@@ -14,6 +14,7 @@ pub struct CustomPropertyMap {
 }
 
 impl CustomPropertyMap {
+    #[must_use] 
     pub fn new() -> Self {
         Self::default()
     }
@@ -38,6 +39,7 @@ impl CustomPropertyMap {
     }
 
     /// Check if a declaration name is a custom property (starts with --).
+    #[must_use] 
     pub fn is_custom_property(name: &str) -> bool {
         name.starts_with("--")
     }
@@ -45,8 +47,9 @@ impl CustomPropertyMap {
 
 /// Resolve `var(--name)` and `var(--name, fallback)` references in a token list.
 ///
-/// Returns a new token list with all var() references substituted.
-/// Handles nested var() in fallback values.
+/// Returns a new token list with all `var()` references substituted.
+/// Handles nested `var()` in fallback values.
+#[must_use] 
 pub fn resolve_var_references(
     tokens: &[CssToken],
     custom_props: &CustomPropertyMap,
@@ -73,7 +76,7 @@ pub fn resolve_var_references(
     result
 }
 
-/// Parse and resolve a single var() reference starting after the 'var(' function token.
+/// Parse and resolve a single `var()` reference starting after the 'var(' function token.
 /// Returns (resolved tokens, number of tokens consumed).
 fn resolve_single_var(
     tokens: &[CssToken],

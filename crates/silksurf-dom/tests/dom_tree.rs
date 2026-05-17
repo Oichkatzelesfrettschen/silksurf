@@ -52,7 +52,7 @@ fn sets_attributes_and_namespace() {
     let svg = dom.create_element_ns("svg", silksurf_dom::Namespace::Svg);
     match dom.node(svg).unwrap().kind() {
         NodeKind::Element { namespace, .. } => {
-            assert_eq!(namespace, &silksurf_dom::Namespace::Svg)
+            assert_eq!(namespace, &silksurf_dom::Namespace::Svg);
         }
         _ => panic!("expected element node"),
     }

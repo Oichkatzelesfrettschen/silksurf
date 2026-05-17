@@ -79,6 +79,87 @@ softbuffer = "0.4"
 boa_engine = { version = "0.21", features = ["annex-b"] }
 boa_runtime = "0.21"
 
+# ---------------------------------------------------------------------------
+# Workspace-wide lints.
+#
+# WHY: The project policy is `RUSTFLAGS='-D warnings' cargo clippy` MUST stay
+#      clean. The default lint groups (`clippy::all` + cargo) are enforced as
+#      hard errors and treated as the bar for every PR. Beyond that, the
+#      pedantic group is opt-in and noisy by design; we enable it here so the
+#      CI lane catches drift but allow the specific lints that the codebase
+#      has deliberately accepted (see silksurf-js/Cargo.toml [lints.clippy]
+#      for the original per-crate stance that this section mirrors).
+#
+# WHAT: Pedantic warnings that survive the workspace-wide allows still fire
+#       as warnings (they are reported by `cargo clippy -- -W clippy::pedantic`
+#       but do not break the default build). Per-site `#[allow(...)]` blocks
+#       are still preferred where the lint flags genuinely-suspect code that
+#       has been audited.
+#
+# HOW: Each crate Cargo.toml opts in with `[lints] workspace = true`. Crates
+#      that already define their own `[lints.clippy]` table (currently only
+#      silksurf-js) continue to override the workspace defaults locally.
+# ---------------------------------------------------------------------------
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)', 'cfg(miri)'] }
+
+[workspace.lints.clippy]
+# Default groups: warnings are errors via RUSTFLAGS='-D warnings'.
+# Lower priority so per-lint `allow` entries below win.
+all = { level = "warn", priority = -1 }
+# Pedantic group is opted into so CI can spot-check drift; specific lints
+# below are allowed because they generate noise that is either not actionable
+# in this codebase or that we have audited and accepted on a per-site basis.
+pedantic = { level = "warn", priority = -1 }
+
+# Style lints that fire on intentionally explicit patterns and would force
+# rewrites without improving clarity.
+single_match = "allow"
+single_match_else = "allow"
+match_like_matches_macro = "allow"
+needless_continue = "allow"
+inline_always = "allow"
+uninlined_format_args = "allow"
+match_same_arms = "allow"
+redundant_closure_for_method_calls = "allow"
+ref_option = "allow"
+needless_lifetimes = "allow"
+elidable_lifetime_names = "allow"
+option_option = "allow"
+unused_self = "allow"
+used_underscore_binding = "allow"
+missing_fields_in_debug = "allow"
+format_collect = "allow"
+
+# Pedantic lints we deliberately accept across the workspace.
+# Rationale: these track silksurf-js/Cargo.toml's existing stance, with
+# additions for lints that proved noisy without surfacing real bugs during
+# the SNAZZY-WAFFLE pedantic pass.
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+too_many_lines = "allow"
+cognitive_complexity = "allow"
+similar_names = "allow"
+many_single_char_names = "allow"
+struct_excessive_bools = "allow"
+struct_field_names = "allow"
+# Cast lints: the workspace deals in pixel coordinates, indices, and color
+# components where small-integer truncation and signed/unsigned conversion
+# are routine. Per-site `#[allow]` with safety comments is preferred for
+# casts in load-bearing code (see e.g. silksurf-render/src/lib.rs); the
+# workspace allow keeps the long tail of bench/test/glue sites tractable.
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_precision_loss = "allow"
+cast_possible_wrap = "allow"
+cast_lossless = "allow"
+# Doc lints that have been verified by the pedantic auto-fix pass and only
+# trigger on intra-doc-link edge cases (e.g. quoted Rust paths in module
+# docs); accepting them here keeps doc churn out of subsequent PRs.
+doc_markdown = "allow"
+
 [profile.dev]
 opt-level = 1
 debug = true

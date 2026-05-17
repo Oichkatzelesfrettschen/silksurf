@@ -1,16 +1,16 @@
 //! Workspace-wide canonical error type.
 //!
-//! WHY: Per-crate error types (CssError, DomError, TokenizeError,
-//! TreeBuildError, NetError, TlsConfigError, EngineError, JsError) are
+//! WHY: Per-crate error types (`CssError`, `DomError`, `TokenizeError`,
+//! `TreeBuildError`, `NetError`, `TlsConfigError`, `EngineError`, `JsError`) are
 //! useful at their crate boundaries but cause `From` proliferation and
-//! `Box<dyn Error>` ergonomics drift at cross-crate boundaries. SilkError
+//! `Box<dyn Error>` ergonomics drift at cross-crate boundaries. `SilkError`
 //! is the canonical type that every public API should funnel through at
 //! the workspace boundary (silksurf-app, silksurf-engine surface, FFI).
 //!
 //! WHAT: silksurf-core has no internal dependencies on its dependents
 //! (which would create cycles); the per-crate `From` impls live in the
 //! leaf crates that own the source error type and that depend on
-//! silksurf-core. SilkError variants are string-erased rather than
+//! silksurf-core. `SilkError` variants are string-erased rather than
 //! holding the concrete per-crate type for the same reason: silksurf-core
 //! cannot name them.
 //!

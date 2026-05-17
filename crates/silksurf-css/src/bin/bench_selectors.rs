@@ -59,9 +59,9 @@ fn main() {
     }
     let elapsed = start.elapsed();
     let per_iter = elapsed / iterations as u32;
-    println!("selector match iterations: {}", iterations);
-    println!("total: {:?}, per-iter: {:?}", elapsed, per_iter);
-    println!("matches: {}", matched);
+    println!("selector match iterations: {iterations}");
+    println!("total: {elapsed:?}, per-iter: {per_iter:?}");
+    println!("matches: {matched}");
 
     if workload {
         let workload_selectors = [
@@ -99,8 +99,8 @@ fn main() {
         }
         let elapsed = start.elapsed();
         let per_iter = elapsed / workload_iterations as u32;
-        println!("workload iterations: {}", workload_iterations);
-        println!("workload total: {:?}, per-iter: {:?}", elapsed, per_iter);
-        println!("workload matches: {}", matched);
+        println!("workload iterations: {workload_iterations}");
+        println!("workload total: {elapsed:?}, per-iter: {per_iter:?}");
+        println!("workload matches: {matched}");
     }
 }

@@ -9,14 +9,14 @@ use crate::TEXT_STATE;
 /// means no wrapping.
 ///
 /// Uses cosmic-text shaping (harfbuzz) for correct Unicode/BiDi measurement.
-/// Shares the process-wide FontSystem via TEXT_STATE to avoid re-scanning
+/// Shares the process-wide `FontSystem` via `TEXT_STATE` to avoid re-scanning
 /// system fonts on every call.
 pub fn measure_text(text: &str, font_size: f32, max_width: Option<f32>) -> (f32, f32) {
     if text.is_empty() {
         return (0.0, 0.0);
     }
 
-    let mut state = TEXT_STATE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut state = TEXT_STATE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let font_system = &mut state.font_system;
 
     let line_height = font_size * 1.2;

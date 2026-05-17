@@ -52,11 +52,12 @@ pub struct SiteIsolation {
 }
 
 impl SiteIsolation {
+    #[must_use] 
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Lookup or create an OriginContext for the given origin string.
+    /// Lookup or create an `OriginContext` for the given origin string.
     /// In v0.1 every call gets a fresh context; real isolation lands in
     /// P8.S9.
     pub fn context_for(&mut self, origin: &str) -> OriginContext {
@@ -81,12 +82,14 @@ pub struct StoragePartition {
 impl StoragePartition {
     pub const SHARED: &'static str = "<v0.1-shared-partition>";
 
+    #[must_use] 
     pub fn shared() -> Self {
         Self {
             key: Arc::from(Self::SHARED),
         }
     }
 
+    #[must_use] 
     pub fn for_origin(origin: &str) -> Self {
         Self {
             key: Arc::from(origin),

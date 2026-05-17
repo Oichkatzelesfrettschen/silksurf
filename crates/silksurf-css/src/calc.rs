@@ -1,6 +1,6 @@
-//! CSS calc() expression evaluation.
+//! CSS `calc()` expression evaluation.
 //!
-//! Parses and evaluates calc() expressions like:
+//! Parses and evaluates `calc()` expressions like:
 //! - calc(100% - 20px)
 //! - calc(50px + 2em)
 //! - calc(100vw / 3)
@@ -21,11 +21,11 @@ pub enum CalcExpr {
 impl CalcExpr {
     /// Evaluate the expression to a concrete px value.
     /// `context_px` is the reference size for percentage values (e.g., parent width).
+    #[must_use] 
     pub fn evaluate(&self, context_px: f32) -> f32 {
         match self {
-            CalcExpr::Value(Length::Px(v)) => *v,
+            CalcExpr::Value(Length::Px(v) | Length::Em(v) | Length::Rem(v)) => *v,
             CalcExpr::Value(Length::Percent(p)) => context_px * p / 100.0,
-            CalcExpr::Value(Length::Em(v)) | CalcExpr::Value(Length::Rem(v)) => *v,
             CalcExpr::Number(n) => *n,
             CalcExpr::Add(a, b) => a.evaluate(context_px) + b.evaluate(context_px),
             CalcExpr::Sub(a, b) => a.evaluate(context_px) - b.evaluate(context_px),
@@ -42,7 +42,8 @@ impl CalcExpr {
     }
 }
 
-/// Parse a calc() expression from CSS tokens (tokens inside the calc() parens).
+/// Parse a `calc()` expression from CSS tokens (tokens inside the `calc()` parens).
+#[must_use] 
 pub fn parse_calc(tokens: &[CssToken]) -> Option<CalcExpr> {
     let filtered: Vec<&CssToken> = tokens
         .iter()

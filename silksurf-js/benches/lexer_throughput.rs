@@ -1,7 +1,7 @@
 //! Lexer throughput benchmark
 //!
 //! Target: 50-100 MB/s
-//! Comparison: Boa ~25 MB/s, QuickJS ~40 MB/s
+//! Comparison: Boa ~25 MB/s, `QuickJS` ~40 MB/s
 
 use std::hint::black_box;
 
@@ -260,7 +260,7 @@ fn simd_benchmark(c: &mut Criterion) {
     );
 
     // Mixed: heavily commented code
-    let heavily_commented = r#"
+    let heavily_commented = r"
 // This is a heavily commented JavaScript file
 // with lots of documentation
 function example(x, y) { // inline comment
@@ -269,7 +269,7 @@ function example(x, y) { // inline comment
     const result = x + y; // another inline
     return result;
 }
-"#
+"
     .repeat(200);
     group.throughput(Throughput::Bytes(heavily_commented.len() as u64));
     group.bench_with_input(

@@ -111,11 +111,13 @@ impl RevalidationHandle {
      * WHY: Lets the caller render from cache and check for an update only when
      * the revalidation has already completed (zero additional latency).
      */
+    #[must_use] 
     pub fn try_recv(&self) -> Option<Result<RevalidationResult, NetError>> {
         self.rx.try_recv().ok()
     }
 
     /// The URL being revalidated.
+    #[must_use] 
     pub fn url(&self) -> &str {
         &self.url
     }
@@ -231,12 +233,10 @@ fn save_stylesheet_to_disk(path: &PathBuf, sheet: &Stylesheet) {
  * ResponseCache::with_disk creates it on first write).
  */
 fn http_cache_dir() -> std::path::PathBuf {
-    let base = std::env::var_os("XDG_CACHE_HOME")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
+    let base = std::env::var_os("XDG_CACHE_HOME").map_or_else(|| {
             let home = std::env::var_os("HOME").unwrap_or_else(|| "/tmp".into());
             std::path::PathBuf::from(home).join(".cache")
-        });
+        }, std::path::PathBuf::from);
     base.join("silksurf").join("http")
 }
 
@@ -249,6 +249,7 @@ pub struct SpeculativeRenderer {
 type FetchResult = Result<(HttpResponse, FetchOrigin, std::time::Duration), NetError>;
 
 impl SpeculativeRenderer {
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             cache: ResponseCache::with_disk(&http_cache_dir()),
@@ -264,6 +265,7 @@ impl SpeculativeRenderer {
      * testing with self-signed certs without changing the production code path.
      * NEVER use in production.
      */
+    #[must_use] 
     pub fn with_insecure() -> Self {
         use silksurf_tls::RustlsProvider;
         Self {
@@ -550,6 +552,7 @@ impl SpeculativeRenderer {
      * returned FetchOrigin::Cache. Calling on an uncached URL sends an
      * unconditional GET (no validation headers), which is wasteful.
      */
+    #[must_use] 
     pub fn spawn_revalidation(&self, url: &str) -> RevalidationHandle {
         /*
          * Clone conditional headers before spawning: ResponseCache is !Send
@@ -616,6 +619,7 @@ impl SpeculativeRenderer {
     }
 
     /// Total bytes held in cache across all URLs.
+    #[must_use] 
     pub fn cache_bytes(&self) -> usize {
         self.cache.total_bytes()
     }

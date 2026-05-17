@@ -2,7 +2,7 @@
 //!
 //! WHY: The render pipeline produces an ARGB pixel buffer (one u32 per pixel,
 //! row-major). To make those pixels visible we need a real X11 drawable. We
-//! deliberately do not use SHM (XShm) yet -- the raw `PutImage` path is
+//! deliberately do not use SHM (`XShm`) yet -- the raw `PutImage` path is
 //! simpler, has no shared-memory teardown semantics to get wrong, and is
 //! fast enough for the P6 slice (1280x720 @ ~3.5MB per frame is a single
 //! request thanks to BIG-REQUESTS, which xcb negotiates by default).
@@ -11,7 +11,7 @@
 //! ID, a graphics context for `PutImage`, the cached `WM_DELETE_WINDOW`
 //! atom, and the current logical size. The `present()` method ships a u32
 //! ARGB buffer to the server; `new()` opens the display, creates the
-//! window, sets WM_NAME, and registers WM_DELETE_WINDOW so the WM close
+//! window, sets `WM_NAME`, and registers `WM_DELETE_WINDOW` so the WM close
 //! button funnels through our event loop instead of slamming the
 //! connection shut.
 //!
@@ -37,7 +37,7 @@ pub struct XcbWindow {
     window_id: x::Window,
     /// Graphics context bound to `window_id`. Required by `PutImage` even
     /// though we do not configure foreground/background -- the GC carries
-    /// the function (GXcopy by default), the plane mask, and the clip
+    /// the function (`GXcopy` by default), the plane mask, and the clip
     /// region (none, by default).
     gc: x::Gcontext,
     /// Cached `WM_DELETE_WINDOW` atom. The event loop compares incoming
@@ -51,7 +51,7 @@ pub struct XcbWindow {
     width: u32,
     /// Logical height in pixels. Updated on Resize.
     height: u32,
-    /// Color depth (root_depth from the screen). Needed by `PutImage`
+    /// Color depth (`root_depth` from the screen). Needed by `PutImage`
     /// every call, so we cache it once at construction.
     depth: u8,
 }
@@ -91,8 +91,8 @@ impl XcbWindow {
         // Width/height fit into u16 on the X11 wire. We clamp at u16::MAX
         // (65535) which is well above any realistic screen size; this
         // never triggers in practice but keeps the cast lossless.
-        let wire_w: u16 = width.min(u16::MAX as u32) as u16;
-        let wire_h: u16 = height.min(u16::MAX as u32) as u16;
+        let wire_w: u16 = width.min(u32::from(u16::MAX)) as u16;
+        let wire_h: u16 = height.min(u32::from(u16::MAX)) as u16;
 
         connection.send_request(&x::CreateWindow {
             depth: x::COPY_FROM_PARENT as u8,
@@ -196,11 +196,13 @@ impl XcbWindow {
     /// X11 window ID. Useful for callers that want to make their own
     /// requests against the window (custom properties, sub-windows,
     /// etc.) without going through this wrapper.
+    #[must_use] 
     pub fn window_id(&self) -> x::Window {
         self.window_id
     }
 
     /// Default screen index for this connection.
+    #[must_use] 
     pub fn screen_num(&self) -> i32 {
         self.screen_num
     }
@@ -213,8 +215,9 @@ impl XcbWindow {
 
     /// Cached `WM_PROTOCOLS` atom. Currently unused outside `new()`
     /// but kept in the API surface so that future protocol additions
-    /// (NET_WM_PING, NET_WM_SYNC_REQUEST, ...) do not need another
+    /// (`NET_WM_PING`, `NET_WM_SYNC_REQUEST`, ...) do not need another
     /// `InternAtom` round-trip.
+    #[must_use] 
     pub fn wm_protocols(&self) -> x::Atom {
         self.wm_protocols
     }
@@ -222,16 +225,19 @@ impl XcbWindow {
     /// Width in pixels. Tracks the most recent Resize event observed
     /// by the event loop -- not necessarily the server-side state if
     /// no events have been pumped yet.
+    #[must_use] 
     pub fn width(&self) -> u32 {
         self.width
     }
 
     /// Height in pixels. Same caveat as `width()`.
+    #[must_use] 
     pub fn height(&self) -> u32 {
         self.height
     }
 
     /// Borrow the underlying connection for advanced use cases.
+    #[must_use] 
     pub fn connection(&self) -> &xcb::Connection {
         &self.connection
     }
@@ -252,7 +258,7 @@ impl XcbWindow {
     /// On the X11 wire each pixel is sent little-endian: byte 0 = B,
     /// byte 1 = G, byte 2 = R, byte 3 = A. This matches the in-memory
     /// layout of `[u32]` on little-endian hosts; on big-endian hosts
-    /// the bytes would need swapping. SilkSurf is x86_64 / aarch64-LE
+    /// the bytes would need swapping. `SilkSurf` is `x86_64` / aarch64-LE
     /// only (both little-endian, see ADR-008), so we do not pay for
     /// a swap pass here.
     ///
@@ -261,7 +267,7 @@ impl XcbWindow {
     /// transparently up to a server-negotiated limit (~16 MiB on
     /// modern X servers, far above our 3.5 MiB worst case at 1280x720).
     /// SHM gives us roughly a 2-3x speedup but adds a multi-step
-    /// teardown contract (segment attach/detach, ShmCompletion event)
+    /// teardown contract (segment attach/detach, `ShmCompletion` event)
     /// that we do not want to land at the same time as the very
     /// first window-mode integration.
     pub fn present(&self, pixels: &[u32]) {
@@ -281,7 +287,7 @@ impl XcbWindow {
         // we only borrow for the duration of the slice and the resulting
         // slice is read-only -- no aliasing concerns.
         let byte_view: &[u8] =
-            unsafe { std::slice::from_raw_parts(pixels.as_ptr() as *const u8, pixel_count * 4) };
+            unsafe { std::slice::from_raw_parts(pixels.as_ptr().cast::<u8>(), pixel_count * 4) };
 
         // Maximum bytes per request (in 4-byte units * 4). Subtract a
         // generous header allowance (~64 bytes) so we never bump the
@@ -316,7 +322,7 @@ impl XcbWindow {
                 format: x::ImageFormat::ZPixmap,
                 drawable: x::Drawable::Window(self.window_id),
                 gc: self.gc,
-                width: self.width.min(u16::MAX as u32) as u16,
+                width: self.width.min(u32::from(u16::MAX)) as u16,
                 height: rows_this_strip.min(u16::MAX as usize) as u16,
                 dst_x: 0,
                 dst_y: row_offset.min(i16::MAX as usize) as i16,

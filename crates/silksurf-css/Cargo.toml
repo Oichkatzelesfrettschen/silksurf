@@ -22,3 +22,6 @@ encoding_rs = "0.8"
 # ComputedStyleSoA type for cache-efficient per-property access.
 # Use: cargo build -p silksurf-css --features cs-soa
 cs-soa = []
+
+[lints]
+workspace = true

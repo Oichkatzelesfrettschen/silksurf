@@ -241,9 +241,9 @@ pub struct BoxShadow {
     pub inset: bool,
 }
 
-/// CSS linear-gradient() value.
+/// CSS `linear-gradient()` value.
 ///
-/// angle_deg follows CSS convention: 0 = to-top, 90 = to-right, 180 = to-bottom.
+/// `angle_deg` follows CSS convention: 0 = to-top, 90 = to-right, 180 = to-bottom.
 /// stops positions are in the range [0.0, 1.0] (0% to 100%).
 #[derive(Debug, Clone, PartialEq)]
 pub struct LinearGradient {
@@ -262,10 +262,12 @@ pub enum Length {
 }
 
 impl Length {
+    #[must_use] 
     pub fn zero() -> Self {
         Length::Px(0.0)
     }
 
+    #[must_use] 
     pub fn is_zero(&self) -> bool {
         match self {
             Length::Px(v) | Length::Percent(v) | Length::Em(v) | Length::Rem(v) => *v == 0.0,
@@ -290,6 +292,7 @@ pub struct Color {
 }
 
 impl Color {
+    #[must_use] 
     pub fn black() -> Self {
         Self {
             r: 0,
@@ -299,6 +302,7 @@ impl Color {
         }
     }
 
+    #[must_use] 
     pub fn transparent() -> Self {
         Self {
             r: 0,
@@ -318,6 +322,7 @@ pub struct Edges {
 }
 
 impl Edges {
+    #[must_use] 
     pub fn all(value: Length) -> Self {
         Self {
             top: value,
@@ -341,6 +346,7 @@ pub struct Margins {
 }
 
 impl Margins {
+    #[must_use] 
     pub fn all(v: LengthOrAuto) -> Self {
         Self {
             top: v,
@@ -350,6 +356,7 @@ impl Margins {
         }
     }
 
+    #[must_use] 
     pub fn zero() -> Self {
         Self::all(LengthOrAuto::Length(Length::zero()))
     }
@@ -479,9 +486,9 @@ impl<T: Clone> ResolvedProperty<T> {
 
 #[derive(Default)]
 struct CascadedStyle {
-    /// CSS-wide keyword overrides (inherit/initial/unset) keyed by PropertyId.
+    /// CSS-wide keyword overrides (inherit/initial/unset) keyed by `PropertyId`.
     /// When a keyword is set with higher cascade priority than the typed slot,
-    /// resolve() applies keyword behavior instead of the typed value.
+    /// `resolve()` applies keyword behavior instead of the typed value.
     keyword_slots: FxHashMap<crate::property_id::PropertyId, ResolvedProperty<CascadeKeyword>>,
     display: Option<ResolvedProperty<Display>>,
     color: Option<ResolvedProperty<Color>>,
@@ -630,18 +637,17 @@ impl CascadedStyle {
 
         // font-size: em is relative to the *parent* font-size (CSS spec).
         let parent_font_size_px = parent
-            .map(|s| match s.font_size {
+            .map_or(16.0, |s| match s.font_size {
                 Length::Px(v) => v,
                 _ => 16.0,
-            })
-            .unwrap_or(16.0);
+            });
         // font-size is inherited; also check for a cascade keyword override.
         let raw_font_size = {
             let fs_kw = ks.get(&PropertyId::FontSize);
             if keyword_beats_typed(fs_kw, &self.font_size) {
                 match fs_kw.unwrap().value {
                     CascadeKeyword::Inherit | CascadeKeyword::Unset => {
-                        parent.map(|s| s.font_size).unwrap_or(fallback.font_size)
+                        parent.map_or(fallback.font_size, |s| s.font_size)
                     }
                     CascadeKeyword::Initial => fallback.font_size,
                 }
@@ -657,7 +663,7 @@ impl CascadedStyle {
             Length::Em(m) => Length::Px(m * parent_font_size_px),
             Length::Rem(m) => Length::Px(m * rem_base_px),
             Length::Percent(p) => Length::Px(p / 100.0 * parent_font_size_px),
-            other => other,
+            other @ Length::Px(_) => other,
         };
         // All non-font-size length properties use the element's own font-size as em base.
         let em_px = match resolved_font_size {
@@ -691,7 +697,7 @@ impl CascadedStyle {
                     if keyword_beats_typed(lh_kw, &self.line_height) {
                         match lh_kw.unwrap().value {
                             CascadeKeyword::Inherit | CascadeKeyword::Unset => {
-                                parent.map(|s| s.line_height).unwrap_or(resolved_font_size)
+                                parent.map_or(resolved_font_size, |s| s.line_height)
                             }
                             CascadeKeyword::Initial => resolved_font_size,
                         }
@@ -709,9 +715,7 @@ impl CascadedStyle {
                 let ff_kw = ks.get(&PropertyId::FontFamily);
                 if keyword_beats_typed(ff_kw, &self.font_family) {
                     match ff_kw.unwrap().value {
-                        CascadeKeyword::Inherit | CascadeKeyword::Unset => parent
-                            .map(|s| s.font_family.clone())
-                            .unwrap_or_else(|| fallback.font_family.clone()),
+                        CascadeKeyword::Inherit | CascadeKeyword::Unset => parent.map_or_else(|| fallback.font_family.clone(), |s| s.font_family.clone()),
                         CascadeKeyword::Initial => fallback.font_family.clone(),
                     }
                 } else {
@@ -1276,33 +1280,35 @@ pub struct StyleIndex {
     id_rules: FxHashMap<SelectorIdent, Vec<IndexedSelector>>,
     class_rules: FxHashMap<SelectorIdent, Vec<IndexedSelector>>,
     universal_rules: Vec<IndexedSelector>,
-    /// Flat list of active StyleRules: top-level rules plus children of
-    /// @media rules whose query matched the build viewport. The rule_index
-    /// field of every IndexedSelector indexes into this vec, not into
-    /// stylesheet.rules. Cascade lookups go through active_rules exclusively.
+    /// Flat list of active `StyleRules`: top-level rules plus children of
+    /// @media rules whose query matched the build viewport. The `rule_index`
+    /// field of every `IndexedSelector` indexes into this vec, not into
+    /// stylesheet.rules. Cascade lookups go through `active_rules` exclusively.
     pub active_rules: Vec<StyleRule>,
     /// Total number of unique (rule, selector) pairs. Used to size the
-    /// CascadeWorkspace::seen_bits bitvec for O(1) dedup without hashing.
+    /// `CascadeWorkspace::seen_bits` bitvec for O(1) dedup without hashing.
     pub total_selector_pairs: usize,
 }
 
 impl StyleIndex {
     /// Construct with the default 1280x800 viewport (matches typical desktop
-    /// render target; callers with a known viewport should use for_viewport).
+    /// render target; callers with a known viewport should use `for_viewport`).
+    #[must_use] 
     pub fn new(stylesheet: &Stylesheet) -> Self {
         Self::for_viewport(stylesheet, 1280.0, 800.0)
     }
 
-    /// Build a StyleIndex that includes @media children whose query matches
+    /// Build a `StyleIndex` that includes @media children whose query matches
     /// the given viewport dimensions (pixels).
     ///
     /// Top-level Style rules are always included. @media rules are evaluated
-    /// against (viewport_w, viewport_h); matching rules' children are promoted
-    /// into active_rules. Non-media At rules (@keyframes, @supports, etc.) are
+    /// against (`viewport_w`, `viewport_h`); matching rules' children are promoted
+    /// into `active_rules`. Non-media At rules (@keyframes, @supports, etc.) are
     /// skipped entirely -- they contribute no selector-matchable style rules.
     ///
     /// Unknown or complex @media queries default to true (safe fallback: apply
-    /// the rules). This matches media.rs evaluate_media_query semantics.
+    /// the rules). This matches media.rs `evaluate_media_query` semantics.
+    #[must_use] 
     pub fn for_viewport(stylesheet: &Stylesheet, viewport_w: f32, viewport_h: f32) -> Self {
         // Flatten stylesheet into a contiguous Vec<StyleRule> of active rules.
         // rule_index fields in IndexedSelector index into this vec.
@@ -1513,14 +1519,15 @@ fn node_tag_id_class(
 pub struct CascadeWorkspace {
     matched_by_rule: Vec<Option<Specificity>>,
     candidates: Vec<IndexedSelector>,
-    /// Bitvec tracking visited (rule, selector) pairs via pair_id.
-    /// Word i covers pair_ids [64*i..64*(i+1)). Cleared via fill(0) in prepare().
+    /// Bitvec tracking visited (rule, selector) pairs via `pair_id`.
+    /// Word i covers `pair_ids` [64*i..64*(i+1)). Cleared via fill(0) in `prepare()`.
     seen_bits: Vec<u64>,
     /// Reusable scratch for class key collection per node (Fix 2).
     class_keys: Vec<SelectorIdent>,
 }
 
 impl CascadeWorkspace {
+    #[must_use] 
     pub fn new(rules_len: usize) -> Self {
         Self {
             matched_by_rule: vec![None; rules_len],
@@ -1602,6 +1609,7 @@ pub struct StyleCache {
 
 #[allow(dead_code)]
 impl StyleCache {
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             generation: 0,
@@ -1609,14 +1617,17 @@ impl StyleCache {
         }
     }
 
+    #[must_use] 
     pub fn generation(&self) -> u64 {
         self.generation
     }
 
+    #[must_use] 
     pub fn styles(&self) -> &FxHashMap<NodeId, ComputedStyle> {
         self.styles.as_ref()
     }
 
+    #[must_use] 
     pub fn styles_arc(&self) -> Arc<FxHashMap<NodeId, ComputedStyle>> {
         Arc::clone(&self.styles)
     }
@@ -1812,8 +1823,7 @@ fn compute_styles_recursive(
         .element_name(node)
         .ok()
         .flatten()
-        .map(|name| name.eq_ignore_ascii_case("html"))
-        .unwrap_or(false)
+        .is_some_and(|name| name.eq_ignore_ascii_case("html"))
     {
         match style.font_size {
             Length::Px(v) => v,
@@ -3060,6 +3070,10 @@ fn parse_text_align(tokens: &[CssToken]) -> Option<TextAlign> {
 }
 
 fn parse_font_weight(tokens: &[CssToken]) -> Option<FontWeight> {
+    // The Whitespace arm is explicit so the find_map skips leading and
+    // trailing whitespace tokens; collapsing it into the wildcard would
+    // hide that intent.
+    #[allow(clippy::match_same_arms)]
     tokens.iter().find_map(|token| match token {
         CssToken::Whitespace => None,
         CssToken::Ident(value) => match value.to_ascii_lowercase().as_str() {
@@ -3121,8 +3135,8 @@ fn parse_box_shadow(tokens: &[CssToken]) -> Option<BoxShadow> {
     Some(BoxShadow {
         offset_x: px(&lengths[0]),
         offset_y: px(&lengths[1]),
-        blur_radius: lengths.get(2).map(px).unwrap_or(0.0),
-        spread_radius: lengths.get(3).map(px).unwrap_or(0.0),
+        blur_radius: lengths.get(2).map_or(0.0, px),
+        spread_radius: lengths.get(3).map_or(0.0, px),
         color: color.unwrap_or_else(Color::black),
         inset,
     })
@@ -3237,7 +3251,7 @@ fn gradient_angle(tokens: &[&CssToken]) -> Option<f32> {
             value.parse::<f32>().ok().map(|g| g * 0.9)
         }
         [CssToken::Dimension { value, unit }] if unit.eq_ignore_ascii_case("rad") => {
-            value.parse::<f32>().ok().map(|r| r.to_degrees())
+            value.parse::<f32>().ok().map(f32::to_degrees)
         }
         [CssToken::Dimension { value, unit }] if unit.eq_ignore_ascii_case("turn") => {
             value.parse::<f32>().ok().map(|t| t * 360.0)
@@ -3312,7 +3326,7 @@ fn parse_flex_shorthand(tokens: &[CssToken]) -> (Option<f32>, Option<f32>, Optio
     let mut basis: Option<FlexBasis> = None;
     for token in tokens {
         match token {
-            CssToken::Whitespace => continue,
+            CssToken::Whitespace => {}
             CssToken::Number(v) => {
                 if let Ok(n) = v.parse::<f32>() {
                     numbers.push(n);
@@ -3365,7 +3379,7 @@ fn parse_border_shorthand(
     let mut color: Option<Color> = None;
     for token in tokens {
         match token {
-            CssToken::Whitespace => continue,
+            CssToken::Whitespace => {}
             CssToken::Dimension { value, unit } if unit.eq_ignore_ascii_case("px") => {
                 if width.is_none() {
                     width = value.parse::<f32>().ok().map(Length::Px);
@@ -3582,6 +3596,14 @@ fn parse_color(tokens: &[CssToken]) -> Option<Color> {
     }
 }
 
+// Helper that builds an opaque named-color triple. Wrapped in Some by the
+// caller (parse_named_color) so the giant match-arm table reads as a flat
+// dispatcher rather than a sea of Some(Color { ... }) constructors.
+//
+// The wildcard `_ => None` arm of parse_named_color requires the match to
+// return Option<Color>, so we keep this helper returning Option as well to
+// avoid sprinkling Some(...) across 148 match arms.
+#[allow(clippy::unnecessary_wraps)]
 fn named_color(r: u8, g: u8, b: u8) -> Option<Color> {
     Some(Color { r, g, b, a: 255 })
 }
@@ -3763,6 +3785,10 @@ where
 {
     let mut values = Vec::new();
     for token in iter {
+        // Comma and Whitespace are explicit no-ops so the rgb()/rgba()
+        // separator handling is visible at a glance; the wildcard arm
+        // covers any other unexpected token types.
+        #[allow(clippy::match_same_arms)]
         match token {
             CssToken::Number(_) | CssToken::Percentage(_) => {
                 if let Some(value) = parse_rgb_component(token) {

@@ -1,12 +1,17 @@
 use silksurf_css::Color;
 use silksurf_text::{measure_text, rasterize_glyphs};
 
-/// Empty string returns zero dimensions without panicking.
+/// Empty string returns zero dimensions without panicking. We compare the
+/// raw f32 against 0.0 because the contract guarantees the function returns
+/// the integer-equivalent zero (not a small epsilon).
 #[test]
 fn measure_empty_text_is_zero() {
     let (w, h) = measure_text("", 16.0, None);
-    assert_eq!(w, 0.0);
-    assert_eq!(h, 0.0);
+    #[allow(clippy::float_cmp)]
+    {
+        assert_eq!(w, 0.0);
+        assert_eq!(h, 0.0);
+    }
 }
 
 /// Non-empty text has positive width and height.
@@ -43,7 +48,7 @@ fn measure_narrow_max_width_increases_height() {
     );
 }
 
-/// rasterize_glyphs does not panic on empty text.
+/// `rasterize_glyphs` does not panic on empty text.
 #[test]
 fn rasterize_glyphs_empty_text_is_noop() {
     let mut buf = vec![0xffu8; 32 * 32 * 4];
@@ -59,7 +64,7 @@ fn rasterize_glyphs_empty_text_is_noop() {
     rasterize_glyphs("", 16.0, color, &mut pixmap, (0.0, 0.0));
 }
 
-/// rasterize_glyphs draws at least one non-white pixel when given opaque text.
+/// `rasterize_glyphs` draws at least one non-white pixel when given opaque text.
 #[test]
 fn rasterize_glyphs_marks_pixels() {
     let mut buf = vec![0xffu8; 64 * 64 * 4];

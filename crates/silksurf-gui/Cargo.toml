@@ -33,3 +33,6 @@ silksurf-render = { path = "../silksurf-render" }
 xcb = "1.7"
 winit = { workspace = true, optional = true }
 softbuffer = { workspace = true, optional = true }
+
+[lints]
+workspace = true

@@ -37,10 +37,10 @@ const COUNTS: &[usize] = &[3, 16, 4001];
 //   0x12345678 -- four distinct nibble values; byte-order bugs produce a
 //                 permuted value that differs from the scalar path.
 // ---------------------------------------------------------------------------
-const COLORS: &[u32] = &[0x00000000, 0xFFFFFFFF, 0xFF0000FF, 0x80808080, 0x12345678];
+const COLORS: &[u32] = &[0x0000_0000, 0xFFFF_FFFF, 0xFF00_00FF, 0x8080_8080, 0x1234_5678];
 
 fn make_buf(len: usize) -> Vec<u32> {
-    vec![0xDEADBEEF_u32; len]
+    vec![0xDEAD_BEEF_u32; len]
 }
 
 // ---------------------------------------------------------------------------

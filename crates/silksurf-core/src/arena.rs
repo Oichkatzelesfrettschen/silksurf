@@ -6,6 +6,7 @@ pub struct SilkArena {
 }
 
 impl SilkArena {
+    #[must_use] 
     pub fn new() -> Self {
         Self { bump: Bump::new() }
     }
@@ -18,7 +19,7 @@ impl SilkArena {
         self.bump.alloc_str(value)
     }
 
-    pub fn vec<'a, T>(&'a self) -> ArenaVec<'a, T> {
+    pub fn vec<T>(&self) -> ArenaVec<'_, T> {
         ArenaVec::new_in(&self.bump)
     }
 

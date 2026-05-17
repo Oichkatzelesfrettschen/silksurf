@@ -64,7 +64,7 @@ if (true) {
     let total_bytes = bytes * iterations;
     let throughput = total_bytes as f64 / elapsed.as_secs_f64() / 1024.0 / 1024.0;
 
-    println!("Parsed {} iterations in {:?}", iterations, elapsed);
+    println!("Parsed {iterations} iterations in {elapsed:?}");
     println!("Average: {:?}/parse", elapsed / iterations as u32);
-    println!("Throughput: {:.2} MB/s", throughput);
+    println!("Throughput: {throughput:.2} MB/s");
 }
