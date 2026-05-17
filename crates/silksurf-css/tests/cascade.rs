@@ -57,7 +57,7 @@ fn cascades_and_inherits() {
 
 #[test]
 fn cascades_line_height_and_border() {
-    let stylesheet = parse_stylesheet("p { line-height: 18px; border: 2px 4px; }").unwrap();
+    let stylesheet = parse_stylesheet("p { line-height: 18px; border-width: 2px 4px; }").unwrap();
 
     let mut dom = Dom::new();
     let doc = dom.create_document();
