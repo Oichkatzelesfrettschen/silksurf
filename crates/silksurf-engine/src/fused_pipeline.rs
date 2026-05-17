@@ -159,6 +159,7 @@ impl FusedWorkspace {
         // Pass 1: cascade -- compute ComputedStyle for every BFS node.
         // Each node reads its parent's style (already computed, since BFS
         // processes parents before children).
+        let mut rem_base_px = 16.0_f32;
         for (i, &node) in self.table.bfs_order.iter().enumerate() {
             let pidx = self.table.parent_idx[i];
             let parent_style = if pidx == u32::MAX {
@@ -174,7 +175,18 @@ impl FusedWorkspace {
                 parent_style,
                 &mut self.cascade_ws,
                 Some(&self.cascade_view),
+                rem_base_px,
             );
+            if dom
+                .element_name(node)
+                .ok()
+                .flatten()
+                .map(|n| n.eq_ignore_ascii_case("html"))
+                .unwrap_or(false)
+                && let silksurf_css::Length::Px(v) = style.font_size
+            {
+                rem_base_px = v;
+            }
             self.styles[i] = Some(style);
         }
 
@@ -323,6 +335,7 @@ pub fn fused_style_layout_paint(
     let mut display_items: Vec<DisplayItem> = Vec::new();
 
     // Pass 1: cascade
+    let mut rem_base_px = 16.0_f32;
     for (i, &node) in table.bfs_order.iter().enumerate() {
         let pidx = table.parent_idx[i];
         let parent_style = if pidx == u32::MAX {
@@ -338,7 +351,18 @@ pub fn fused_style_layout_paint(
             parent_style,
             &mut cascade_ws,
             None,
+            rem_base_px,
         );
+        if dom
+            .element_name(node)
+            .ok()
+            .flatten()
+            .map(|n| n.eq_ignore_ascii_case("html"))
+            .unwrap_or(false)
+            && let silksurf_css::Length::Px(v) = style.font_size
+        {
+            rem_base_px = v;
+        }
         styles[i] = Some(style);
     }
 

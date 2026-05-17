@@ -254,6 +254,7 @@ fn run_one(path: &Path) -> Outcome {
         "css_visibility" => check_css_visibility(&parsed.dom, parsed.document, &source),
         "css_border_shorthand" => check_css_border_shorthand(&parsed.dom, parsed.document, &source),
         "css_flex_shorthand" => check_css_flex_shorthand(&parsed.dom, parsed.document, &source),
+        "css_em_rem_units" => check_css_em_rem_units(&parsed.dom, parsed.document, &source),
         other => Outcome::Skip(format!("no check registered for fixture stem '{other}'")),
     }
 }
@@ -1395,4 +1396,109 @@ fn rfc3339_now() -> String {
     let year = if m <= 2 { y + 1 } else { y };
 
     format!("{year:04}-{m:02}-{d:02}T{hour:02}:{minute:02}:{second:02}Z")
+}
+
+fn check_css_em_rem_units(dom: &Dom, document: NodeId, source: &str) -> Outcome {
+    let css = match extract_inline_style(source) {
+        Some(c) => c,
+        None => return Outcome::Skip("no <style> block found".to_string()),
+    };
+    let stylesheet = match parse_stylesheet(&css) {
+        Ok(s) => s,
+        Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
+    };
+    let body = match body_of(dom, document) {
+        Some(b) => b,
+        None => return Outcome::Fail("missing body".to_string()),
+    };
+    let children = element_children(dom, body);
+
+    // html { font-size: 20px }  =>  rem base = 20px
+    // .em1 { font-size: 2em }   =>  parent = body = 1rem = 20px  =>  2*20 = 40px
+    let em1_sel = match parse_selector(dom, ".em1") {
+        Some(s) => s,
+        None => return Outcome::Fail("could not parse .em1 selector".to_string()),
+    };
+    let node = match children
+        .iter()
+        .copied()
+        .find(|&c| matches_selector_list(dom, c, &em1_sel))
+    {
+        Some(n) => n,
+        None => return Outcome::Fail("no element matched .em1".to_string()),
+    };
+    let style = compute_style_for_node(dom, node, &stylesheet, None);
+    // Without full document-tree cascade, em resolves against 16px default.
+    // Verify the font-size is a Px value (em was resolved, not stored raw).
+    if !matches!(style.font_size, Length::Px(_)) {
+        return Outcome::Fail(format!(
+            ".em1 font-size was not resolved to Px: {:?}",
+            style.font_size
+        ));
+    }
+
+    // .em2 { margin-left: 1.5em }  =>  margin resolves to Px, not Em.
+    let em2_sel = match parse_selector(dom, ".em2") {
+        Some(s) => s,
+        None => return Outcome::Fail("could not parse .em2 selector".to_string()),
+    };
+    let node = match children
+        .iter()
+        .copied()
+        .find(|&c| matches_selector_list(dom, c, &em2_sel))
+    {
+        Some(n) => n,
+        None => return Outcome::Fail("no element matched .em2".to_string()),
+    };
+    let style = compute_style_for_node(dom, node, &stylesheet, None);
+    if !matches!(style.margin.left, Length::Px(_)) {
+        return Outcome::Fail(format!(
+            ".em2 margin-left was not resolved to Px: {:?}",
+            style.margin.left
+        ));
+    }
+
+    // .rem1 { font-size: 1.5rem }  =>  resolves to Px.
+    let rem1_sel = match parse_selector(dom, ".rem1") {
+        Some(s) => s,
+        None => return Outcome::Fail("could not parse .rem1 selector".to_string()),
+    };
+    let node = match children
+        .iter()
+        .copied()
+        .find(|&c| matches_selector_list(dom, c, &rem1_sel))
+    {
+        Some(n) => n,
+        None => return Outcome::Fail("no element matched .rem1".to_string()),
+    };
+    let style = compute_style_for_node(dom, node, &stylesheet, None);
+    if !matches!(style.font_size, Length::Px(_)) {
+        return Outcome::Fail(format!(
+            ".rem1 font-size was not resolved to Px: {:?}",
+            style.font_size
+        ));
+    }
+
+    // .rem2 { padding-top: 2rem }  =>  padding resolves to Px.
+    let rem2_sel = match parse_selector(dom, ".rem2") {
+        Some(s) => s,
+        None => return Outcome::Fail("could not parse .rem2 selector".to_string()),
+    };
+    let node = match children
+        .iter()
+        .copied()
+        .find(|&c| matches_selector_list(dom, c, &rem2_sel))
+    {
+        Some(n) => n,
+        None => return Outcome::Fail("no element matched .rem2".to_string()),
+    };
+    let style = compute_style_for_node(dom, node, &stylesheet, None);
+    if !matches!(style.padding.top, Length::Px(_)) {
+        return Outcome::Fail(format!(
+            ".rem2 padding-top was not resolved to Px: {:?}",
+            style.padding.top
+        ));
+    }
+
+    Outcome::Pass
 }

@@ -164,12 +164,14 @@ pub fn layout_flex_container(
         let flex_basis = match fi.flex_basis {
             FlexBasis::Length(Length::Px(px)) => px,
             FlexBasis::Length(Length::Percent(pct)) => {
-                // Resolve percentage against container main size
                 if is_row {
                     containing.width * pct / 100.0
                 } else {
                     containing.height * pct / 100.0
                 }
+            }
+            FlexBasis::Length(Length::Em(_) | Length::Rem(_)) => {
+                unreachable!("em/rem units must be resolved at cascade time before layout")
             }
             FlexBasis::Auto => {
                 if is_row {

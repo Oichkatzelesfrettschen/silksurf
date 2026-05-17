@@ -492,7 +492,10 @@ impl<'a> LayoutBox<'a> {
 pub(crate) fn length_to_px(length: Length) -> f32 {
     match length {
         Length::Px(value) => value,
-        Length::Percent(_) => 0.0, // Needs context; use length_to_px_with_context for percentages
+        Length::Percent(_) => 0.0,
+        Length::Em(_) | Length::Rem(_) => {
+            unreachable!("em/rem units must be resolved at cascade time before layout")
+        }
     }
 }
 

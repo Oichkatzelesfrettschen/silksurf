@@ -234,6 +234,9 @@ fn length_auto(l: Length) -> LengthPercentageAuto {
     match l {
         Length::Px(px) => LengthPercentageAuto::length(px),
         Length::Percent(p) => LengthPercentageAuto::percent(p / 100.0),
+        Length::Em(_) | Length::Rem(_) => {
+            unreachable!("em/rem units must be resolved at cascade time before layout")
+        }
     }
 }
 
@@ -241,6 +244,9 @@ fn length_pct(l: Length) -> LengthPercentage {
     match l {
         Length::Px(px) => LengthPercentage::length(px),
         Length::Percent(p) => LengthPercentage::percent(p / 100.0),
+        Length::Em(_) | Length::Rem(_) => {
+            unreachable!("em/rem units must be resolved at cascade time before layout")
+        }
     }
 }
 
@@ -314,6 +320,9 @@ fn css_to_taffy_style(style: Option<&ComputedStyle>) -> Style {
         FlexBasis::Auto => Dimension::auto(),
         FlexBasis::Length(Length::Px(px)) => Dimension::length(px),
         FlexBasis::Length(Length::Percent(p)) => Dimension::percent(p / 100.0),
+        FlexBasis::Length(Length::Em(_) | Length::Rem(_)) => {
+            unreachable!("em/rem units must be resolved at cascade time before layout")
+        }
     };
 
     let gap_col = LengthPercentage::length(
@@ -378,6 +387,9 @@ fn length_or_auto_dim(v: LengthOrAuto) -> Dimension {
         LengthOrAuto::Auto => Dimension::auto(),
         LengthOrAuto::Length(Length::Px(px)) => Dimension::length(px),
         LengthOrAuto::Length(Length::Percent(p)) => Dimension::percent(p / 100.0),
+        LengthOrAuto::Length(Length::Em(_) | Length::Rem(_)) => {
+            unreachable!("em/rem units must be resolved at cascade time before layout")
+        }
     }
 }
 
@@ -385,6 +397,9 @@ fn length_dim(v: Length) -> Dimension {
     match v {
         Length::Px(px) => Dimension::length(px),
         Length::Percent(p) => Dimension::percent(p / 100.0),
+        Length::Em(_) | Length::Rem(_) => {
+            unreachable!("em/rem units must be resolved at cascade time before layout")
+        }
     }
 }
 
@@ -393,6 +408,9 @@ fn opt_length_dim(v: Option<Length>) -> Dimension {
         None => Dimension::auto(),
         Some(Length::Px(px)) => Dimension::length(px),
         Some(Length::Percent(p)) => Dimension::percent(p / 100.0),
+        Some(Length::Em(_) | Length::Rem(_)) => {
+            unreachable!("em/rem units must be resolved at cascade time before layout")
+        }
     }
 }
 
