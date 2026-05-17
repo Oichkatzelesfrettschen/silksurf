@@ -86,6 +86,11 @@ pub enum PropertyId {
     PaddingRight = 58,
     PaddingBottom = 59,
     PaddingLeft = 60,
+    // Individual border sides (width only; style/color remain global per current architecture)
+    BorderTop = 61,
+    BorderRight = 62,
+    BorderBottom = 63,
+    BorderLeft = 64,
     Unknown = 255,
 }
 
@@ -119,6 +124,10 @@ pub fn lookup_property_id(name: &str) -> PropertyId {
         (b'b', 12) if name.eq_ignore_ascii_case("border-style") => PropertyId::BorderStyle,
         (b'b', 6) if name.eq_ignore_ascii_case("bottom") => PropertyId::Bottom,
         (b'b', 13) if name.eq_ignore_ascii_case("border-radius") => PropertyId::BorderRadius,
+        (b'b', 10) if name.eq_ignore_ascii_case("border-top") => PropertyId::BorderTop,
+        (b'b', 11) if name.eq_ignore_ascii_case("border-left") => PropertyId::BorderLeft,
+        (b'b', 12) if name.eq_ignore_ascii_case("border-right") => PropertyId::BorderRight,
+        (b'b', 13) if name.eq_ignore_ascii_case("border-bottom") => PropertyId::BorderBottom,
         (b'b', 10) if name.eq_ignore_ascii_case("box-shadow") => PropertyId::BoxShadow,
         // 'f' prefix
         (b'f', 9) if name.eq_ignore_ascii_case("font-size") => PropertyId::FontSize,

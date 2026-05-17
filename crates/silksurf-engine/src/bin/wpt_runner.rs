@@ -262,6 +262,9 @@ fn run_one(path: &Path) -> Outcome {
         "css_cascade_keywords" => {
             check_css_cascade_keywords(&parsed.dom, parsed.document, &source)
         }
+        "css_individual_borders" => {
+            check_css_individual_borders(&parsed.dom, parsed.document, &source)
+        }
         other => Outcome::Skip(format!("no check registered for fixture stem '{other}'")),
     }
 }
@@ -1810,6 +1813,104 @@ fn check_css_cascade_keywords(dom: &Dom, document: NodeId, source: &str) -> Outc
         return Outcome::Fail(format!(
             "#unset-display: expected Inline (unset=initial for non-inherited), got {:?}",
             unset_display.display
+        ));
+    }
+
+    Outcome::Pass
+}
+
+fn check_css_individual_borders(dom: &Dom, document: NodeId, source: &str) -> Outcome {
+    let css = match extract_inline_style(source) {
+        Some(c) => c,
+        None => return Outcome::Skip("no <style> block found".to_string()),
+    };
+    let stylesheet = match parse_stylesheet(&css) {
+        Ok(s) => s,
+        Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
+    };
+
+    let get_style = |id: &str| -> Option<silksurf_css::ComputedStyle> {
+        let selector_str = format!("#{id}");
+        let sel = parse_selector(dom, &selector_str)?;
+        let node = find_element(dom, document, &sel)?;
+        Some(compute_style_for_node(dom, node, &stylesheet, None))
+    };
+
+    // #a { border-top: 3px solid red } -> top=3px, others=0
+    let a = match get_style("a") {
+        Some(s) => s,
+        None => return Outcome::Fail("element #a not found".to_string()),
+    };
+    if a.border.top != Length::Px(3.0) {
+        return Outcome::Fail(format!(
+            "#a border-top: expected 3px, got {:?}",
+            a.border.top
+        ));
+    }
+    if a.border.right != Length::Px(0.0)
+        || a.border.bottom != Length::Px(0.0)
+        || a.border.left != Length::Px(0.0)
+    {
+        return Outcome::Fail(format!(
+            "#a: other sides expected 0, got right={:?} bottom={:?} left={:?}",
+            a.border.right, a.border.bottom, a.border.left
+        ));
+    }
+
+    // #b { border-right: 5px } -> right=5px
+    let b = match get_style("b") {
+        Some(s) => s,
+        None => return Outcome::Fail("element #b not found".to_string()),
+    };
+    if b.border.right != Length::Px(5.0) {
+        return Outcome::Fail(format!(
+            "#b border-right: expected 5px, got {:?}",
+            b.border.right
+        ));
+    }
+
+    // #c { border-bottom: 2px } -> bottom=2px
+    let c = match get_style("c") {
+        Some(s) => s,
+        None => return Outcome::Fail("element #c not found".to_string()),
+    };
+    if c.border.bottom != Length::Px(2.0) {
+        return Outcome::Fail(format!(
+            "#c border-bottom: expected 2px, got {:?}",
+            c.border.bottom
+        ));
+    }
+
+    // #d { border-left: 7px } -> left=7px
+    let d = match get_style("d") {
+        Some(s) => s,
+        None => return Outcome::Fail("element #d not found".to_string()),
+    };
+    if d.border.left != Length::Px(7.0) {
+        return Outcome::Fail(format!(
+            "#d border-left: expected 7px, got {:?}",
+            d.border.left
+        ));
+    }
+
+    // #e { border: 10px; border-top: 4px } -> top=4px, others=10px
+    let e = match get_style("e") {
+        Some(s) => s,
+        None => return Outcome::Fail("element #e not found".to_string()),
+    };
+    if e.border.top != Length::Px(4.0) {
+        return Outcome::Fail(format!(
+            "#e border-top: expected 4px (individual wins), got {:?}",
+            e.border.top
+        ));
+    }
+    if e.border.right != Length::Px(10.0)
+        || e.border.bottom != Length::Px(10.0)
+        || e.border.left != Length::Px(10.0)
+    {
+        return Outcome::Fail(format!(
+            "#e: other sides expected 10px, got right={:?} bottom={:?} left={:?}",
+            e.border.right, e.border.bottom, e.border.left
         ));
     }
 

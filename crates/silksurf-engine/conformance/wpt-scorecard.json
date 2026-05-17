@@ -1,12 +1,12 @@
 {
-  "total": 33,
-  "pass": 33,
+  "total": 34,
+  "pass": 34,
   "fail": 0,
   "skip": 0,
   "rate": 1.0000,
-  "timestamp": "2026-05-17T01:30:51Z",
+  "timestamp": "2026-05-17T01:35:54Z",
   "runner_version": "0.1.0",
   "runner_kind": "wpt-synthetic",
   "fixture_dir": "crates/silksurf-engine/conformance/wpt/fixtures",
-  "duration_secs": 0.001
+  "duration_secs": 0.007
 }
