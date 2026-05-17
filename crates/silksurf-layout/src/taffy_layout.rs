@@ -27,7 +27,7 @@ use rustc_hash::FxHashMap;
 use silksurf_css::{
     AlignItems as CssAlignItems, AlignSelf as CssAlignSelf, ComputedStyle, Display as CssDisplay,
     FlexBasis, FlexDirection as CssFlexDirection, FlexWrap as CssFlexWrap,
-    JustifyContent as CssJustifyContent, Length,
+    JustifyContent as CssJustifyContent, Length, LengthOrAuto,
 };
 use silksurf_dom::{Dom, NodeId as DomNodeId, NodeKind};
 use taffy::{
@@ -246,8 +246,10 @@ fn length_pct(l: Length) -> LengthPercentage {
 
 /// Convert a silksurf-css ComputedStyle to a taffy Style.
 ///
-/// Width/height are AUTO unless the style has explicit pixel/percent values.
-/// (ComputedStyle does not carry width/height yet; that is deferred to Phase 4.4.)
+/// Converts ComputedStyle to taffy::Style for layout computation.
+///
+/// Width/height/min/max are converted from `LengthOrAuto` / `Option<Length>` to
+/// taffy Dimension values. AUTO passes through as `Dimension::auto()`.
 fn css_to_taffy_style(style: Option<&ComputedStyle>) -> Style {
     let Some(style) = style else {
         // Return a block style that fills available space.
@@ -355,7 +357,42 @@ fn css_to_taffy_style(style: Option<&ComputedStyle>) -> Style {
             width: gap_col,
             height: gap_row,
         },
+        size: Size {
+            width: length_or_auto_dim(style.width),
+            height: length_or_auto_dim(style.height),
+        },
+        min_size: Size {
+            width: length_dim(style.min_width),
+            height: length_dim(style.min_height),
+        },
+        max_size: Size {
+            width: opt_length_dim(style.max_width),
+            height: opt_length_dim(style.max_height),
+        },
         ..Default::default()
+    }
+}
+
+fn length_or_auto_dim(v: LengthOrAuto) -> Dimension {
+    match v {
+        LengthOrAuto::Auto => Dimension::auto(),
+        LengthOrAuto::Length(Length::Px(px)) => Dimension::length(px),
+        LengthOrAuto::Length(Length::Percent(p)) => Dimension::percent(p / 100.0),
+    }
+}
+
+fn length_dim(v: Length) -> Dimension {
+    match v {
+        Length::Px(px) => Dimension::length(px),
+        Length::Percent(p) => Dimension::percent(p / 100.0),
+    }
+}
+
+fn opt_length_dim(v: Option<Length>) -> Dimension {
+    match v {
+        None => Dimension::auto(),
+        Some(Length::Px(px)) => Dimension::length(px),
+        Some(Length::Percent(p)) => Dimension::percent(p / 100.0),
     }
 }
 

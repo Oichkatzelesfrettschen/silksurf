@@ -26,8 +26,9 @@
  */
 
 use crate::{
-    BoxShadow, Color, ComputedStyle, Display, Edges, FlexContainerStyle, FlexItemStyle, FontStyle,
-    FontWeight, Length, LengthOrAuto, LinearGradient, Overflow, Position, TextAlign,
+    BorderStyle, BoxShadow, Color, ComputedStyle, Display, Edges, FlexContainerStyle,
+    FlexItemStyle, FontStyle, FontWeight, Length, LengthOrAuto, LinearGradient, Overflow, Position,
+    TextAlign, TextDecoration, Visibility, WhiteSpace,
 };
 use rustc_hash::FxHashMap;
 use silksurf_dom::NodeId;
@@ -320,6 +321,22 @@ pub(crate) struct ComputedStyleSoA {
     pub(crate) border_radius: Vec<f32>,
     pub(crate) box_shadow: Vec<Option<BoxShadow>>,
     pub(crate) background_image: Vec<Option<LinearGradient>>,
+    // Sizing
+    pub(crate) width: Vec<LengthOrAuto>,
+    pub(crate) height: Vec<LengthOrAuto>,
+    pub(crate) min_width: Vec<Length>,
+    pub(crate) max_width: Vec<Option<Length>>,
+    pub(crate) min_height: Vec<Length>,
+    pub(crate) max_height: Vec<Option<Length>>,
+    // Border rendering
+    pub(crate) border_color: Vec<Color>,
+    pub(crate) border_style: Vec<BorderStyle>,
+    // Text
+    pub(crate) text_decoration: Vec<TextDecoration>,
+    pub(crate) letter_spacing: Vec<f32>,
+    pub(crate) word_spacing: Vec<f32>,
+    pub(crate) white_space: Vec<WhiteSpace>,
+    pub(crate) visibility: Vec<Visibility>,
 }
 
 impl Default for ComputedStyleSoA {
@@ -361,6 +378,19 @@ impl ComputedStyleSoA {
             border_radius: Vec::new(),
             box_shadow: Vec::new(),
             background_image: Vec::new(),
+            width: Vec::new(),
+            height: Vec::new(),
+            min_width: Vec::new(),
+            max_width: Vec::new(),
+            min_height: Vec::new(),
+            max_height: Vec::new(),
+            border_color: Vec::new(),
+            border_style: Vec::new(),
+            text_decoration: Vec::new(),
+            letter_spacing: Vec::new(),
+            word_spacing: Vec::new(),
+            white_space: Vec::new(),
+            visibility: Vec::new(),
         }
     }
 
@@ -398,6 +428,19 @@ impl ComputedStyleSoA {
         self.border_radius.push(style.border_radius);
         self.box_shadow.push(style.box_shadow);
         self.background_image.push(style.background_image.clone());
+        self.width.push(style.width);
+        self.height.push(style.height);
+        self.min_width.push(style.min_width);
+        self.max_width.push(style.max_width);
+        self.min_height.push(style.min_height);
+        self.max_height.push(style.max_height);
+        self.border_color.push(style.border_color);
+        self.border_style.push(style.border_style);
+        self.text_decoration.push(style.text_decoration);
+        self.letter_spacing.push(style.letter_spacing);
+        self.word_spacing.push(style.word_spacing);
+        self.white_space.push(style.white_space);
+        self.visibility.push(style.visibility);
     }
 
     /*
@@ -437,6 +480,19 @@ impl ComputedStyleSoA {
             border_radius: self.border_radius[index],
             box_shadow: self.box_shadow[index],
             background_image: self.background_image[index].clone(),
+            width: self.width[index],
+            height: self.height[index],
+            min_width: self.min_width[index],
+            max_width: self.max_width[index],
+            min_height: self.min_height[index],
+            max_height: self.max_height[index],
+            border_color: self.border_color[index],
+            border_style: self.border_style[index],
+            text_decoration: self.text_decoration[index],
+            letter_spacing: self.letter_spacing[index],
+            word_spacing: self.word_spacing[index],
+            white_space: self.white_space[index],
+            visibility: self.visibility[index],
         })
     }
 

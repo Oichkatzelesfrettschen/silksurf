@@ -182,6 +182,43 @@ pub enum FontStyle {
     Oblique,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BorderStyle {
+    #[default]
+    None,
+    Solid,
+    Dashed,
+    Dotted,
+    Double,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TextDecoration {
+    #[default]
+    None,
+    Underline,
+    Overline,
+    LineThrough,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WhiteSpace {
+    #[default]
+    Normal,
+    Nowrap,
+    Pre,
+    PreWrap,
+    PreLine,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Visibility {
+    #[default]
+    Visible,
+    Hidden,
+    Collapse,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BoxShadow {
     pub offset_x: f32,
@@ -297,15 +334,30 @@ pub struct ComputedStyle {
     pub bottom: LengthOrAuto,
     pub left: LengthOrAuto,
     pub z_index: i32,
+    // Sizing
+    pub width: LengthOrAuto,
+    pub height: LengthOrAuto,
+    pub min_width: Length,
+    pub max_width: Option<Length>,
+    pub min_height: Length,
+    pub max_height: Option<Length>,
     // Overflow
     pub overflow_x: Overflow,
     pub overflow_y: Overflow,
+    // Border rendering
+    pub border_color: Color,
+    pub border_style: BorderStyle,
     // Visual
     pub opacity: f32,
+    pub visibility: Visibility,
     // Text
     pub text_align: TextAlign,
     pub font_weight: FontWeight,
     pub font_style: FontStyle,
+    pub text_decoration: TextDecoration,
+    pub letter_spacing: f32,
+    pub word_spacing: f32,
+    pub white_space: WhiteSpace,
     // Decoration
     pub border_radius: f32,
     pub box_shadow: Option<BoxShadow>,
@@ -336,12 +388,25 @@ impl Default for ComputedStyle {
             bottom: LengthOrAuto::Auto,
             left: LengthOrAuto::Auto,
             z_index: 0,
+            width: LengthOrAuto::Auto,
+            height: LengthOrAuto::Auto,
+            min_width: Length::Px(0.0),
+            max_width: None,
+            min_height: Length::Px(0.0),
+            max_height: None,
             overflow_x: Overflow::default(),
             overflow_y: Overflow::default(),
+            border_color: Color::black(),
+            border_style: BorderStyle::default(),
             opacity: 1.0,
+            visibility: Visibility::default(),
             text_align: TextAlign::default(),
             font_weight: FontWeight::default(),
             font_style: FontStyle::default(),
+            text_decoration: TextDecoration::default(),
+            letter_spacing: 0.0,
+            word_spacing: 0.0,
+            white_space: WhiteSpace::default(),
             border_radius: 0.0,
             box_shadow: None,
             background_image: None,
@@ -401,15 +466,30 @@ struct CascadedStyle {
     bottom: Option<ResolvedProperty<LengthOrAuto>>,
     left_offset: Option<ResolvedProperty<LengthOrAuto>>,
     z_index: Option<ResolvedProperty<i32>>,
+    // Sizing
+    width: Option<ResolvedProperty<LengthOrAuto>>,
+    height: Option<ResolvedProperty<LengthOrAuto>>,
+    min_width: Option<ResolvedProperty<Length>>,
+    max_width: Option<ResolvedProperty<Option<Length>>>,
+    min_height: Option<ResolvedProperty<Length>>,
+    max_height: Option<ResolvedProperty<Option<Length>>>,
     // Overflow
     overflow_x: Option<ResolvedProperty<Overflow>>,
     overflow_y: Option<ResolvedProperty<Overflow>>,
+    // Border rendering
+    border_color: Option<ResolvedProperty<Color>>,
+    border_style: Option<ResolvedProperty<BorderStyle>>,
     // Visual
     opacity: Option<ResolvedProperty<f32>>,
+    visibility: Option<ResolvedProperty<Visibility>>,
     // Text
     text_align: Option<ResolvedProperty<TextAlign>>,
     font_weight: Option<ResolvedProperty<FontWeight>>,
     font_style: Option<ResolvedProperty<FontStyle>>,
+    text_decoration: Option<ResolvedProperty<TextDecoration>>,
+    letter_spacing: Option<ResolvedProperty<f32>>,
+    word_spacing: Option<ResolvedProperty<f32>>,
+    white_space: Option<ResolvedProperty<WhiteSpace>>,
     // Decoration
     border_radius: Option<ResolvedProperty<f32>>,
     box_shadow: Option<ResolvedProperty<BoxShadow>>,
@@ -494,9 +574,21 @@ impl CascadedStyle {
             bottom: self.bottom.map(|e| e.value).unwrap_or_default(),
             left: self.left_offset.map(|e| e.value).unwrap_or_default(),
             z_index: self.z_index.map(|e| e.value).unwrap_or(0),
+            width: self.width.map(|e| e.value).unwrap_or(LengthOrAuto::Auto),
+            height: self.height.map(|e| e.value).unwrap_or(LengthOrAuto::Auto),
+            min_width: self.min_width.map(|e| e.value).unwrap_or(Length::Px(0.0)),
+            max_width: self.max_width.map(|e| e.value).unwrap_or(None),
+            min_height: self.min_height.map(|e| e.value).unwrap_or(Length::Px(0.0)),
+            max_height: self.max_height.map(|e| e.value).unwrap_or(None),
             overflow_x: self.overflow_x.map(|e| e.value).unwrap_or_default(),
             overflow_y: self.overflow_y.map(|e| e.value).unwrap_or_default(),
+            border_color: self
+                .border_color
+                .map(|e| e.value)
+                .unwrap_or_else(Color::black),
+            border_style: self.border_style.map(|e| e.value).unwrap_or_default(),
             opacity: self.opacity.map(|e| e.value).unwrap_or(1.0),
+            visibility: self.visibility.map(|e| e.value).unwrap_or_default(),
             text_align: self
                 .text_align
                 .map(|e| e.value)
@@ -511,6 +603,18 @@ impl CascadedStyle {
                 .font_style
                 .map(|e| e.value)
                 .or_else(|| parent.map(|s| s.font_style))
+                .unwrap_or_default(),
+            text_decoration: self
+                .text_decoration
+                .map(|e| e.value)
+                .or_else(|| parent.map(|s| s.text_decoration))
+                .unwrap_or_default(),
+            letter_spacing: self.letter_spacing.map(|e| e.value).unwrap_or(0.0),
+            word_spacing: self.word_spacing.map(|e| e.value).unwrap_or(0.0),
+            white_space: self
+                .white_space
+                .map(|e| e.value)
+                .or_else(|| parent.map(|s| s.white_space))
                 .unwrap_or_default(),
             border_radius: self.border_radius.map(|e| e.value).unwrap_or(0.0),
             box_shadow: self.box_shadow.map(|e| e.value),
@@ -1747,6 +1851,152 @@ fn apply_declaration(
                 );
             }
         }
+        // Sizing
+        PropertyId::Width => {
+            if let Some(value) = parse_length_or_auto(&declaration.value) {
+                apply_property(
+                    &mut cascaded.width,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::Height => {
+            if let Some(value) = parse_length_or_auto(&declaration.value) {
+                apply_property(
+                    &mut cascaded.height,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::MinWidth => {
+            if let Some(value) = parse_length(&declaration.value) {
+                apply_property(
+                    &mut cascaded.min_width,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::MaxWidth => {
+            if let Some(value) = parse_max_dimension(&declaration.value) {
+                apply_property(
+                    &mut cascaded.max_width,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::MinHeight => {
+            if let Some(value) = parse_length(&declaration.value) {
+                apply_property(
+                    &mut cascaded.min_height,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::MaxHeight => {
+            if let Some(value) = parse_max_dimension(&declaration.value) {
+                apply_property(
+                    &mut cascaded.max_height,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        // Border rendering
+        PropertyId::BorderColor => {
+            if let Some(value) = parse_color(&declaration.value) {
+                apply_property(
+                    &mut cascaded.border_color,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::BorderStyle => {
+            if let Some(value) = parse_border_style_value(&declaration.value) {
+                apply_property(
+                    &mut cascaded.border_style,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        // Text / visual
+        PropertyId::TextDecoration => {
+            if let Some(value) = parse_text_decoration_value(&declaration.value) {
+                apply_property(
+                    &mut cascaded.text_decoration,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::LetterSpacing => {
+            if let Some(value) = parse_spacing_px(&declaration.value) {
+                apply_property(
+                    &mut cascaded.letter_spacing,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::WordSpacing => {
+            if let Some(value) = parse_spacing_px(&declaration.value) {
+                apply_property(
+                    &mut cascaded.word_spacing,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::WhiteSpace => {
+            if let Some(value) = parse_white_space_value(&declaration.value) {
+                apply_property(
+                    &mut cascaded.white_space,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::Visibility => {
+            if let Some(value) = parse_visibility_value(&declaration.value) {
+                apply_property(
+                    &mut cascaded.visibility,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
         PropertyId::Unknown => {}
     }
 }
@@ -2167,6 +2417,67 @@ fn gradient_color_stop(tokens: &[&CssToken], auto_pos: f32) -> Option<(f32, Colo
         _ => auto_pos,
     };
     Some((pos, color))
+}
+
+fn parse_max_dimension(tokens: &[CssToken]) -> Option<Option<Length>> {
+    if first_ident(tokens) == Some("none") {
+        return Some(None);
+    }
+    parse_length(tokens).map(Some)
+}
+
+fn parse_border_style_value(tokens: &[CssToken]) -> Option<BorderStyle> {
+    match first_ident(tokens)? {
+        "none" => Some(BorderStyle::None),
+        "solid" => Some(BorderStyle::Solid),
+        "dashed" => Some(BorderStyle::Dashed),
+        "dotted" => Some(BorderStyle::Dotted),
+        "double" => Some(BorderStyle::Double),
+        _ => None,
+    }
+}
+
+fn parse_text_decoration_value(tokens: &[CssToken]) -> Option<TextDecoration> {
+    match first_ident(tokens)? {
+        "none" => Some(TextDecoration::None),
+        "underline" => Some(TextDecoration::Underline),
+        "overline" => Some(TextDecoration::Overline),
+        "line-through" => Some(TextDecoration::LineThrough),
+        _ => None,
+    }
+}
+
+fn parse_spacing_px(tokens: &[CssToken]) -> Option<f32> {
+    if first_ident(tokens) == Some("normal") {
+        return Some(0.0);
+    }
+    tokens.iter().find_map(|token| match token {
+        CssToken::Dimension { value, unit } if unit.eq_ignore_ascii_case("px") => {
+            value.parse::<f32>().ok()
+        }
+        CssToken::Number(value) if value == "0" => Some(0.0),
+        _ => None,
+    })
+}
+
+fn parse_white_space_value(tokens: &[CssToken]) -> Option<WhiteSpace> {
+    match first_ident(tokens)? {
+        "normal" => Some(WhiteSpace::Normal),
+        "nowrap" => Some(WhiteSpace::Nowrap),
+        "pre" => Some(WhiteSpace::Pre),
+        "pre-wrap" => Some(WhiteSpace::PreWrap),
+        "pre-line" => Some(WhiteSpace::PreLine),
+        _ => None,
+    }
+}
+
+fn parse_visibility_value(tokens: &[CssToken]) -> Option<Visibility> {
+    match first_ident(tokens)? {
+        "visible" => Some(Visibility::Visible),
+        "hidden" => Some(Visibility::Hidden),
+        "collapse" => Some(Visibility::Collapse),
+        _ => None,
+    }
 }
 
 fn parse_length_list(tokens: &[CssToken]) -> Vec<Length> {
