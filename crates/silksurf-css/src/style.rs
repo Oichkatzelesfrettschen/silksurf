@@ -497,7 +497,10 @@ struct CascadedStyle {
     padding_right: Option<ResolvedProperty<Length>>,
     padding_bottom: Option<ResolvedProperty<Length>>,
     padding_left: Option<ResolvedProperty<Length>>,
-    border: Option<ResolvedProperty<Edges>>,
+    border_top: Option<ResolvedProperty<Length>>,
+    border_right: Option<ResolvedProperty<Length>>,
+    border_bottom: Option<ResolvedProperty<Length>>,
+    border_left: Option<ResolvedProperty<Length>>,
     // Flex container
     flex_direction: Option<ResolvedProperty<FlexDirection>>,
     flex_wrap: Option<ResolvedProperty<FlexWrap>>,
@@ -779,16 +782,36 @@ impl CascadedStyle {
                 em_px,
                 rem_base_px,
             ),
-            border: resolve_edges(
-                resolve_non_inherited_kw(
-                    self.border,
-                    ks.get(&PropertyId::Border),
-                    parent.map(|p| p.border),
-                    fallback.border,
-                ),
-                em_px,
-                rem_base_px,
-            ),
+            border: {
+                let zero = Length::Px(0.0);
+                let raw = Edges {
+                    top: resolve_non_inherited_kw(
+                        self.border_top,
+                        ks.get(&PropertyId::BorderTop),
+                        parent.map(|p| p.border.top),
+                        zero,
+                    ),
+                    right: resolve_non_inherited_kw(
+                        self.border_right,
+                        ks.get(&PropertyId::BorderRight),
+                        parent.map(|p| p.border.right),
+                        zero,
+                    ),
+                    bottom: resolve_non_inherited_kw(
+                        self.border_bottom,
+                        ks.get(&PropertyId::BorderBottom),
+                        parent.map(|p| p.border.bottom),
+                        zero,
+                    ),
+                    left: resolve_non_inherited_kw(
+                        self.border_left,
+                        ks.get(&PropertyId::BorderLeft),
+                        parent.map(|p| p.border.left),
+                        zero,
+                    ),
+                };
+                resolve_edges(raw, em_px, rem_base_px)
+            },
             flex_container: FlexContainerStyle {
                 direction: resolve_non_inherited_kw(
                     self.flex_direction,
@@ -1997,12 +2020,18 @@ fn apply_declaration(
                 apply_keyword(ks, PropertyId::FlexBasis, kw, imp, sp, ord);
             }
             PropertyId::Border => {
-                apply_keyword(ks, PropertyId::Border, kw, imp, sp, ord);
+                apply_keyword(ks, PropertyId::BorderTop, kw, imp, sp, ord);
+                apply_keyword(ks, PropertyId::BorderRight, kw, imp, sp, ord);
+                apply_keyword(ks, PropertyId::BorderBottom, kw, imp, sp, ord);
+                apply_keyword(ks, PropertyId::BorderLeft, kw, imp, sp, ord);
                 apply_keyword(ks, PropertyId::BorderStyle, kw, imp, sp, ord);
                 apply_keyword(ks, PropertyId::BorderColor, kw, imp, sp, ord);
             }
             PropertyId::BorderWidth => {
-                apply_keyword(ks, PropertyId::Border, kw, imp, sp, ord);
+                apply_keyword(ks, PropertyId::BorderTop, kw, imp, sp, ord);
+                apply_keyword(ks, PropertyId::BorderRight, kw, imp, sp, ord);
+                apply_keyword(ks, PropertyId::BorderBottom, kw, imp, sp, ord);
+                apply_keyword(ks, PropertyId::BorderLeft, kw, imp, sp, ord);
             }
             pid => {
                 apply_keyword(ks, pid, kw, imp, sp, ord);
@@ -2186,39 +2215,71 @@ fn apply_declaration(
         }
         PropertyId::Border => {
             let (width, style, color) = parse_border_shorthand(&declaration.value);
+            let (imp, spec, ord) = (declaration.important, specificity, order);
             if let Some(w) = width {
-                apply_property(
-                    &mut cascaded.border,
-                    Edges::all(w),
-                    declaration.important,
-                    specificity,
-                    order,
-                );
+                apply_property(&mut cascaded.border_top, w, imp, spec, ord);
+                apply_property(&mut cascaded.border_right, w, imp, spec, ord);
+                apply_property(&mut cascaded.border_bottom, w, imp, spec, ord);
+                apply_property(&mut cascaded.border_left, w, imp, spec, ord);
             }
             if let Some(s) = style {
-                apply_property(
-                    &mut cascaded.border_style,
-                    s,
-                    declaration.important,
-                    specificity,
-                    order,
-                );
+                apply_property(&mut cascaded.border_style, s, imp, spec, ord);
             }
             if let Some(c) = color {
+                apply_property(&mut cascaded.border_color, c, imp, spec, ord);
+            }
+        }
+        PropertyId::BorderWidth => {
+            if let Some(edges) = parse_edges(&declaration.value) {
+                let (imp, spec, ord) = (declaration.important, specificity, order);
+                apply_property(&mut cascaded.border_top, edges.top, imp, spec, ord);
+                apply_property(&mut cascaded.border_right, edges.right, imp, spec, ord);
+                apply_property(&mut cascaded.border_bottom, edges.bottom, imp, spec, ord);
+                apply_property(&mut cascaded.border_left, edges.left, imp, spec, ord);
+            }
+        }
+        PropertyId::BorderTop => {
+            let (width, _, _) = parse_border_shorthand(&declaration.value);
+            if let Some(w) = width {
                 apply_property(
-                    &mut cascaded.border_color,
-                    c,
+                    &mut cascaded.border_top,
+                    w,
                     declaration.important,
                     specificity,
                     order,
                 );
             }
         }
-        PropertyId::BorderWidth => {
-            if let Some(value) = parse_edges(&declaration.value) {
+        PropertyId::BorderRight => {
+            let (width, _, _) = parse_border_shorthand(&declaration.value);
+            if let Some(w) = width {
                 apply_property(
-                    &mut cascaded.border,
-                    value,
+                    &mut cascaded.border_right,
+                    w,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::BorderBottom => {
+            let (width, _, _) = parse_border_shorthand(&declaration.value);
+            if let Some(w) = width {
+                apply_property(
+                    &mut cascaded.border_bottom,
+                    w,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::BorderLeft => {
+            let (width, _, _) = parse_border_shorthand(&declaration.value);
+            if let Some(w) = width {
+                apply_property(
+                    &mut cascaded.border_left,
+                    w,
                     declaration.important,
                     specificity,
                     order,
