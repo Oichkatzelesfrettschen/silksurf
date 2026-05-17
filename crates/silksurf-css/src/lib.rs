@@ -13,6 +13,7 @@ pub mod cascade_view;
 pub use cascade_view::{CascadeEntry, CascadeView};
 pub mod custom_properties;
 mod matching;
+pub mod media;
 mod parser;
 pub mod property_id;
 mod selector;

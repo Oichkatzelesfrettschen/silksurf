@@ -28,7 +28,7 @@ use crate::matching::{
     Specificity, matches_selector, matches_selector_with_view, selector_specificity,
 };
 use crate::selector::{Selector, SelectorIdent, SelectorModifier, TypeSelector};
-use crate::{CssToken, Declaration, Rule, Stylesheet};
+use crate::{AtRuleBlock, CssToken, Declaration, Rule, StyleRule, Stylesheet};
 use rustc_hash::{FxHashMap, FxHashSet};
 use silksurf_dom::{AttributeName, Dom, NodeId, NodeKind, TagName};
 use smallvec::SmallVec;
@@ -1276,25 +1276,70 @@ pub struct StyleIndex {
     id_rules: FxHashMap<SelectorIdent, Vec<IndexedSelector>>,
     class_rules: FxHashMap<SelectorIdent, Vec<IndexedSelector>>,
     universal_rules: Vec<IndexedSelector>,
+    /// Flat list of active StyleRules: top-level rules plus children of
+    /// @media rules whose query matched the build viewport. The rule_index
+    /// field of every IndexedSelector indexes into this vec, not into
+    /// stylesheet.rules. Cascade lookups go through active_rules exclusively.
+    pub active_rules: Vec<StyleRule>,
     /// Total number of unique (rule, selector) pairs. Used to size the
     /// CascadeWorkspace::seen_bits bitvec for O(1) dedup without hashing.
     pub total_selector_pairs: usize,
 }
 
 impl StyleIndex {
+    /// Construct with the default 1280x800 viewport (matches typical desktop
+    /// render target; callers with a known viewport should use for_viewport).
     pub fn new(stylesheet: &Stylesheet) -> Self {
-        let mut index = StyleIndex {
-            tag_rules: FxHashMap::default(),
-            id_rules: FxHashMap::default(),
-            class_rules: FxHashMap::default(),
-            universal_rules: Vec::new(),
-            total_selector_pairs: 0,
-        };
+        Self::for_viewport(stylesheet, 1280.0, 800.0)
+    }
+
+    /// Build a StyleIndex that includes @media children whose query matches
+    /// the given viewport dimensions (pixels).
+    ///
+    /// Top-level Style rules are always included. @media rules are evaluated
+    /// against (viewport_w, viewport_h); matching rules' children are promoted
+    /// into active_rules. Non-media At rules (@keyframes, @supports, etc.) are
+    /// skipped entirely -- they contribute no selector-matchable style rules.
+    ///
+    /// Unknown or complex @media queries default to true (safe fallback: apply
+    /// the rules). This matches media.rs evaluate_media_query semantics.
+    pub fn for_viewport(stylesheet: &Stylesheet, viewport_w: f32, viewport_h: f32) -> Self {
+        // Flatten stylesheet into a contiguous Vec<StyleRule> of active rules.
+        // rule_index fields in IndexedSelector index into this vec.
+        let mut active_rules: Vec<StyleRule> = Vec::new();
+        for rule in &stylesheet.rules {
+            match rule {
+                Rule::Style(sr) => active_rules.push(sr.clone()),
+                Rule::At(at) if at.name.eq_ignore_ascii_case("media") => {
+                    if crate::media::evaluate_media_query(
+                        &at.prelude,
+                        viewport_w,
+                        viewport_h,
+                    ) {
+                        if let Some(AtRuleBlock::Rules(children)) = &at.block {
+                            for child in children {
+                                if let Rule::Style(sr) = child {
+                                    active_rules.push(sr.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+                Rule::At(_) => {}
+            }
+        }
+
+        // Build tag/id/class/universal selector index over active_rules.
+        // Separating collection from indexing avoids a borrow conflict
+        // (mutating the maps while iterating active_rules).
+        let mut tag_rules: FxHashMap<TagName, Vec<IndexedSelector>> = FxHashMap::default();
+        let mut id_rules: FxHashMap<SelectorIdent, Vec<IndexedSelector>> = FxHashMap::default();
+        let mut class_rules: FxHashMap<SelectorIdent, Vec<IndexedSelector>> =
+            FxHashMap::default();
+        let mut universal_rules: Vec<IndexedSelector> = Vec::new();
         let mut pair_id: u32 = 0;
-        for (rule_index, rule) in stylesheet.rules.iter().enumerate() {
-            let Rule::Style(rule) = rule else {
-                continue;
-            };
+
+        for (rule_index, rule) in active_rules.iter().enumerate() {
             for (selector_index, selector) in rule.selectors.selectors.iter().enumerate() {
                 let entry = IndexedSelector {
                     rule_index,
@@ -1305,20 +1350,27 @@ impl StyleIndex {
                 pair_id += 1;
                 match selector_key(selector) {
                     SelectorKey::Tag(tag) => {
-                        index.tag_rules.entry(tag).or_default().push(entry);
+                        tag_rules.entry(tag).or_default().push(entry);
                     }
                     SelectorKey::Id(id) => {
-                        index.id_rules.entry(id).or_default().push(entry);
+                        id_rules.entry(id).or_default().push(entry);
                     }
                     SelectorKey::Class(class) => {
-                        index.class_rules.entry(class).or_default().push(entry);
+                        class_rules.entry(class).or_default().push(entry);
                     }
-                    SelectorKey::Universal => index.universal_rules.push(entry),
+                    SelectorKey::Universal => universal_rules.push(entry),
                 }
             }
         }
-        index.total_selector_pairs = pair_id as usize;
-        index
+
+        StyleIndex {
+            tag_rules,
+            id_rules,
+            class_rules,
+            universal_rules,
+            active_rules,
+            total_selector_pairs: pair_id as usize,
+        }
     }
 }
 
@@ -1526,7 +1578,7 @@ pub fn compute_styles(
     stylesheet: &Stylesheet,
 ) -> FxHashMap<NodeId, ComputedStyle> {
     let index = StyleIndex::new(stylesheet);
-    let mut workspace = CascadeWorkspace::new(stylesheet.rules.len());
+    let mut workspace = CascadeWorkspace::new(index.active_rules.len());
     let mut styles = FxHashMap::default();
     compute_styles_recursive(
         dom,
@@ -1634,7 +1686,7 @@ impl StyleCache {
         }
 
         let index = StyleIndex::new(stylesheet);
-        let mut workspace = CascadeWorkspace::new(stylesheet.rules.len());
+        let mut workspace = CascadeWorkspace::new(index.active_rules.len());
         self.generation = self.generation.wrapping_add(1);
         let styles = Arc::make_mut(&mut self.styles);
         let mut seen = FxHashSet::default();
@@ -1670,7 +1722,7 @@ pub fn compute_style_for_node(
     parent: Option<&ComputedStyle>,
 ) -> ComputedStyle {
     let index = StyleIndex::new(stylesheet);
-    let mut workspace = CascadeWorkspace::new(stylesheet.rules.len());
+    let mut workspace = CascadeWorkspace::new(index.active_rules.len());
     compute_style_for_node_with_workspace(
         dom,
         node,
@@ -1690,7 +1742,7 @@ pub fn compute_style_for_node_with_index(
     index: &StyleIndex,
     parent: Option<&ComputedStyle>,
 ) -> ComputedStyle {
-    let mut workspace = CascadeWorkspace::new(stylesheet.rules.len());
+    let mut workspace = CascadeWorkspace::new(index.active_rules.len());
     compute_style_for_node_with_workspace(
         dom,
         node,
@@ -1814,7 +1866,7 @@ fn compute_styles_recursive(
 fn cascade_for_node(
     dom: &Dom,
     node: NodeId,
-    stylesheet: &Stylesheet,
+    _stylesheet: &Stylesheet,
     index: &StyleIndex,
     workspace: &mut CascadeWorkspace,
     cascade_view: Option<&crate::cascade_view::CascadeView>,
@@ -1824,7 +1876,7 @@ fn cascade_for_node(
      * candidates and class_keys. No heap allocation after steady state.
      * See: CascadeWorkspace::prepare() for invariant details.
      */
-    workspace.prepare(stylesheet.rules.len(), index.total_selector_pairs);
+    workspace.prepare(index.active_rules.len(), index.total_selector_pairs);
 
     let mut cascaded = CascadedStyle::default();
     let mut order = 0usize;
@@ -1902,10 +1954,7 @@ fn cascade_for_node(
         }
         seen_bits[word] |= bit;
 
-        let Some(rule) = stylesheet.rules.get(candidate.rule_index) else {
-            continue;
-        };
-        let Rule::Style(rule) = rule else {
+        let Some(rule) = index.active_rules.get(candidate.rule_index) else {
             continue;
         };
         let Some(selector) = rule.selectors.selectors.get(candidate.selector_index) else {
@@ -1936,15 +1985,12 @@ fn cascade_for_node(
     workspace.candidates = candidates;
     workspace.seen_bits = seen_bits;
 
-    for (rule_index, rule) in stylesheet.rules.iter().enumerate() {
+    for (rule_index, rule) in index.active_rules.iter().enumerate() {
         let Some(specificity) = workspace
             .matched_by_rule
             .get(rule_index)
             .and_then(|spec| *spec)
         else {
-            continue;
-        };
-        let Rule::Style(rule) = rule else {
             continue;
         };
         for declaration in &rule.declarations {

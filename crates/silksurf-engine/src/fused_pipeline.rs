@@ -326,7 +326,7 @@ pub fn fused_style_layout_paint(
      * candidates Vec, seen_bits bitvec, class_keys Vec) -- ~200 allocs saved
      * for a 50-node page. See: silksurf_css::CascadeWorkspace for lifecycle.
      */
-    let mut cascade_ws = CascadeWorkspace::new(stylesheet.rules.len());
+    let mut cascade_ws = CascadeWorkspace::new(style_index.active_rules.len());
     let table = LayoutNeighborTable::build(dom, root);
     let n = table.len();
 
