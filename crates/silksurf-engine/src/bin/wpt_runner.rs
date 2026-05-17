@@ -308,6 +308,8 @@ fn run_one(path: &Path) -> Outcome {
         // @media query evaluation
         "css_media_screen" => check_css_media_screen(&parsed.dom, parsed.document, &source),
         "css_media_width" => check_css_media_width(&parsed.dom, parsed.document, &source),
+        // State pseudo-classes
+        "css_pseudo_state" => check_css_pseudo_state(&parsed.dom, parsed.document, &source),
         other => Outcome::Skip(format!("no check registered for fixture stem '{other}'")),
     }
 }
@@ -2779,5 +2781,96 @@ fn check_css_media_width(dom: &Dom, document: NodeId, source: &str) -> Outcome {
             narrow_style.opacity
         ));
     }
+    Outcome::Pass
+}
+
+fn check_css_pseudo_state(dom: &Dom, document: NodeId, source: &str) -> Outcome {
+    let css = match extract_inline_style(source) {
+        Some(c) => c,
+        None => return Outcome::Skip("no <style> block".to_string()),
+    };
+    let stylesheet = match parse_stylesheet(&css) {
+        Ok(s) => s,
+        Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
+    };
+
+    // Helper: get opacity of a node found by id=value attribute.
+    let node_by_id = |id_val: &str| -> Option<NodeId> {
+        let body = body_of(dom, document)?;
+        let all = dom.children(body).ok()?.to_vec();
+        all.into_iter().find(|&n| {
+            dom.attributes(n)
+                .ok()
+                .into_iter()
+                .flatten()
+                .any(|a| a.name.matches("id") && a.value.as_str() == id_val)
+        })
+    };
+
+    let opacity_of = |id_val: &str| -> f32 {
+        let n = match node_by_id(id_val) {
+            Some(n) => n,
+            None => return -1.0,
+        };
+        compute_style_for_node(dom, n, &stylesheet, None).opacity
+    };
+
+    // #link has href -> #link:any-link (spec 1,1,0) wins over #link (spec 1,0,0).
+    // Expected: 0.9.
+    let link_opacity = opacity_of("link");
+    if (link_opacity - 0.9).abs() > 0.01 {
+        return Outcome::Fail(format!(
+            "#link (has href): expected opacity 0.9 from #link:any-link, got {link_opacity:.3}"
+        ));
+    }
+
+    // #nolink has no href -> :any-link must NOT match -> only #nolink applies (0.1).
+    let nolink_opacity = opacity_of("nolink");
+    if (nolink_opacity - 0.1).abs() > 0.01 {
+        return Outcome::Fail(format!(
+            "#nolink (no href): expected opacity 0.1 (base rule), got {nolink_opacity:.3} -- :any-link must not match"
+        ));
+    }
+
+    // #dis (disabled input) -> :disabled applies (0.3); :enabled must not.
+    let dis_opacity = opacity_of("dis");
+    if (dis_opacity - 0.3).abs() > 0.01 {
+        return Outcome::Fail(format!(
+            "#dis (disabled): expected opacity 0.3 from :disabled, got {dis_opacity:.3}"
+        ));
+    }
+
+    // #ena (enabled input) -> :enabled applies (0.7).
+    let ena_opacity = opacity_of("ena");
+    if (ena_opacity - 0.7).abs() > 0.01 {
+        return Outcome::Fail(format!(
+            "#ena (enabled): expected opacity 0.7 from :enabled, got {ena_opacity:.3}"
+        ));
+    }
+
+    // #req (required input) -> :required applies (0.6).
+    let req_opacity = opacity_of("req");
+    if (req_opacity - 0.6).abs() > 0.01 {
+        return Outcome::Fail(format!(
+            "#req (required): expected opacity 0.6 from :required, got {req_opacity:.3}"
+        ));
+    }
+
+    // #opt (optional input, no required attr) -> :optional applies (0.5).
+    let opt_opacity = opacity_of("opt");
+    if (opt_opacity - 0.5).abs() > 0.01 {
+        return Outcome::Fail(format!(
+            "#opt (optional): expected opacity 0.5 from :optional, got {opt_opacity:.3}"
+        ));
+    }
+
+    // #para (p element) -> :read-only applies (0.4) since p is not editable.
+    let para_opacity = opacity_of("para");
+    if (para_opacity - 0.4).abs() > 0.01 {
+        return Outcome::Fail(format!(
+            "#para (read-only element): expected opacity 0.4 from :read-only, got {para_opacity:.3}"
+        ));
+    }
+
     Outcome::Pass
 }
