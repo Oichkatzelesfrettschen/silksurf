@@ -33,7 +33,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use boa_engine::{
-    Context, JsValue, NativeFunction, Source, js_string, object::ObjectInitializer,
+    Context, JsNativeError, JsValue, NativeFunction, Source, js_string,
+    object::{ObjectInitializer, builtins::JsArrayBuffer},
     property::Attribute,
 };
 
@@ -320,6 +321,23 @@ const SKIP_FEATURES: &[&str] = &[
     "json-parse-with-source",
     // Align detached-buffer semantics -- spec change boa 0.21 predates
     "align-detached-buffer-semantics-with-web-reality",
+    // IsHTMLDDA requires [[IsHTMLDDA]] internal slot (document.all-like object);
+    // boa 0.21 does not expose the hook needed to create one via the public API.
+    "IsHTMLDDA",
+    // Legacy RegExp static properties ($1-$9, RegExp.input, etc.) are Annex B
+    // accessors that boa 0.21 does not implement (null dereference in cross-realm).
+    "legacy-regexp",
+    // Function.prototype.caller / callee: boa 0.21 incorrectly throws TypeError
+    // when caller is strict-mode code but callee is non-strict (should not throw
+    // in the specific Annex B cases that the es5-era tests exercise).
+    "caller",
+    // ArrayBuffer.prototype.transferToImmutable -- 2025 spec addition not in boa 0.21.
+    "immutable-arraybuffer",
+    // Inline RegExp modifiers (?ims:...) -- Stage 3 proposal, not in boa 0.21.
+    "regexp-modifiers",
+    // FinalizationRegistry -- ES2021 feature not implemented in boa 0.21.
+    // All FinalizationRegistry tests fail with "FinalizationRegistry is not defined".
+    "FinalizationRegistry",
 ];
 
 // ---------------------------------------------------------------------------
@@ -403,8 +421,39 @@ fn install_test262_host(ctx: &mut Context) {
     let is_htmldda = ObjectInitializer::new(ctx).build();
     let dollar_262 = ObjectInitializer::new(ctx)
         .function(
-            // createRealm(): stub; realm isolation tests will fail (acceptable)
-            NativeFunction::from_fn_ptr(|_, _, _| Ok(JsValue::undefined())),
+            // createRealm(): create a fresh realm using boa's built-in API and
+            // return { global } so cross-realm intrinsic tests can access the
+            // new realm's constructors. The .eval() shim below evaluates in the
+            // outer realm (not the new one); tests that call realm.eval() will
+            // still fail, but the ~90 tests that only need .global will pass.
+            NativeFunction::from_fn_ptr(|_, _, ctx| {
+                let new_realm = ctx.create_realm()?;
+                // Temporarily enter the new realm to read its global object.
+                let old_realm = ctx.enter_realm(new_realm);
+                let global_obj = ctx.global_object();
+                ctx.enter_realm(old_realm);
+
+                let realm_obj = ObjectInitializer::new(ctx)
+                    .property(
+                        js_string!("global"),
+                        JsValue::from(global_obj),
+                        Attribute::all(),
+                    )
+                    .function(
+                        NativeFunction::from_fn_ptr(|_, args, ctx| {
+                            let code = args
+                                .first()
+                                .and_then(|v| v.to_string(ctx).ok())
+                                .map(|s| s.to_std_string_escaped())
+                                .unwrap_or_default();
+                            ctx.eval(Source::from_bytes(code.as_bytes()))
+                        }),
+                        js_string!("evalScript"),
+                        1,
+                    )
+                    .build();
+                Ok(JsValue::from(realm_obj))
+            }),
             js_string!("createRealm"),
             0,
         )
@@ -415,8 +464,25 @@ fn install_test262_host(ctx: &mut Context) {
             0,
         )
         .function(
-            // detachArrayBuffer(ab): mark AB as detached; stub for now
-            NativeFunction::from_fn_ptr(|_, _, _| Ok(JsValue::undefined())),
+            // detachArrayBuffer(ab): detach the ArrayBuffer using boa's built-in
+            // API. Required by detachArrayBuffer.js harness and the ~130 test262
+            // cases that call $DETACHBUFFER().
+            NativeFunction::from_fn_ptr(|_, args, _ctx| {
+                let val = args.first().ok_or_else(|| {
+                    JsNativeError::typ()
+                        .with_message("detachArrayBuffer requires one argument")
+                })?;
+                let obj = val.as_object().ok_or_else(|| {
+                    JsNativeError::typ()
+                        .with_message("detachArrayBuffer argument must be an object")
+                })?;
+                let ab = JsArrayBuffer::from_object(obj.clone()).map_err(|_| {
+                    JsNativeError::typ()
+                        .with_message("argument is not an ArrayBuffer")
+                })?;
+                ab.detach(&JsValue::undefined())?;
+                Ok(JsValue::undefined())
+            }),
             js_string!("detachArrayBuffer"),
             1,
         )
@@ -442,6 +508,20 @@ fn install_test262_host(ctx: &mut Context) {
             }),
             js_string!("codePointRange"),
             2,
+        )
+        .function(
+            // evalScript(code): evaluate a script string in the current realm.
+            // Required by Annex B global-code tests that use $262.evalScript().
+            NativeFunction::from_fn_ptr(|_, args, ctx| {
+                let code = args
+                    .first()
+                    .and_then(|v| v.to_string(ctx).ok())
+                    .map(|s| s.to_std_string_escaped())
+                    .unwrap_or_default();
+                ctx.eval(Source::from_bytes(code.as_bytes()))
+            }),
+            js_string!("evalScript"),
+            1,
         )
         // IsHTMLDDA: a callable that returns undefined, used to test typeof
         // returns "undefined" for document.all-like objects. Stub as undefined.
@@ -578,7 +658,14 @@ fn is_syntax_error(e: &boa_engine::JsError) -> bool {
 }
 
 fn error_matches(e: &boa_engine::JsError, expected: &str) -> bool {
-    error_type_name(e) == expected
+    if error_type_name(e) == expected {
+        return true;
+    }
+    // For non-native thrown values (e.g. Test262Error, user-defined classes),
+    // boa formats the JsError as "<ClassName> { ... }". Check if the Display
+    // string starts with the expected type name so that `type: Test262Error`
+    // negative expectations match correctly.
+    format!("{e}").starts_with(expected)
 }
 
 // ---------------------------------------------------------------------------

@@ -76,7 +76,7 @@ softbuffer = "0.4"
 # ECMA-262 2024+ compliant JS engine (pure Rust, Servo/Mozilla lineage).
 # Used by silksurf-js boa_backend as the production JS runtime; replaces
 # the hand-written bytecode VM which is preserved behind the legacy-vm feature.
-boa_engine = "0.21"
+boa_engine = { version = "0.21", features = ["annex-b"] }
 boa_runtime = "0.21"
 
 [profile.dev]
