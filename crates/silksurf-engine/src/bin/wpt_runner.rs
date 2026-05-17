@@ -20,9 +20,9 @@
  */
 
 use silksurf_css::{
-    BorderStyle, FlexBasis, Length, LengthOrAuto, SelectorList, TextDecoration, Visibility,
-    WhiteSpace, compute_style_for_node, matches_selector_list, parse_selector_list_with_interner,
-    parse_stylesheet,
+    BorderStyle, Color, Display, FlexBasis, Length, LengthOrAuto, SelectorList, TextDecoration,
+    Visibility, WhiteSpace, compute_style_for_node, compute_styles, matches_selector_list,
+    parse_selector_list_with_interner, parse_stylesheet,
 };
 use silksurf_dom::{Dom, NodeId, NodeKind};
 use silksurf_engine::parse_html;
@@ -259,6 +259,9 @@ fn run_one(path: &Path) -> Outcome {
             check_css_individual_margins(&parsed.dom, parsed.document, &source)
         }
         "css_named_colors" => check_css_named_colors(&parsed.dom, parsed.document, &source),
+        "css_cascade_keywords" => {
+            check_css_cascade_keywords(&parsed.dom, parsed.document, &source)
+        }
         other => Outcome::Skip(format!("no check registered for fixture stem '{other}'")),
     }
 }
@@ -1727,4 +1730,88 @@ fn find_element(dom: &Dom, root: NodeId, sel: &SelectorList) -> Option<NodeId> {
         }
     }
     None
+}
+
+fn check_css_cascade_keywords(dom: &Dom, document: NodeId, source: &str) -> Outcome {
+    let css = match extract_inline_style(source) {
+        Some(c) => c,
+        None => return Outcome::Skip("no <style> block found".to_string()),
+    };
+    let stylesheet = match parse_stylesheet(&css) {
+        Ok(s) => s,
+        Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
+    };
+    // Full-tree cascade so inheritance flows from parent computed values.
+    let styles = compute_styles(dom, document, &stylesheet);
+
+    let get_style = |id: &str| -> Option<silksurf_css::ComputedStyle> {
+        let selector_str = format!("#{id}");
+        let sel = parse_selector(dom, &selector_str)?;
+        let node = find_element(dom, document, &sel)?;
+        styles.get(&node).cloned()
+    };
+
+    // `color: inherit` on child of `.parent { color: red }` -> red.
+    let inherit_color = match get_style("inherit-color") {
+        Some(s) => s,
+        None => return Outcome::Fail("element #inherit-color not found".to_string()),
+    };
+    let red = Color { r: 255, g: 0, b: 0, a: 255 };
+    if inherit_color.color != red {
+        return Outcome::Fail(format!(
+            "#inherit-color: expected red, got {:?}",
+            inherit_color.color
+        ));
+    }
+
+    // `display: inherit` on child of `.parent { display: flex }` -> Flex.
+    let inherit_display = match get_style("inherit-display") {
+        Some(s) => s,
+        None => return Outcome::Fail("element #inherit-display not found".to_string()),
+    };
+    if inherit_display.display != Display::Flex {
+        return Outcome::Fail(format!(
+            "#inherit-display: expected Flex, got {:?}",
+            inherit_display.display
+        ));
+    }
+
+    // `color: initial` -> CSS initial value for color = black.
+    let initial_color = match get_style("initial-color") {
+        Some(s) => s,
+        None => return Outcome::Fail("element #initial-color not found".to_string()),
+    };
+    let black = Color { r: 0, g: 0, b: 0, a: 255 };
+    if initial_color.color != black {
+        return Outcome::Fail(format!(
+            "#initial-color: expected black, got {:?}",
+            initial_color.color
+        ));
+    }
+
+    // `color: unset` -- color is inherited -> unset = inherit -> red.
+    let unset_color = match get_style("unset-color") {
+        Some(s) => s,
+        None => return Outcome::Fail("element #unset-color not found".to_string()),
+    };
+    if unset_color.color != red {
+        return Outcome::Fail(format!(
+            "#unset-color: expected red (unset=inherit for inherited prop), got {:?}",
+            unset_color.color
+        ));
+    }
+
+    // `display: unset` -- display is not inherited -> unset = initial -> Inline.
+    let unset_display = match get_style("unset-display") {
+        Some(s) => s,
+        None => return Outcome::Fail("element #unset-display not found".to_string()),
+    };
+    if unset_display.display != Display::Inline {
+        return Outcome::Fail(format!(
+            "#unset-display: expected Inline (unset=initial for non-inherited), got {:?}",
+            unset_display.display
+        ));
+    }
+
+    Outcome::Pass
 }
