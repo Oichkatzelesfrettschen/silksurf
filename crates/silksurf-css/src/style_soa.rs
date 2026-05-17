@@ -265,8 +265,8 @@ impl StyleSoA {
 #[allow(dead_code)]
 fn length_to_f32(length: Length) -> f32 {
     match length {
-        Length::Px(v) => v,
-        Length::Percent(v) => v, // Store percentage as-is; resolve at layout time
+        Length::Px(v) | Length::Percent(v) => v,
+        Length::Em(v) | Length::Rem(v) => v,
     }
 }
 

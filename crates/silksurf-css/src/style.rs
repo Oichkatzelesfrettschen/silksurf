@@ -243,6 +243,10 @@ pub struct LinearGradient {
 pub enum Length {
     Px(f32),
     Percent(f32),
+    /// Relative to the element's own computed font-size (resolved at cascade time).
+    Em(f32),
+    /// Relative to the root element's font-size; defaults to 16 px (resolved at cascade time).
+    Rem(f32),
 }
 
 impl Length {
@@ -252,7 +256,7 @@ impl Length {
 
     pub fn is_zero(&self) -> bool {
         match self {
-            Length::Px(v) | Length::Percent(v) => *v == 0.0,
+            Length::Px(v) | Length::Percent(v) | Length::Em(v) | Length::Rem(v) => *v == 0.0,
         }
     }
 }
@@ -496,6 +500,46 @@ struct CascadedStyle {
     background_image: Option<ResolvedProperty<LinearGradient>>,
 }
 
+/*
+ * em/rem resolution helpers -- convert relative length units to absolute px.
+ *
+ * WHY: Em and Rem units are relative (em = element font-size, rem = root
+ * font-size). They are stored as-is during parsing and resolved here, in
+ * the cascade resolve pass, so all downstream code (layout, render) only
+ * ever sees Px or Percent values in ComputedStyle.
+ *
+ * font-size uses parent_font_size_px as its em base (self-referential em
+ * for font-size means relative to parent, per CSS spec). All other properties
+ * use the element's own resolved font-size as the em base.
+ */
+fn resolve_length(l: Length, em_px: f32, rem_px: f32) -> Length {
+    match l {
+        Length::Px(_) | Length::Percent(_) => l,
+        Length::Em(multiplier) => Length::Px(multiplier * em_px),
+        Length::Rem(multiplier) => Length::Px(multiplier * rem_px),
+    }
+}
+
+fn resolve_edges(edges: Edges, em_px: f32, rem_px: f32) -> Edges {
+    Edges {
+        top: resolve_length(edges.top, em_px, rem_px),
+        right: resolve_length(edges.right, em_px, rem_px),
+        bottom: resolve_length(edges.bottom, em_px, rem_px),
+        left: resolve_length(edges.left, em_px, rem_px),
+    }
+}
+
+fn resolve_length_or_auto(l: LengthOrAuto, em_px: f32, rem_px: f32) -> LengthOrAuto {
+    match l {
+        LengthOrAuto::Auto => LengthOrAuto::Auto,
+        LengthOrAuto::Length(len) => LengthOrAuto::Length(resolve_length(len, em_px, rem_px)),
+    }
+}
+
+fn resolve_opt_length(l: Option<Length>, em_px: f32, rem_px: f32) -> Option<Length> {
+    l.map(|len| resolve_length(len, em_px, rem_px))
+}
+
 impl CascadedStyle {
     /*
      * resolve -- produce final ComputedStyle from cascaded values + parent inheritance.
@@ -506,15 +550,36 @@ impl CascadedStyle {
      * Copy fields use the static directly; non-Copy (font_family) clones only
      * when needed (rare: only when no cascade value and no parent inheritance).
      */
-    fn resolve(self, parent: Option<&ComputedStyle>) -> ComputedStyle {
+    fn resolve(self, parent: Option<&ComputedStyle>, rem_base_px: f32) -> ComputedStyle {
         static FALLBACK: std::sync::LazyLock<ComputedStyle> =
             std::sync::LazyLock::new(ComputedStyle::default);
         let fallback = &*FALLBACK;
-        let resolved_font_size = self
+
+        // font-size: em is relative to the *parent* font-size (CSS spec).
+        let parent_font_size_px = parent
+            .map(|s| match s.font_size {
+                Length::Px(v) => v,
+                _ => 16.0,
+            })
+            .unwrap_or(16.0);
+        let raw_font_size = self
             .font_size
             .map(|entry| entry.value)
-            .or_else(|| parent.map(|style| style.font_size))
+            .or_else(|| parent.map(|s| s.font_size))
             .unwrap_or(fallback.font_size);
+        // For font-size: Percent means percent of parent font-size (same as em).
+        let resolved_font_size = match raw_font_size {
+            Length::Em(m) => Length::Px(m * parent_font_size_px),
+            Length::Rem(m) => Length::Px(m * rem_base_px),
+            Length::Percent(p) => Length::Px(p / 100.0 * parent_font_size_px),
+            other => other,
+        };
+        // All non-font-size length properties use the element's own font-size as em base.
+        let em_px = match resolved_font_size {
+            Length::Px(v) => v,
+            _ => 16.0,
+        };
+
         ComputedStyle {
             display: self
                 .display
@@ -530,28 +595,40 @@ impl CascadedStyle {
                 .map(|entry| entry.value)
                 .unwrap_or(fallback.background_color),
             font_size: resolved_font_size,
-            line_height: self
-                .line_height
-                .map(|entry| entry.value)
-                .or_else(|| parent.map(|style| style.line_height))
-                .unwrap_or(resolved_font_size),
+            line_height: resolve_length(
+                self.line_height
+                    .map(|entry| entry.value)
+                    .or_else(|| parent.map(|style| style.line_height))
+                    .unwrap_or(resolved_font_size),
+                em_px,
+                rem_base_px,
+            ),
             font_family: self
                 .font_family
                 .map(|entry| entry.value)
                 .or_else(|| parent.map(|style| style.font_family.clone()))
                 .unwrap_or_else(|| fallback.font_family.clone()),
-            margin: self
-                .margin
-                .map(|entry| entry.value)
-                .unwrap_or(fallback.margin),
-            padding: self
-                .padding
-                .map(|entry| entry.value)
-                .unwrap_or(fallback.padding),
-            border: self
-                .border
-                .map(|entry| entry.value)
-                .unwrap_or(fallback.border),
+            margin: resolve_edges(
+                self.margin
+                    .map(|entry| entry.value)
+                    .unwrap_or(fallback.margin),
+                em_px,
+                rem_base_px,
+            ),
+            padding: resolve_edges(
+                self.padding
+                    .map(|entry| entry.value)
+                    .unwrap_or(fallback.padding),
+                em_px,
+                rem_base_px,
+            ),
+            border: resolve_edges(
+                self.border
+                    .map(|entry| entry.value)
+                    .unwrap_or(fallback.border),
+                em_px,
+                rem_base_px,
+            ),
             flex_container: FlexContainerStyle {
                 direction: self.flex_direction.map(|e| e.value).unwrap_or_default(),
                 wrap: self.flex_wrap.map(|e| e.value).unwrap_or_default(),
@@ -569,17 +646,57 @@ impl CascadedStyle {
                 order: self.order.map(|e| e.value).unwrap_or(0),
             },
             position: self.position.map(|e| e.value).unwrap_or_default(),
-            top: self.top.map(|e| e.value).unwrap_or_default(),
-            right: self.right_offset.map(|e| e.value).unwrap_or_default(),
-            bottom: self.bottom.map(|e| e.value).unwrap_or_default(),
-            left: self.left_offset.map(|e| e.value).unwrap_or_default(),
+            top: resolve_length_or_auto(
+                self.top.map(|e| e.value).unwrap_or_default(),
+                em_px,
+                rem_base_px,
+            ),
+            right: resolve_length_or_auto(
+                self.right_offset.map(|e| e.value).unwrap_or_default(),
+                em_px,
+                rem_base_px,
+            ),
+            bottom: resolve_length_or_auto(
+                self.bottom.map(|e| e.value).unwrap_or_default(),
+                em_px,
+                rem_base_px,
+            ),
+            left: resolve_length_or_auto(
+                self.left_offset.map(|e| e.value).unwrap_or_default(),
+                em_px,
+                rem_base_px,
+            ),
             z_index: self.z_index.map(|e| e.value).unwrap_or(0),
-            width: self.width.map(|e| e.value).unwrap_or(LengthOrAuto::Auto),
-            height: self.height.map(|e| e.value).unwrap_or(LengthOrAuto::Auto),
-            min_width: self.min_width.map(|e| e.value).unwrap_or(Length::Px(0.0)),
-            max_width: self.max_width.map(|e| e.value).unwrap_or(None),
-            min_height: self.min_height.map(|e| e.value).unwrap_or(Length::Px(0.0)),
-            max_height: self.max_height.map(|e| e.value).unwrap_or(None),
+            width: resolve_length_or_auto(
+                self.width.map(|e| e.value).unwrap_or(LengthOrAuto::Auto),
+                em_px,
+                rem_base_px,
+            ),
+            height: resolve_length_or_auto(
+                self.height.map(|e| e.value).unwrap_or(LengthOrAuto::Auto),
+                em_px,
+                rem_base_px,
+            ),
+            min_width: resolve_length(
+                self.min_width.map(|e| e.value).unwrap_or(Length::Px(0.0)),
+                em_px,
+                rem_base_px,
+            ),
+            max_width: resolve_opt_length(
+                self.max_width.map(|e| e.value).unwrap_or(None),
+                em_px,
+                rem_base_px,
+            ),
+            min_height: resolve_length(
+                self.min_height.map(|e| e.value).unwrap_or(Length::Px(0.0)),
+                em_px,
+                rem_base_px,
+            ),
+            max_height: resolve_opt_length(
+                self.max_height.map(|e| e.value).unwrap_or(None),
+                em_px,
+                rem_base_px,
+            ),
             overflow_x: self.overflow_x.map(|e| e.value).unwrap_or_default(),
             overflow_y: self.overflow_y.map(|e| e.value).unwrap_or_default(),
             border_color: self
@@ -949,6 +1066,7 @@ pub fn compute_styles(
         None,
         &mut styles,
         &mut workspace,
+        16.0,
     );
     styles
 }
@@ -1067,6 +1185,7 @@ impl StyleCache {
                 parent_style.as_ref(),
                 styles,
                 &mut workspace,
+                16.0,
             );
         }
 
@@ -1090,6 +1209,7 @@ pub fn compute_style_for_node(
         parent,
         &mut workspace,
         None,
+        16.0,
     )
 }
 
@@ -1109,6 +1229,7 @@ pub fn compute_style_for_node_with_index(
         parent,
         &mut workspace,
         None,
+        16.0,
     )
 }
 
@@ -1123,6 +1244,7 @@ pub fn compute_style_for_node_with_index(
  * See: CascadeWorkspace for scratch buffer lifecycle
  * See: fused_pipeline.rs fused_style_layout_paint() for call site
  */
+#[allow(clippy::too_many_arguments)]
 pub fn compute_style_for_node_with_workspace(
     dom: &Dom,
     node: NodeId,
@@ -1131,13 +1253,16 @@ pub fn compute_style_for_node_with_workspace(
     parent: Option<&ComputedStyle>,
     workspace: &mut CascadeWorkspace,
     cascade_view: Option<&crate::cascade_view::CascadeView>,
+    rem_base_px: f32,
 ) -> ComputedStyle {
     if dom.element_name(node).ok().flatten().is_none() {
         return parent.cloned().unwrap_or_default();
     }
-    cascade_for_node(dom, node, stylesheet, index, workspace, cascade_view).resolve(parent)
+    cascade_for_node(dom, node, stylesheet, index, workspace, cascade_view)
+        .resolve(parent, rem_base_px)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn compute_styles_recursive(
     dom: &Dom,
     node: NodeId,
@@ -1146,11 +1271,35 @@ fn compute_styles_recursive(
     parent: Option<&ComputedStyle>,
     styles: &mut FxHashMap<NodeId, ComputedStyle>,
     workspace: &mut CascadeWorkspace,
+    rem_base_px: f32,
 ) {
     let style = compute_style_for_node_with_workspace(
-        dom, node, stylesheet, index, parent, workspace, None,
+        dom,
+        node,
+        stylesheet,
+        index,
+        parent,
+        workspace,
+        None,
+        rem_base_px,
     );
     styles.insert(node, style.clone());
+    // Update rem_base after processing the html element: all descendants
+    // use its resolved font-size as the rem base (CSS spec rem = root em).
+    let child_rem_base = if dom
+        .element_name(node)
+        .ok()
+        .flatten()
+        .map(|name| name.eq_ignore_ascii_case("html"))
+        .unwrap_or(false)
+    {
+        match style.font_size {
+            Length::Px(v) => v,
+            _ => rem_base_px,
+        }
+    } else {
+        rem_base_px
+    };
     if let Ok(children) = dom.children(node) {
         for child in children {
             compute_styles_recursive(
@@ -1161,6 +1310,7 @@ fn compute_styles_recursive(
                 Some(&style),
                 styles,
                 workspace,
+                child_rem_base,
             );
         }
     }
@@ -2146,6 +2296,12 @@ fn parse_length_token(token: &CssToken) -> Option<Length> {
         CssToken::Dimension { value, unit } if unit.eq_ignore_ascii_case("px") => {
             value.parse::<f32>().ok().map(Length::Px)
         }
+        CssToken::Dimension { value, unit } if unit.eq_ignore_ascii_case("em") => {
+            value.parse::<f32>().ok().map(Length::Em)
+        }
+        CssToken::Dimension { value, unit } if unit.eq_ignore_ascii_case("rem") => {
+            value.parse::<f32>().ok().map(Length::Rem)
+        }
         CssToken::Percentage(value) => value.parse::<f32>().ok().map(Length::Percent),
         CssToken::Number(value) if value == "0" => Some(Length::zero()),
         _ => None,
@@ -2265,7 +2421,7 @@ fn parse_box_shadow(tokens: &[CssToken]) -> Option<BoxShadow> {
         return None;
     }
     let px = |l: &Length| match l {
-        Length::Px(v) | Length::Percent(v) => *v,
+        Length::Px(v) | Length::Percent(v) | Length::Em(v) | Length::Rem(v) => *v,
     };
     Some(BoxShadow {
         offset_x: px(&lengths[0]),

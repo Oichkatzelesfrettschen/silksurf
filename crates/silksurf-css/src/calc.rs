@@ -25,6 +25,7 @@ impl CalcExpr {
         match self {
             CalcExpr::Value(Length::Px(v)) => *v,
             CalcExpr::Value(Length::Percent(p)) => context_px * p / 100.0,
+            CalcExpr::Value(Length::Em(v)) | CalcExpr::Value(Length::Rem(v)) => *v,
             CalcExpr::Number(n) => *n,
             CalcExpr::Add(a, b) => a.evaluate(context_px) + b.evaluate(context_px),
             CalcExpr::Sub(a, b) => a.evaluate(context_px) - b.evaluate(context_px),
