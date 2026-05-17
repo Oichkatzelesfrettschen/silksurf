@@ -91,6 +91,21 @@ pub enum PropertyId {
     BorderRight = 62,
     BorderBottom = 63,
     BorderLeft = 64,
+    // CSS Grid container properties
+    GridTemplateColumns = 65,
+    GridTemplateRows = 66,
+    GridAutoColumns = 67,
+    GridAutoRows = 68,
+    GridAutoFlow = 69,
+    // CSS Grid item placement (individual longhand)
+    GridColumnStart = 70,
+    GridColumnEnd = 71,
+    GridRowStart = 72,
+    GridRowEnd = 73,
+    // CSS Grid shorthands
+    GridColumn = 74,
+    GridRow = 75,
+    GridArea = 76,
     Unknown = 255,
 }
 
@@ -144,6 +159,25 @@ pub fn lookup_property_id(name: &str) -> PropertyId {
         (b'f', 4) if name.eq_ignore_ascii_case("flex") => PropertyId::Flex,
         // 'g' prefix
         (b'g', 3) if name.eq_ignore_ascii_case("gap") => PropertyId::Gap,
+        // CSS Grid properties (all start with 'g').
+        // Lengths: grid-area=9 grid-row=8 grid-column=11 grid-row-end=12
+        //          grid-auto-flow=14 grid-auto-rows=14 grid-row-start=14
+        //          grid-column-end=15 grid-auto-columns=17 grid-column-start=17
+        //          grid-template-rows=18 grid-template-columns=21
+        (b'g', 9) if name.eq_ignore_ascii_case("grid-area") => PropertyId::GridArea,
+        (b'g', 8) if name.eq_ignore_ascii_case("grid-row") => PropertyId::GridRow,
+        (b'g', 11) if name.eq_ignore_ascii_case("grid-column") => PropertyId::GridColumn,
+        (b'g', 12) if name.eq_ignore_ascii_case("grid-row-end") => PropertyId::GridRowEnd,
+        // 14-char grid properties (three of them share the same first byte + length):
+        (b'g', 14) if name.eq_ignore_ascii_case("grid-auto-flow") => PropertyId::GridAutoFlow,
+        (b'g', 14) if name.eq_ignore_ascii_case("grid-auto-rows") => PropertyId::GridAutoRows,
+        (b'g', 14) if name.eq_ignore_ascii_case("grid-row-start") => PropertyId::GridRowStart,
+        (b'g', 15) if name.eq_ignore_ascii_case("grid-column-end") => PropertyId::GridColumnEnd,
+        // 17-char grid properties (two of them):
+        (b'g', 17) if name.eq_ignore_ascii_case("grid-auto-columns") => PropertyId::GridAutoColumns,
+        (b'g', 17) if name.eq_ignore_ascii_case("grid-column-start") => PropertyId::GridColumnStart,
+        (b'g', 18) if name.eq_ignore_ascii_case("grid-template-rows") => PropertyId::GridTemplateRows,
+        (b'g', 21) if name.eq_ignore_ascii_case("grid-template-columns") => PropertyId::GridTemplateColumns,
         // 'j' prefix
         (b'j', 15) if name.eq_ignore_ascii_case("justify-content") => PropertyId::JustifyContent,
         // 'h' prefix
