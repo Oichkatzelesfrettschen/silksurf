@@ -298,6 +298,17 @@ after a `66.984688ms` navigation build, focus damage at `total 21.680us`, and
 typed input damage at `render 17.660us`, `total 41.470us`, and `117.500us`
 input-to-present.
 
+The runtime-text GUI probe schedules a module-script timer after the initial
+dynamic script drain, mutates one same-box text node at runtime, and requires
+the retained text repaint path to present damage without a later
+`fused total:` line. An O0 Wayland AI-chat run on 2026-07-02 reports
+`Runtime text repaint: dirty_nodes=1 damage=(215, 228, 1045, 19)`, then a
+damage frame with app blit `5.930us`, chrome `230ns`, render `19.710us`,
+buffer `28.710us`, and total CPU work `50.180us`. A final rerun after
+formatting and source-bundle refresh keeps the same retained path and reports
+app blit `9.670us`, chrome `240ns`, render `27.840us`, buffer `49.880us`,
+and total CPU work `80.260us`.
+
 The viewport-backed path is the first tile-cache step. The retained bitmap now
 has an origin (`bitmap_scroll_y`) and a bounded height (`bitmap_height`), while
 `raster_height` remains the scrollable document height. The next renderer step

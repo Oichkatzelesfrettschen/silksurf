@@ -12,7 +12,7 @@ cd "${REPO_ROOT}"
 
 usage() {
     cat <<'EOF'
-Usage: scripts/gui_probe.sh [--release|--debug|--o0] [--backend auto|wayland|x11] [--presenter auto|shm|softbuffer] [--shm] [--fixture ai-chat|form-submit|post-submit] [--probe smoke|address|address-caret|chrome|hover|page-input|form-submit|reload|scroll|stop] [--runs N] [--timeout-seconds N] [--max-input-ns N] [--max-any-input-ns N] [--max-buffer-ns N] [--max-any-buffer-ns N] [--max-render-ns N] [--max-overhead-ns N] [--max-total-ns N] [--max-focus-total-ns N] [--trace-app-frame] [URL]
+Usage: scripts/gui_probe.sh [--release|--debug|--o0] [--backend auto|wayland|x11] [--presenter auto|shm|softbuffer] [--shm] [--fixture ai-chat|form-submit|post-submit] [--probe smoke|address|address-caret|chrome|hover|page-input|runtime-text|form-submit|reload|scroll|stop] [--runs N] [--timeout-seconds N] [--max-input-ns N] [--max-any-input-ns N] [--max-buffer-ns N] [--max-any-buffer-ns N] [--max-render-ns N] [--max-overhead-ns N] [--max-total-ns N] [--max-focus-total-ns N] [--trace-app-frame] [URL]
 
 Runs the silksurf winit GUI probe with SILKSURF_PROBE_EXIT_AFTER_INPUT=1.
 The process exits successfully only after the final synthetic address input
@@ -26,7 +26,7 @@ Options:
   --presenter VALUE      Select auto, shm, or softbuffer. Default: auto.
   --shm                  Select the Wayland SHM presenter.
   --fixture VALUE        Serve a local probe fixture. Supported: ai-chat, form-submit, post-submit.
-  --probe VALUE          Select smoke, address, address-caret, chrome, hover, page-input, form-submit, reload, scroll, or stop input sequence. Default: address.
+  --probe VALUE          Select smoke, address, address-caret, chrome, hover, page-input, runtime-text, form-submit, reload, scroll, or stop input sequence. Default: address.
   --runs N               Run the probe N times after building. Default: 1.
   --timeout-seconds N    Kill one app run after N seconds. Default: 10.
   --max-input-ns N       Fail when final_input_to_present_ns is greater than N.
@@ -291,9 +291,9 @@ case "${fixture}" in
 esac
 
 case "${probe}" in
-    smoke|address|address-caret|chrome|hover|page-input|form-submit|reload|scroll|stop) ;;
+    smoke|address|address-caret|chrome|hover|page-input|runtime-text|form-submit|reload|scroll|stop) ;;
     *)
-        echo "gui_probe: probe must be smoke, address, address-caret, chrome, hover, page-input, form-submit, reload, scroll, or stop" >&2
+        echo "gui_probe: probe must be smoke, address, address-caret, chrome, hover, page-input, runtime-text, form-submit, reload, scroll, or stop" >&2
         exit 2
         ;;
 esac
@@ -315,6 +315,10 @@ if [ "${probe}" = "scroll" ] && [ -z "${fixture}" ]; then
 fi
 if [ "${probe}" = "hover" ] && [ "${fixture}" != "ai-chat" ]; then
     echo "gui_probe: --probe hover requires --fixture ai-chat" >&2
+    exit 2
+fi
+if [ "${probe}" = "runtime-text" ] && [ "${fixture}" != "ai-chat" ]; then
+    echo "gui_probe: --probe runtime-text requires --fixture ai-chat" >&2
     exit 2
 fi
 
@@ -451,8 +455,11 @@ env_args=(
     "SILKSURF_PROBE_EXIT_AFTER_INPUT=1"
     "SILKSURF_WAYLAND_PRESENTER=${wayland_presenter}"
 )
-if [ "${trace_app_frame}" -eq 1 ] || [ "${probe}" = "scroll" ]; then
+if [ "${trace_app_frame}" -eq 1 ] || [ "${probe}" = "scroll" ] || [ "${probe}" = "runtime-text" ]; then
     env_args+=("SILKSURF_TRACE_APP_FRAME=1")
+fi
+if [ "${probe}" = "runtime-text" ]; then
+    env_args+=("SILKSURF_TRACE_RUNTIME_TEXT=1")
 fi
 if [ "${fixture}" = "ai-chat" ] && [ "${probe}" = "page-input" ]; then
     env_args+=("SILKSURF_TRACE_NAV_BUILD=1")
@@ -501,6 +508,7 @@ write_ai_chat_fixture() {
       <h1>AI Workbench</h1>
       <img class="avatar" src="/avatar.png" width="64" height="32" alt="fixture image">
       <p class="lede">A deterministic local page models dense chat, citations, controls, code, and composer chrome.</p>
+      <p id="runtime-text-target">stable</p>
       <form class="composer">
         <textarea>Summarize the current trace and propose the next falsifier.</textarea>
         <button>Send</button>
@@ -569,6 +577,13 @@ document.body.setAttribute("data-module-graph", fixtureGraph);
 export const fixtureKind = "ai-chat";
 export const fixtureGraphKind = fixtureGraph;
 EOF
+    if [ "${probe}" = "runtime-text" ]; then
+        cat >>"${fixture_dir}/module.js" <<'EOF'
+setTimeout(function () {
+  document.getElementById('runtime-text-target').firstChild.textContent = 'staple';
+}, 0);
+EOF
+    fi
     cat >"${fixture_dir}/module-child.js" <<'EOF'
 export const fixtureGraph = "module-child";
 EOF
@@ -823,7 +838,7 @@ record_metrics() {
         final_total_ns
     do
         value="$(metric_value "${timing}" "${metric}")"
-        if [ "${value}" -ge 0 ]; then
+        if [ -n "${value}" ] && [ "${value}" -ge 0 ]; then
             printf '%s\t%s\t%s\n' "${run_index}" "${metric}" "${value}" >>"${metrics_file}"
         fi
     done
@@ -1216,6 +1231,21 @@ run_probe_once() {
         fi
         return 0
     fi
+    if [ "${probe}" = "runtime-text" ]; then
+        check_runtime_text_probe_log "${log_file}"
+        final_timing="$(extract_final_timing "${log_file}" "app frame: .*mode Damage")"
+        if [ -z "${final_timing}" ]; then
+            echo "gui_probe: missing runtime text damage frame timing" >&2
+            exit 1
+        fi
+        check_max_metric "${final_timing}" final_buffer_ns "${max_buffer_ns}"
+        check_max_metric "${final_timing}" final_render_ns "${max_render_ns}"
+        check_max_metric "${final_timing}" final_overhead_ns "${max_overhead_ns}"
+        check_max_metric "${final_timing}" final_total_ns "${max_total_ns}"
+        record_metrics "${run_index}" "${final_timing}"
+        printf '%s\n' "${final_timing}"
+        return 0
+    fi
     if [ "${probe}" = "form-submit" ]; then
         check_form_submit_probe_log "${log_file}"
         return 0
@@ -1514,6 +1544,33 @@ check_page_input_probe_log() {
     fi
 
     echo "gui_probe: page input OK"
+}
+
+check_runtime_text_probe_log() {
+    local log_file="$1"
+
+    if [ "${fixture}" != "ai-chat" ]; then
+        echo "gui_probe: runtime-text probe requires --fixture ai-chat" >&2
+        exit 1
+    fi
+    if ! grep -Fq "Runtime text repaint: dirty_nodes=1" "${log_file}"; then
+        echo "gui_probe: runtime text mutation did not use retained text repaint" >&2
+        exit 1
+    fi
+    if ! grep -Fq "[SilkSurf] Runtime host callbacks:" "${log_file}"; then
+        echo "gui_probe: runtime text mutation did not drain host callbacks" >&2
+        exit 1
+    fi
+    if awk '/Runtime text repaint:/ { armed = 1; next } armed && /fused total:/ { found = 1 } END { exit(found ? 0 : 1) }' "${log_file}"; then
+        echo "gui_probe: runtime text repaint ran fused layout after fast path" >&2
+        exit 1
+    fi
+    if ! grep -Fq "mode Damage(Rect" "${log_file}"; then
+        echo "gui_probe: runtime text repaint did not present damage" >&2
+        exit 1
+    fi
+
+    echo "gui_probe: runtime text repaint OK"
 }
 
 check_form_submit_probe_log() {
