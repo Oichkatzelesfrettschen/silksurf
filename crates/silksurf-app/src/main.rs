@@ -2271,6 +2271,10 @@ fn repaint_runtime_text_only_dirty_nodes(
     frame: &mut BrowserFrame,
     dirty_nodes: &[silksurf_dom::NodeId],
 ) -> Option<BrowserRedrawMode> {
+    if let [node] = dirty_nodes {
+        return repaint_single_runtime_text_node(runtime, frame, *node);
+    }
+
     let dom = runtime
         .dom
         .lock()
@@ -2312,6 +2316,64 @@ fn repaint_runtime_text_only_dirty_nodes(
             &text,
         )
     {
+        return Some(BrowserRedrawMode::Damage(damage));
+    }
+    rasterize_browser_document_damage_scratch(
+        &runtime.display_list,
+        frame.bitmap_scroll_y,
+        frame.bitmap_height,
+        damage,
+        &mut runtime.damage_scratch,
+    );
+    if !sync_argb_damage_from_scratch(&runtime.damage_scratch, &mut frame.argb, FRAME_WIDTH) {
+        rasterize_browser_document_damage_into(
+            &runtime.display_list,
+            frame.bitmap_scroll_y,
+            frame.bitmap_height,
+            damage,
+            &mut runtime.rgba,
+            &mut runtime.damage_scratch,
+        );
+        sync_argb_damage_from_rgba(
+            &runtime.rgba,
+            &mut frame.argb,
+            FRAME_WIDTH,
+            frame.bitmap_height,
+            viewport_damage_rect(damage, frame.bitmap_scroll_y),
+        );
+    }
+    Some(BrowserRedrawMode::Damage(damage))
+}
+
+fn repaint_single_runtime_text_node(
+    runtime: &mut BrowserPageRuntime,
+    frame: &mut BrowserFrame,
+    node: silksurf_dom::NodeId,
+) -> Option<BrowserRedrawMode> {
+    let (item_index, text, damage) = {
+        let dom = runtime
+            .dom
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let text = dirty_text_node_content(&dom, node)?.to_string();
+        let item_index = dirty_text_display_item_index(&runtime.display_list.items, node)?;
+        let damage =
+            text_item_in_place_damage_rect(&runtime.display_list.items[item_index], &text)?;
+        let _ = fused_node_rect(&runtime.fused, node)?;
+        (item_index, text, damage)
+    };
+
+    trace_runtime_text_repaint(1, damage);
+    let text_paint =
+        update_text_display_item_content(&mut runtime.display_list.items[item_index], &text)?;
+    if paint_text_damage_argb(
+        &runtime.display_list.items,
+        item_index,
+        frame,
+        damage,
+        text_paint,
+        &text,
+    ) {
         return Some(BrowserRedrawMode::Damage(damage));
     }
     rasterize_browser_document_damage_scratch(
@@ -2386,7 +2448,7 @@ fn text_item_in_place_damage_rect(
     if rect.width <= 0.0 || rect.height <= 0.0 || *font_size <= 0.0 || !font_size.is_finite() {
         return None;
     }
-    let (width, height) = silksurf_text::measure_text(value, *font_size, Some(rect.width));
+    let (width, height) = page_bitmap_text_bounds(value, *font_size)?;
     if width <= rect.width + 0.5 && height <= rect.height + 0.5 {
         Some(focused_input_text_damage_rect(item, value).unwrap_or(*rect))
     } else {
@@ -2553,12 +2615,40 @@ fn paint_text_damage_argb(
 }
 
 fn page_bitmap_text_supported(text: &str, font_size: f32) -> bool {
-    font_size.is_finite()
-        && font_size > 0.0
-        && text.chars().all(|ch| match ch {
-            '\n' | '\r' | '\t' | ' ' => true,
-            _ => ch.is_ascii() && chrome_glyph_byte(ch as u8).is_some(),
-        })
+    page_bitmap_text_bounds(text, font_size).is_some()
+}
+
+fn page_bitmap_text_bounds(text: &str, font_size: f32) -> Option<(f32, f32)> {
+    let (_, advance, line_height, space_advance) = page_bitmap_text_metrics(font_size)?;
+    if text.is_empty() {
+        return Some((0.0, 0.0));
+    }
+    let mut current_width = 0_i32;
+    let mut widest_width = 0_i32;
+    let mut line_count = 1_i32;
+    for ch in text.chars() {
+        match ch {
+            '\n' => {
+                widest_width = widest_width.max(current_width);
+                current_width = 0;
+                line_count = line_count.saturating_add(1);
+            }
+            '\r' => {}
+            '\t' => current_width = current_width.saturating_add(space_advance.saturating_mul(4)),
+            ' ' => current_width = current_width.saturating_add(space_advance),
+            _ => {
+                if !ch.is_ascii() || chrome_glyph_byte(ch as u8).is_none() {
+                    return None;
+                }
+                current_width = current_width.saturating_add(advance);
+            }
+        }
+    }
+    widest_width = widest_width.max(current_width);
+    Some((
+        widest_width.max(0) as f32,
+        line_count.max(1).saturating_mul(line_height).max(0) as f32,
+    ))
 }
 
 fn text_damage_background_argb(
@@ -10267,6 +10357,66 @@ mod tests {
 
         assert!(page.runtime.rgba.capacity() >= rgba_capacity);
         assert!(page.frame.argb.capacity() >= argb_capacity);
+    }
+
+    #[test]
+    fn browser_page_suppresses_style_and_script_metadata_text() {
+        let inline_css = concat!(
+            "body{background:#eee;width:60vw;margin:15vh auto;",
+            "font-family:system-ui,sans-serif}",
+            "h1{font-size:1.5em}",
+            "div{opacity:0.8}",
+            "a:link,a:visited{color:#348}"
+        );
+        let payload = BrowserPagePayload {
+            url: "https://example.com/".to_string(),
+            html: format!(
+                concat!(
+                    "<!doctype html><html><head><style>{}</style>",
+                    "<script type=\"application/json\">hidden-script-text</script>",
+                    "</head><body><div><h1>Example Domain</h1>",
+                    "<p>This domain is for use in documentation examples ",
+                    "without needing permission.</p>",
+                    "<a href=\"https://www.iana.org/domains/example\">Learn more</a>",
+                    "</div></body></html>"
+                ),
+                inline_css
+            ),
+            css_text: stylesheet_text_with_user_agent_defaults(inline_css),
+            script_texts: Vec::new(),
+            module_texts: Vec::new(),
+            images: Vec::new(),
+            render_config: BrowserRenderConfig::default(),
+        };
+
+        let page = build_browser_page(payload).expect("payload builds page");
+        let text_items: Vec<&str> = page
+            .runtime
+            .display_list
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                DisplayItem::Text { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+
+        assert!(
+            text_items
+                .iter()
+                .any(|text| text.contains("Example Domain"))
+        );
+        assert!(
+            text_items
+                .iter()
+                .any(|text| text.contains("documentation examples"))
+        );
+        assert!(!text_items.iter().any(|text| text.contains("body{")));
+        assert!(
+            !text_items
+                .iter()
+                .any(|text| text.contains("hidden-script-text"))
+        );
     }
 
     #[test]
