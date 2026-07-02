@@ -53,8 +53,9 @@ pub struct TaffyLayout {
     taffy_to_bfs: FxHashMap<TaffyId, usize>,
     /// Reused child-id list for parent node construction.
     child_ids_scratch: Vec<TaffyId>,
-    /// Per-compute text measurement cache keyed by BFS index.
+    /// Text measurement cache keyed by BFS index and guarded by DOM generation.
     text_measure_cache: Vec<CachedTextMeasures>,
+    text_measure_generation: u64,
 }
 
 #[derive(Clone, Copy)]
@@ -149,6 +150,7 @@ impl TaffyLayout {
             taffy_to_bfs: FxHashMap::default(),
             child_ids_scratch: Vec::new(),
             text_measure_cache: Vec::new(),
+            text_measure_generation: u64::MAX,
         }
     }
 
@@ -248,9 +250,7 @@ impl TaffyLayout {
             width: AvailableSpace::Definite(viewport.width),
             height: AvailableSpace::Definite(viewport.height),
         };
-        self.text_measure_cache.clear();
-        self.text_measure_cache
-            .resize(self.taffy_nodes.len(), CachedTextMeasures::default());
+        self.refresh_text_measure_cache(dom.generation());
 
         // Split borrow: tree needs &mut, taffy_to_bfs needs &.
         let TaffyLayout {
@@ -341,6 +341,15 @@ impl TaffyLayout {
             );
         }
         result.is_ok()
+    }
+
+    fn refresh_text_measure_cache(&mut self, generation: u64) {
+        if self.text_measure_generation != generation {
+            self.text_measure_cache.clear();
+            self.text_measure_generation = generation;
+        }
+        self.text_measure_cache
+            .resize(self.taffy_nodes.len(), CachedTextMeasures::default());
     }
 
     /// Write absolute positions from taffy layout results into `node_rects`.
@@ -1159,6 +1168,57 @@ mod tests {
         tl.rebuild(&dom, &table, &styles);
         let ok = tl.compute(&dom, &styles, &table.bfs_order, viewport);
         assert!(ok);
+    }
+
+    #[test]
+    fn text_measure_cache_survives_same_generation() {
+        let mut tl = TaffyLayout::new();
+        tl.text_measure_generation = 7;
+        tl.taffy_nodes.resize(2, None);
+        tl.text_measure_cache
+            .resize(2, CachedTextMeasures::default());
+        tl.text_measure_cache[1].insert(CachedTextMeasure {
+            font_size: 16.0,
+            max_width: Some(80.0),
+            width: 40.0,
+            height: 16.0,
+            text_len: 5,
+        });
+
+        tl.refresh_text_measure_cache(7);
+        assert_eq!(tl.text_measure_generation, 7);
+        assert_eq!(text_measure_cache_entry_count(&tl), 1);
+
+        tl.refresh_text_measure_cache(8);
+        assert_eq!(tl.text_measure_generation, 8);
+        assert_eq!(text_measure_cache_entry_count(&tl), 0);
+    }
+
+    #[test]
+    fn compute_sets_text_measure_generation() {
+        let (dom, root) = make_dom_with_text();
+        let table = LayoutNeighborTable::build(&dom, root);
+        let styles: Vec<Option<ComputedStyle>> = vec![None; table.len()];
+        let viewport = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 800.0,
+            height: 600.0,
+        };
+        let mut tl = TaffyLayout::new();
+        tl.rebuild(&dom, &table, &styles);
+
+        assert!(tl.compute(&dom, &styles, &table.bfs_order, viewport));
+        assert_eq!(tl.text_measure_generation, dom.generation());
+    }
+
+    fn text_measure_cache_entry_count(layout: &TaffyLayout) -> usize {
+        layout
+            .text_measure_cache
+            .iter()
+            .flat_map(|entries| entries.entries)
+            .flatten()
+            .count()
     }
 
     #[test]
