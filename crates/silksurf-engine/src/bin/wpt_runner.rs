@@ -283,6 +283,9 @@ fn run_one(path: &Path) -> Outcome {
         "css_inline_style_attribute" => {
             check_css_inline_style_attribute(&parsed.dom, parsed.document, &source)
         }
+        "css_multiple_style_blocks" => {
+            check_css_multiple_style_blocks(&parsed.dom, parsed.document, &source)
+        }
         // CSS property coverage
         "css_overflow" => check_css_overflow(&parsed.dom, parsed.document, &source),
         "css_opacity" => check_css_opacity(&parsed.dom, parsed.document, &source),
@@ -638,36 +641,38 @@ fn check_html_text_entities(dom: &Dom, document: NodeId) -> Outcome {
 }
 
 /*
- * extract_inline_style -- pull the literal contents of <style>...</style>
- * out of the source HTML.
+ * extract_inline_style pulls literal <style> contents from source HTML.
  *
- * WHY: silksurf-html keeps <style> raw text as a Text child of the
- * <style> element, but we want the verbatim CSS source string to feed
- * into parse_stylesheet. Re-tokenizing the HTML and grabbing the first
- * Character payload after a <style> StartTag is the simplest path that
- * does not depend on the DOM's text-coalescing behaviour.
+ * The runner concatenates document style blocks in source order before CSS
+ * parsing. That mirrors the app pipeline and preserves cascade order across
+ * separate <style> elements.
  */
 fn extract_inline_style(html: &str) -> Option<String> {
     let mut tokenizer = Tokenizer::new();
     let mut tokens = tokenizer.feed(html).ok()?;
     tokens.extend(tokenizer.finish().ok()?);
     let mut in_style = false;
+    let mut saw_style = false;
     let mut buf = String::new();
     for token in tokens {
         match token {
             HtmlToken::StartTag { name, .. } if name.eq_ignore_ascii_case("style") => {
                 in_style = true;
+                saw_style = true;
             }
             HtmlToken::EndTag { name } if name.eq_ignore_ascii_case("style") => {
                 if in_style {
-                    return Some(buf);
+                    if !buf.ends_with('\n') {
+                        buf.push('\n');
+                    }
+                    in_style = false;
                 }
             }
             HtmlToken::Character { data } if in_style => buf.push_str(&data),
             _ => {}
         }
     }
-    None
+    saw_style.then_some(buf)
 }
 
 fn parse_selector(dom: &Dom, css_selector: &str) -> Option<SelectorList> {
@@ -1783,6 +1788,42 @@ fn check_css_inline_style_attribute(dom: &Dom, document: NodeId, source: &str) -
         ));
     }
 
+    Outcome::Pass
+}
+
+fn check_css_multiple_style_blocks(dom: &Dom, document: NodeId, source: &str) -> Outcome {
+    let Some(css) = extract_inline_style(source) else {
+        return Outcome::Skip("no <style> block".to_string());
+    };
+    let stylesheet = match parse_stylesheet(&css) {
+        Ok(s) => s,
+        Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
+    };
+    if stylesheet.rules.len() < 2 {
+        return Outcome::Fail(format!(
+            "expected at least 2 rules from separate style blocks, got {}",
+            stylesheet.rules.len()
+        ));
+    }
+    let Some(body) = body_of(dom, document) else {
+        return Outcome::Fail("missing body".to_string());
+    };
+    let Some(target) = first_element_child_named(dom, body, "p") else {
+        return Outcome::Fail("missing target paragraph".to_string());
+    };
+    let style = compute_style_for_node(dom, target, &stylesheet, None);
+    let green = Color {
+        r: 0,
+        g: 128,
+        b: 0,
+        a: 255,
+    };
+    if style.color != green {
+        return Outcome::Fail(format!(
+            "later style block should override earlier color, got {:?}",
+            style.color
+        ));
+    }
     Outcome::Pass
 }
 
