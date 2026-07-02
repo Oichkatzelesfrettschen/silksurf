@@ -70,8 +70,6 @@ pub struct FusedWorkspace {
     pub node_rects: Vec<Rect>,
     /// Paint commands (valid after `run()`; order is BFS paint order).
     pub display_items: Vec<DisplayItem>,
-    /// Render-tree suppression flags per BFS-indexed node.
-    render_suppressed: Vec<bool>,
     /// Cached tree-shape generation for the BFS table.
     table_generation: u64,
     /// Cached selector-input generation for the cascade view.
@@ -106,7 +104,6 @@ impl FusedWorkspace {
             styles: Vec::new(),
             node_rects: Vec::new(),
             display_items: Vec::new(),
-            render_suppressed: Vec::new(),
             table_generation: u64::MAX,
             cascade_generation: u64::MAX,
             taffy_structure_generation: u64::MAX,
@@ -188,8 +185,7 @@ impl FusedWorkspace {
         self.node_rects.clear();
         self.node_rects.resize(n, viewport);
         self.display_items.clear();
-        self.render_suppressed.clear();
-        self.render_suppressed.resize(n, false);
+        let root_suppressed = node_starts_non_rendered_subtree(dom, root);
 
         // Pass 1: cascade -- compute ComputedStyle for every BFS node.
         // Each node reads its parent's style (already computed, since BFS
@@ -198,9 +194,6 @@ impl FusedWorkspace {
         let mut rem_base_px = 16.0_f32;
         for (i, &node) in self.table.bfs_order.iter().enumerate() {
             let pidx = self.table.parent_idx[i];
-            let parent_suppressed = pidx != u32::MAX && self.render_suppressed[pidx as usize];
-            self.render_suppressed[i] =
-                parent_suppressed || node_starts_non_rendered_subtree(dom, node);
             let parent_style = if pidx == u32::MAX {
                 None
             } else {
@@ -216,7 +209,7 @@ impl FusedWorkspace {
                 Some(&self.cascade_view),
                 rem_base_px,
             );
-            if self.render_suppressed[i] {
+            if root_suppressed {
                 style.display = Display::None;
             }
             apply_replaced_size(dom, node, &mut style, replaced_sizes);
@@ -452,15 +445,13 @@ pub fn fused_style_layout_paint_with_replaced_sizes(
     let mut styles: Vec<Option<ComputedStyle>> = vec![None; n];
     let mut node_rects: Vec<Rect> = vec![viewport; n];
     let mut display_items: Vec<DisplayItem> = Vec::new();
-    let mut render_suppressed = vec![false; n];
+    let root_suppressed = node_starts_non_rendered_subtree(dom, root);
 
     // Pass 1: cascade
     let phase_start = std::time::Instant::now();
     let mut rem_base_px = 16.0_f32;
     for (i, &node) in table.bfs_order.iter().enumerate() {
         let pidx = table.parent_idx[i];
-        let parent_suppressed = pidx != u32::MAX && render_suppressed[pidx as usize];
-        render_suppressed[i] = parent_suppressed || node_starts_non_rendered_subtree(dom, node);
         let parent_style = if pidx == u32::MAX {
             None
         } else {
@@ -476,7 +467,7 @@ pub fn fused_style_layout_paint_with_replaced_sizes(
             None,
             rem_base_px,
         );
-        if render_suppressed[i] {
+        if root_suppressed {
             style.display = Display::None;
         }
         apply_replaced_size(dom, node, &mut style, replaced_sizes);
@@ -1043,6 +1034,32 @@ mod tests {
             .collect();
 
         assert_eq!(text_items, vec!["Visible body"]);
+    }
+
+    #[test]
+    fn non_rendered_root_suppresses_descendant_text() {
+        let mut dom = Dom::new();
+        let script = dom.create_element("script");
+        let text = dom.create_text("hidden script text");
+        dom.append_child(script, text).unwrap();
+        let stylesheet = silksurf_css::parse_stylesheet("").unwrap();
+        let viewport = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 1280.0,
+            height: 800.0,
+        };
+
+        let result = fused_style_layout_paint(&dom, &stylesheet, script, viewport);
+
+        assert!(result.display_items.is_empty());
+        assert!(
+            result
+                .styles
+                .iter()
+                .flatten()
+                .all(|style| style.display == Display::None)
+        );
     }
 
     #[test]
