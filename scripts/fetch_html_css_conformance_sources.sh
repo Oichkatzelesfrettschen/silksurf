@@ -25,7 +25,9 @@ fetch_source css22.pdf https://www.w3.org/TR/CSS22/css2.pdf
 fetch_source css2-1998.pdf https://www.w3.org/TR/1998/REC-CSS2-19980512/css2.pdf
 fetch_source html40.pdf https://www.w3.org/TR/1998/REC-html40-19980424/html40.pdf
 fetch_source html401.pdf.gz https://www.w3.org/TR/1999/REC-html401-19991224/html40.pdf.gz
+fetch_source html-living-standard.pdf https://html.spec.whatwg.org/print.pdf
 fetch_source html-living-standard.html https://html.spec.whatwg.org/multipage/
+fetch_source css-2026.html https://www.w3.org/TR/css-2026/
 fetch_source css-syntax-3.html https://www.w3.org/TR/css-syntax-3/
 fetch_source selectors-4.html https://www.w3.org/TR/selectors-4/
 fetch_source css-cascade-5.html https://www.w3.org/TR/css-cascade-5/
@@ -56,7 +58,9 @@ for file in \
     css2-1998.pdf \
     html40.pdf \
     html401.pdf.gz \
+    html-living-standard.pdf \
     html-living-standard.html \
+    css-2026.html \
     css-syntax-3.html \
     selectors-4.html \
     css-cascade-5.html \
@@ -86,7 +90,9 @@ done
         css2-1998.pdf \
         html40.pdf \
         html401.pdf.gz \
+        html-living-standard.pdf \
         html-living-standard.html \
+        css-2026.html \
         css-syntax-3.html \
         selectors-4.html \
         css-cascade-5.html \

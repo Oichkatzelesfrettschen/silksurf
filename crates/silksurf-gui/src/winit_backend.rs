@@ -1374,6 +1374,15 @@ impl WinitInputProbe {
                 exit_after_finish: probe_exit_after_finish_enabled(),
                 exit_frame_delay: 0,
             }),
+            Some("runtime-text") => Some(Self {
+                steps: Vec::new(),
+                wait_after_step: Vec::new(),
+                next_index: 0,
+                waiting_for_redraw: true,
+                armed: false,
+                exit_after_finish: probe_exit_after_finish_enabled(),
+                exit_frame_delay: 1,
+            }),
             Some("form-submit") => Some(Self {
                 steps: FORM_SUBMIT_PROBE_STEPS.to_vec(),
                 wait_after_step: wait_after_each_step(FORM_SUBMIT_PROBE_STEPS.len()),
@@ -2226,6 +2235,24 @@ mod tests {
             super::PAGE_INPUT_PROBE_STEPS,
             &[WinitInput::FocusNextPageInput, WinitInput::TextInput('!')]
         );
+    }
+
+    #[test]
+    fn runtime_text_probe_waits_one_extra_frame() {
+        let mut probe = WinitInputProbe {
+            steps: Vec::new(),
+            wait_after_step: Vec::new(),
+            next_index: 0,
+            waiting_for_redraw: true,
+            armed: false,
+            exit_after_finish: true,
+            exit_frame_delay: 1,
+        };
+
+        probe.arm_next_input();
+        assert!(probe.finished());
+        assert!(!probe.exit_delay_elapsed());
+        assert!(probe.exit_delay_elapsed());
     }
 
     #[test]

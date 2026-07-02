@@ -11,7 +11,9 @@ This bundle retains primary source material for HTML and CSS conformance work.
 | `css2-1998.pdf` | `https://www.w3.org/TR/1998/REC-CSS2-19980512/css2.pdf` | Original CSS2 Recommendation PDF for legacy visual formatting, positioning, and media behavior. |
 | `html40.pdf` | `https://www.w3.org/TR/1998/REC-html40-19980424/html40.pdf` | Historical HTML PDF reference for legacy element and document behavior. |
 | `html401.pdf.gz` | `https://www.w3.org/TR/1999/REC-html401-19991224/html40.pdf.gz` | HTML 4.01 compressed PDF endpoint bytes for legacy element, form, and document behavior. |
+| `html-living-standard.pdf` | `https://html.spec.whatwg.org/print.pdf` | Current WHATWG HTML PDF snapshot for parser, document, element, form, script, and rendering behavior. |
 | `html-living-standard.html` | `https://html.spec.whatwg.org/multipage/` | Current HTML living standard snapshot. The source endpoint serves HTML, not PDF. |
+| `css-2026.html` | `https://www.w3.org/TR/css-2026/` | CSS Snapshot 2026 implementer index for the current CSS module set. The source endpoint serves HTML, not PDF. |
 | `css-syntax-3.html` | `https://www.w3.org/TR/css-syntax-3/` | CSS Syntax Level 3 snapshot for tokenizer and parser conformance. |
 | `selectors-4.html` | `https://www.w3.org/TR/selectors-4/` | Selectors Level 4 snapshot for selector parsing and matching conformance. |
 | `css-cascade-5.html` | `https://www.w3.org/TR/css-cascade-5/` | CSS Cascade Level 5 snapshot for origin, specificity, inheritance, and computed-value behavior. |
@@ -43,12 +45,12 @@ requires a different replay string.
 
 ## Notes
 
-The W3C module PDF endpoints for CSS Syntax Level 3, Selectors Level 4, CSS
-Cascade Level 5, CSS Values and Units Level 4, CSS Color Level 4,
-Backgrounds and Borders Level 3, CSS Flexible Box Layout Level 1, CSS Display
-Level 3, CSS Text Level 3, CSSOM, CSSOM View, CSS Sizing Level 3, CSS
-Overflow Level 3, CSS Positioned Layout Level 3, CSS Box Alignment Level 3,
-CSS Fonts Level 4, CSS Images Level 3, and HTML 5.2 return 404 or
-negotiation pages during source discovery. The bundle keeps the available
-primary PDFs and stores current module standards in the HTML or gzip format
-the source publishes.
+The W3C module PDF endpoints for CSS Snapshot 2026, CSS Syntax Level 3,
+Selectors Level 4, CSS Cascade Level 5, CSS Values and Units Level 4, CSS
+Color Level 4, Backgrounds and Borders Level 3, CSS Flexible Box Layout Level
+1, CSS Display Level 3, CSS Text Level 3, CSSOM, CSSOM View, CSS Sizing Level
+3, CSS Overflow Level 3, CSS Positioned Layout Level 3, CSS Box Alignment
+Level 3, CSS Fonts Level 4, CSS Images Level 3, and HTML 5.2 return 404,
+multiple-choice, or negotiation pages during source discovery. The bundle
+keeps the available primary PDFs and stores current module standards in the
+HTML or gzip format the source publishes.
