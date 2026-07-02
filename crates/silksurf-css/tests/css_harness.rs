@@ -4,6 +4,7 @@ use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 
 use silksurf_css::parse_stylesheet_bytes;
+use silksurf_html::{Token as HtmlToken, Tokenizer};
 
 const DEFAULT_EXPECTATIONS_FILE: &str = "silksurf-css-harness.expectations";
 
@@ -295,14 +296,14 @@ fn css_harness_compliance() {
         .unwrap_or_else(|error| panic!("[css-harness] failed to parse harness options: {error}"));
 
     let mut files = Vec::new();
-    collect_css_files(&root, &mut files)
+    collect_case_files(&root, &mut files)
         .unwrap_or_else(|error| panic!("[css-harness] failed to scan {}: {error}", root.display()));
 
     files.sort();
     let files = apply_file_filters(files, &root, &options);
     assert!(
         !files.is_empty(),
-        "[css-harness] no .css files selected under {} (check CSS_TEST_INCLUDE/CSS_TEST_EXCLUDE/CSS_TEST_MAX_FILES)",
+        "[css-harness] no CSS or markup files selected under {} (check CSS_TEST_INCLUDE/CSS_TEST_EXCLUDE/CSS_TEST_MAX_FILES)",
         root.display()
     );
 
@@ -314,8 +315,12 @@ fn css_harness_compliance() {
             continue;
         }
 
-        let data = match fs::read(&file) {
-            Ok(data) => data,
+        let data = match load_case_bytes(&file) {
+            Ok(Some(data)) => data,
+            Ok(None) => {
+                summary.record_case(relative, ExpectedOutcome::Skip, ParseOutcome::Passed);
+                continue;
+            }
             Err(error) => {
                 summary.record_harness_failure(relative, format!("failed to read file: {error}"));
                 continue;
@@ -371,24 +376,74 @@ fn apply_file_filters(
     selected
 }
 
-fn collect_css_files(root: &Path, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
+fn collect_case_files(root: &Path, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
     let mut entries = fs::read_dir(root)?.collect::<Result<Vec<_>, _>>()?;
     entries.sort_by_key(std::fs::DirEntry::path);
 
     for entry in entries {
         let path = entry.path();
         if path.is_dir() {
-            collect_css_files(&path, files)?;
-        } else if path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("css"))
-        {
+            collect_case_files(&path, files)?;
+        } else if is_case_file(&path) {
             files.push(path);
         }
     }
 
     Ok(())
+}
+
+fn is_case_file(path: &Path) -> bool {
+    let Some(ext) = path.extension().and_then(|ext| ext.to_str()) else {
+        return false;
+    };
+    matches!(
+        ext.to_ascii_lowercase().as_str(),
+        "css" | "html" | "htm" | "xht" | "xhtml"
+    )
+}
+
+fn load_case_bytes(path: &Path) -> Result<Option<Vec<u8>>, std::io::Error> {
+    let data = fs::read(path)?;
+    if path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("css"))
+    {
+        return Ok(Some(data));
+    }
+
+    let source = String::from_utf8_lossy(&data);
+    Ok(extract_inline_style(&source).map(String::into_bytes))
+}
+
+fn extract_inline_style(html: &str) -> Option<String> {
+    let mut tokenizer = Tokenizer::new();
+    let mut tokens = tokenizer.feed(html).ok()?;
+    tokens.extend(tokenizer.finish().ok()?);
+    let mut in_style = false;
+    let mut saw_style = false;
+    let mut buf = String::new();
+
+    for token in tokens {
+        match token {
+            HtmlToken::StartTag { name, .. } if name.eq_ignore_ascii_case("style") => {
+                in_style = true;
+                saw_style = true;
+            }
+            HtmlToken::EndTag { name } if name.eq_ignore_ascii_case("style") => {
+                if in_style {
+                    if !buf.ends_with('\n') {
+                        buf.push('\n');
+                    }
+                    in_style = false;
+                }
+            }
+            HtmlToken::Character { data } if in_style => buf.push_str(&data),
+            _ => {}
+        }
+    }
+
+    saw_style.then_some(buf)
 }
 
 fn normalized_relative_path(file: &Path, root: &Path) -> String {

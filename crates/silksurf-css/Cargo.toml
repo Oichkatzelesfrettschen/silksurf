@@ -16,6 +16,9 @@ serde = { workspace = true }
 mimalloc = { workspace = true }
 encoding_rs = "0.8"
 
+[dev-dependencies]
+silksurf-html = { path = "../silksurf-html" }
+
 [features]
 # cs-soa: Structure-of-Arrays layout for ComputedStyle.
 # Off by default; additive only. Enables the style_soa module and the
