@@ -341,6 +341,24 @@ impl FusedWorkspace {
             table: self.table.clone(),
         }
     }
+
+    /// Move the current workspace output into the owned result shape.
+    #[must_use]
+    pub fn take_result(&mut self) -> FusedResult {
+        FusedResult {
+            styles: std::mem::take(&mut self.styles),
+            display_items: std::mem::take(&mut self.display_items),
+            node_rects: std::mem::take(&mut self.node_rects),
+            table: self.table.clone(),
+        }
+    }
+
+    /// Recycle result vector storage for the next workspace run.
+    pub fn recycle_result_storage(&mut self, mut result: FusedResult) {
+        self.styles = std::mem::take(&mut result.styles);
+        self.display_items = std::mem::take(&mut result.display_items);
+        self.node_rects = std::mem::take(&mut result.node_rects);
+    }
 }
 
 /*
