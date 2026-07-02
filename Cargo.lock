@@ -3855,6 +3855,7 @@ dependencies = [
  "silksurf-layout",
  "silksurf-net",
  "silksurf-render",
+ "silksurf-text",
  "silksurf-tls",
  "tokio",
  "tracing-subscriber",
