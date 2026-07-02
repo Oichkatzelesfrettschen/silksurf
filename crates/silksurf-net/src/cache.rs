@@ -81,7 +81,7 @@ pub struct ResponseCache {
 }
 
 impl ResponseCache {
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -104,7 +104,7 @@ impl ResponseCache {
      *
      * See: put_to_disk, load_from_disk below
      */
-    #[must_use] 
+    #[must_use]
     pub fn with_disk(dir: &Path) -> Self {
         let mut cache = Self {
             entries: FxHashMap::default(),
@@ -115,7 +115,7 @@ impl ResponseCache {
     }
 
     /// Get a cached response for the given URL, if available.
-    #[must_use] 
+    #[must_use]
     pub fn get(&self, url: &str) -> Option<&CachedResponse> {
         self.entries.get(url)
     }
@@ -127,8 +127,12 @@ impl ResponseCache {
      * filesystem does not prevent in-memory caching from working.
      */
     pub fn put(&mut self, url: String, response: &super::HttpResponse) {
-        let etag = response.header("etag").map(std::string::ToString::to_string);
-        let last_modified = response.header("last-modified").map(std::string::ToString::to_string);
+        let etag = response
+            .header("etag")
+            .map(std::string::ToString::to_string);
+        let last_modified = response
+            .header("last-modified")
+            .map(std::string::ToString::to_string);
 
         let entry = CachedResponse {
             body: response.body.clone(),
@@ -148,7 +152,7 @@ impl ResponseCache {
     }
 
     /// Build conditional request headers for revalidation.
-    #[must_use] 
+    #[must_use]
     pub fn conditional_headers(&self, url: &str) -> Vec<(String, String)> {
         let mut headers = Vec::new();
         if let Some(cached) = self.entries.get(url) {
@@ -163,19 +167,19 @@ impl ResponseCache {
     }
 
     /// Number of cached entries.
-    #[must_use] 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
     /// Check if cache is empty.
-    #[must_use] 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
     /// Total cached bytes.
-    #[must_use] 
+    #[must_use]
     pub fn total_bytes(&self) -> usize {
         self.entries.values().map(|e| e.body.len()).sum()
     }
@@ -218,6 +222,9 @@ impl ResponseCache {
                 cached_at: Instant::now(),
                 url: url.clone(),
             };
+            if !disk_entry_is_decoded_text(&cached) {
+                continue;
+            }
             self.entries.insert(url, cached);
         }
     }
@@ -232,11 +239,13 @@ impl ResponseCache {
  * File name: FxHash of the URL (hex) + ".json". Collision probability for
  * < 1000 URLs is negligible (64-bit hash space).
  *
- * INVARIANT: only text responses are stored (body_utf8 field is lossy UTF-8).
- * Binary responses are not written (would produce unreadable JSON for images).
- * In practice, silksurf-net fetches HTML and CSS only, which are always text.
+ * INVARIANT: only text responses are stored. Binary responses stay in the
+ * in-memory cache and never pass through UTF-8 JSON serialization.
  */
 fn put_to_disk(dir: &Path, url: &str, entry: &CachedResponse) {
+    let Some(body_utf8) = disk_cache_body(entry) else {
+        return;
+    };
     use rustc_hash::FxHasher;
     use std::hash::{Hash, Hasher};
     let mut hasher = FxHasher::default();
@@ -246,7 +255,7 @@ fn put_to_disk(dir: &Path, url: &str, entry: &CachedResponse) {
     let disk = CachedResponseDisk {
         url: url.to_string(),
         status: entry.status,
-        body_utf8: String::from_utf8_lossy(&entry.body).into_owned(),
+        body_utf8,
         headers: entry.headers.clone(),
         etag: entry.etag.clone(),
         last_modified: entry.last_modified.clone(),
@@ -258,4 +267,128 @@ fn put_to_disk(dir: &Path, url: &str, entry: &CachedResponse) {
     let _ = std::fs::create_dir_all(dir);
     let path = dir.join(format!("{key:016x}.json"));
     let _ = std::fs::write(path, json);
+}
+
+fn disk_cache_body(entry: &CachedResponse) -> Option<String> {
+    if !disk_entry_is_decoded_text(entry) {
+        return None;
+    }
+    String::from_utf8(entry.body.clone()).ok()
+}
+
+fn disk_entry_is_decoded_text(entry: &CachedResponse) -> bool {
+    is_text_response(entry)
+        && header_value(&entry.headers, "transfer-encoding").is_none()
+        && header_value(&entry.headers, "content-encoding").is_none()
+}
+
+fn is_text_response(entry: &CachedResponse) -> bool {
+    let Some(content_type) = header_value(&entry.headers, "content-type") else {
+        return false;
+    };
+    let media_type = content_type
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    media_type.starts_with("text/")
+        || matches!(
+            media_type.as_str(),
+            "application/javascript" | "application/json" | "application/xml"
+        )
+}
+
+fn header_value<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
+    headers
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case(name))
+        .map(|(_, value)| value.as_str())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CachedResponseDisk, ResponseCache};
+    use crate::HttpResponse;
+    use std::path::PathBuf;
+
+    #[test]
+    fn disk_cache_skips_binary_responses() {
+        let dir = temp_cache_dir("binary");
+        let mut cache = ResponseCache::with_disk(&dir);
+        cache.put(
+            "https://example.test/avatar.png".to_string(),
+            &HttpResponse {
+                status: 200,
+                headers: vec![("Content-Type".to_string(), "image/png".to_string())],
+                body: vec![0x89, b'P', b'N', b'G', 0xff],
+            },
+        );
+
+        let reloaded = ResponseCache::with_disk(&dir);
+
+        assert!(reloaded.get("https://example.test/avatar.png").is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn disk_cache_loads_text_responses() {
+        let dir = temp_cache_dir("text");
+        let mut cache = ResponseCache::with_disk(&dir);
+        cache.put(
+            "https://example.test/style.css".to_string(),
+            &HttpResponse {
+                status: 200,
+                headers: vec![("Content-Type".to_string(), "text/css".to_string())],
+                body: b"body { color: black; }".to_vec(),
+            },
+        );
+
+        let reloaded = ResponseCache::with_disk(&dir);
+
+        assert_eq!(
+            reloaded
+                .get("https://example.test/style.css")
+                .map(|entry| entry.body.as_slice()),
+            Some(b"body { color: black; }".as_slice())
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn disk_cache_skips_transport_encoded_text_responses() {
+        let dir = temp_cache_dir("encoded");
+        std::fs::create_dir_all(&dir).expect("create cache dir");
+        let disk = CachedResponseDisk {
+            url: "https://example.test/".to_string(),
+            status: 200,
+            body_utf8: "3\r\nabc\r\n0\r\n\r\n".to_string(),
+            headers: vec![
+                ("Content-Type".to_string(), "text/html".to_string()),
+                ("Transfer-Encoding".to_string(), "chunked".to_string()),
+            ],
+            etag: None,
+            last_modified: None,
+        };
+        let json = serde_json::to_vec(&disk).expect("serialize cache row");
+        std::fs::write(dir.join("encoded.json"), json).expect("write cache row");
+
+        let reloaded = ResponseCache::with_disk(&dir);
+
+        assert!(reloaded.get("https://example.test/").is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn temp_cache_dir(label: &str) -> PathBuf {
+        let mut dir = std::env::temp_dir();
+        dir.push(format!(
+            "silksurf-cache-test-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time is after epoch")
+                .as_nanos()
+        ));
+        dir
+    }
 }

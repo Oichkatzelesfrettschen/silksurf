@@ -68,14 +68,14 @@ pub struct EnginePipeline {
 }
 
 impl EnginePipeline {
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self {
             style_cache: StyleCache::new(),
         }
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn style_generation(&self) -> u64 {
         self.style_cache.generation()
     }

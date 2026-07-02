@@ -48,6 +48,8 @@ pub struct LayoutNeighborTable {
     pub parent_idx: Vec<u32>,
     /// Flat BFS-order list of all node IDs.
     pub bfs_order: Vec<NodeId>,
+    /// First child index per node (by flat BFS index). `u32::MAX` means leaf.
+    pub child_start: Vec<u32>,
     /// Number of children per node (by flat BFS index).
     pub child_count: Vec<u16>,
     /// Reverse map: `NodeId` -> flat BFS index.
@@ -71,6 +73,7 @@ impl LayoutNeighborTable {
             level_starts: Vec::new(),
             parent_idx: Vec::new(),
             bfs_order: Vec::new(),
+            child_start: Vec::new(),
             child_count: Vec::new(),
             node_to_bfs_idx: rustc_hash::FxHashMap::default(),
         };
@@ -82,7 +85,7 @@ impl LayoutNeighborTable {
      * rebuild -- refill the table in-place, reusing allocated capacity.
      *
      * WHY: fused_style_layout_paint calls build() on every render.  For a
-     * 50-node DOM at 1000 iterations that is 1000 * (1 FxHashMap + 4 Vecs +
+     * 50-node DOM at 1000 iterations that is 1000 * (1 FxHashMap + 5 Vecs +
      * 6 inner level Vecs) = >10000 allocator calls.  rebuild() clears each
      * container (O(1) capacity-preserving clear) and refills, yielding zero
      * heap traffic after the first call once capacity is established.
@@ -92,7 +95,7 @@ impl LayoutNeighborTable {
      * the same allocation.  The FxHashMap grows and never shrinks.
      *
      * INVARIANT: After rebuild(), all arrays are consistent (same length N,
-     * same BFS ordering, valid parent_idx/child_count entries).
+     * same BFS ordering, valid parent_idx/child_start/child_count entries).
      *
      * Complexity: O(N) where N = new node count
      * Allocations: 0 after capacity reaches steady state
@@ -100,6 +103,7 @@ impl LayoutNeighborTable {
     pub fn rebuild(&mut self, dom: &Dom, root: NodeId) {
         self.bfs_order.clear();
         self.parent_idx.clear();
+        self.child_start.clear();
         self.child_count.clear();
         self.node_to_bfs_idx.clear();
         self.level_starts.clear();
@@ -108,6 +112,7 @@ impl LayoutNeighborTable {
         self.bfs_order.push(root);
         self.node_to_bfs_idx.insert(root, 0);
         self.parent_idx.push(u32::MAX);
+        self.child_start.push(u32::MAX); // filled when root is processed below
         self.child_count.push(0); // filled when root is processed below
         self.level_starts.push(0);
 
@@ -127,6 +132,11 @@ impl LayoutNeighborTable {
             for i in level_start..level_end {
                 let node = self.bfs_order[i];
                 let children = dom.children(node).unwrap_or(&[]);
+                self.child_start[i] = if children.is_empty() {
+                    u32::MAX
+                } else {
+                    self.bfs_order.len() as u32
+                };
                 // Set child count for this node (was placeholder 0).
                 self.child_count[i] = children.len().min(u16::MAX as usize) as u16;
 
@@ -136,6 +146,7 @@ impl LayoutNeighborTable {
                     self.node_to_bfs_idx.insert(child, flat_idx);
                     self.bfs_order.push(child);
                     self.parent_idx.push(pidx);
+                    self.child_start.push(u32::MAX); // placeholder, filled next iteration
                     self.child_count.push(0); // placeholder, filled next iteration
                 }
             }
@@ -157,7 +168,7 @@ impl LayoutNeighborTable {
      *
      * Complexity: O(1)
      */
-    #[must_use] 
+    #[must_use]
     pub fn level(&self, i: usize) -> &[NodeId] {
         let start = self.level_starts[i] as usize;
         let end = if i + 1 < self.level_starts.len() {
@@ -169,19 +180,19 @@ impl LayoutNeighborTable {
     }
 
     /// Total number of nodes.
-    #[must_use] 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.bfs_order.len()
     }
 
     /// Check if empty.
-    #[must_use] 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.bfs_order.is_empty()
     }
 
     /// Number of BFS depth levels.
-    #[must_use] 
+    #[must_use]
     pub fn depth(&self) -> usize {
         self.level_starts.len()
     }
@@ -215,7 +226,10 @@ mod tests {
         assert_eq!(table.depth(), 2);
         assert_eq!(table.level(0).len(), 1); // root
         assert_eq!(table.level(1).len(), 2); // children
+        assert_eq!(table.child_start[0], 1); // root children start after root
         assert_eq!(table.child_count[0], 2); // root has 2 children
+        assert_eq!(table.child_start[1], u32::MAX);
+        assert_eq!(table.child_start[2], u32::MAX);
     }
 
     #[test]
@@ -235,5 +249,8 @@ mod tests {
         assert_eq!(table.level(0)[0], root);
         assert_eq!(table.level(1)[0], child);
         assert_eq!(table.parent_idx[1], 0);
+        assert_eq!(table.child_start[0], 1);
+        assert_eq!(table.child_count[0], 1);
+        assert_eq!(table.child_start[1], u32::MAX);
     }
 }

@@ -837,10 +837,7 @@ fn main() {
                         // Path-substring skip: data-staleness issues that are
                         // independent of whether the engine feature is present.
                         let path_str = path.to_str().unwrap_or("");
-                        if SKIP_PATH_CONTAINS
-                            .iter()
-                            .any(|pat| path_str.contains(pat))
-                        {
+                        if SKIP_PATH_CONTAINS.iter().any(|pat| path_str.contains(pat)) {
                             let _ = result_tx.send((path, Outcome::Skip));
                             continue;
                         }

@@ -37,8 +37,9 @@ fn extra_ca_file_rejects_empty() {
     let tmp = tempfile_pem(b"");
     let result = TlsConfig::new_with_extra_ca_file(&tmp);
     match result {
-        Err(TlsConfigError::NoCertificates { .. } |
-TlsConfigError::NoUsableCertificates { .. }) => {}
+        Err(
+            TlsConfigError::NoCertificates { .. } | TlsConfigError::NoUsableCertificates { .. },
+        ) => {}
         other => panic!("expected NoCertificates / NoUsableCertificates error, got {other:?}"),
     }
 }
@@ -48,8 +49,11 @@ fn extra_ca_file_rejects_malformed_pem() {
     let tmp = tempfile_pem(b"not a real PEM file -- just bytes\n");
     let result = TlsConfig::new_with_extra_ca_file(&tmp);
     match result {
-        Err(TlsConfigError::NoCertificates { .. } |
-TlsConfigError::NoUsableCertificates { .. } | TlsConfigError::Io(_)) => {}
+        Err(
+            TlsConfigError::NoCertificates { .. }
+            | TlsConfigError::NoUsableCertificates { .. }
+            | TlsConfigError::Io(_),
+        ) => {}
         other => panic!("expected NoCertificates / NoUsableCertificates / Io error, got {other:?}"),
     }
 }

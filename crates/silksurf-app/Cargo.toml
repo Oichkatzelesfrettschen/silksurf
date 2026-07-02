@@ -7,25 +7,28 @@ publish = false
 
 [dependencies]
 silksurf-engine = { path = "../silksurf-engine", features = ["net"] }
+silksurf-net = { path = "../silksurf-net" }
 silksurf-dom = { path = "../silksurf-dom" }
 silksurf-css = { path = "../silksurf-css" }
 silksurf-layout = { path = "../silksurf-layout" }
-silksurf-render = { path = "../silksurf-render", features = ["parallel"] }
-silksurf-gui = { path = "../silksurf-gui", features = ["winit-backend"] }
+silksurf-render = { path = "../silksurf-render" }
+silksurf-image = { path = "../silksurf-image" }
+silksurf-gui = { path = "../silksurf-gui", default-features = false, features = ["winit-backend"] }
 silksurf-js = { path = "../../silksurf-js" }
 silksurf-core = { path = "../silksurf-core" }
 url = { workspace = true }
+arboard = { workspace = true }
 mimalloc = { workspace = true }
-silksurf-tls = { path = "../silksurf-tls" }
-rustls = { workspace = true }
-tokio = { workspace = true }
-hickory-resolver = { workspace = true }
-hickory-proto = { workspace = true }
-# Observability: app owns the subscriber, env-filter, panic hook (P8.S6).
-# `tracing` is needed directly so the panic hook can emit `tracing::error!`
-# without depending on a re-export from a sibling crate.
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
+quick_cache = { workspace = true }
+accesskit = { workspace = true, optional = true }
+silksurf-tls = { path = "../silksurf-tls", optional = true }
+rustls = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+hickory-resolver = { workspace = true, optional = true }
+hickory-proto = { workspace = true, optional = true }
+# Structured tracing is opt-in. The default browser keeps a small branded
+# panic hook and direct stderr status lines for the embedded runtime profile.
+tracing-subscriber = { workspace = true, optional = true }
 
 [[bin]]
 name = "silksurf-app"
@@ -34,9 +37,24 @@ path = "src/main.rs"
 [[bin]]
 name = "tls-probe"
 path = "src/bin/tls_probe.rs"
+required-features = ["tls-probe"]
+
+[[bin]]
+name = "h2-fetch-probe"
+path = "src/bin/h2_fetch_probe.rs"
 
 [features]
+accessibility = ["dep:accesskit"]
 platform-verifier = ["silksurf-engine/platform-verifier"]
+structured-tracing = ["dep:tracing-subscriber"]
+tls-probe = [
+  "dep:hickory-proto",
+  "dep:hickory-resolver",
+  "dep:rustls",
+  "dep:silksurf-tls",
+  "dep:tokio",
+]
+xcb-backend = ["silksurf-gui/xcb-backend"]
 
 [lints]
 workspace = true

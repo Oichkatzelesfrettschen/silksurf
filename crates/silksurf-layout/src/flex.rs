@@ -80,7 +80,9 @@ pub fn layout_flex_container<S: BuildHasher>(
 ) -> FxHashMap<NodeId, FlexLayoutResult> {
     let mut results = FxHashMap::default();
 
-    let Some(container_style) = styles.get(&container_node) else { return results; };
+    let Some(container_style) = styles.get(&container_node) else {
+        return results;
+    };
 
     let flex = &container_style.flex_container;
     let is_row = matches!(
@@ -112,7 +114,9 @@ pub fn layout_flex_container<S: BuildHasher>(
 
     let mut items: Vec<FlexItem> = Vec::with_capacity(children.len());
     for child in &children {
-        let Some(child_style) = styles.get(child) else { continue; };
+        let Some(child_style) = styles.get(child) else {
+            continue;
+        };
         if child_style.display == Display::None {
             continue;
         }

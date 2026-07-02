@@ -1,34 +1,20 @@
 /*
  * render/lib.rs -- display list construction and tile-based rasterization.
  *
- * WHY: Final stage of the rendering pipeline. Converts positioned layout
- * boxes into a flat DisplayList of paint commands (SolidColor, Text),
- * then rasterizes them to an RGBA pixel buffer.
+ * The final rendering stage converts positioned layout boxes into a flat
+ * DisplayList of paint commands and rasterizes them to an RGBA pixel buffer.
  *
- * Architecture:
- *   build_display_list: layout tree -> Vec<DisplayItem> (depth-first walk)
- *   with_tiles: partition display items into spatial tile buckets
- *   rasterize_damage: paint only tiles intersecting the damage region
- *   fill_rect: per-row pixel fill with SSE2 SIMD (4 pixels/store)
+ * build_display_list walks the layout tree depth-first. with_tiles partitions
+ * display items into spatial tile buckets. rasterize_damage paints only items
+ * that intersect the damage region. fill_rect uses the fastest row-fill path
+ * available on the target CPU.
  *
- * Tile-based rendering: viewport divided into 64x64 tiles. Each tile
- * has a bucket of display item indices. Damage rasterization only
- * processes tiles that overlap the dirty rectangle.
+ * Tile-based rendering divides the viewport into fixed-size buckets. Each
+ * bucket stores display item indices. Damage rasterization processes buckets
+ * that overlap the dirty rectangle.
  *
- * SIMD: fill_row_sse2 (x86/x86_64) uses _mm_set1_epi32 + _mm_storeu_si128
- * to fill 4 pixels per instruction.  fill_row_neon (aarch64) mirrors this
- * with vdupq_n_u32 + vst1q_u32.  Both fall back to scalar .fill() when the
- * feature is absent (sse2 on x86; NEON is mandatory on aarch64 so the
- * fallback is unreachable in practice, but the code compiles cleanly).
- *
- * DONE(perf): Rayon tile parallelism (Phase 4.6) -- rasterize_parallel{,_into}
- * DONE(perf): Buffer reuse -- rasterize_parallel_into eliminates per-frame alloc
- * TODO(perf): SoA DisplayList for type-batched rasterization
- *
- * Memory: RGBA buffer = width * height * 4 bytes (4MB for 1280x800)
- *
- * See: layout/lib.rs for LayoutTree input
- * See: style.rs ComputedStyle for color/background data
+ * fill_row_sse2 fills four x86 pixels per store. fill_row_neon mirrors that
+ * path on aarch64. Scalar fill remains the portable fallback.
  */
 #![allow(
     clippy::collapsible_if,
@@ -40,6 +26,7 @@ use rustc_hash::FxHashMap;
 use silksurf_css::{BoxShadow as CssBoxShadow, Color, ComputedStyle};
 use silksurf_dom::{Dom, NodeId, NodeKind};
 use silksurf_layout::{LayoutTree, Rect};
+use std::sync::Arc;
 use tiny_skia::{
     FillRule, GradientStop, LinearGradient, Paint, PathBuilder, PixmapMut, Point, SpreadMode,
     Transform,
@@ -58,6 +45,28 @@ pub mod display_list_batched;
 pub struct DisplayList {
     pub items: Vec<DisplayItem>,
     pub tiles: Option<DisplayListTiles>,
+}
+
+#[derive(Default)]
+pub struct DamageScratch {
+    pixels: Vec<u8>,
+    item_indices: Vec<usize>,
+    seen_items: Vec<bool>,
+    last_damage: Option<DamagePixelRect>,
+}
+
+impl DamageScratch {
+    pub fn pixel_ptr(&self) -> *const u8 {
+        self.pixels.as_ptr()
+    }
+
+    pub fn pixels(&self) -> &[u8] {
+        &self.pixels
+    }
+
+    pub fn last_damage(&self) -> Option<DamagePixelRect> {
+        self.last_damage
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -117,6 +126,17 @@ pub enum DisplayItem {
         angle: f32,
         stops: Vec<(f32, Color)>,
     },
+    Image {
+        rect: Rect,
+        image: ImageSurface,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImageSurface {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Arc<[u8]>,
 }
 
 // The styles map is pinned to FxHashMap by the layout/render pipeline
@@ -139,7 +159,7 @@ pub fn build_display_list(
 }
 
 impl DisplayList {
-    #[must_use] 
+    #[must_use]
     pub fn with_tiles(mut self, width: u32, height: u32, tile_size: u32) -> Self {
         if width == 0 || height == 0 || tile_size == 0 {
             return self;
@@ -213,7 +233,7 @@ fn build_display_list_for_box(
     }
 }
 
-#[must_use] 
+#[must_use]
 pub fn rasterize(display_list: &DisplayList, width: u32, height: u32) -> Vec<u8> {
     let damage = Rect {
         x: 0.0,
@@ -224,7 +244,7 @@ pub fn rasterize(display_list: &DisplayList, width: u32, height: u32) -> Vec<u8>
     rasterize_damage(display_list, width, height, damage)
 }
 
-#[must_use] 
+#[must_use]
 pub fn rasterize_damage(
     display_list: &DisplayList,
     width: u32,
@@ -275,6 +295,9 @@ pub fn rasterize_damage(
                     fill_rect(&mut buffer, width, height, *rect, pair.1);
                 }
             }
+            DisplayItem::Image { rect, image } => {
+                blit_image_nearest(&mut buffer, width, height, *rect, image);
+            }
         }
     }
     buffer
@@ -285,7 +308,8 @@ fn item_rect(item: &DisplayItem) -> Rect {
         DisplayItem::SolidColor { rect, .. }
         | DisplayItem::Text { rect, .. }
         | DisplayItem::RoundedRect { rect, .. }
-        | DisplayItem::LinearGradient { rect, .. } => *rect,
+        | DisplayItem::LinearGradient { rect, .. }
+        | DisplayItem::Image { rect, .. } => *rect,
         DisplayItem::BoxShadow { rect, shadow } => box_shadow_rect(*rect, shadow),
     }
 }
@@ -333,7 +357,13 @@ fn build_tiles(items: &[DisplayItem], width: u32, height: u32, tile_size: u32) -
 }
 
 impl DisplayListTiles {
-    fn items_for_rect(&self, rect: Rect) -> Vec<usize> {
+    pub fn items_for_rect(&self, rect: Rect) -> Vec<usize> {
+        let mut items = Vec::new();
+        self.items_for_rect_into(rect, &mut items);
+        items
+    }
+
+    fn items_for_rect_into(&self, rect: Rect, items: &mut Vec<usize>) {
         let x0 = rect.x.max(0.0).floor() as i32;
         let y0 = rect.y.max(0.0).floor() as i32;
         let x1 = (rect.x + rect.width).max(0.0).ceil() as i32;
@@ -342,7 +372,7 @@ impl DisplayListTiles {
         let ty0 = (y0.max(0) as u32) / self.tile_size;
         let tx1 = ((x1.max(1) as u32).saturating_sub(1)) / self.tile_size;
         let ty1 = ((y1.max(1) as u32).saturating_sub(1)) / self.tile_size;
-        let mut items = Vec::new();
+        items.clear();
         for ty in ty0..=ty1.min(self.tiles_y.saturating_sub(1)) {
             for tx in tx0..=tx1.min(self.tiles_x.saturating_sub(1)) {
                 let tile_index = (ty * self.tiles_x + tx) as usize;
@@ -351,7 +381,6 @@ impl DisplayListTiles {
                 }
             }
         }
-        items
     }
 }
 
@@ -437,7 +466,7 @@ unsafe fn fill_row_sse2(row: &mut [u32], pixel: u32) {
     #[cfg(target_arch = "x86")]
     use std::arch::x86::*;
     #[cfg(target_arch = "x86_64")]
-    use std::arch::x86_64::{_mm_set1_epi32, __m128i, _mm_storeu_si128};
+    use std::arch::x86_64::{__m128i, _mm_set1_epi32, _mm_storeu_si128};
 
     let len = row.len();
     if len == 0 {
@@ -581,7 +610,7 @@ pub fn fill_simd(buf: &mut [u32], color: u32) {
  * See: IEC 61966-2-1:1999, section 4.2.
  * See: docs/design/COLOR.md, section "sRGB <-> Linear Conversion".
  */
-#[must_use] 
+#[must_use]
 pub fn srgb_to_linear(c: u8) -> f32 {
     let c_f = f32::from(c) / 255.0;
     let linear = if c_f <= 0.04045 {
@@ -607,7 +636,7 @@ pub fn srgb_to_linear(c: u8) -> f32 {
  * See: IEC 61966-2-1:1999, section 4.2.
  * See: docs/design/COLOR.md, section "sRGB <-> Linear Conversion".
  */
-#[must_use] 
+#[must_use]
 pub fn linear_to_srgb(c: f32) -> u8 {
     let c_clamped = c.clamp(0.0, 1.0);
     let encoded = if c_clamped <= 0.003_130_8 {
@@ -638,7 +667,7 @@ pub fn linear_to_srgb(c: f32) -> u8 {
  * See: Porter, T. and Duff, T. "Compositing Digital Images." SIGGRAPH 1984.
  * See: docs/design/COLOR.md, section "Alpha Premultiplication Policy".
  */
-#[must_use] 
+#[must_use]
 pub fn premultiply(r: u8, g: u8, b: u8, a: u8) -> (u8, u8, u8) {
     let alpha = u32::from(a);
     let premult = |c: u8| -> u8 {
@@ -661,7 +690,7 @@ pub fn premultiply(r: u8, g: u8, b: u8, a: u8) -> (u8, u8, u8) {
  *
  * See: docs/design/COLOR.md, section "Alpha Premultiplication Policy".
  */
-#[must_use] 
+#[must_use]
 pub fn unpremultiply(r: u8, g: u8, b: u8, a: u8) -> (u8, u8, u8) {
     if a == 0 {
         return (0, 0, 0);
@@ -703,15 +732,17 @@ pub fn unpremultiply(r: u8, g: u8, b: u8, a: u8) -> (u8, u8, u8) {
 // never alias the same byte; see rasterize_parallel_into for the partition.
 struct SendPtr(*mut u8, usize);
 
-// SAFETY: the SendPtr instance is only shared with the parallel rayon
-// closure below, which partitions the underlying buffer into disjoint
-// rectangular tiles. No two threads ever write to the same byte.
+// SAFETY: the rayon closure partitions the buffer into disjoint tiles, so no
+// two workers write the same byte.
+#[cfg(feature = "parallel")]
 unsafe impl Send for SendPtr {}
 
-// SAFETY: shared by reference into the parallel closure; the read-only
-// (pointer, length) pair is immutable from the closure's perspective.
+// SAFETY: the shared pointer-length pair is immutable inside the parallel
+// closure. Tile partitioning controls mutation through the raw pointer.
+#[cfg(feature = "parallel")]
 unsafe impl Sync for SendPtr {}
 
+#[cfg(feature = "parallel")]
 pub fn rasterize_parallel_into(
     display_list: &DisplayList,
     width: u32,
@@ -782,14 +813,16 @@ pub fn rasterize_parallel_into(
                 | DisplayItem::Text { color, .. }
                 | DisplayItem::RoundedRect { color, .. } => *color,
                 DisplayItem::BoxShadow { shadow, .. } => shadow.color,
-                DisplayItem::LinearGradient { stops, .. } => {
-                    stops.first().map_or(Color {
+                DisplayItem::LinearGradient { stops, .. } => stops.first().map_or(
+                    Color {
                         r: 0,
                         g: 0,
                         b: 0,
                         a: 0,
-                    }, |pair| pair.1)
-                }
+                    },
+                    |pair| pair.1,
+                ),
+                DisplayItem::Image { .. } => continue,
             };
 
             // Clip to tile bounds
@@ -842,7 +875,7 @@ pub fn rasterize_parallel_into(
  * See: gororoba_app/crates/gororoba_bevy_lbm/src/soa_solver.rs:1254
  */
 #[cfg(feature = "parallel")]
-#[must_use] 
+#[must_use]
 pub fn rasterize_parallel(
     display_list: &DisplayList,
     width: u32,
@@ -862,7 +895,7 @@ pub fn rasterize_parallel(
 ///
 /// Output pixels are premultiplied RGBA8, matching `PixmapMut` conventions.
 /// For fully-opaque colors (alpha == 255) this is identical to straight RGBA.
-#[must_use] 
+#[must_use]
 pub fn rasterize_skia(display_list: &DisplayList, width: u32, height: u32) -> Vec<u8> {
     let mut buf = Vec::new();
     rasterize_skia_into(display_list, width, height, &mut buf);
@@ -874,13 +907,19 @@ pub fn rasterize_skia(display_list: &DisplayList, width: u32, height: u32) -> Ve
 /// Resizes `buf` only when `width * height * 4` does not match the current
 /// length, then resets to an opaque white background before painting.
 pub fn rasterize_skia_into(display_list: &DisplayList, width: u32, height: u32, buf: &mut Vec<u8>) {
+    let trace_full = std::env::var_os("SILKSURF_TRACE_RENDER_FULL").is_some();
+    let total_start = std::time::Instant::now();
     let required = (width * height * 4) as usize;
+    let resize_start = std::time::Instant::now();
     if buf.len() != required {
         buf.resize(required, 0xffu8);
     }
+    trace_render_full_phase(trace_full, "resize", resize_start.elapsed());
     // White, fully-opaque background. In premultiplied RGBA8 this is
     // [255, 255, 255, 255], identical to straight RGBA for alpha = 255.
+    let fill_start = std::time::Instant::now();
     buf.fill(0xffu8);
+    trace_render_full_phase(trace_full, "fill", fill_start.elapsed());
 
     debug_assert_eq!(
         buf.len(),
@@ -888,93 +927,475 @@ pub fn rasterize_skia_into(display_list: &DisplayList, width: u32, height: u32, 
         "skia buffer length mismatch after resize"
     );
 
+    let pixmap_start = std::time::Instant::now();
     let slice = buf.as_mut_slice();
     let Some(mut pixmap) = PixmapMut::from_bytes(slice, width, height) else {
         return;
     };
+    trace_render_full_phase(trace_full, "pixmap", pixmap_start.elapsed());
 
+    let paint_start = std::time::Instant::now();
     for item in &display_list.items {
-        match item {
-            DisplayItem::SolidColor { rect, color } => {
-                let Some(sk_r) = sk_rect(*rect) else {
-                    continue;
-                };
-                let paint = sk_paint(*color);
-                pixmap.fill_rect(sk_r, &paint, Transform::identity(), None);
-            }
-            DisplayItem::RoundedRect { rect, radii, color } => {
-                let Some(path) = rounded_rect_path(*rect, *radii) else {
-                    continue;
-                };
-                let paint = sk_paint(*color);
-                pixmap.fill_path(
-                    &path,
-                    &paint,
-                    FillRule::Winding,
-                    Transform::identity(),
-                    None,
-                );
-            }
-            DisplayItem::Text {
-                rect,
+        paint_skia_item(&mut pixmap, item, (0.0, 0.0));
+    }
+    trace_render_full_phase(trace_full, "paint", paint_start.elapsed());
+    trace_render_full_total(
+        trace_full,
+        display_list.items.len(),
+        width,
+        height,
+        total_start.elapsed(),
+    );
+}
+
+/// Rasterize only `damage` into a retained RGBA8 buffer using tiny-skia.
+///
+/// The dirty rectangle is rendered into `scratch` with item coordinates
+/// translated by the negative damage origin. The scratch rectangle then copies
+/// into `buf`, so pixels outside `damage` stay untouched.
+pub fn rasterize_skia_damage_into(
+    display_list: &DisplayList,
+    width: u32,
+    height: u32,
+    damage: Rect,
+    buf: &mut Vec<u8>,
+    scratch: &mut DamageScratch,
+) {
+    scratch.last_damage = None;
+    let required = (width * height * 4) as usize;
+    if buf.len() != required {
+        buf.resize(required, 0xffu8);
+    }
+
+    let Some(damage_pixels) = damage_pixel_rect(damage, width, height) else {
+        return;
+    };
+    let scratch_required = damage_pixels.width as usize * damage_pixels.height as usize * 4;
+    if scratch.pixels.len() != scratch_required {
+        scratch.pixels.resize(scratch_required, 0xffu8);
+    }
+    scratch.pixels.fill(0xffu8);
+
+    let Some(mut pixmap) = PixmapMut::from_bytes(
+        scratch.pixels.as_mut_slice(),
+        damage_pixels.width,
+        damage_pixels.height,
+    ) else {
+        return;
+    };
+
+    collect_damage_item_indices(display_list, damage, &mut scratch.item_indices);
+    prepare_seen_items(&mut scratch.seen_items, display_list.items.len());
+    let offset = (-(damage_pixels.x as f32), -(damage_pixels.y as f32));
+    for index in scratch.item_indices.iter().copied() {
+        if index >= display_list.items.len() || scratch.seen_items[index] {
+            continue;
+        }
+        scratch.seen_items[index] = true;
+        let item = &display_list.items[index];
+        if rect_intersects(item_rect(item), damage) {
+            paint_skia_item(&mut pixmap, item, offset);
+        }
+    }
+
+    copy_damage_scratch_to_buffer(buf, width, damage_pixels, &scratch.pixels);
+    scratch.last_damage = Some(damage_pixels);
+}
+
+/// Rasterize translated display-list damage into a retained RGBA8 buffer.
+///
+/// `buffer_damage` names the destination pixels. `item_damage` names the
+/// same damage in display-list coordinates. `paint_offset` maps display-list
+/// coordinates into destination buffer coordinates before clipping to damage.
+pub fn rasterize_skia_translated_damage_into(
+    display_list: &DisplayList,
+    width: u32,
+    height: u32,
+    buffer_damage: Rect,
+    item_damage: Rect,
+    paint_offset: (f32, f32),
+    buf: &mut Vec<u8>,
+    scratch: &mut DamageScratch,
+) {
+    let trace_damage = std::env::var_os("SILKSURF_TRACE_RENDER_DAMAGE").is_some();
+    let total_start = std::time::Instant::now();
+    scratch.last_damage = None;
+    let required = (width * height * 4) as usize;
+    if buf.len() != required {
+        buf.resize(required, 0xffu8);
+    }
+
+    let setup_start = std::time::Instant::now();
+    let Some(damage_pixels) = damage_pixel_rect(buffer_damage, width, height) else {
+        return;
+    };
+    let scratch_required = damage_pixels.width as usize * damage_pixels.height as usize * 4;
+    if scratch.pixels.len() != scratch_required {
+        scratch.pixels.resize(scratch_required, 0xffu8);
+    }
+    trace_damage_phase(trace_damage, "translated-setup", setup_start.elapsed());
+
+    let fill_start = std::time::Instant::now();
+    scratch.pixels.fill(0xffu8);
+    trace_damage_phase(trace_damage, "translated-fill", fill_start.elapsed());
+
+    let pixmap_start = std::time::Instant::now();
+    let Some(mut pixmap) = PixmapMut::from_bytes(
+        scratch.pixels.as_mut_slice(),
+        damage_pixels.width,
+        damage_pixels.height,
+    ) else {
+        return;
+    };
+    trace_damage_phase(trace_damage, "translated-pixmap", pixmap_start.elapsed());
+
+    let collect_start = std::time::Instant::now();
+    collect_damage_item_indices(display_list, item_damage, &mut scratch.item_indices);
+    prepare_seen_items(&mut scratch.seen_items, display_list.items.len());
+    trace_damage_phase(trace_damage, "translated-collect", collect_start.elapsed());
+
+    let paint_start = std::time::Instant::now();
+    let offset = (
+        paint_offset.0 - damage_pixels.x as f32,
+        paint_offset.1 - damage_pixels.y as f32,
+    );
+    let mut painted_items = 0usize;
+    for index in scratch.item_indices.iter().copied() {
+        if index >= display_list.items.len() || scratch.seen_items[index] {
+            continue;
+        }
+        scratch.seen_items[index] = true;
+        let item = &display_list.items[index];
+        if rect_intersects(shift_rect(item_rect(item), paint_offset), buffer_damage) {
+            painted_items += 1;
+            let item_start = std::time::Instant::now();
+            paint_skia_item(&mut pixmap, item, offset);
+            trace_damage_item(trace_damage, index, item, item_start.elapsed());
+        }
+    }
+    trace_damage_phase(trace_damage, "translated-paint", paint_start.elapsed());
+
+    let copy_start = std::time::Instant::now();
+    copy_damage_scratch_to_buffer(buf, width, damage_pixels, &scratch.pixels);
+    trace_damage_phase(trace_damage, "translated-copy", copy_start.elapsed());
+    scratch.last_damage = Some(damage_pixels);
+    if trace_damage {
+        eprintln!(
+            "[SilkSurf] render damage: translated-total {:?}, damage={}x{} at ({}, {}), candidates={}, painted={painted_items}",
+            total_start.elapsed(),
+            damage_pixels.width,
+            damage_pixels.height,
+            damage_pixels.x,
+            damage_pixels.y,
+            scratch.item_indices.len()
+        );
+    }
+}
+
+fn trace_damage_phase(enabled: bool, name: &str, elapsed: std::time::Duration) {
+    if enabled {
+        eprintln!("[SilkSurf] render damage: {name} {elapsed:?}");
+    }
+}
+
+fn trace_render_full_phase(enabled: bool, name: &str, elapsed: std::time::Duration) {
+    if enabled {
+        eprintln!("[SilkSurf] render full: {name} {elapsed:?}");
+    }
+}
+
+fn trace_render_full_total(
+    enabled: bool,
+    item_count: usize,
+    width: u32,
+    height: u32,
+    elapsed: std::time::Duration,
+) {
+    if enabled {
+        eprintln!(
+            "[SilkSurf] render full: total {elapsed:?}, size={}x{}, items={item_count}",
+            width, height
+        );
+    }
+}
+
+fn trace_damage_item(
+    enabled: bool,
+    index: usize,
+    item: &DisplayItem,
+    elapsed: std::time::Duration,
+) {
+    if !enabled || elapsed < std::time::Duration::from_micros(100) {
+        return;
+    }
+    let kind = match item {
+        DisplayItem::SolidColor { .. } => "solid",
+        DisplayItem::Text { .. } => "text",
+        DisplayItem::RoundedRect { .. } => "rounded-rect",
+        DisplayItem::BoxShadow { .. } => "box-shadow",
+        DisplayItem::LinearGradient { .. } => "linear-gradient",
+        DisplayItem::Image { .. } => "image",
+    };
+    let text_len = match item {
+        DisplayItem::Text { text, .. } => text.len(),
+        _ => 0,
+    };
+    let ascii = match item {
+        DisplayItem::Text { text, .. } => text.is_ascii(),
+        _ => true,
+    };
+    let font_size = match item {
+        DisplayItem::Text { font_size, .. } => *font_size,
+        _ => 0.0,
+    };
+    eprintln!(
+        "[SilkSurf] render damage item: index={index} kind={kind} text_len={text_len} ascii={ascii} font_size={font_size} elapsed={elapsed:?}"
+    );
+}
+
+fn collect_damage_item_indices(
+    display_list: &DisplayList,
+    damage: Rect,
+    item_indices: &mut Vec<usize>,
+) {
+    if let Some(tiles) = &display_list.tiles {
+        tiles.items_for_rect_into(damage, item_indices);
+    } else {
+        item_indices.clear();
+        item_indices.extend(0..display_list.items.len());
+    }
+}
+
+fn prepare_seen_items(seen_items: &mut Vec<bool>, item_count: usize) {
+    if seen_items.len() != item_count {
+        seen_items.resize(item_count, false);
+    } else {
+        seen_items.fill(false);
+    }
+}
+
+fn paint_skia_item(pixmap: &mut PixmapMut<'_>, item: &DisplayItem, offset: (f32, f32)) {
+    match item {
+        DisplayItem::SolidColor { rect, color } => {
+            let rect = shift_rect(*rect, offset);
+            let Some(sk_r) = sk_rect(rect) else {
+                return;
+            };
+            let paint = sk_paint(*color);
+            pixmap.fill_rect(sk_r, &paint, Transform::identity(), None);
+        }
+        DisplayItem::RoundedRect { rect, radii, color } => {
+            let rect = shift_rect(*rect, offset);
+            let Some(path) = rounded_rect_path(rect, *radii) else {
+                return;
+            };
+            let paint = sk_paint(*color);
+            pixmap.fill_path(
+                &path,
+                &paint,
+                FillRule::Winding,
+                Transform::identity(),
+                None,
+            );
+        }
+        DisplayItem::Text {
+            rect,
+            text,
+            font_size,
+            color,
+            ..
+        } => {
+            silksurf_text::rasterize_glyphs(
                 text,
-                font_size,
-                color,
-                ..
-            } => {
-                silksurf_text::rasterize_glyphs(
-                    text,
-                    *font_size,
-                    *color,
-                    &mut pixmap,
-                    (rect.x, rect.y),
-                );
+                *font_size,
+                *color,
+                pixmap,
+                (rect.x + offset.0, rect.y + offset.1),
+            );
+        }
+        DisplayItem::BoxShadow { rect, shadow } => {
+            if shadow.inset {
+                return;
             }
-            DisplayItem::BoxShadow { rect, shadow } => {
-                // Inset shadows require clipping stencil work; deferred.
-                if shadow.inset {
-                    continue;
-                }
-                let shadow_rect = box_shadow_rect(*rect, shadow);
-                let Some(sk_r) = sk_rect(shadow_rect) else {
-                    continue;
-                };
-                let paint = sk_paint(shadow.color);
-                pixmap.fill_rect(sk_r, &paint, Transform::identity(), None);
+            let shadow_rect = box_shadow_rect(shift_rect(*rect, offset), shadow);
+            let Some(sk_r) = sk_rect(shadow_rect) else {
+                return;
+            };
+            let paint = sk_paint(shadow.color);
+            pixmap.fill_rect(sk_r, &paint, Transform::identity(), None);
+        }
+        DisplayItem::LinearGradient { rect, angle, stops } => {
+            if stops.is_empty() {
+                return;
             }
-            DisplayItem::LinearGradient { rect, angle, stops } => {
-                if stops.is_empty() {
-                    continue;
-                }
-                let Some(sk_r) = sk_rect(*rect) else {
-                    continue;
-                };
-                let (start, end) = gradient_endpoints(*rect, *angle);
-                let grad_stops: Vec<GradientStop> = stops
-                    .iter()
-                    .map(|(pos, color)| {
-                        GradientStop::new(
-                            *pos,
-                            tiny_skia::Color::from_rgba8(color.r, color.g, color.b, color.a),
-                        )
-                    })
-                    .collect();
-                let Some(gradient) = LinearGradient::new(
-                    start,
-                    end,
-                    grad_stops,
-                    SpreadMode::Pad,
-                    Transform::identity(),
-                ) else {
-                    continue;
-                };
-                let paint = Paint {
-                    anti_alias: true,
-                    shader: gradient,
-                    ..Paint::default()
-                };
-                pixmap.fill_rect(sk_r, &paint, Transform::identity(), None);
-            }
+            let rect = shift_rect(*rect, offset);
+            let Some(sk_r) = sk_rect(rect) else {
+                return;
+            };
+            let (start, end) = gradient_endpoints(rect, *angle);
+            let grad_stops: Vec<GradientStop> = stops
+                .iter()
+                .map(|(pos, color)| {
+                    GradientStop::new(
+                        *pos,
+                        tiny_skia::Color::from_rgba8(color.r, color.g, color.b, color.a),
+                    )
+                })
+                .collect();
+            let Some(gradient) = LinearGradient::new(
+                start,
+                end,
+                grad_stops,
+                SpreadMode::Pad,
+                Transform::identity(),
+            ) else {
+                return;
+            };
+            let paint = Paint {
+                anti_alias: true,
+                shader: gradient,
+                ..Paint::default()
+            };
+            pixmap.fill_rect(sk_r, &paint, Transform::identity(), None);
+        }
+        DisplayItem::Image { rect, image } => {
+            let rect = shift_rect(*rect, offset);
+            let (width, height) = (pixmap.width(), pixmap.height());
+            blit_image_nearest(pixmap.data_mut(), width, height, rect, image);
+        }
+    }
+}
+
+fn blit_image_nearest(
+    buffer: &mut [u8],
+    width: u32,
+    height: u32,
+    rect: Rect,
+    image: &ImageSurface,
+) {
+    if !image_has_full_rgba(image) {
+        return;
+    }
+    let Some(dst) = image_dest_rect(width, height, rect) else {
+        return;
+    };
+    let dst_width = rect.width.max(1.0);
+    let dst_height = rect.height.max(1.0);
+    let surface_width = image.width as usize;
+    for y in dst.y..dst.y + dst.height {
+        let src_y = image_source_coord(y as f32 - rect.y, dst_height, image.height);
+        for x in dst.x..dst.x + dst.width {
+            let src_x = image_source_coord(x as f32 - rect.x, dst_width, image.width);
+            let src = (src_y as usize * surface_width + src_x as usize) * 4;
+            let dst = (y as usize * width as usize + x as usize) * 4;
+            copy_image_pixel(buffer, dst, &image.rgba, src);
+        }
+    }
+}
+
+fn image_has_full_rgba(image: &ImageSurface) -> bool {
+    image.width > 0
+        && image.height > 0
+        && image.rgba.len() >= image.width as usize * image.height as usize * 4
+}
+
+fn image_dest_rect(width: u32, height: u32, rect: Rect) -> Option<DamagePixelRect> {
+    if width == 0 || height == 0 || rect.width <= 0.0 || rect.height <= 0.0 {
+        return None;
+    }
+    let x0 = rect.x.max(0.0).floor() as u32;
+    let y0 = rect.y.max(0.0).floor() as u32;
+    let x1 = (rect.x + rect.width).clamp(0.0, width as f32).ceil() as u32;
+    let y1 = (rect.y + rect.height).clamp(0.0, height as f32).ceil() as u32;
+    if x0 >= x1 || y0 >= y1 {
+        return None;
+    }
+    Some(DamagePixelRect {
+        x: x0,
+        y: y0,
+        width: x1 - x0,
+        height: y1 - y0,
+    })
+}
+
+fn image_source_coord(dst_offset: f32, dst_extent: f32, src_extent: u32) -> u32 {
+    let coord = (dst_offset.max(0.0) * src_extent as f32 / dst_extent).floor() as u32;
+    coord.min(src_extent.saturating_sub(1))
+}
+
+fn copy_image_pixel(dst: &mut [u8], dst_offset: usize, src: &[u8], src_offset: usize) {
+    if dst_offset + 4 > dst.len() || src_offset + 4 > src.len() {
+        return;
+    }
+    let alpha = u16::from(src[src_offset + 3]);
+    if alpha == 255 {
+        dst[dst_offset..dst_offset + 4].copy_from_slice(&src[src_offset..src_offset + 4]);
+        return;
+    }
+    blend_image_pixel(dst, dst_offset, src, src_offset, alpha);
+}
+
+fn blend_image_pixel(dst: &mut [u8], dst_offset: usize, src: &[u8], src_offset: usize, alpha: u16) {
+    let inv_alpha = 255 - alpha;
+    for channel in 0..3 {
+        let src_value = u16::from(src[src_offset + channel]);
+        let dst_value = u16::from(dst[dst_offset + channel]);
+        dst[dst_offset + channel] = ((src_value * alpha + dst_value * inv_alpha + 127) / 255) as u8;
+    }
+    dst[dst_offset + 3] = 255;
+}
+
+fn shift_rect(rect: Rect, offset: (f32, f32)) -> Rect {
+    Rect {
+        x: rect.x + offset.0,
+        y: rect.y + offset.1,
+        width: rect.width,
+        height: rect.height,
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DamagePixelRect {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+fn damage_pixel_rect(rect: Rect, width: u32, height: u32) -> Option<DamagePixelRect> {
+    if width == 0 || height == 0 {
+        return None;
+    }
+    let x0 = rect.x.max(0.0).floor() as i32;
+    let y0 = rect.y.max(0.0).floor() as i32;
+    let x1 = (rect.x + rect.width).min(width as f32).ceil() as i32;
+    let y1 = (rect.y + rect.height).min(height as f32).ceil() as i32;
+    if x0 >= x1 || y0 >= y1 {
+        return None;
+    }
+    Some(DamagePixelRect {
+        x: x0 as u32,
+        y: y0 as u32,
+        width: (x1 - x0) as u32,
+        height: (y1 - y0) as u32,
+    })
+}
+
+fn copy_damage_scratch_to_buffer(
+    buf: &mut [u8],
+    width: u32,
+    damage: DamagePixelRect,
+    scratch: &[u8],
+) {
+    let frame_stride = width as usize * 4;
+    let scratch_stride = damage.width as usize * 4;
+    for row in 0..damage.height as usize {
+        let src_start = row * scratch_stride;
+        let src_end = src_start + scratch_stride;
+        let dst_start = ((damage.y as usize + row) * frame_stride) + damage.x as usize * 4;
+        let dst_end = dst_start + scratch_stride;
+        if src_end <= scratch.len() && dst_end <= buf.len() {
+            buf[dst_start..dst_end].copy_from_slice(&scratch[src_start..src_end]);
         }
     }
 }

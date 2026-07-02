@@ -28,12 +28,20 @@ use crate::matching::{
     Specificity, matches_selector, matches_selector_with_view, selector_specificity,
 };
 use crate::selector::{Selector, SelectorIdent, SelectorModifier, TypeSelector};
-use crate::{AtRuleBlock, CssToken, Declaration, Rule, StyleRule, Stylesheet};
+use crate::{
+    AtRuleBlock, CssToken, Declaration, Rule, StyleRule, Stylesheet, parse_declaration_list,
+};
 use rustc_hash::{FxHashMap, FxHashSet};
 use silksurf_dom::{AttributeName, Dom, NodeId, NodeKind, TagName};
 use smallvec::SmallVec;
 use smol_str::SmolStr;
 use std::sync::Arc;
+
+const INLINE_STYLE_SPECIFICITY: Specificity = Specificity {
+    ids: u32::MAX,
+    classes: u32::MAX,
+    elements: u32::MAX,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Display {
@@ -347,12 +355,12 @@ pub enum Length {
 }
 
 impl Length {
-    #[must_use] 
+    #[must_use]
     pub fn zero() -> Self {
         Length::Px(0.0)
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn is_zero(&self) -> bool {
         match self {
             Length::Px(v) | Length::Percent(v) | Length::Em(v) | Length::Rem(v) => *v == 0.0,
@@ -377,7 +385,7 @@ pub struct Color {
 }
 
 impl Color {
-    #[must_use] 
+    #[must_use]
     pub fn black() -> Self {
         Self {
             r: 0,
@@ -387,7 +395,7 @@ impl Color {
         }
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn transparent() -> Self {
         Self {
             r: 0,
@@ -407,7 +415,7 @@ pub struct Edges {
 }
 
 impl Edges {
-    #[must_use] 
+    #[must_use]
     pub fn all(value: Length) -> Self {
         Self {
             top: value,
@@ -431,7 +439,7 @@ pub struct Margins {
 }
 
 impl Margins {
-    #[must_use] 
+    #[must_use]
     pub fn all(v: LengthOrAuto) -> Self {
         Self {
             top: v,
@@ -441,7 +449,7 @@ impl Margins {
         }
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn zero() -> Self {
         Self::all(LengthOrAuto::Length(Length::zero()))
     }
@@ -738,11 +746,10 @@ impl CascadedStyle {
         let ks = &keyword_slots;
 
         // font-size: em is relative to the *parent* font-size (CSS spec).
-        let parent_font_size_px = parent
-            .map_or(16.0, |s| match s.font_size {
-                Length::Px(v) => v,
-                _ => 16.0,
-            });
+        let parent_font_size_px = parent.map_or(16.0, |s| match s.font_size {
+            Length::Px(v) => v,
+            _ => 16.0,
+        });
         // font-size is inherited; also check for a cascade keyword override.
         let raw_font_size = {
             let fs_kw = ks.get(&PropertyId::FontSize);
@@ -817,7 +824,10 @@ impl CascadedStyle {
                 let ff_kw = ks.get(&PropertyId::FontFamily);
                 if keyword_beats_typed(ff_kw, &self.font_family) {
                     match ff_kw.unwrap().value {
-                        CascadeKeyword::Inherit | CascadeKeyword::Unset => parent.map_or_else(|| fallback.font_family.clone(), |s| s.font_family.clone()),
+                        CascadeKeyword::Inherit | CascadeKeyword::Unset => parent.map_or_else(
+                            || fallback.font_family.clone(),
+                            |s| s.font_family.clone(),
+                        ),
                         CascadeKeyword::Initial => fallback.font_family.clone(),
                     }
                 } else {
@@ -998,21 +1008,15 @@ impl CascadedStyle {
                 template_columns: self
                     .grid_template_columns
                     .map_or_else(Vec::new, |p| p.value),
-                template_rows: self
-                    .grid_template_rows
-                    .map_or_else(Vec::new, |p| p.value),
-                auto_columns: self
-                    .grid_auto_columns
-                    .map_or_else(Vec::new, |p| p.value),
+                template_rows: self.grid_template_rows.map_or_else(Vec::new, |p| p.value),
+                auto_columns: self.grid_auto_columns.map_or_else(Vec::new, |p| p.value),
                 auto_rows: self.grid_auto_rows.map_or_else(Vec::new, |p| p.value),
                 auto_flow: self
                     .grid_auto_flow
                     .map_or(GridAutoFlow::default(), |p| p.value),
             },
             grid_item: GridItemStyle {
-                column_start: self
-                    .grid_column_start
-                    .map_or(GridLine::Auto, |p| p.value),
+                column_start: self.grid_column_start.map_or(GridLine::Auto, |p| p.value),
                 column_end: self.grid_column_end.map_or(GridLine::Auto, |p| p.value),
                 row_start: self.grid_row_start.map_or(GridLine::Auto, |p| p.value),
                 row_end: self.grid_row_end.map_or(GridLine::Auto, |p| p.value),
@@ -1228,9 +1232,7 @@ impl CascadedStyle {
                 let bi_kw = ks.get(&PropertyId::BackgroundImage);
                 if keyword_beats_typed(bi_kw, &self.background_image) {
                     match bi_kw.unwrap().value {
-                        CascadeKeyword::Inherit => {
-                            parent.and_then(|s| s.background_image.clone())
-                        }
+                        CascadeKeyword::Inherit => parent.and_then(|s| s.background_image.clone()),
                         CascadeKeyword::Initial | CascadeKeyword::Unset => None,
                     }
                 } else {
@@ -1418,7 +1420,7 @@ pub struct StyleIndex {
 impl StyleIndex {
     /// Construct with the default 1280x800 viewport (matches typical desktop
     /// render target; callers with a known viewport should use `for_viewport`).
-    #[must_use] 
+    #[must_use]
     pub fn new(stylesheet: &Stylesheet) -> Self {
         Self::for_viewport(stylesheet, 1280.0, 800.0)
     }
@@ -1433,7 +1435,7 @@ impl StyleIndex {
     ///
     /// Unknown or complex @media queries default to true (safe fallback: apply
     /// the rules). This matches media.rs `evaluate_media_query` semantics.
-    #[must_use] 
+    #[must_use]
     pub fn for_viewport(stylesheet: &Stylesheet, viewport_w: f32, viewport_h: f32) -> Self {
         // Flatten stylesheet into a contiguous Vec<StyleRule> of active rules.
         // rule_index fields in IndexedSelector index into this vec.
@@ -1442,11 +1444,7 @@ impl StyleIndex {
             match rule {
                 Rule::Style(sr) => active_rules.push(sr.clone()),
                 Rule::At(at) if at.name.eq_ignore_ascii_case("media") => {
-                    if crate::media::evaluate_media_query(
-                        &at.prelude,
-                        viewport_w,
-                        viewport_h,
-                    ) {
+                    if crate::media::evaluate_media_query(&at.prelude, viewport_w, viewport_h) {
                         if let Some(AtRuleBlock::Rules(children)) = &at.block {
                             for child in children {
                                 if let Rule::Style(sr) = child {
@@ -1465,8 +1463,7 @@ impl StyleIndex {
         // (mutating the maps while iterating active_rules).
         let mut tag_rules: FxHashMap<TagName, Vec<IndexedSelector>> = FxHashMap::default();
         let mut id_rules: FxHashMap<SelectorIdent, Vec<IndexedSelector>> = FxHashMap::default();
-        let mut class_rules: FxHashMap<SelectorIdent, Vec<IndexedSelector>> =
-            FxHashMap::default();
+        let mut class_rules: FxHashMap<SelectorIdent, Vec<IndexedSelector>> = FxHashMap::default();
         let mut universal_rules: Vec<IndexedSelector> = Vec::new();
         let mut pair_id: u32 = 0;
 
@@ -1652,7 +1649,7 @@ pub struct CascadeWorkspace {
 }
 
 impl CascadeWorkspace {
-    #[must_use] 
+    #[must_use]
     pub fn new(rules_len: usize) -> Self {
         Self {
             matched_by_rule: vec![None; rules_len],
@@ -1734,7 +1731,7 @@ pub struct StyleCache {
 
 #[allow(dead_code)]
 impl StyleCache {
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self {
             generation: 0,
@@ -1742,17 +1739,17 @@ impl StyleCache {
         }
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn generation(&self) -> u64 {
         self.generation
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn styles(&self) -> &FxHashMap<NodeId, ComputedStyle> {
         self.styles.as_ref()
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn styles_arc(&self) -> Arc<FxHashMap<NodeId, ComputedStyle>> {
         Arc::clone(&self.styles)
     }
@@ -2016,68 +2013,83 @@ fn cascade_for_node(
     let mut cascaded = CascadedStyle::default();
     let mut order = 0usize;
 
-    /*
-     * Candidate collection: two paths depending on whether CascadeView
-     * is available.
-     *
-     * CascadeView path (SoA, single cache line per node):
-     *   Reads CascadeEntry (36 bytes) + pre-constructed SelectorIdents
-     *   from flat array. No dom.node() call, no attribute iteration,
-     *   no SelectorIdent construction. Each node touches 1 cache line
-     *   for the entry + sequential ident reads.
-     *
-     * Fallback path (AoS, 2.6 cache lines per node):
-     *   Calls node_tag_id_class -> dom.node() -> pattern match -> attr scan.
-     *   Used when CascadeView is not materialized (e.g., compute_styles
-     *   without FusedWorkspace).
-     */
+    collect_candidate_rules(dom, node, index, workspace, cascade_view);
+    match_candidate_rules(dom, node, index, workspace, cascade_view);
+    apply_matched_rules(index, workspace, &mut cascaded, &mut order);
+    apply_inline_style_attribute(dom, node, &mut cascaded, &mut order);
+    cascaded
+}
+
+fn collect_candidate_rules(
+    dom: &Dom,
+    node: NodeId,
+    index: &StyleIndex,
+    workspace: &mut CascadeWorkspace,
+    cascade_view: Option<&crate::cascade_view::CascadeView>,
+) {
     if let Some(view) = cascade_view {
-        let entry = &view.entries[node.raw()];
-        if let Some(entries) = index.tag_rules.get(&entry.tag) {
-            workspace.candidates.extend_from_slice(entries);
-        }
-        if let Some(id_ident) = view.id_ident(entry) {
-            if let Some(entries) = index.id_rules.get(id_ident) {
-                workspace.candidates.extend_from_slice(entries);
-            }
-        }
-        for class_ident in view.class_idents(entry) {
-            if let Some(entries) = index.class_rules.get(class_ident) {
-                workspace.candidates.extend_from_slice(entries);
-            }
-        }
+        collect_view_candidates(node, index, workspace, view);
     } else {
-        let (tag, id_key) = node_tag_id_class(dom, node, &mut workspace.class_keys);
-        if let Some(tag) = tag {
-            if let Some(entries) = index.tag_rules.get(&tag) {
-                workspace.candidates.extend_from_slice(entries);
-            }
-        }
-        if let Some(ref id_key) = id_key {
-            if let Some(entries) = index.id_rules.get(id_key) {
-                workspace.candidates.extend_from_slice(entries);
-            }
-        }
-        for class_key in &workspace.class_keys {
-            if let Some(entries) = index.class_rules.get(class_key) {
-                workspace.candidates.extend_from_slice(entries);
-            }
-        }
+        collect_dom_candidates(dom, node, index, workspace);
     }
     workspace
         .candidates
         .extend_from_slice(&index.universal_rules);
+}
 
-    /*
-     * Take candidates and seen_bits out of workspace so we can mutate
-     * workspace.matched_by_rule inside the loop without borrow conflicts.
-     * mem::take leaves empty Vecs behind (zero allocation -- the original
-     * allocation is now owned by the locals). Returned after the loop.
-     *
-     * Fix D: seen_bits bitvec replaces FxHashSet for O(1) dedup via pair_id.
-     * fill(0) in prepare() is 3 stores (24 bytes) vs FxHashSet clear.
-     * Bit test+set is branchless shift+mask vs hash+probe+insert.
-     */
+fn collect_view_candidates(
+    node: NodeId,
+    index: &StyleIndex,
+    workspace: &mut CascadeWorkspace,
+    view: &crate::cascade_view::CascadeView,
+) {
+    let entry = &view.entries[node.raw()];
+    if let Some(entries) = index.tag_rules.get(&entry.tag) {
+        workspace.candidates.extend_from_slice(entries);
+    }
+    if let Some(id_ident) = view.id_ident(entry)
+        && let Some(entries) = index.id_rules.get(id_ident)
+    {
+        workspace.candidates.extend_from_slice(entries);
+    }
+    for class_ident in view.class_idents(entry) {
+        if let Some(entries) = index.class_rules.get(class_ident) {
+            workspace.candidates.extend_from_slice(entries);
+        }
+    }
+}
+
+fn collect_dom_candidates(
+    dom: &Dom,
+    node: NodeId,
+    index: &StyleIndex,
+    workspace: &mut CascadeWorkspace,
+) {
+    let (tag, id_key) = node_tag_id_class(dom, node, &mut workspace.class_keys);
+    if let Some(tag) = tag
+        && let Some(entries) = index.tag_rules.get(&tag)
+    {
+        workspace.candidates.extend_from_slice(entries);
+    }
+    if let Some(ref id_key) = id_key
+        && let Some(entries) = index.id_rules.get(id_key)
+    {
+        workspace.candidates.extend_from_slice(entries);
+    }
+    for class_key in &workspace.class_keys {
+        if let Some(entries) = index.class_rules.get(class_key) {
+            workspace.candidates.extend_from_slice(entries);
+        }
+    }
+}
+
+fn match_candidate_rules(
+    dom: &Dom,
+    node: NodeId,
+    index: &StyleIndex,
+    workspace: &mut CascadeWorkspace,
+    cascade_view: Option<&crate::cascade_view::CascadeView>,
+) {
     let mut candidates = std::mem::take(&mut workspace.candidates);
     let mut seen_bits = std::mem::take(&mut workspace.seen_bits);
 
@@ -2119,7 +2131,14 @@ fn cascade_for_node(
     // Return scratch buffers to workspace (retain allocations for next call)
     workspace.candidates = candidates;
     workspace.seen_bits = seen_bits;
+}
 
+fn apply_matched_rules(
+    index: &StyleIndex,
+    workspace: &CascadeWorkspace,
+    cascaded: &mut CascadedStyle,
+    order: &mut usize,
+) {
     for (rule_index, rule) in index.active_rules.iter().enumerate() {
         let Some(specificity) = workspace
             .matched_by_rule
@@ -2129,11 +2148,36 @@ fn cascade_for_node(
             continue;
         };
         for declaration in &rule.declarations {
-            order += 1;
-            apply_declaration(&mut cascaded, declaration, specificity, order);
+            *order += 1;
+            apply_declaration(cascaded, declaration, specificity, *order);
         }
     }
-    cascaded
+}
+
+fn apply_inline_style_attribute(
+    dom: &Dom,
+    node: NodeId,
+    cascaded: &mut CascadedStyle,
+    order: &mut usize,
+) {
+    let Some(style_text) = inline_style_text(dom, node) else {
+        return;
+    };
+    let Ok(declarations) = parse_declaration_list(style_text) else {
+        return;
+    };
+    for declaration in &declarations {
+        *order += 1;
+        apply_declaration(cascaded, declaration, INLINE_STYLE_SPECIFICITY, *order);
+    }
+}
+
+fn inline_style_text(dom: &Dom, node: NodeId) -> Option<&str> {
+    dom.attributes(node)
+        .ok()?
+        .iter()
+        .find(|attr| attr.name.matches("style"))
+        .map(|attr| attr.value.as_str())
 }
 /*
  * apply_declaration -- apply a single CSS declaration to the cascaded style.
@@ -4283,12 +4327,14 @@ fn parse_minmax_min(tokens: &[&CssToken]) -> Option<GridTrackMin> {
             "max-content" => Some(GridTrackMin::MaxContent),
             _ => None,
         },
-        CssToken::Dimension { value, unit } if unit.eq_ignore_ascii_case("px") => {
-            value.parse::<f32>().ok().map(|px| GridTrackMin::Length(Length::Px(px)))
-        }
-        CssToken::Percentage(value) => {
-            value.parse::<f32>().ok().map(|p| GridTrackMin::Length(Length::Percent(p)))
-        }
+        CssToken::Dimension { value, unit } if unit.eq_ignore_ascii_case("px") => value
+            .parse::<f32>()
+            .ok()
+            .map(|px| GridTrackMin::Length(Length::Px(px))),
+        CssToken::Percentage(value) => value
+            .parse::<f32>()
+            .ok()
+            .map(|p| GridTrackMin::Length(Length::Percent(p))),
         _ => None,
     }
 }
@@ -4302,15 +4348,17 @@ fn parse_minmax_max(tokens: &[&CssToken]) -> Option<GridTrackMax> {
             "max-content" => Some(GridTrackMax::MaxContent),
             _ => None,
         },
-        CssToken::Dimension { value, unit } if unit.eq_ignore_ascii_case("px") => {
-            value.parse::<f32>().ok().map(|px| GridTrackMax::Length(Length::Px(px)))
-        }
+        CssToken::Dimension { value, unit } if unit.eq_ignore_ascii_case("px") => value
+            .parse::<f32>()
+            .ok()
+            .map(|px| GridTrackMax::Length(Length::Px(px))),
         CssToken::Dimension { value, unit } if unit.eq_ignore_ascii_case("fr") => {
             value.parse::<f32>().ok().map(GridTrackMax::Fr)
         }
-        CssToken::Percentage(value) => {
-            value.parse::<f32>().ok().map(|p| GridTrackMax::Length(Length::Percent(p)))
-        }
+        CssToken::Percentage(value) => value
+            .parse::<f32>()
+            .ok()
+            .map(|p| GridTrackMax::Length(Length::Percent(p))),
         _ => None,
     }
 }
@@ -4356,10 +4404,8 @@ fn parse_repeat_function(inner: &[&CssToken]) -> Vec<GridTrackSize> {
 
     // The remainder after the comma is a track-list; reconstruct as owned tokens
     // and parse recursively.
-    let remainder_owned: Vec<CssToken> = non_ws[comma_pos + 1..]
-        .iter()
-        .map(|&t| t.clone())
-        .collect();
+    let remainder_owned: Vec<CssToken> =
+        non_ws[comma_pos + 1..].iter().map(|&t| t.clone()).collect();
     let inner_tracks = parse_track_list(&remainder_owned);
     let inner_len = inner_tracks.len();
 
@@ -4382,16 +4428,10 @@ fn parse_grid_auto_flow(tokens: &[CssToken]) -> Option<GridAutoFlow> {
     match non_ws.as_slice() {
         [a] if a.eq_ignore_ascii_case("row") => Some(GridAutoFlow::Row),
         [a] if a.eq_ignore_ascii_case("column") => Some(GridAutoFlow::Column),
-        [a, b] | [b, a]
-            if a.eq_ignore_ascii_case("dense")
-                && b.eq_ignore_ascii_case("row") =>
-        {
+        [a, b] | [b, a] if a.eq_ignore_ascii_case("dense") && b.eq_ignore_ascii_case("row") => {
             Some(GridAutoFlow::RowDense)
         }
-        [a, b] | [b, a]
-            if a.eq_ignore_ascii_case("dense")
-                && b.eq_ignore_ascii_case("column") =>
-        {
+        [a, b] | [b, a] if a.eq_ignore_ascii_case("dense") && b.eq_ignore_ascii_case("column") => {
             Some(GridAutoFlow::ColumnDense)
         }
         [a] if a.eq_ignore_ascii_case("dense") => Some(GridAutoFlow::RowDense),
@@ -4402,7 +4442,7 @@ fn parse_grid_auto_flow(tokens: &[CssToken]) -> Option<GridAutoFlow> {
 /// Parse a single `<grid-line>` value: `auto`, `<integer>`, `span <integer>`.
 fn parse_grid_line(tokens: &[CssToken]) -> Option<GridLine> {
     // Clone to owned Vec<CssToken> so slice patterns match CssToken variants directly.
-    // Filter both Whitespace and Eof — the tokenizer appends Eof to every output.
+    // Filter both Whitespace and Eof; the tokenizer appends Eof to every output.
     let non_ws: Vec<CssToken> = tokens
         .iter()
         .filter(|t| !matches!(t, CssToken::Whitespace | CssToken::Eof))
@@ -4412,9 +4452,7 @@ fn parse_grid_line(tokens: &[CssToken]) -> Option<GridLine> {
     match non_ws.as_slice() {
         [CssToken::Ident(kw)] if kw.eq_ignore_ascii_case("auto") => Some(GridLine::Auto),
         [CssToken::Number(n)] => n.parse::<i16>().ok().map(GridLine::Line),
-        [CssToken::Ident(span_kw), CssToken::Number(n)]
-            if span_kw.eq_ignore_ascii_case("span") =>
-        {
+        [CssToken::Ident(span_kw), CssToken::Number(n)] if span_kw.eq_ignore_ascii_case("span") => {
             n.parse::<u16>().ok().map(GridLine::Span)
         }
         _ => None,
@@ -4435,8 +4473,7 @@ fn parse_grid_placement_shorthand(tokens: &[CssToken]) -> (Option<GridLine>, Opt
 
     if let Some(pos) = slash_pos {
         let start_toks: Vec<CssToken> = non_ws[..pos].iter().map(|&t| t.clone()).collect();
-        let end_toks: Vec<CssToken> =
-            non_ws[pos + 1..].iter().map(|&t| t.clone()).collect();
+        let end_toks: Vec<CssToken> = non_ws[pos + 1..].iter().map(|&t| t.clone()).collect();
         (parse_grid_line(&start_toks), parse_grid_line(&end_toks))
     } else {
         // No slash: single value applies to start; end is auto.
@@ -4562,7 +4599,9 @@ mod grid_tests {
     fn parse_px_and_auto_track_list() {
         let tracks = parse_tracks("100px auto 1fr");
         assert_eq!(tracks.len(), 3);
-        assert!(matches!(tracks[0], GridTrackSize::Length(Length::Px(v)) if (v - 100.0).abs() < 0.01));
+        assert!(
+            matches!(tracks[0], GridTrackSize::Length(Length::Px(v)) if (v - 100.0).abs() < 0.01)
+        );
         assert!(matches!(tracks[1], GridTrackSize::Auto));
         assert!(matches!(tracks[2], GridTrackSize::Fr(_)));
     }
@@ -4573,7 +4612,9 @@ mod grid_tests {
         assert_eq!(tracks.len(), 1);
         match &tracks[0] {
             GridTrackSize::Minmax(min, max) => {
-                assert!(matches!(min, GridTrackMin::Length(Length::Px(v)) if (v - 100.0).abs() < 0.01));
+                assert!(
+                    matches!(min, GridTrackMin::Length(Length::Px(v)) if (v - 100.0).abs() < 0.01)
+                );
                 assert!(matches!(max, GridTrackMax::Fr(v) if (v - 1.0).abs() < 0.01));
             }
             other => panic!("expected Minmax, got {:?}", other),
@@ -4584,7 +4625,11 @@ mod grid_tests {
     fn parse_repeat_track() {
         let tracks = parse_tracks("repeat(3, 1fr)");
         assert_eq!(tracks.len(), 3);
-        assert!(tracks.iter().all(|t| matches!(t, GridTrackSize::Fr(v) if (v - 1.0).abs() < 0.01)));
+        assert!(
+            tracks
+                .iter()
+                .all(|t| matches!(t, GridTrackSize::Fr(v) if (v - 1.0).abs() < 0.01))
+        );
     }
 
     #[test]
@@ -4599,7 +4644,10 @@ mod grid_tests {
 
     #[test]
     fn parse_grid_line_span() {
-        assert_eq!(parse_grid_line(&tokenize("span 3")), Some(GridLine::Span(3)));
+        assert_eq!(
+            parse_grid_line(&tokenize("span 3")),
+            Some(GridLine::Span(3))
+        );
     }
 
     #[test]
@@ -4611,7 +4659,10 @@ mod grid_tests {
 
     #[test]
     fn grid_auto_flow_row() {
-        assert_eq!(parse_grid_auto_flow(&tokenize("row")), Some(GridAutoFlow::Row));
+        assert_eq!(
+            parse_grid_auto_flow(&tokenize("row")),
+            Some(GridAutoFlow::Row)
+        );
     }
 
     #[test]

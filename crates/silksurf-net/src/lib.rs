@@ -36,12 +36,17 @@
 
 pub mod cache;
 pub mod h2_client;
+pub mod websocket;
+
+pub use websocket::{WebSocketReply, websocket_text_roundtrip};
 
 use rustls::StreamOwned;
 use silksurf_tls::{RustlsProvider, TlsProvider};
+#[cfg(feature = "content-encoding")]
+use std::io::Cursor;
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 /*
  * MAX_RESPONSE_BODY_BYTES -- DoS bound on a single HTTP response body.
@@ -65,6 +70,9 @@ use std::sync::Arc;
  * See: SNAZZY-WAFFLE roadmap P8.S8 (DoS bounds per crate).
  */
 pub const MAX_RESPONSE_BODY_BYTES: usize = 16 * 1024 * 1024;
+
+#[cfg(feature = "content-encoding")]
+const ACCEPT_ENCODING_VALUE: &str = "br, gzip, deflate";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HttpMethod {
@@ -102,7 +110,7 @@ pub struct HttpResponse {
 
 impl HttpResponse {
     /// Get a header value by name (case-insensitive).
-    #[must_use] 
+    #[must_use]
     pub fn header(&self, name: &str) -> Option<&str> {
         self.headers
             .iter()
@@ -140,10 +148,10 @@ pub struct BasicClient {
 }
 
 impl BasicClient {
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self {
-            tls: Arc::new(RustlsProvider::new()),
+            tls: shared_default_tls_provider(),
             max_redirects: 5,
         }
     }
@@ -154,6 +162,12 @@ impl BasicClient {
             max_redirects: 5,
         }
     }
+}
+
+fn shared_default_tls_provider() -> Arc<dyn TlsProvider + Send + Sync> {
+    static DEFAULT_TLS: OnceLock<Arc<RustlsProvider>> = OnceLock::new();
+    let provider = DEFAULT_TLS.get_or_init(|| Arc::new(RustlsProvider::new()));
+    provider.clone()
 }
 
 impl Default for BasicClient {
@@ -168,98 +182,215 @@ impl NetClient for BasicClient {
         let mut redirects = 0;
 
         loop {
-            let parsed = url::Url::parse(&current_url)
-                .map_err(|e| NetError::new(format!("Invalid URL: {e}")))?;
-
-            let host = parsed
-                .host_str()
-                .ok_or_else(|| NetError::new("No host in URL"))?
-                .to_string();
-            let is_https = parsed.scheme() == "https";
-            let port = parsed.port().unwrap_or(if is_https { 443 } else { 80 });
-            let path = if parsed.query().is_some() {
-                format!("{}?{}", parsed.path(), parsed.query().unwrap_or(""))
-            } else {
-                parsed.path().to_string()
-            };
-
-            // Build HTTP/1.1 request
-            let mut req_buf = Vec::with_capacity(512);
-            write!(
-                req_buf,
-                "{} {} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\nUser-Agent: SilkSurf/0.1\r\nAccept: */*\r\n",
-                request.method.as_str(),
-                if path.is_empty() { "/" } else { &path },
-            ).map_err(|e| NetError::new(format!("Write error: {e}")))?;
-
-            // Add custom headers
-            for (name, value) in &request.headers {
-                write!(req_buf, "{name}: {value}\r\n")
-                    .map_err(|e| NetError::new(format!("Write error: {e}")))?;
-            }
-
-            // Content-Length for POST bodies
-            if !request.body.is_empty() {
-                write!(req_buf, "Content-Length: {}\r\n", request.body.len())
-                    .map_err(|e| NetError::new(format!("Write error: {e}")))?;
-            }
-
-            req_buf.extend_from_slice(b"\r\n");
-            req_buf.extend_from_slice(&request.body);
-
-            // Connect
-            let addr = format!("{host}:{port}");
-            let mut tcp = TcpStream::connect(&addr)
-                .map_err(|e| NetError::new(format!("TCP connect to {addr}: {e}")))?;
-            // DoS bound (P8.S8): cap stalls during handshake/read. Aligned
-            // with silksurf_tls::MAX_TLS_HANDSHAKE_SECS so handshake
-            // exhaustion attacks become recoverable NetError.
-            tcp.set_read_timeout(Some(std::time::Duration::from_secs(
-                silksurf_tls::MAX_TLS_HANDSHAKE_SECS,
-            )))
-            .ok();
-
-            // Send request and read response
-            let response_bytes = if is_https {
-                let server_name = rustls::pki_types::ServerName::try_from(host.as_str())
-                    .map_err(|e| NetError::new(format!("Invalid server name: {e}")))?
-                    .to_owned();
-                let config = self.tls.config();
-                let mut conn = rustls::ClientConnection::new(config, server_name)
-                    .map_err(|e| NetError::new(format!("TLS setup: {e}")))?;
-                while conn.is_handshaking() {
-                    conn.complete_io(&mut tcp)
-                        .map_err(|e| NetError::new(format!("TLS handshake: {e}")))?;
-                }
-                let mut stream = StreamOwned::new(conn, tcp);
-                stream
-                    .write_all(&req_buf)
-                    .map_err(|e| NetError::new(format!("TLS write: {e}")))?;
-                read_response(&mut stream)?
-            } else {
-                tcp.write_all(&req_buf)
-                    .map_err(|e| NetError::new(format!("TCP write: {e}")))?;
-                read_response(&mut tcp)?
-            };
-
-            // Parse response
-            let response = parse_response(&response_bytes)?;
-
-            // Handle redirects
-            if matches!(response.status, 301 | 302 | 303 | 307 | 308)
-                && redirects < self.max_redirects
+            let (parsed, response) = self.fetch_http1_once(request, &current_url)?;
+            if let Some(next_url) =
+                redirect_target(&parsed, &response, redirects, self.max_redirects)
             {
-                if let Some(location) = response.header("location") {
-                    current_url = parsed
-                        .join(location).map_or_else(|_| location.to_string(), |u| u.to_string());
-                    redirects += 1;
-                    continue;
-                }
+                current_url = next_url;
+                redirects += 1;
+                continue;
             }
-
             return Ok(response);
         }
     }
+}
+
+impl BasicClient {
+    fn fetch_http1_once(
+        &self,
+        request: &HttpRequest,
+        current_url: &str,
+    ) -> Result<(url::Url, HttpResponse), NetError> {
+        let target = RequestTarget::parse(current_url)?;
+        let request_bytes = build_http1_request(request, &target)?;
+        let response_bytes = send_http1_request(self.tls.as_ref(), &target, &request_bytes)?;
+        let response = parse_response(&response_bytes)?;
+        Ok((target.parsed, response))
+    }
+}
+
+struct RequestTarget {
+    parsed: url::Url,
+    host: String,
+    is_https: bool,
+    port: u16,
+    path: String,
+}
+
+impl RequestTarget {
+    fn parse(current_url: &str) -> Result<Self, NetError> {
+        let parsed =
+            url::Url::parse(current_url).map_err(|e| NetError::new(format!("Invalid URL: {e}")))?;
+        let host = parsed
+            .host_str()
+            .ok_or_else(|| NetError::new("No host in URL"))?
+            .to_string();
+        let is_https = parsed.scheme() == "https";
+        let port = parsed.port().unwrap_or(if is_https { 443 } else { 80 });
+        let path = request_path(&parsed);
+        Ok(Self {
+            parsed,
+            host,
+            is_https,
+            port,
+            path,
+        })
+    }
+}
+
+fn request_path(parsed: &url::Url) -> String {
+    match parsed.query() {
+        Some(query) => format!("{}?{query}", parsed.path()),
+        None => parsed.path().to_string(),
+    }
+}
+
+fn build_http1_request(request: &HttpRequest, target: &RequestTarget) -> Result<Vec<u8>, NetError> {
+    let mut request_bytes = Vec::with_capacity(512);
+    write_request_line(&mut request_bytes, request, target)?;
+    write_content_encoding_header(&mut request_bytes, &request.headers)?;
+    write_custom_headers(&mut request_bytes, &request.headers)?;
+    write_content_length(&mut request_bytes, request.body.len())?;
+    request_bytes.extend_from_slice(b"\r\n");
+    request_bytes.extend_from_slice(&request.body);
+    Ok(request_bytes)
+}
+
+fn write_request_line(
+    request_bytes: &mut Vec<u8>,
+    request: &HttpRequest,
+    target: &RequestTarget,
+) -> Result<(), NetError> {
+    let path = if target.path.is_empty() {
+        "/"
+    } else {
+        target.path.as_str()
+    };
+    write!(
+        request_bytes,
+        "{} {path} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nUser-Agent: SilkSurf/0.1\r\nAccept: */*\r\n",
+        request.method.as_str(),
+        target.host,
+    )
+    .map_err(|e| NetError::new(format!("Write error: {e}")))
+}
+
+#[cfg(feature = "content-encoding")]
+fn write_content_encoding_header(
+    request_bytes: &mut Vec<u8>,
+    headers: &[(String, String)],
+) -> Result<(), NetError> {
+    if !has_header(headers, "accept-encoding") {
+        write!(
+            request_bytes,
+            "Accept-Encoding: {ACCEPT_ENCODING_VALUE}\r\n"
+        )
+        .map_err(|e| NetError::new(format!("Write error: {e}")))?;
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "content-encoding"))]
+fn write_content_encoding_header(
+    _request_bytes: &mut Vec<u8>,
+    _headers: &[(String, String)],
+) -> Result<(), NetError> {
+    Ok(())
+}
+
+fn write_custom_headers(
+    request_bytes: &mut Vec<u8>,
+    headers: &[(String, String)],
+) -> Result<(), NetError> {
+    for (name, value) in headers {
+        write!(request_bytes, "{name}: {value}\r\n")
+            .map_err(|e| NetError::new(format!("Write error: {e}")))?;
+    }
+    Ok(())
+}
+
+fn write_content_length(request_bytes: &mut Vec<u8>, body_len: usize) -> Result<(), NetError> {
+    if body_len == 0 {
+        return Ok(());
+    }
+    write!(request_bytes, "Content-Length: {body_len}\r\n")
+        .map_err(|e| NetError::new(format!("Write error: {e}")))
+}
+
+fn send_http1_request(
+    tls: &(dyn TlsProvider + Send + Sync),
+    target: &RequestTarget,
+    request_bytes: &[u8],
+) -> Result<Vec<u8>, NetError> {
+    let mut tcp = connect_tcp(target)?;
+    if target.is_https {
+        return send_https_request(tls, target, tcp, request_bytes);
+    }
+    tcp.write_all(request_bytes)
+        .map_err(|e| NetError::new(format!("TCP write: {e}")))?;
+    read_response(&mut tcp)
+}
+
+fn connect_tcp(target: &RequestTarget) -> Result<TcpStream, NetError> {
+    let addr = format!("{}:{}", target.host, target.port);
+    let tcp = TcpStream::connect(&addr)
+        .map_err(|e| NetError::new(format!("TCP connect to {addr}: {e}")))?;
+    tcp.set_read_timeout(Some(std::time::Duration::from_secs(
+        silksurf_tls::MAX_TLS_HANDSHAKE_SECS,
+    )))
+    .ok();
+    Ok(tcp)
+}
+
+fn send_https_request(
+    tls: &(dyn TlsProvider + Send + Sync),
+    target: &RequestTarget,
+    tcp: TcpStream,
+    request_bytes: &[u8],
+) -> Result<Vec<u8>, NetError> {
+    let server_name = rustls::pki_types::ServerName::try_from(target.host.as_str())
+        .map_err(|e| NetError::new(format!("Invalid server name: {e}")))?
+        .to_owned();
+    let config = tls.config();
+    let conn = rustls::ClientConnection::new(config, server_name)
+        .map_err(|e| NetError::new(format!("TLS setup: {e}")))?;
+    complete_tls_handshake(conn, tcp, request_bytes)
+}
+
+fn complete_tls_handshake(
+    mut conn: rustls::ClientConnection,
+    mut tcp: TcpStream,
+    request_bytes: &[u8],
+) -> Result<Vec<u8>, NetError> {
+    while conn.is_handshaking() {
+        conn.complete_io(&mut tcp)
+            .map_err(|e| NetError::new(format!("TLS handshake: {e}")))?;
+    }
+    let mut stream = StreamOwned::new(conn, tcp);
+    stream
+        .write_all(request_bytes)
+        .map_err(|e| NetError::new(format!("TLS write: {e}")))?;
+    read_response(&mut stream)
+}
+
+fn redirect_target(
+    parsed: &url::Url,
+    response: &HttpResponse,
+    redirects: usize,
+    max_redirects: usize,
+) -> Option<String> {
+    if !is_redirect_status(response.status) || redirects >= max_redirects {
+        return None;
+    }
+    response.header("location").map(|location| {
+        parsed
+            .join(location)
+            .map_or_else(|_| location.to_string(), |u| u.to_string())
+    })
+}
+
+fn is_redirect_status(status: u16) -> bool {
+    matches!(status, 301 | 302 | 303 | 307 | 308)
 }
 
 impl BasicClient {
@@ -283,7 +414,7 @@ impl BasicClient {
      * See: h2_client.rs for the H2 implementation
      * See: SpeculativeRenderer::fetch_all_or_speculate for cache integration
      */
-    #[must_use] 
+    #[must_use]
     pub fn fetch_parallel(&self, requests: &[HttpRequest]) -> Vec<Result<HttpResponse, NetError>> {
         if requests.is_empty() {
             return vec![];
@@ -311,7 +442,7 @@ impl BasicClient {
                     return responses
                         .into_iter()
                         .map(|r| {
-                            Ok(HttpResponse {
+                            decode_response(HttpResponse {
                                 status: r.status,
                                 headers: r.headers,
                                 body: r.body,
@@ -361,6 +492,13 @@ fn same_https_host(requests: &[HttpRequest]) -> Option<(String, u16)> {
         }
     }
     Some((host, port))
+}
+
+#[cfg(feature = "content-encoding")]
+fn has_header(headers: &[(String, String)], name: &str) -> bool {
+    headers
+        .iter()
+        .any(|(header_name, _)| header_name.eq_ignore_ascii_case(name))
 }
 
 /// Read the full HTTP response from a stream.
@@ -416,9 +554,324 @@ fn parse_response(data: &[u8]) -> Result<HttpResponse, NetError> {
 
     let body = data[header_len..].to_vec();
 
-    Ok(HttpResponse {
+    decode_response(HttpResponse {
         status,
         headers: parsed_headers,
         body,
     })
+}
+
+fn decode_response(response: HttpResponse) -> Result<HttpResponse, NetError> {
+    let response = decode_transfer_response(response)?;
+    #[cfg(feature = "content-encoding")]
+    {
+        decode_encoded_response(response)
+    }
+    #[cfg(not(feature = "content-encoding"))]
+    {
+        Ok(response)
+    }
+}
+
+fn decode_transfer_response(mut response: HttpResponse) -> Result<HttpResponse, NetError> {
+    let codings = transfer_codings(&response);
+    if codings.is_empty() {
+        return Ok(response);
+    }
+    if !transfer_codings_are_supported(&codings) {
+        return Err(NetError::new(format!(
+            "Unsupported Transfer-Encoding: {}",
+            codings.join(", ")
+        )));
+    }
+    response.body = decode_chunked_body(&response.body)?;
+    response
+        .headers
+        .retain(|(name, _)| !is_decoded_transfer_header(name));
+    Ok(response)
+}
+
+fn transfer_codings(response: &HttpResponse) -> Vec<String> {
+    response
+        .headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("transfer-encoding"))
+        .flat_map(|(_, value)| value.split(','))
+        .map(str::trim)
+        .filter(|coding| !coding.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn transfer_codings_are_supported(codings: &[String]) -> bool {
+    codings.len() == 1 && codings[0].eq_ignore_ascii_case("chunked")
+}
+
+fn is_decoded_transfer_header(name: &str) -> bool {
+    name.eq_ignore_ascii_case("transfer-encoding") || name.eq_ignore_ascii_case("content-length")
+}
+
+fn decode_chunked_body(body: &[u8]) -> Result<Vec<u8>, NetError> {
+    let mut decoded = Vec::with_capacity(body.len());
+    let mut cursor = 0;
+    loop {
+        let (line, after_line) = chunk_line(body, cursor)?;
+        let chunk_len = chunk_len(line)?;
+        cursor = after_line;
+        if chunk_len == 0 {
+            consume_chunk_trailers(body, cursor)?;
+            return Ok(decoded);
+        }
+        let chunk_end = cursor
+            .checked_add(chunk_len)
+            .ok_or_else(|| NetError::new("Chunked response size overflow"))?;
+        if chunk_end > body.len() {
+            return Err(NetError::new("Incomplete chunked response body"));
+        }
+        let next_len = decoded.len().saturating_add(chunk_len);
+        if next_len > MAX_RESPONSE_BODY_BYTES {
+            return Err(NetError::new(format!(
+                "Decoded chunked response exceeds MAX_RESPONSE_BODY_BYTES ({MAX_RESPONSE_BODY_BYTES} bytes)"
+            )));
+        }
+        decoded.extend_from_slice(&body[cursor..chunk_end]);
+        cursor = consume_chunk_crlf(body, chunk_end)?;
+    }
+}
+
+fn chunk_line(body: &[u8], cursor: usize) -> Result<(&[u8], usize), NetError> {
+    let Some(relative_end) = body[cursor..].windows(2).position(|pair| pair == b"\r\n") else {
+        return Err(NetError::new("Incomplete chunked response size line"));
+    };
+    let line_end = cursor + relative_end;
+    Ok((&body[cursor..line_end], line_end + 2))
+}
+
+fn chunk_len(line: &[u8]) -> Result<usize, NetError> {
+    let size = line.split(|byte| *byte == b';').next().unwrap_or_default();
+    let size_text = std::str::from_utf8(size)
+        .map(str::trim)
+        .map_err(|_| NetError::new("Invalid chunked response size"))?;
+    usize::from_str_radix(size_text, 16).map_err(|_| NetError::new("Invalid chunked response size"))
+}
+
+fn consume_chunk_crlf(body: &[u8], cursor: usize) -> Result<usize, NetError> {
+    if body.get(cursor..cursor + 2) == Some(b"\r\n") {
+        return Ok(cursor + 2);
+    }
+    Err(NetError::new("Missing chunked response terminator"))
+}
+
+fn consume_chunk_trailers(body: &[u8], cursor: usize) -> Result<(), NetError> {
+    if body.get(cursor..cursor + 2) == Some(b"\r\n") {
+        return Ok(());
+    }
+    if body[cursor..]
+        .windows(4)
+        .any(|window| window == b"\r\n\r\n")
+    {
+        return Ok(());
+    }
+    Err(NetError::new("Incomplete chunked response trailers"))
+}
+
+#[cfg(feature = "content-encoding")]
+fn decode_encoded_response(mut response: HttpResponse) -> Result<HttpResponse, NetError> {
+    let Some(value) = response.header("content-encoding").map(str::to_string) else {
+        return Ok(response);
+    };
+    let mut body = std::mem::take(&mut response.body);
+    for coding in value.split(',').map(str::trim).rev() {
+        if coding.is_empty() || coding.eq_ignore_ascii_case("identity") {
+            continue;
+        }
+        body = decode_single_content_coding(coding, &body)?;
+    }
+    response.body = body;
+    response
+        .headers
+        .retain(|(name, _)| !is_decoded_entity_header(name));
+    Ok(response)
+}
+
+#[cfg(feature = "content-encoding")]
+fn is_decoded_entity_header(name: &str) -> bool {
+    name.eq_ignore_ascii_case("content-encoding") || name.eq_ignore_ascii_case("content-length")
+}
+
+#[cfg(feature = "content-encoding")]
+fn decode_single_content_coding(coding: &str, body: &[u8]) -> Result<Vec<u8>, NetError> {
+    if coding.eq_ignore_ascii_case("br") {
+        let reader = Cursor::new(body);
+        let mut decoder = brotli_decompressor::Decompressor::new(reader, 4096);
+        return read_decoded_body(&mut decoder, "brotli");
+    }
+    if coding.eq_ignore_ascii_case("gzip") || coding.eq_ignore_ascii_case("x-gzip") {
+        let reader = Cursor::new(body);
+        let mut decoder = flate2::read::GzDecoder::new(reader);
+        return read_decoded_body(&mut decoder, "gzip");
+    }
+    if coding.eq_ignore_ascii_case("deflate") {
+        let reader = Cursor::new(body);
+        let mut decoder = flate2::read::DeflateDecoder::new(reader);
+        return read_decoded_body(&mut decoder, "deflate");
+    }
+    Err(NetError::new(format!(
+        "Unsupported Content-Encoding: {coding}"
+    )))
+}
+
+#[cfg(feature = "content-encoding")]
+fn read_decoded_body(reader: &mut dyn Read, coding: &str) -> Result<Vec<u8>, NetError> {
+    let mut decoded = Vec::with_capacity(8192);
+    let mut chunk = [0u8; 8192];
+    loop {
+        let bytes_read = reader
+            .read(&mut chunk)
+            .map_err(|e| NetError::new(format!("{coding} decode: {e}")))?;
+        if bytes_read == 0 {
+            break;
+        }
+        let next_len = decoded.len().saturating_add(bytes_read);
+        if next_len > MAX_RESPONSE_BODY_BYTES {
+            return Err(NetError::new(format!(
+                "Decoded response exceeds MAX_RESPONSE_BODY_BYTES ({MAX_RESPONSE_BODY_BYTES} bytes)"
+            )));
+        }
+        decoded.extend_from_slice(&chunk[..bytes_read]);
+    }
+    Ok(decoded)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_response;
+    #[cfg(feature = "content-encoding")]
+    use super::{HttpResponse, decode_response, has_header};
+
+    #[cfg(feature = "content-encoding")]
+    use flate2::Compression;
+    #[cfg(feature = "content-encoding")]
+    use flate2::write::{DeflateEncoder, GzEncoder};
+    #[cfg(feature = "content-encoding")]
+    use std::io::Write;
+
+    #[cfg(feature = "content-encoding")]
+    #[test]
+    fn has_header_matches_case_insensitively() {
+        let headers = vec![("Accept-Encoding".to_string(), "identity".to_string())];
+        assert!(has_header(&headers, "accept-encoding"));
+        assert!(!has_header(&headers, "content-encoding"));
+    }
+
+    #[cfg(feature = "content-encoding")]
+    #[test]
+    fn parse_response_decodes_gzip_body() {
+        let body = b"silksurf compressed html";
+        let compressed = gzip_bytes(body);
+        let mut raw =
+            b"HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: 999\r\n\r\n".to_vec();
+        raw.extend_from_slice(&compressed);
+
+        let response = parse_response(&raw).expect("gzip response decodes");
+
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, body);
+        assert_eq!(response.header("content-encoding"), None);
+        assert_eq!(response.header("content-length"), None);
+    }
+
+    #[cfg(feature = "content-encoding")]
+    #[test]
+    fn parse_response_decodes_chunked_gzip_body() {
+        let body = b"silksurf chunked compressed html";
+        let chunked = chunked_body(&gzip_bytes(body), &[3, 5, 9]);
+        let mut raw =
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Encoding: gzip\r\n\r\n"
+                .to_vec();
+        raw.extend_from_slice(&chunked);
+
+        let response = parse_response(&raw).expect("chunked gzip response decodes");
+
+        assert_eq!(response.body, body);
+        assert_eq!(response.header("transfer-encoding"), None);
+        assert_eq!(response.header("content-encoding"), None);
+        assert_eq!(response.header("content-length"), None);
+    }
+
+    #[test]
+    fn parse_response_rejects_incomplete_chunked_body() {
+        let raw = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nsil".to_vec();
+
+        let err = parse_response(&raw).expect_err("incomplete chunk fails");
+
+        assert!(err.message.contains("Incomplete chunked response body"));
+    }
+
+    #[cfg(feature = "content-encoding")]
+    #[test]
+    fn decode_response_decodes_deflate_body() {
+        let body = b"css payload";
+        let response = HttpResponse {
+            status: 200,
+            headers: vec![("Content-Encoding".to_string(), "deflate".to_string())],
+            body: deflate_bytes(body),
+        };
+
+        let decoded = decode_response(response).expect("deflate response decodes");
+
+        assert_eq!(decoded.body, body);
+        assert_eq!(decoded.header("content-encoding"), None);
+    }
+
+    #[cfg(feature = "content-encoding")]
+    #[test]
+    fn decode_response_rejects_unknown_content_coding() {
+        let response = HttpResponse {
+            status: 200,
+            headers: vec![("Content-Encoding".to_string(), "zstd".to_string())],
+            body: b"payload".to_vec(),
+        };
+
+        let err = decode_response(response).expect_err("unknown coding fails");
+
+        assert!(err.message.contains("Unsupported Content-Encoding"));
+    }
+
+    #[cfg(feature = "content-encoding")]
+    fn gzip_bytes(body: &[u8]) -> Vec<u8> {
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+        encoder.write_all(body).expect("gzip write");
+        encoder.finish().expect("gzip finish")
+    }
+
+    #[cfg(feature = "content-encoding")]
+    fn deflate_bytes(body: &[u8]) -> Vec<u8> {
+        let mut encoder = DeflateEncoder::new(Vec::new(), Compression::fast());
+        encoder.write_all(body).expect("deflate write");
+        encoder.finish().expect("deflate finish")
+    }
+
+    #[cfg(feature = "content-encoding")]
+    fn chunked_body(body: &[u8], split_hint: &[usize]) -> Vec<u8> {
+        let mut chunked = Vec::new();
+        let mut cursor = 0;
+        for &hint in split_hint {
+            if cursor >= body.len() {
+                break;
+            }
+            let end = cursor.saturating_add(hint).min(body.len());
+            write!(chunked, "{:x}\r\n", end - cursor).expect("chunk size write");
+            chunked.extend_from_slice(&body[cursor..end]);
+            chunked.extend_from_slice(b"\r\n");
+            cursor = end;
+        }
+        if cursor < body.len() {
+            write!(chunked, "{:x}\r\n", body.len() - cursor).expect("chunk size write");
+            chunked.extend_from_slice(&body[cursor..]);
+            chunked.extend_from_slice(b"\r\n");
+        }
+        chunked.extend_from_slice(b"0\r\n\r\n");
+        chunked
+    }
 }

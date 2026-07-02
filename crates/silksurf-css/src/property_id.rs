@@ -118,7 +118,7 @@ pub enum PropertyId {
  *
  * Complexity: O(1) average (first-byte dispatch + short string compare)
  */
-#[must_use] 
+#[must_use]
 pub fn lookup_property_id(name: &str) -> PropertyId {
     // Fast path: match on first byte and length to reduce comparisons
     let bytes = name.as_bytes();
@@ -176,8 +176,12 @@ pub fn lookup_property_id(name: &str) -> PropertyId {
         // 17-char grid properties (two of them):
         (b'g', 17) if name.eq_ignore_ascii_case("grid-auto-columns") => PropertyId::GridAutoColumns,
         (b'g', 17) if name.eq_ignore_ascii_case("grid-column-start") => PropertyId::GridColumnStart,
-        (b'g', 18) if name.eq_ignore_ascii_case("grid-template-rows") => PropertyId::GridTemplateRows,
-        (b'g', 21) if name.eq_ignore_ascii_case("grid-template-columns") => PropertyId::GridTemplateColumns,
+        (b'g', 18) if name.eq_ignore_ascii_case("grid-template-rows") => {
+            PropertyId::GridTemplateRows
+        }
+        (b'g', 21) if name.eq_ignore_ascii_case("grid-template-columns") => {
+            PropertyId::GridTemplateColumns
+        }
         // 'j' prefix
         (b'j', 15) if name.eq_ignore_ascii_case("justify-content") => PropertyId::JustifyContent,
         // 'h' prefix

@@ -19,7 +19,7 @@ pub struct SelectorIdent {
 }
 
 impl SelectorIdent {
-    #[must_use] 
+    #[must_use]
     pub fn new(value: &str) -> Self {
         Self {
             value: SmallString::from(value),
@@ -37,7 +37,7 @@ impl SelectorIdent {
         Self { value, atom }
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn new_with_atom(value: SmallString, atom: Atom) -> Self {
         Self {
             value,
@@ -58,12 +58,12 @@ impl SelectorIdent {
         self.atom = None;
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn as_str(&self) -> &str {
         self.value.as_str()
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn atom(&self) -> Option<Atom> {
         self.atom
     }
@@ -116,7 +116,7 @@ pub struct NthIndex {
 }
 
 impl NthIndex {
-    #[must_use] 
+    #[must_use]
     pub fn matches(&self, position: usize) -> bool {
         if position == 0 {
             return false;
@@ -301,12 +301,12 @@ impl SelectorModifier {
     }
 }
 
-#[must_use] 
+#[must_use]
 pub fn parse_selector_list(tokens: Vec<CssToken>) -> SelectorList {
     parse_selector_list_with_interner(tokens, None)
 }
 
-#[must_use] 
+#[must_use]
 pub fn parse_selector_list_with_interner(
     tokens: Vec<CssToken>,
     interner: Option<&mut SilkInterner>,
@@ -410,7 +410,9 @@ impl<'a> SelectorParser<'a> {
                 combinator = Some(explicit);
                 self.consume_whitespace();
             }
-            let Some(compound) = self.parse_compound_selector() else { break; };
+            let Some(compound) = self.parse_compound_selector() else {
+                break;
+            };
             steps.push(SelectorStep {
                 combinator,
                 compound,
@@ -647,7 +649,7 @@ impl<'a> SelectorParser<'a> {
     }
 
     fn is_eof(&self) -> bool {
-        matches!(self.peek(), Some(CssToken::Eof))
+        matches!(self.peek(), Some(CssToken::Eof) | None)
     }
     fn skip_to_bracket_close(&mut self) {
         while let Some(token) = self.next() {

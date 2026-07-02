@@ -5,6 +5,11 @@ use silksurf_core::SilkInterner;
 use smol_str::SmolStr;
 use std::borrow::Cow;
 
+const MAX_CSS_BYTES: usize = 128 * 1024;
+const MAX_INLINE_STYLE_BYTES: usize = 16 * 1024;
+const MAX_NESTED_AT_RULE_BLOCK_TOKENS: usize = 4096;
+const MAX_QUALIFIED_RULE_SELECTOR_TOKENS: usize = 1024;
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Stylesheet {
     pub rules: Vec<Rule>,
@@ -51,7 +56,7 @@ pub struct CssParser {
 }
 
 impl CssParser {
-    #[must_use] 
+    #[must_use]
     pub fn new(mut tokens: Vec<CssToken>) -> Self {
         if !matches!(tokens.last(), Some(CssToken::Eof)) {
             tokens.push(CssToken::Eof);
@@ -128,7 +133,10 @@ impl CssParser {
                     self.next();
                     let block_tokens = self.consume_block();
                     let declarations = parse_declarations(&block_tokens);
-                    let selectors = parse_selector_list(selector_tokens);
+                    let selectors = parse_bounded_selector_list(
+                        selector_tokens,
+                        MAX_QUALIFIED_RULE_SELECTOR_TOKENS,
+                    );
                     return Some(Rule::Style(StyleRule {
                         selectors,
                         declarations,
@@ -197,17 +205,8 @@ pub fn parse_stylesheet(input: &str) -> Result<Stylesheet, CssError> {
     let mut parser = CssParser::new(tokens);
     let stylesheet = parser.parse_stylesheet();
     /*
-     * DoS bound (P8.S8): refuse stylesheets whose top-level rule count
-     * exceeds crate::MAX_CSS_RULES. Checked once after parsing (not
-     * inside the parser hot path) so the cascade and matching layers
-     * never see a degenerate Vec<Rule>.
-     *
-     * TODO(P8.S8): Push the check INTO CssParser::parse_stylesheet so
-     * we abort early instead of allocating the full rule Vec first.
-     * That requires changing the inner method's signature to return
-     * Result<Stylesheet, CssError>, which is a breaking API change for
-     * the few external callers of CssParser directly. Tracked for the
-     * next API-break window.
+     * MAX_CSS_RULES bounds the top-level rule vector before cascade and
+     * matching receive the stylesheet.
      */
     if stylesheet.rules.len() > crate::MAX_CSS_RULES {
         return Err(CssError {
@@ -227,23 +226,19 @@ pub fn parse_stylesheet_bytes(input: &[u8]) -> Result<Stylesheet, CssError> {
     parse_stylesheet(decoded.as_ref())
 }
 
+pub fn parse_declaration_list(input: &str) -> Result<Vec<Declaration>, CssError> {
+    let truncated = truncate_at_declaration_boundary(input, MAX_INLINE_STYLE_BYTES);
+    let mut tokenizer = CssTokenizer::new();
+    let mut tokens = tokenizer.feed(truncated)?;
+    tokens.extend(tokenizer.finish()?);
+    Ok(parse_declarations(&tokens))
+}
+
 pub fn parse_stylesheet_with_interner(
     input: &str,
     interner: &mut SilkInterner,
 ) -> Result<Stylesheet, CssError> {
-    // Limit CSS input to 512KB to prevent OOM on very large stylesheets.
-    // ChatGPT serves 1.4MB of CSS; we parse the first 512KB which covers
-    // the critical layout rules. Full support needs a streaming parser.
-    const MAX_CSS_BYTES: usize = 128 * 1024;
-    let truncated = if input.len() > MAX_CSS_BYTES {
-        // Find a safe truncation point (end of a rule block)
-        let safe_end = input[..MAX_CSS_BYTES]
-            .rfind('}')
-            .map_or(MAX_CSS_BYTES, |pos| pos + 1);
-        &input[..safe_end]
-    } else {
-        input
-    };
+    let truncated = truncate_at_rule_boundary(input, MAX_CSS_BYTES);
 
     let mut tokenizer = CssTokenizer::new();
     let mut tokens = tokenizer.feed(truncated)?;
@@ -266,6 +261,30 @@ pub fn parse_stylesheet_with_interner(
     }
     intern_rules(&mut sheet.rules, interner);
     Ok(sheet)
+}
+
+fn truncate_at_declaration_boundary(input: &str, max_bytes: usize) -> &str {
+    if input.len() <= max_bytes {
+        return input;
+    }
+    let prefix = utf8_prefix(input, max_bytes);
+    prefix.rfind(';').map_or(prefix, |pos| &prefix[..=pos])
+}
+
+fn truncate_at_rule_boundary(input: &str, max_bytes: usize) -> &str {
+    if input.len() <= max_bytes {
+        return input;
+    }
+    let prefix = utf8_prefix(input, max_bytes);
+    prefix.rfind('}').map_or(prefix, |pos| &prefix[..=pos])
+}
+
+fn utf8_prefix(input: &str, max_bytes: usize) -> &str {
+    let mut end = max_bytes.min(input.len());
+    while !input.is_char_boundary(end) {
+        end -= 1;
+    }
+    &input[..end]
 }
 
 fn decode_stylesheet_bytes(input: &[u8]) -> Cow<'_, str> {
@@ -363,9 +382,19 @@ fn is_css_whitespace(byte: u8) -> bool {
 fn parse_at_rule_block(tokens: Vec<CssToken>) -> AtRuleBlock {
     if looks_like_declarations(&tokens) {
         AtRuleBlock::Declarations(parse_declarations(&tokens))
+    } else if tokens.len() > MAX_NESTED_AT_RULE_BLOCK_TOKENS {
+        AtRuleBlock::Rules(Vec::new())
     } else {
         let mut parser = CssParser::new(tokens);
         AtRuleBlock::Rules(parser.parse_stylesheet().rules)
+    }
+}
+
+fn parse_bounded_selector_list(tokens: Vec<CssToken>, max_tokens: usize) -> SelectorList {
+    if tokens.len() > max_tokens {
+        parse_selector_list(Vec::new())
+    } else {
+        parse_selector_list(tokens)
     }
 }
 

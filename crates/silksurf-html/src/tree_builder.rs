@@ -34,7 +34,7 @@ enum InsertionMode {
 }
 
 impl TreeBuilder {
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         let mut dom = Dom::new();
         let document = dom.create_document();

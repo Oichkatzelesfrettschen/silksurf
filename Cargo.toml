@@ -10,6 +10,7 @@ members = [
   "crates/silksurf-layout",
   "crates/silksurf-render",
   "crates/silksurf-text",
+  "crates/silksurf-image",
   "crates/silksurf-gui",
   "crates/silksurf-net",
   "crates/silksurf-tls",
@@ -30,6 +31,7 @@ lasso = "0.7"
 memchr = "2.8"
 rayon = "1.11"
 rustc-hash = "2.1"
+quick_cache = "0.7"
 smallvec = { version = "1.15", features = ["union", "serde"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -44,11 +46,20 @@ tracing = { version = "0.1" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2.5"
 rustls = "0.23"
+arboard = { version = "3.6", default-features = false, features = ["wayland-data-control"] }
+# Accessibility tree infrastructure. Browser semantic snapshots use this
+# behind the app-level accessibility feature; native adapters stay out of the
+# default low-resource runtime until a presenter-specific integration lands.
+accesskit = "0.24"
 tokio = { version = "1", features = ["rt", "io-util", "net", "time"] }
 tokio-rustls = "0.26"
 h2 = "0.4"
+tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
 bytes = "1"
 http = "1"
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
+brotli-decompressor = { version = "5.0", default-features = true }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 hickory-resolver = { version = "0.26.0-beta.3", features = ["dnssec-ring", "tokio"] }
 hickory-proto = { version = "0.26.0-beta.3", features = ["dnssec-ring"] }
 # UAX #9 and UAX #14 support (AD-023). unicode-segmentation is the
@@ -61,6 +72,10 @@ html5ever = "0.38"
 # CPU-only 2D rasterizer (Skia subset, pure Rust). Used by silksurf-render
 # for anti-aliased path fill via PixmapMut::from_bytes wrapping the tile buffer.
 tiny-skia = "0.12"
+png = "0.18"
+image-webp = "0.2"
+zune-core = "0.5"
+zune-jpeg = "0.5"
 # Unicode-aware text shaping and layout (Servo/Mozilla lineage). Used by
 # silksurf-text for measure_text and rasterize_glyphs via SwashCache.
 cosmic-text = "0.19"
@@ -71,13 +86,15 @@ taffy = "0.10"
 # Used by silksurf-gui winit-backend to replace the XCB-only event loop.
 winit = "0.30"
 # Cross-platform software pixel buffer; surface.buffer_mut() -> &mut [u32].
-# Used by silksurf-gui winit-backend to present rasterizer output.
-softbuffer = "0.4"
+# silksurf-gui selects the exact platform features it presents through.
+softbuffer = { version = "0.4", default-features = false }
 # ECMA-262 2024+ compliant JS engine (pure Rust, Servo/Mozilla lineage).
 # Used by silksurf-js boa_backend as the production JS runtime; replaces
 # the hand-written bytecode VM which is preserved behind the legacy-vm feature.
 boa_engine = { version = "0.21", features = ["annex-b"] }
 boa_runtime = "0.21"
+# OS randomness for browser crypto host APIs.
+getrandom = "0.3"
 
 # ---------------------------------------------------------------------------
 # Workspace-wide lints.

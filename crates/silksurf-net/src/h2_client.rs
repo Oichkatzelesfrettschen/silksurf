@@ -1,45 +1,27 @@
 /*
- * h2_client.rs -- HTTP/2 parallel fetch over a single TLS connection.
+ * h2_client.rs drives same-origin HTTPS batches over one HTTP/2 TLS
+ * connection.
  *
- * WHY: chatgpt.com serves 2-3 CSS files as sequential HTTP/1.1 requests, each
- * incurring TCP+TLS setup (~50ms) + transfer time. HTTP/2 multiplexes all
- * requests over a single TLS connection, so total time = max(RTT) not sum(RTT).
- * Typical saving: (N-1) * ~50ms = ~100-150ms for 3 subresources.
- *
- * Architecture:
- *   fetch_h2_parallel(config, host, port, requests) -- blocking entry point
- *     -> creates tokio current_thread runtime (zero OS threads, drives I/O on caller)
- *     -> fetch_h2_parallel_async -- async h2 client via tokio-rustls
- *       1. TCP connect (tokio)
- *       2. TLS handshake (tokio-rustls) -- config has ALPN ["h2", "http/1.1"]
- *       3. Check negotiated ALPN -- return Err("not h2") if server chose HTTP/1.1
- *       4. h2::client::handshake -- negotiate HTTP/2 settings
- *       5. Send all requests in a loop (all in-flight before any await)
- *       6. Collect responses in send-order
- *
- * Thread model: all-sync from the caller's perspective. The tokio runtime is
- * created and dropped within fetch_h2_parallel; it never spawns OS threads.
- *
- * Complexity: O(1) TLS handshakes (vs O(N) for HTTP/1.1), O(N) request frames
- * Fallback: caller checks Err("not h2") and falls back to sequential HTTP/1.1
- *
- * See: BasicClient::fetch_parallel in lib.rs for integration point
- * See: TlsConfig::new_h2 in silksurf-tls for ALPN configuration
+ * fetch_h2_parallel creates a current-thread Tokio runtime, negotiates ALPN,
+ * sends every request before awaiting bodies, and returns responses in request
+ * order. BasicClient::fetch_parallel owns the HTTP/1.1 fallback boundary.
  */
 
 use bytes::Bytes;
-use h2::client;
+use futures_util::future::join_all;
+use h2::client::{self, ResponseFuture, SendRequest};
 use http::{Method, Request, Version};
 use rustls::ClientConfig;
 use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 
+#[cfg(feature = "content-encoding")]
+const ACCEPT_ENCODING_VALUE: &str = "br, gzip, deflate";
+
 /*
- * H2Request -- minimal per-URL state for parallel h2 fetch.
- *
- * path and query are separated because h2 sends them in the :path pseudo-header.
- * headers are request-specific (e.g. Accept: text/css).
+ * H2Request stores the per-stream :path components and request-specific
+ * headers used by the HTTP/2 request builder.
  */
 pub struct H2Request {
     pub path: String,
@@ -48,9 +30,8 @@ pub struct H2Request {
 }
 
 /*
- * H2Response -- response from a single h2 stream.
- *
- * Mirrors HttpResponse but avoids re-importing silksurf-net types here.
+ * H2Response mirrors HttpResponse while this module stays independent of the
+ * public client response type.
  */
 pub struct H2Response {
     pub status: u16,
@@ -59,18 +40,8 @@ pub struct H2Response {
 }
 
 /*
- * fetch_h2_parallel -- blocking entry point for HTTP/2 parallel fetch.
- *
- * Creates a minimal tokio current_thread runtime (zero extra OS threads) to
- * drive the h2 state machine. The runtime is dropped when this function returns.
- *
- * Returns Err if the server did not negotiate h2 via ALPN, or if any network
- * error occurred. Callers should fall back to sequential HTTP/1.1 on Err.
- *
- * INVARIANT: tls_config must have ALPN ["h2", "http/1.1"]; use TlsProvider::h2_config().
- * A config without ALPN will negotiate HTTP/1.1 and this function will return Err.
- *
- * Complexity: O(1) TLS handshakes + O(N) request frames per call
+ * fetch_h2_parallel presents a blocking API while the current-thread runtime
+ * drives TCP, TLS, and HTTP/2 state on the caller thread.
  */
 pub fn fetch_h2_parallel(
     tls_config: Arc<ClientConfig>,
@@ -82,9 +53,8 @@ pub fn fetch_h2_parallel(
         return Ok(vec![]);
     }
     /*
-     * new_current_thread: runs on the calling OS thread -- no extra threads created.
-     * enable_io: needed for TcpStream async I/O (epoll/io_uring on Linux)
-     * enable_time: needed by h2's internal keepalive timers
+     * new_current_thread keeps the network batch on the caller OS thread.
+     * enable_io drives TcpStream, and enable_time drives h2 timers.
      */
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_io()
@@ -108,8 +78,8 @@ async fn fetch_h2_parallel_async(
     tcp.set_nodelay(true).ok();
 
     /*
-     * TLS handshake via tokio-rustls. The config has ALPN ["h2", "http/1.1"],
-     * so the server will negotiate h2 if it supports it.
+     * tokio-rustls uses the caller-provided ALPN config, so h2-capable servers
+     * select HTTP/2 during the TLS handshake.
      */
     let server_name = rustls::pki_types::ServerName::try_from(host)
         .map_err(|e| format!("server name: {e}"))?
@@ -121,21 +91,23 @@ async fn fetch_h2_parallel_async(
         .map_err(|e| format!("TLS handshake: {e}"))?;
 
     /*
-     * ALPN check: if the server negotiated http/1.1 (or no ALPN), we cannot
-     * use h2 framing. Return Err so the caller can fall back to HTTP/1.1.
+     * A non-h2 ALPN result cannot carry HTTP/2 frames. The caller owns the
+     * HTTP/1.1 fallback path.
      */
     let negotiated = tls.get_ref().1.alpn_protocol();
     if negotiated != Some(b"h2") {
-        let proto = negotiated.map_or_else(|| "none".to_string(), |p| String::from_utf8_lossy(p).into_owned());
+        let proto = negotiated.map_or_else(
+            || "none".to_string(),
+            |p| String::from_utf8_lossy(p).into_owned(),
+        );
         return Err(format!("server negotiated '{proto}' not 'h2'"));
     }
 
     /*
-     * h2 handshake: sends HTTP/2 client preface + initial SETTINGS frame.
-     * The connection future must be driven concurrently with request sending;
-     * we spawn it on the current_thread runtime (same OS thread, cooperative).
+     * h2::client::handshake sends the client preface and SETTINGS frame. The
+     * connection future runs cooperatively on the same current-thread runtime.
      */
-    let (mut send_request, connection) = client::handshake(tls)
+    let (send_request, connection) = client::handshake(tls)
         .await
         .map_err(|e| format!("h2 handshake: {e}"))?;
 
@@ -146,40 +118,27 @@ async fn fetch_h2_parallel_async(
     });
 
     /*
-     * Send all requests before awaiting any response.
-     *
-     * WHY: h2 multiplexing means all requests are in-flight simultaneously.
-     * Awaiting each response before sending the next would serialize the
-     * round-trips, defeating multiplexing. Instead: send all -> collect all.
-     *
-     * ready().await resolves immediately when under SETTINGS_MAX_CONCURRENT_STREAMS
-     * (typically 100 on modern servers). For 2-3 CSS files, always immediate.
+     * The sender enqueues every request before the collector awaits bodies.
+     * That keeps same-origin resource batches multiplexed instead of serialized.
      */
+    let response_futures = send_h2_requests(send_request, host, requests).await?;
+
+    /*
+     * H2 response bodies drain concurrently. Each DATA frame returns flow-control
+     * capacity while other streams remain in flight, so large module batches do
+     * not starve the connection window or trigger peer resets.
+     */
+    collect_h2_responses(response_futures).await
+}
+
+async fn send_h2_requests(
+    mut send_request: SendRequest<Bytes>,
+    host: &str,
+    requests: &[H2Request],
+) -> Result<Vec<ResponseFuture>, String> {
     let mut response_futures = Vec::with_capacity(requests.len());
     for req in requests {
-        let uri = match &req.query {
-            Some(q) => format!("https://{host}{}?{q}", req.path),
-            None => format!("https://{host}{}", req.path),
-        };
-
-        let mut builder = Request::builder()
-            .method(Method::GET)
-            .uri(&uri)
-            .version(Version::HTTP_2)
-            .header("accept", "text/css,*/*")
-            .header("user-agent", "SilkSurf/0.1 (X11; Linux x86_64)");
-        for (k, v) in &req.extra_headers {
-            builder = builder.header(k.as_str(), v.as_str());
-        }
-        let http_req = builder
-            .body(())
-            .map_err(|e| format!("build request: {e}"))?;
-
-        /*
-         * ready() consumes send_request and resolves to it again when the
-         * connection has capacity (SETTINGS_MAX_CONCURRENT_STREAMS not exceeded).
-         * Reassign so the loop variable is valid for the next iteration.
-         */
+        let http_req = build_h2_request(host, req)?;
         send_request = send_request
             .ready()
             .await
@@ -187,47 +146,74 @@ async fn fetch_h2_parallel_async(
         let (resp_future, _send_stream) = send_request
             .send_request(http_req, true)
             .map_err(|e| format!("send request: {e}"))?;
-
         response_futures.push(resp_future);
     }
+    Ok(response_futures)
+}
 
-    /*
-     * Collect responses in send order.
-     *
-     * All responses are in-flight (server is processing them in parallel).
-     * Awaiting them sequentially is fine: the server processes them concurrently,
-     * so total time = max(individual RTTs), not their sum.
-     *
-     * Flow control: after reading each DATA frame chunk, release capacity back
-     * to the connection window. Without this, the server will stall after the
-     * first window's worth of data (~65KB default initial window).
-     */
-    let mut results = Vec::with_capacity(requests.len());
-    for resp_future in response_futures {
-        let response = resp_future.await.map_err(|e| format!("response: {e}"))?;
-
-        let status = response.status().as_u16();
-        let headers: Vec<(String, String)> = response
-            .headers()
-            .iter()
-            .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
-            .collect();
-
-        let mut body_stream = response.into_body();
-        let mut body: Vec<u8> = Vec::new();
-        while let Some(chunk) = body_stream.data().await {
-            let data: Bytes = chunk.map_err(|e| format!("body data: {e}"))?;
-            let n = data.len();
-            body.extend_from_slice(&data);
-            body_stream.flow_control().release_capacity(n).ok();
-        }
-
-        results.push(H2Response {
-            status,
-            headers,
-            body,
-        });
+fn build_h2_request(host: &str, req: &H2Request) -> Result<Request<()>, String> {
+    let uri = match &req.query {
+        Some(query) => format!("https://{host}{}?{query}", req.path),
+        None => format!("https://{host}{}", req.path),
+    };
+    let mut builder = Request::builder()
+        .method(Method::GET)
+        .uri(&uri)
+        .version(Version::HTTP_2)
+        .header("accept", "text/css,*/*")
+        .header("user-agent", "SilkSurf/0.1 (X11; Linux x86_64)");
+    #[cfg(feature = "content-encoding")]
+    if !has_header(&req.extra_headers, "accept-encoding") {
+        builder = builder.header("accept-encoding", ACCEPT_ENCODING_VALUE);
     }
+    for (key, value) in &req.extra_headers {
+        builder = builder.header(key.as_str(), value.as_str());
+    }
+    builder.body(()).map_err(|e| format!("build request: {e}"))
+}
 
-    Ok(results)
+async fn collect_h2_responses(
+    response_futures: Vec<ResponseFuture>,
+) -> Result<Vec<H2Response>, String> {
+    let responses = join_all(response_futures.into_iter().map(collect_h2_response)).await;
+    let mut collected = Vec::with_capacity(responses.len());
+    for response in responses {
+        collected.push(response?);
+    }
+    Ok(collected)
+}
+
+async fn collect_h2_response(resp_future: ResponseFuture) -> Result<H2Response, String> {
+    let response = resp_future.await.map_err(|e| format!("response: {e}"))?;
+    let status = response.status().as_u16();
+    let headers: Vec<(String, String)> = response
+        .headers()
+        .iter()
+        .map(|(key, value)| {
+            (
+                key.as_str().to_string(),
+                value.to_str().unwrap_or("").to_string(),
+            )
+        })
+        .collect();
+    let mut body_stream = response.into_body();
+    let mut body = Vec::new();
+    while let Some(chunk) = body_stream.data().await {
+        let data = chunk.map_err(|e| format!("body data: {e}"))?;
+        let bytes_read = data.len();
+        body.extend_from_slice(&data);
+        body_stream.flow_control().release_capacity(bytes_read).ok();
+    }
+    Ok(H2Response {
+        status,
+        headers,
+        body,
+    })
+}
+
+#[cfg(feature = "content-encoding")]
+fn has_header(headers: &[(String, String)], name: &str) -> bool {
+    headers
+        .iter()
+        .any(|(header_name, _)| header_name.eq_ignore_ascii_case(name))
 }
