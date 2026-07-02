@@ -105,6 +105,41 @@ impl CachedTextMeasures {
     }
 }
 
+#[derive(Default)]
+struct TaffyRebuildStats {
+    created: usize,
+    leaves: usize,
+    parents: usize,
+    child_edges: usize,
+    skipped: usize,
+    skipped_display_none: usize,
+    skipped_whitespace: usize,
+    skipped_text_merge: usize,
+}
+
+impl TaffyRebuildStats {
+    fn record_skip(
+        &mut self,
+        dom: &Dom,
+        table: &LayoutNeighborTable,
+        styles: &[Option<ComputedStyle>],
+        index: usize,
+    ) {
+        self.skipped += 1;
+        if text_node_collapses_to_empty_layout(dom, table, styles, index) {
+            self.skipped_whitespace += 1;
+        } else if styles
+            .get(index)
+            .and_then(Option::as_ref)
+            .is_none_or(|style| style.display == CssDisplay::None)
+        {
+            self.skipped_display_none += 1;
+        } else {
+            self.skipped_text_merge += 1;
+        }
+    }
+}
+
 impl TaffyLayout {
     #[must_use]
     pub fn new() -> Self {
@@ -126,6 +161,8 @@ impl TaffyLayout {
         table: &LayoutNeighborTable,
         styles: &[Option<ComputedStyle>],
     ) {
+        let trace_taffy = std::env::var_os("SILKSURF_TRACE_TAFFY").is_some();
+        let mut stats = TaffyRebuildStats::default();
         self.tree.clear();
         let n = table.len();
         self.taffy_nodes.clear();
@@ -136,6 +173,9 @@ impl TaffyLayout {
         // taffy node IDs are available when we build the parent node.
         for i in (0..n).rev() {
             if taffy_node_merges_into_parent(dom, table, styles, i) {
+                if trace_taffy {
+                    stats.record_skip(dom, table, styles, i);
+                }
                 continue;
             }
             let taffy_style = css_to_taffy_style(styles.get(i).and_then(Option::as_ref));
@@ -148,9 +188,18 @@ impl TaffyLayout {
                     .extend((start..end).filter_map(|child_idx| self.taffy_nodes[child_idx]));
             }
 
+            if trace_taffy {
+                stats.child_edges += self.child_ids_scratch.len();
+            }
             let result = if self.child_ids_scratch.is_empty() {
+                if trace_taffy {
+                    stats.leaves += 1;
+                }
                 self.tree.new_leaf(taffy_style)
             } else {
+                if trace_taffy {
+                    stats.parents += 1;
+                }
                 self.tree
                     .new_with_children(taffy_style, &self.child_ids_scratch)
             };
@@ -159,6 +208,20 @@ impl TaffyLayout {
                 self.taffy_to_bfs.insert(tn, i);
                 self.taffy_nodes[i] = Some(tn);
             }
+        }
+        if trace_taffy {
+            stats.created = self.taffy_to_bfs.len();
+            eprintln!(
+                "[SilkSurf] taffy rebuild: bfs_nodes={n}, created={}, leaves={}, parents={}, child_edges={}, skipped={}, skipped_display_none={}, skipped_whitespace={}, skipped_text_merge={}",
+                stats.created,
+                stats.leaves,
+                stats.parents,
+                stats.child_edges,
+                stats.skipped,
+                stats.skipped_display_none,
+                stats.skipped_whitespace,
+                stats.skipped_text_merge
+            );
         }
     }
 

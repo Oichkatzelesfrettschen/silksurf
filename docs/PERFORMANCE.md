@@ -627,6 +627,17 @@ total dropping from 3.875040ms to 3.471439ms. An eight-entry cache gives the
 same hit count on this fixture and costs more memory, so four entries stay the
 current low-resource point.
 
+`SILKSURF_TRACE_TAFFY=1` now reports rebuild shape before the solve. A live
+Wayland AI-chat smoke run over the 2026-07-02 fixture records 1,792 BFS nodes,
+1,087 created Taffy nodes, 886 leaves, 201 parents, 1,086 child edges, and 705
+skipped nodes. The skipped set is 309 collapsible-whitespace text nodes and
+396 direct text nodes merged into their parent leaf. A release control sample
+solves that graph in 1.683003ms and finishes navigation build work in
+9.681346ms. The same O0 path finishes layout-paint in 36.726749ms and
+navigation build work in 51.667843ms without tracing. The active first-load
+surface is therefore the 1,087-node grid/flex solve plus viewport frame build,
+not address input handling and not raw style/script metadata painting.
+
 Wayland SHM full-frame preseed now caps post-present cold-buffer seeding at
 two released buffers and acquires released aged buffers before virgin buffers.
 A traced AI-chat page-input run records first-frame preseed at 1.769412ms
