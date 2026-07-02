@@ -563,6 +563,31 @@ impl Default for ComputedStyle {
     }
 }
 
+impl ComputedStyle {
+    #[must_use]
+    pub fn anonymous_text(parent: Option<&ComputedStyle>) -> Self {
+        let Some(parent) = parent else {
+            return Self::default();
+        };
+        Self {
+            display: parent.display,
+            color: parent.color,
+            font_size: parent.font_size,
+            line_height: parent.line_height,
+            font_family: parent.font_family.clone(),
+            visibility: parent.visibility,
+            text_align: parent.text_align,
+            font_weight: parent.font_weight,
+            font_style: parent.font_style,
+            text_decoration: parent.text_decoration,
+            letter_spacing: parent.letter_spacing,
+            word_spacing: parent.word_spacing,
+            white_space: parent.white_space,
+            ..Self::default()
+        }
+    }
+}
+
 #[derive(Clone)]
 struct ResolvedProperty<T> {
     value: T,
@@ -1925,6 +1950,13 @@ pub fn compute_style_for_node_with_workspace(
     rem_base_px: f32,
 ) -> ComputedStyle {
     if dom.element_name(node).ok().flatten().is_none() {
+        if dom
+            .node(node)
+            .ok()
+            .is_some_and(|node| matches!(node.kind(), NodeKind::Text { .. }))
+        {
+            return ComputedStyle::anonymous_text(parent);
+        }
         return parent.cloned().unwrap_or_default();
     }
     cascade_for_node(dom, node, stylesheet, index, workspace, cascade_view)
@@ -4529,6 +4561,7 @@ fn parse_grid_area_shorthand(tokens: &[CssToken]) -> [Option<GridLine>; 4] {
 mod tests {
     use crate::parser::parse_stylesheet;
     use crate::style::LinearGradient;
+    use smallvec::smallvec;
 
     fn gradient_from_rule(css: &str) -> Option<LinearGradient> {
         let sheet = parse_stylesheet(css).ok()?;
@@ -4583,6 +4616,44 @@ mod tests {
     fn test_too_few_stops_rejected() {
         let result = gradient_from_rule("a { background-image: linear-gradient(90deg, red); }");
         assert!(result.is_none(), "single stop should be rejected");
+    }
+
+    #[test]
+    fn anonymous_text_inherits_text_state_and_resets_box_state() {
+        let parent = super::ComputedStyle {
+            display: super::Display::Flex,
+            color: super::Color {
+                r: 10,
+                g: 20,
+                b: 30,
+                a: 255,
+            },
+            background_color: super::Color {
+                r: 40,
+                g: 50,
+                b: 60,
+                a: 255,
+            },
+            font_size: super::Length::Px(18.0),
+            line_height: super::Length::Px(24.0),
+            font_family: smallvec![smol_str::SmolStr::new_static("serif")],
+            padding: super::Edges::all(super::Length::Px(9.0)),
+            visibility: super::Visibility::Hidden,
+            white_space: super::WhiteSpace::Pre,
+            ..super::ComputedStyle::default()
+        };
+
+        let text = super::ComputedStyle::anonymous_text(Some(&parent));
+
+        assert_eq!(text.display, parent.display);
+        assert_eq!(text.color, parent.color);
+        assert_eq!(text.font_size, parent.font_size);
+        assert_eq!(text.line_height, parent.line_height);
+        assert_eq!(text.font_family, parent.font_family);
+        assert_eq!(text.visibility, parent.visibility);
+        assert_eq!(text.white_space, parent.white_space);
+        assert_eq!(text.background_color, super::Color::transparent());
+        assert_eq!(text.padding, super::Edges::all(super::Length::zero()));
     }
 }
 
