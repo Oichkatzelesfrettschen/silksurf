@@ -116,6 +116,11 @@ struct TaffyRebuildStats {
     skipped_display_none: usize,
     skipped_whitespace: usize,
     skipped_text_merge: usize,
+    skip_time: std::time::Duration,
+    style_time: std::time::Duration,
+    child_time: std::time::Duration,
+    tree_time: std::time::Duration,
+    map_time: std::time::Duration,
 }
 
 impl TaffyRebuildStats {
@@ -138,6 +143,16 @@ impl TaffyRebuildStats {
         } else {
             self.skipped_text_merge += 1;
         }
+    }
+}
+
+fn trace_start(trace_enabled: bool) -> Option<std::time::Instant> {
+    trace_enabled.then(std::time::Instant::now)
+}
+
+fn record_elapsed(total: &mut std::time::Duration, start: Option<std::time::Instant>) {
+    if let Some(start) = start {
+        *total += start.elapsed();
     }
 }
 
@@ -178,13 +193,19 @@ impl TaffyLayout {
         // Process in reverse BFS order: children before parents so
         // taffy node IDs are available when we build the parent node.
         for i in (0..n).rev() {
-            if taffy_node_merges_into_parent(dom, table, styles, i) {
+            let skip_start = trace_start(trace_taffy);
+            let node_merges_into_parent = taffy_node_merges_into_parent(dom, table, styles, i);
+            record_elapsed(&mut stats.skip_time, skip_start);
+            if node_merges_into_parent {
                 if trace_taffy {
                     stats.record_skip(dom, table, styles, i);
                 }
                 continue;
             }
+            let style_start = trace_start(trace_taffy);
             let taffy_style = css_to_taffy_style_for_index(table, styles, i);
+            record_elapsed(&mut stats.style_time, style_start);
+            let child_start = trace_start(trace_taffy);
             self.child_ids_scratch.clear();
             let first_child = table.child_start[i];
             if first_child != u32::MAX {
@@ -193,10 +214,12 @@ impl TaffyLayout {
                 self.child_ids_scratch
                     .extend((start..end).filter_map(|child_idx| self.taffy_nodes[child_idx]));
             }
+            record_elapsed(&mut stats.child_time, child_start);
 
             if trace_taffy {
                 stats.child_edges += self.child_ids_scratch.len();
             }
+            let tree_start = trace_start(trace_taffy);
             let result = if self.child_ids_scratch.is_empty() {
                 if trace_taffy {
                     stats.leaves += 1;
@@ -209,16 +232,19 @@ impl TaffyLayout {
                 self.tree
                     .new_with_children(taffy_style, &self.child_ids_scratch)
             };
+            record_elapsed(&mut stats.tree_time, tree_start);
 
             if let Ok(tn) = result {
+                let map_start = trace_start(trace_taffy);
                 self.taffy_to_bfs.insert(tn, i);
                 self.taffy_nodes[i] = Some(tn);
+                record_elapsed(&mut stats.map_time, map_start);
             }
         }
         if trace_taffy {
             stats.created = self.taffy_to_bfs.len();
             eprintln!(
-                "[SilkSurf] taffy rebuild: bfs_nodes={n}, created={}, leaves={}, parents={}, child_edges={}, skipped={}, skipped_display_none={}, skipped_whitespace={}, skipped_text_merge={}",
+                "[SilkSurf] taffy rebuild: bfs_nodes={n}, created={}, leaves={}, parents={}, child_edges={}, skipped={}, skipped_display_none={}, skipped_whitespace={}, skipped_text_merge={}, skip_time={:?}, style_time={:?}, child_time={:?}, tree_time={:?}, map_time={:?}",
                 stats.created,
                 stats.leaves,
                 stats.parents,
@@ -226,7 +252,12 @@ impl TaffyLayout {
                 stats.skipped,
                 stats.skipped_display_none,
                 stats.skipped_whitespace,
-                stats.skipped_text_merge
+                stats.skipped_text_merge,
+                stats.skip_time,
+                stats.style_time,
+                stats.child_time,
+                stats.tree_time,
+                stats.map_time
             );
         }
     }
@@ -263,9 +294,15 @@ impl TaffyLayout {
         let result = tree.compute_layout_with_measure(
             root,
             available,
-            |known, avail, taffy_node_id, _ctx, _style| {
+            |known, avail, taffy_node_id, _context, _style| {
                 if let Some(stats) = trace_stats.as_mut() {
                     stats.calls += 1;
+                }
+                if let Some(size) = known_measure_size(known) {
+                    if let Some(stats) = trace_stats.as_mut() {
+                        stats.known_size_hits += 1;
+                    }
+                    return size;
                 }
                 let Some(&bfs_idx) = taffy_to_bfs.get(&taffy_node_id) else {
                     return Size::ZERO;
@@ -331,8 +368,9 @@ impl TaffyLayout {
         );
         if let Some(stats) = trace_stats {
             eprintln!(
-                "[SilkSurf] taffy measure: calls={}, text_calls={}, text_cache_hits={}, text_bytes={}, max_text_bytes={}, text_time={:?}",
+                "[SilkSurf] taffy measure: calls={}, known_size_hits={}, text_calls={}, text_cache_hits={}, text_bytes={}, max_text_bytes={}, text_time={:?}",
                 stats.calls,
+                stats.known_size_hits,
                 stats.text_calls,
                 stats.text_cache_hits,
                 stats.text_bytes,
@@ -413,11 +451,22 @@ fn new_taffy_tree(capacity: usize) -> SilkTaffy {
 #[derive(Default)]
 struct TaffyMeasureStats {
     calls: usize,
+    known_size_hits: usize,
     text_calls: usize,
     text_bytes: usize,
     max_text_bytes: usize,
     text_elapsed: std::time::Duration,
     text_cache_hits: usize,
+}
+
+fn known_measure_size(known: Size<Option<f32>>) -> Option<Size<f32>> {
+    match known {
+        Size {
+            width: Some(width),
+            height: Some(height),
+        } => Some(Size { width, height }),
+        _ => None,
+    }
 }
 
 fn measure_taffy_text_node(
@@ -1210,6 +1259,27 @@ mod tests {
 
         assert!(tl.compute(&dom, &styles, &table.bfs_order, viewport));
         assert_eq!(tl.text_measure_generation, dom.generation());
+    }
+
+    #[test]
+    fn known_measure_size_returns_complete_dimensions() {
+        assert_eq!(
+            known_measure_size(Size {
+                width: Some(21.0),
+                height: Some(34.0),
+            }),
+            Some(Size {
+                width: 21.0,
+                height: 34.0,
+            })
+        );
+        assert_eq!(
+            known_measure_size(Size {
+                width: Some(21.0),
+                height: None,
+            }),
+            None
+        );
     }
 
     fn text_measure_cache_entry_count(layout: &TaffyLayout) -> usize {
