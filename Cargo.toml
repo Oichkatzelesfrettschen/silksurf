@@ -188,6 +188,13 @@ codegen-units = 256
 [profile.dev.package."*"]
 opt-level = 2
 
+[profile.dev-o0]
+inherits = "dev"
+opt-level = 0
+
+[profile.dev-o0.package."*"]
+opt-level = 0
+
 [profile.test]
 inherits = "dev"
 debug-assertions = true

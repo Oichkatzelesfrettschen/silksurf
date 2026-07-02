@@ -17,6 +17,7 @@
 #   make fuzz    -- cargo-fuzz smoke, 30s per target (requires cargo-fuzz)
 #   make bench   -- run the benchmark suite
 #   make gui-probe -- run the live winit GUI probe when a display is present
+#   make gui-probe-o0 -- run the live GUI probe with opt-level 0
 #   make release   -- guarded release (requires explicit VERSION=x.y.z)
 #
 # All Rust targets pass RUSTFLAGS='-D warnings'. This is the project policy.
@@ -66,7 +67,7 @@ BOLT_OPTS     ?= -reorder-blocks=ext-tsp -reorder-functions=cdsort \
 # Rust targets (primary)
 # ---------------------------------------------------------------------------
 
-.PHONY: check test full fmt doc clean clean-cargo clean-build-artifacts hooks cross miri fuzz bench gui-probe release
+.PHONY: check test full fmt doc clean clean-cargo clean-build-artifacts hooks cross miri fuzz bench gui-probe gui-probe-o0 release
 
 # Fast gate: format check + clippy -D warnings + lint helpers.
 # Wired into pre-commit hook.
@@ -162,10 +163,15 @@ bench:
 	$(RUSTFLAGS_DENY) cargo bench --workspace
 
 GUI_PROBE_ARGS ?= --release --backend auto
+GUI_PROBE_O0_ARGS ?= --o0 --backend auto
 
 # Live GUI smoke. This target requires a working Wayland or X11 session.
 gui-probe:
 	scripts/gui_probe.sh $(GUI_PROBE_ARGS)
+
+# Live GUI O0 smoke. This target exercises the custom dev-o0 Cargo profile.
+gui-probe-o0:
+	scripts/gui_probe.sh $(GUI_PROBE_O0_ARGS)
 
 # Guarded release. Requires VERSION=x.y.z on the command line.
 release:
