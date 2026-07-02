@@ -3657,6 +3657,7 @@ fn handle_browser_command_input(
         | silksurf_gui::WinitInput::End => false,
         silksurf_gui::WinitInput::Back => navigate_history_back(runtime),
         silksurf_gui::WinitInput::Forward => navigate_history_forward(runtime),
+        silksurf_gui::WinitInput::BrowserHome => navigate_home_page(runtime),
         silksurf_gui::WinitInput::Reload => reload_current_page(runtime),
         silksurf_gui::WinitInput::Stop => stop_navigation(&mut runtime.state.borrow_mut()),
         _ => false,
@@ -4229,6 +4230,19 @@ fn navigate_history_target(
         runtime.navigation_rx,
         BrowserNavigationRequest::get(target_url),
         PendingHistoryAction::MoveTo(target_index),
+        runtime.wake_handle,
+        runtime.render_config,
+        runtime.image_cache,
+    )
+}
+
+fn navigate_home_page(runtime: &BrowserInputRuntime<'_>) -> bool {
+    let mut state = runtime.state.borrow_mut();
+    clear_page_input_focus(&mut state);
+    handle_chrome_action(
+        &mut state,
+        runtime.navigation_rx,
+        BrowserChromeAction::Home,
         runtime.wake_handle,
         runtime.render_config,
         runtime.image_cache,
