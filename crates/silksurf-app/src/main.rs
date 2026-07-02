@@ -6,6 +6,25 @@
 //! Usage: silksurf-app \[URL\]
 //! Default URL: `https://example.com`
 
+#![allow(
+    clippy::assigning_clones,
+    clippy::cast_ptr_alignment,
+    clippy::derivable_impls,
+    clippy::float_cmp,
+    clippy::if_not_else,
+    clippy::manual_let_else,
+    clippy::map_unwrap_or,
+    clippy::needless_borrow,
+    clippy::needless_option_as_deref,
+    clippy::needless_pass_by_value,
+    clippy::semicolon_if_nothing_returned,
+    clippy::too_many_arguments,
+    clippy::trivially_copy_pass_by_ref,
+    clippy::unnecessary_wraps,
+    clippy::unnested_or_patterns,
+    clippy::unreadable_literal
+)]
+
 /*
  * mimalloc global allocator.
  *
@@ -463,6 +482,7 @@ fn install_structured_tracing() {
             tracing_subscriber::EnvFilter::from_default_env().add_directive(
                 "silksurf=info"
                     .parse()
+                    // UNWRAP-OK: silksurf=info is a static tracing directive.
                     .expect("silksurf=info is a valid tracing directive"),
             ),
         )
@@ -994,10 +1014,8 @@ fn run_static_browser_render(
         "  CSS parse:      {:?}",
         css_start
             .elapsed()
-            .checked_sub(fused_elapsed)
-            .unwrap()
-            .checked_sub(raster_elapsed)
-            .unwrap()
+            .saturating_sub(fused_elapsed)
+            .saturating_sub(raster_elapsed)
     );
     eprintln!("  Fused pipeline: {fused_elapsed:?}");
     eprintln!("  Rasterize:      {raster_elapsed:?}");
@@ -1968,6 +1986,7 @@ fn parse_revalidation_stylesheet(
                 "",
                 &mut silksurf_core::SilkInterner::new(),
             )
+            // UNWRAP-OK: empty CSS is always a valid stylesheet.
             .unwrap()
         });
     (css_t0.elapsed(), stylesheet)
@@ -5097,7 +5116,7 @@ fn resize_argb_words_for_rgba_uninit(argb: &mut Vec<u32>, rgba: &[u8]) {
         argb.reserve_exact(target_len - argb.len());
     }
     /*
-     * pack_rgba_bytes_to_argb_words overwrites every exposed word before any
+     * SAFETY: pack_rgba_bytes_to_argb_words overwrites every exposed word before any
      * caller reads the framebuffer. u32 has no destructor, so an early panic
      * only releases the allocation.
      */
@@ -5158,10 +5177,14 @@ unsafe fn pack_rgba_bytes_to_argb_words_avx2(rgba: &[u8], argb: &mut [u32]) -> u
     for lane in 0..lanes {
         let rgba_offset = lane * 32;
         let argb_offset = lane * 8;
+        // SAFETY: lane counts keep byte and word offsets inside both slices.
         let source = unsafe { rgba.as_ptr().add(rgba_offset).cast::<__m256i>() };
+        // SAFETY: lane counts keep byte and word offsets inside both slices.
         let dest = unsafe { argb.as_mut_ptr().add(argb_offset).cast::<__m256i>() };
+        // SAFETY: AVX2 unaligned load reads one complete 32-byte lane.
         let raw = unsafe { _mm256_loadu_si256(source) };
         let argb_words = _mm256_shuffle_epi8(raw, shuffle_mask);
+        // SAFETY: AVX2 unaligned store writes one complete 8-word lane.
         unsafe {
             _mm256_storeu_si256(dest, argb_words);
         }
@@ -5199,10 +5222,14 @@ unsafe fn pack_rgba_bytes_to_argb_words_ssse3(rgba: &[u8], argb: &mut [u32]) -> 
     for lane in 0..lanes {
         let rgba_offset = lane * 16;
         let argb_offset = lane * 4;
+        // SAFETY: lane counts keep byte and word offsets inside both slices.
         let source = unsafe { rgba.as_ptr().add(rgba_offset).cast::<__m128i>() };
+        // SAFETY: lane counts keep byte and word offsets inside both slices.
         let dest = unsafe { argb.as_mut_ptr().add(argb_offset).cast::<__m128i>() };
+        // SAFETY: SSSE3 unaligned load reads one complete 16-byte lane.
         let raw = unsafe { _mm_loadu_si128(source) };
         let argb_words = _mm_shuffle_epi8(raw, shuffle_mask);
+        // SAFETY: SSSE3 unaligned store writes one complete 4-word lane.
         unsafe {
             _mm_storeu_si128(dest, argb_words);
         }
@@ -5233,14 +5260,18 @@ unsafe fn pack_rgba_bytes_to_argb_words_sse2(rgba: &[u8], argb: &mut [u32]) -> u
     for lane in 0..lanes {
         let rgba_offset = lane * 16;
         let argb_offset = lane * 4;
+        // SAFETY: lane counts keep byte and word offsets inside both slices.
         let source = unsafe { rgba.as_ptr().add(rgba_offset).cast::<__m128i>() };
+        // SAFETY: lane counts keep byte and word offsets inside both slices.
         let dest = unsafe { argb.as_mut_ptr().add(argb_offset).cast::<__m128i>() };
+        // SAFETY: SSE2 unaligned load reads one complete 16-byte lane.
         let raw = unsafe { _mm_loadu_si128(source) };
         let red_blue = _mm_and_si128(raw, red_blue_mask);
         let green_alpha = _mm_and_si128(raw, green_alpha_mask);
         let red = _mm_slli_epi32(red_blue, 16);
         let blue = _mm_srli_epi32(red_blue, 16);
         let argb_words = _mm_or_si128(green_alpha, _mm_or_si128(red, blue));
+        // SAFETY: SSE2 unaligned store writes one complete 4-word lane.
         unsafe {
             _mm_storeu_si128(dest, argb_words);
         }

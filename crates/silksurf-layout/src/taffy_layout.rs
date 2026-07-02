@@ -23,7 +23,7 @@ use silksurf_css::{
     FlexBasis, FlexDirection as CssFlexDirection, FlexWrap as CssFlexWrap,
     GridAutoFlow as CssGridAutoFlow, GridLine as CssGridLine, GridTrackMax as CssGridTrackMax,
     GridTrackMin as CssGridTrackMin, GridTrackSize as CssGridTrackSize,
-    JustifyContent as CssJustifyContent, Length, LengthOrAuto,
+    JustifyContent as CssJustifyContent, Length, LengthOrAuto, WhiteSpace,
 };
 use silksurf_dom::{Dom, NodeId as DomNodeId, NodeKind};
 use taffy::{
@@ -68,7 +68,16 @@ struct CachedTextMeasure {
 
 impl CachedTextMeasure {
     fn matches(self, font_size: f32, max_width: Option<f32>) -> bool {
-        self.font_size == font_size && self.max_width == max_width
+        self.font_size.to_bits() == font_size.to_bits()
+            && optional_f32_bits_equal(self.max_width, max_width)
+    }
+}
+
+fn optional_f32_bits_equal(left: Option<f32>, right: Option<f32>) -> bool {
+    match (left, right) {
+        (Some(left), Some(right)) => left.to_bits() == right.to_bits(),
+        (None, None) => true,
+        _ => false,
     }
 }
 
@@ -385,6 +394,9 @@ fn taffy_node_merges_into_parent(
     styles: &[Option<ComputedStyle>],
     index: usize,
 ) -> bool {
+    if text_node_collapses_to_empty_layout(dom, table, styles, index) {
+        return index != 0;
+    }
     if styles
         .get(index)
         .and_then(Option::as_ref)
@@ -400,6 +412,88 @@ fn taffy_node_merges_into_parent(
     };
     matches!(node.kind(), NodeKind::Text { .. })
         && text_node_parent_is_text_leaf(dom, table, styles, index)
+}
+
+fn text_node_collapses_to_empty_layout(
+    dom: &Dom,
+    table: &LayoutNeighborTable,
+    styles: &[Option<ComputedStyle>],
+    index: usize,
+) -> bool {
+    let Some(node_id) = table.bfs_order.get(index).copied() else {
+        return false;
+    };
+    let Some(text) = text_node_contents(dom, node_id) else {
+        return false;
+    };
+    if !collapsible_ascii_whitespace(text)
+        || !style_collapses_whitespace(styles.get(index).and_then(Option::as_ref))
+    {
+        return false;
+    }
+    whitespace_parent_has_no_inline_text_flow(dom, table, styles, index)
+}
+
+fn text_node_contents(dom: &Dom, node_id: DomNodeId) -> Option<&str> {
+    let node = dom.node(node_id).ok()?;
+    match node.kind() {
+        NodeKind::Text { text } => Some(text),
+        _ => None,
+    }
+}
+
+fn collapsible_ascii_whitespace(text: &str) -> bool {
+    !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_whitespace())
+}
+
+fn style_collapses_whitespace(style: Option<&ComputedStyle>) -> bool {
+    matches!(
+        style.map_or(WhiteSpace::Normal, |style| style.white_space),
+        WhiteSpace::Normal | WhiteSpace::Nowrap
+    )
+}
+
+fn whitespace_parent_has_no_inline_text_flow(
+    dom: &Dom,
+    table: &LayoutNeighborTable,
+    styles: &[Option<ComputedStyle>],
+    index: usize,
+) -> bool {
+    let parent = table.parent_idx.get(index).copied().unwrap_or(u32::MAX);
+    if parent == u32::MAX {
+        return false;
+    }
+    let Some(first_child) = table.child_start.get(parent as usize).copied() else {
+        return false;
+    };
+    if first_child == u32::MAX {
+        return false;
+    }
+    let start = first_child as usize;
+    let end = start + usize::from(table.child_count[parent as usize]);
+    let previous_keeps_space = index > start
+        && node_participates_in_inline_text_flow(dom, table, styles, index.saturating_sub(1));
+    let next_keeps_space =
+        index + 1 < end && node_participates_in_inline_text_flow(dom, table, styles, index + 1);
+    !previous_keeps_space && !next_keeps_space
+}
+
+fn node_participates_in_inline_text_flow(
+    dom: &Dom,
+    table: &LayoutNeighborTable,
+    styles: &[Option<ComputedStyle>],
+    index: usize,
+) -> bool {
+    let Some(node_id) = table.bfs_order.get(index).copied() else {
+        return false;
+    };
+    if text_node_contents(dom, node_id).is_some_and(|text| !collapsible_ascii_whitespace(text)) {
+        return true;
+    }
+    styles
+        .get(index)
+        .and_then(Option::as_ref)
+        .is_some_and(|style| style.display == CssDisplay::Inline)
 }
 
 fn text_node_parent_is_text_leaf(
@@ -875,5 +969,61 @@ mod tests {
             rect_b.x,
             rect_a.x + rect_a.width
         );
+    }
+
+    #[test]
+    fn collapsed_block_whitespace_does_not_create_taffy_node() {
+        let mut dom = Dom::new();
+        let root = dom.create_document();
+        let container = dom.create_element("div");
+        let whitespace = dom.create_text("\n  ");
+        let child = dom.create_element("p");
+        dom.append_child(root, container).unwrap();
+        dom.append_child(container, whitespace).unwrap();
+        dom.append_child(container, child).unwrap();
+
+        let table = LayoutNeighborTable::build(&dom, root);
+        let styles: Vec<Option<ComputedStyle>> = vec![
+            Some(ComputedStyle {
+                display: CssDisplay::Block,
+                ..Default::default()
+            });
+            table.len()
+        ];
+        let whitespace_idx = table.node_to_bfs_idx[&whitespace] as usize;
+
+        let mut tl = TaffyLayout::new();
+        tl.rebuild(&dom, &table, &styles);
+
+        assert!(tl.taffy_nodes[whitespace_idx].is_none());
+    }
+
+    #[test]
+    fn inline_text_flow_keeps_whitespace_taffy_node() {
+        let mut dom = Dom::new();
+        let root = dom.create_document();
+        let container = dom.create_element("p");
+        let left = dom.create_text("left");
+        let whitespace = dom.create_text(" ");
+        let right = dom.create_text("right");
+        dom.append_child(root, container).unwrap();
+        dom.append_child(container, left).unwrap();
+        dom.append_child(container, whitespace).unwrap();
+        dom.append_child(container, right).unwrap();
+
+        let table = LayoutNeighborTable::build(&dom, root);
+        let styles: Vec<Option<ComputedStyle>> = vec![
+            Some(ComputedStyle {
+                display: CssDisplay::Inline,
+                ..Default::default()
+            });
+            table.len()
+        ];
+        let whitespace_idx = table.node_to_bfs_idx[&whitespace] as usize;
+
+        let mut tl = TaffyLayout::new();
+        tl.rebuild(&dom, &table, &styles);
+
+        assert!(tl.taffy_nodes[whitespace_idx].is_some());
     }
 }

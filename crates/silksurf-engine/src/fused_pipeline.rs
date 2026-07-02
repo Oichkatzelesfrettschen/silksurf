@@ -8,7 +8,7 @@
 
 use silksurf_css::{
     CascadeView, CascadeWorkspace, ComputedStyle, Display, Length, LengthOrAuto, StyleIndex,
-    Stylesheet, compute_style_for_node_with_workspace,
+    Stylesheet, WhiteSpace, compute_style_for_node_with_workspace,
 };
 use silksurf_dom::{Dom, NodeId, NodeKind, TagName};
 use silksurf_layout::Rect;
@@ -155,7 +155,8 @@ impl FusedWorkspace {
          */
         let dom_gen = dom.generation();
         if dom_gen != self.dom_generation {
-            self.table.rebuild(dom, root);
+            self.table
+                .rebuild_filtered(dom, root, node_starts_non_rendered_subtree);
             self.cascade_view.rebuild(dom);
             self.dom_generation = dom_gen;
         }
@@ -223,6 +224,9 @@ impl FusedWorkspace {
                 continue;
             };
             if style.display == Display::None {
+                continue;
+            }
+            if text_node_collapses_to_empty_render(dom, &self.table, &self.styles, i) {
                 continue;
             }
             emit_workspace_paint(
@@ -325,7 +329,7 @@ pub fn fused_style_layout_paint_with_replaced_sizes(
      * stay owned by the workspace.
      */
     let mut cascade_ws = CascadeWorkspace::new(style_index.active_rules.len());
-    let table = LayoutNeighborTable::build(dom, root);
+    let table = LayoutNeighborTable::build_filtered(dom, root, node_starts_non_rendered_subtree);
     let n = table.len();
     trace_fused_phase(
         trace_fused,
@@ -429,6 +433,9 @@ pub fn fused_style_layout_paint_with_replaced_sizes(
         if style.display == Display::None {
             continue;
         }
+        if text_node_collapses_to_empty_render(dom, &table, &styles, i) {
+            continue;
+        }
         emit_allocating_paint(dom, node, style, node_rects[i], &mut display_items);
     }
     trace_fused_phase(
@@ -510,7 +517,7 @@ fn is_image_element(dom: &Dom, node: NodeId) -> bool {
     dom.element_name(node)
         .ok()
         .flatten()
-        .is_some_and(|name| TagName::from_str(&name) == TagName::Img)
+        .is_some_and(|name| TagName::from_str(name) == TagName::Img)
 }
 
 fn emit_workspace_paint(
@@ -655,7 +662,7 @@ fn font_size_px(style: &ComputedStyle) -> f32 {
 fn is_form_control(dom: &Dom, node: NodeId) -> bool {
     dom.element_name(node).ok().flatten().is_some_and(|name| {
         matches!(
-            TagName::from_str(&name),
+            TagName::from_str(name),
             TagName::Input | TagName::Textarea | TagName::Select
         )
     })
@@ -666,7 +673,7 @@ fn form_control_text(dom: &Dom, node: NodeId) -> Option<String> {
         .element_name(node)
         .ok()
         .flatten()
-        .is_some_and(|name| TagName::from_str(&name) == TagName::Select)
+        .is_some_and(|name| TagName::from_str(name) == TagName::Select)
     {
         return selected_option_text(dom, node);
     }
@@ -718,7 +725,7 @@ fn collect_enabled_option_nodes(dom: &Dom, node: NodeId, options: &mut Vec<NodeI
         .element_name(node)
         .ok()
         .flatten()
-        .is_some_and(|name| TagName::from_str(&name) == TagName::Option)
+        .is_some_and(|name| TagName::from_str(name) == TagName::Option)
         && dom
             .attributes(node)
             .ok()
@@ -749,7 +756,7 @@ fn input_type_matches(attrs: &[silksurf_dom::Attribute], target: &str) -> bool {
 
 fn textarea_text(dom: &Dom, node: NodeId) -> Option<String> {
     let name = dom.element_name(node).ok().flatten()?;
-    if TagName::from_str(&name) != TagName::Textarea {
+    if TagName::from_str(name) != TagName::Textarea {
         return None;
     }
     let text = descendant_text(dom, node);
@@ -795,6 +802,88 @@ fn node_starts_non_rendered_subtree(dom: &Dom, node: NodeId) -> bool {
         ),
         NodeKind::Document | NodeKind::Text { .. } => false,
     }
+}
+
+fn text_node_collapses_to_empty_render(
+    dom: &Dom,
+    table: &LayoutNeighborTable,
+    styles: &[Option<ComputedStyle>],
+    index: usize,
+) -> bool {
+    let Some(node_id) = table.bfs_order.get(index).copied() else {
+        return false;
+    };
+    let Some(text) = text_node_contents(dom, node_id) else {
+        return false;
+    };
+    if !collapsible_ascii_whitespace(text)
+        || !style_collapses_whitespace(styles.get(index).and_then(Option::as_ref))
+    {
+        return false;
+    }
+    whitespace_parent_has_no_inline_text_flow(dom, table, styles, index)
+}
+
+fn text_node_contents(dom: &Dom, node: NodeId) -> Option<&str> {
+    let node = dom.node(node).ok()?;
+    match node.kind() {
+        NodeKind::Text { text } => Some(text),
+        _ => None,
+    }
+}
+
+fn collapsible_ascii_whitespace(text: &str) -> bool {
+    !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_whitespace())
+}
+
+fn style_collapses_whitespace(style: Option<&ComputedStyle>) -> bool {
+    matches!(
+        style.map_or(WhiteSpace::Normal, |style| style.white_space),
+        WhiteSpace::Normal | WhiteSpace::Nowrap
+    )
+}
+
+fn whitespace_parent_has_no_inline_text_flow(
+    dom: &Dom,
+    table: &LayoutNeighborTable,
+    styles: &[Option<ComputedStyle>],
+    index: usize,
+) -> bool {
+    let parent = table.parent_idx.get(index).copied().unwrap_or(u32::MAX);
+    if parent == u32::MAX {
+        return false;
+    }
+    let Some(first_child) = table.child_start.get(parent as usize).copied() else {
+        return false;
+    };
+    if first_child == u32::MAX {
+        return false;
+    }
+    let start = first_child as usize;
+    let end = start + usize::from(table.child_count[parent as usize]);
+    let previous_keeps_space = index > start
+        && node_participates_in_inline_text_flow(dom, table, styles, index.saturating_sub(1));
+    let next_keeps_space =
+        index + 1 < end && node_participates_in_inline_text_flow(dom, table, styles, index + 1);
+    !previous_keeps_space && !next_keeps_space
+}
+
+fn node_participates_in_inline_text_flow(
+    dom: &Dom,
+    table: &LayoutNeighborTable,
+    styles: &[Option<ComputedStyle>],
+    index: usize,
+) -> bool {
+    let Some(node_id) = table.bfs_order.get(index).copied() else {
+        return false;
+    };
+    if text_node_contents(dom, node_id).is_some_and(|text| !collapsible_ascii_whitespace(text)) {
+        return true;
+    }
+    styles
+        .get(index)
+        .and_then(Option::as_ref)
+        .is_some_and(|style| style.display == Display::Inline)
 }
 
 #[cfg(test)]
@@ -845,6 +934,66 @@ mod tests {
             .collect();
 
         assert_eq!(text_items, vec!["Visible body"]);
+    }
+
+    #[test]
+    fn block_indentation_whitespace_does_not_emit_text_items() {
+        let document = silksurf_html::parse_html(
+            "<!doctype html><html><body>\n  <main>\n    <p>Visible body</p>\n  </main>\n</body></html>",
+        );
+        let stylesheet = silksurf_css::parse_stylesheet(
+            "html, body, main, p { display: block; white-space: normal; }",
+        )
+        .unwrap();
+        let viewport = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 800.0,
+            height: 600.0,
+        };
+
+        let result =
+            fused_style_layout_paint(&document, &stylesheet, NodeId::from_raw(0), viewport);
+        let text_items: Vec<&str> = result
+            .display_items
+            .iter()
+            .filter_map(|item| match item {
+                DisplayItem::Text { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(text_items, vec!["Visible body"]);
+    }
+
+    #[test]
+    fn inline_text_flow_keeps_separator_whitespace() {
+        let document = silksurf_html::parse_html(
+            "<!doctype html><html><body><p><span>left</span> <span>right</span></p></body></html>",
+        );
+        let stylesheet = silksurf_css::parse_stylesheet(
+            "html, body, p { display: block; } span { display: inline; }",
+        )
+        .unwrap();
+        let viewport = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 800.0,
+            height: 600.0,
+        };
+
+        let result =
+            fused_style_layout_paint(&document, &stylesheet, NodeId::from_raw(0), viewport);
+        let text_items: Vec<&str> = result
+            .display_items
+            .iter()
+            .filter_map(|item| match item {
+                DisplayItem::Text { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+
+        assert!(text_items.contains(&" "));
     }
 
     #[test]

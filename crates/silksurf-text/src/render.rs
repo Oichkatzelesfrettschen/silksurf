@@ -4,6 +4,12 @@ use tiny_skia::PremultipliedColorU8;
 
 use crate::TEXT_STATE;
 
+struct GlyphPixmap<'a> {
+    pixels: &'a mut [PremultipliedColorU8],
+    width: i32,
+    height: i32,
+}
+
 /// Rasterize shaped glyphs for `text` directly into `pixmap`.
 ///
 /// Each glyph is alpha-composited (Porter-Duff "src over") into the pixmap
@@ -90,7 +96,11 @@ fn rasterize_ascii_glyphs(
     let mut cursor_x = origin.0.round() as i32;
     let mut cursor_y = origin.1.round() as i32;
     let line_origin_x = cursor_x;
-    let pixels = pixmap.pixels_mut();
+    let mut glyph_pixmap = GlyphPixmap {
+        pixels: pixmap.pixels_mut(),
+        width: pixmap_width,
+        height: pixmap_height,
+    };
 
     for ch in text.chars() {
         match ch {
@@ -110,16 +120,7 @@ fn rasterize_ascii_glyphs(
                     return false;
                 };
                 let glyph = ascii_glyph(glyph_char);
-                draw_ascii_glyph(
-                    pixels,
-                    pixmap_width,
-                    pixmap_height,
-                    cursor_x,
-                    cursor_y,
-                    scale,
-                    glyph,
-                    color,
-                );
+                draw_ascii_glyph(&mut glyph_pixmap, cursor_x, cursor_y, scale, glyph, color);
                 cursor_x = cursor_x.saturating_add(advance);
             }
         }
@@ -144,9 +145,7 @@ fn fast_bitmap_glyph(ch: char) -> Option<char> {
 }
 
 fn draw_ascii_glyph(
-    pixels: &mut [PremultipliedColorU8],
-    pixmap_width: i32,
-    pixmap_height: i32,
+    pixmap: &mut GlyphPixmap<'_>,
     x: i32,
     y: i32,
     scale: i32,
@@ -164,13 +163,13 @@ fn draw_ascii_glyph(
                     let pixel_y = y + row as i32 * scale + dy;
                     if pixel_x < 0
                         || pixel_y < 0
-                        || pixel_x >= pixmap_width
-                        || pixel_y >= pixmap_height
+                        || pixel_x >= pixmap.width
+                        || pixel_y >= pixmap.height
                     {
                         continue;
                     }
-                    let idx = pixel_y as usize * pixmap_width as usize + pixel_x as usize;
-                    if let Some(dst) = pixels.get_mut(idx) {
+                    let idx = pixel_y as usize * pixmap.width as usize + pixel_x as usize;
+                    if let Some(dst) = pixmap.pixels.get_mut(idx) {
                         composite_over_rgba(dst, color.r, color.g, color.b, color.a);
                     }
                 }

@@ -198,7 +198,7 @@ fn is_form_control_node(dom: &Dom, node_id: NodeId) -> bool {
     dom.element_name(node_id)
         .ok()
         .flatten()
-        .is_some_and(|name| matches!(TagName::from_str(&name), TagName::Input | TagName::Textarea))
+        .is_some_and(|name| matches!(TagName::from_str(name), TagName::Input | TagName::Textarea))
 }
 
 fn form_control_value(dom: &Dom, node_id: NodeId) -> String {
@@ -353,22 +353,19 @@ fn dispatch_event(
         return Ok(JsValue::from(true));
     };
 
-    let event = match event_arg.and_then(JsValue::as_object) {
-        Some(object) => {
-            object.set(js_string!("target"), this.clone(), false, ctx)?;
-            JsValue::from(object.clone())
-        }
-        None => {
-            let object = ObjectInitializer::new(ctx)
-                .property(
-                    js_string!("type"),
-                    JsString::from(event_type.as_str()),
-                    Attribute::all(),
-                )
-                .property(js_string!("target"), this.clone(), Attribute::all())
-                .build();
-            JsValue::from(object)
-        }
+    let event = if let Some(object) = event_arg.and_then(JsValue::as_object) {
+        object.set(js_string!("target"), this.clone(), false, ctx)?;
+        JsValue::from(object.clone())
+    } else {
+        let object = ObjectInitializer::new(ctx)
+            .property(
+                js_string!("type"),
+                JsString::from(event_type.as_str()),
+                Attribute::all(),
+            )
+            .property(js_string!("target"), this.clone(), Attribute::all())
+            .build();
+        JsValue::from(object)
     };
 
     let mut callbacks = Vec::new();
@@ -386,7 +383,7 @@ fn dispatch_event(
 
 // ---- accessor getter builder -----------------------------------------------
 
-/// `NativeFunction` becomes a `JsFunction` for ObjectInitializer accessors.
+/// `NativeFunction` becomes a `JsFunction` for `ObjectInitializer` accessors.
 ///
 /// The returned function owns the built object after `ctx.realm()` is borrowed.
 fn make_getter(ctx: &mut Context, f: NativeFunction) -> JsFunction {
@@ -615,6 +612,8 @@ fn related_node_native(
     relation: fn(&Dom, NodeId) -> Result<Option<NodeId>, DomError>,
 ) -> NativeFunction {
     let arc = Arc::clone(dom_arc);
+    // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |_this, _args, ctx| {
             let related = {
@@ -635,6 +634,8 @@ fn child_nodes_native(
     elements_only: bool,
 ) -> NativeFunction {
     let arc = Arc::clone(dom_arc);
+    // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |_this, _args, ctx| {
             let nodes = node_children(&arc, node_id, elements_only);
@@ -669,6 +670,8 @@ fn node_array(
 
 fn get_attribute_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
     let arc = Arc::clone(dom_arc);
+    // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let name = match args.first() {
@@ -684,15 +687,17 @@ fn get_attribute_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFun
                         .map(|attr| attr.value.to_string())
                 })
             };
-            Ok(value
-                .map(|value| JsValue::from(JsString::from(value.as_str())))
-                .unwrap_or_else(JsValue::null))
+            Ok(value.map_or_else(JsValue::null, |value| {
+                JsValue::from(JsString::from(value.as_str()))
+            }))
         })
     }
 }
 
 fn set_attribute_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
     let arc = Arc::clone(dom_arc);
+    // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let name = match args.first() {
@@ -717,6 +722,8 @@ fn attribute_get_native(
     attribute_name: &'static str,
 ) -> NativeFunction {
     let arc = Arc::clone(dom_arc);
+    // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |_this, _args, _ctx| {
             let value = {
@@ -741,6 +748,8 @@ fn attribute_set_native(
     attribute_name: &'static str,
 ) -> NativeFunction {
     let arc = Arc::clone(dom_arc);
+    // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let value = args
@@ -757,6 +766,8 @@ fn attribute_set_native(
 
 fn append_child_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
     let arc = Arc::clone(dom_arc);
+    // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let child = extract_node_id(args.first(), ctx)?;
@@ -772,6 +783,8 @@ fn append_child_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunc
 
 fn remove_child_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
     let arc = Arc::clone(dom_arc);
+    // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let child = extract_node_id(args.first(), ctx)?;
@@ -786,6 +799,8 @@ fn remove_child_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunc
 
 fn insert_before_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
     let arc = Arc::clone(dom_arc);
+    // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let child = extract_node_id(args.first(), ctx)?;
@@ -803,19 +818,18 @@ fn insert_before_or_append(
     reference: Option<NodeId>,
 ) {
     let mut dom = dom_arc.lock().unwrap_or_else(PoisonError::into_inner);
-    match reference {
-        Some(reference) => {
-            let _ = dom.insert_before(parent, child, reference);
-        }
-        None => {
-            detach_from_parent(&mut dom, child);
-            let _ = dom.append_child(parent, child);
-        }
+    if let Some(reference) = reference {
+        let _ = dom.insert_before(parent, child, reference);
+    } else {
+        detach_from_parent(&mut dom, child);
+        let _ = dom.append_child(parent, child);
     }
 }
 
 fn replace_child_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
     let arc = Arc::clone(dom_arc);
+    // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let child = extract_node_id(args.first(), ctx)?;
@@ -832,6 +846,8 @@ fn replace_child_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFun
 
 fn text_content_get_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
     let arc = Arc::clone(dom_arc);
+    // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |_this, _args, _ctx| {
             let dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
@@ -844,6 +860,8 @@ fn text_content_get_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> Native
 
 fn text_content_set_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
     let arc = Arc::clone(dom_arc);
+    // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let text = args
@@ -860,6 +878,8 @@ fn text_content_set_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> Native
 
 fn value_get_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
     let arc = Arc::clone(dom_arc);
+    // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |_this, _args, _ctx| {
             let dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
@@ -872,6 +892,8 @@ fn value_get_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunctio
 
 fn value_set_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
     let arc = Arc::clone(dom_arc);
+    // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let value = args
@@ -887,6 +909,8 @@ fn value_set_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunctio
 }
 
 fn node_add_event_listener_native(node_id: NodeId) -> NativeFunction {
+    // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             add_event_listener(node_id, args.first(), args.get(1), ctx)
@@ -895,6 +919,8 @@ fn node_add_event_listener_native(node_id: NodeId) -> NativeFunction {
 }
 
 fn node_remove_event_listener_native(node_id: NodeId) -> NativeFunction {
+    // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             remove_event_listener(node_id, args.first(), args.get(1), ctx)
@@ -903,6 +929,8 @@ fn node_remove_event_listener_native(node_id: NodeId) -> NativeFunction {
 }
 
 fn node_dispatch_event_native(node_id: NodeId) -> NativeFunction {
+    // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |this, args, ctx| {
             dispatch_event(this, node_id, args.first(), ctx)
@@ -1079,6 +1107,8 @@ fn document_selector_getter_native(
     selector: &'static str,
 ) -> NativeFunction {
     let arc = Arc::clone(dom_arc);
+    // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |_this, _args, ctx| {
             query_first_value(&arc, root, selector, ctx)
@@ -1088,6 +1118,8 @@ fn document_selector_getter_native(
 
 fn document_get_element_by_id_native(dom_arc: &Arc<Mutex<Dom>>, root: NodeId) -> NativeFunction {
     let arc = Arc::clone(dom_arc);
+    // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let Some(id) = selector_arg(args.first(), ctx)? else {
@@ -1100,6 +1132,8 @@ fn document_get_element_by_id_native(dom_arc: &Arc<Mutex<Dom>>, root: NodeId) ->
 
 fn document_query_selector_native(dom_arc: &Arc<Mutex<Dom>>, root: NodeId) -> NativeFunction {
     let arc = Arc::clone(dom_arc);
+    // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let Some(selector) = selector_arg(args.first(), ctx)? else {
@@ -1112,6 +1146,8 @@ fn document_query_selector_native(dom_arc: &Arc<Mutex<Dom>>, root: NodeId) -> Na
 
 fn document_query_selector_all_native(dom_arc: &Arc<Mutex<Dom>>, root: NodeId) -> NativeFunction {
     let arc = Arc::clone(dom_arc);
+    // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let Some(selector) = selector_arg(args.first(), ctx)? else {
@@ -1127,6 +1163,8 @@ fn document_get_elements_by_tag_name_native(
     root: NodeId,
 ) -> NativeFunction {
     let arc = Arc::clone(dom_arc);
+    // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let Some(tag) = selector_arg(args.first(), ctx)? else {
@@ -1139,6 +1177,8 @@ fn document_get_elements_by_tag_name_native(
 
 fn document_create_element_native(dom_arc: &Arc<Mutex<Dom>>) -> NativeFunction {
     let arc = Arc::clone(dom_arc);
+    // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let Some(tag) = selector_arg(args.first(), ctx)? else {
@@ -1155,6 +1195,8 @@ fn document_create_element_native(dom_arc: &Arc<Mutex<Dom>>) -> NativeFunction {
 
 fn document_create_text_node_native(dom_arc: &Arc<Mutex<Dom>>) -> NativeFunction {
     let arc = Arc::clone(dom_arc);
+    // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let text = selector_arg(args.first(), ctx)?.unwrap_or_default();

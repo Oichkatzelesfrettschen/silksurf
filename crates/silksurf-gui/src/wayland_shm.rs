@@ -1,5 +1,4 @@
 use std::{
-    ffi::CStr,
     fs::File,
     io::ErrorKind,
     os::fd::{AsFd, AsRawFd},
@@ -27,6 +26,7 @@ use crate::{WinitDamageRect, WinitPresentDamage};
 const WAYLAND_SHM_BUFFER_COUNT: usize = 4;
 const WAYLAND_SHM_FULL_DAMAGE_PRESEED_COUNT: usize = 2;
 
+#[allow(clippy::large_enum_variant)]
 pub enum WaylandShmDrawOutcome {
     Presented {
         damage: WinitPresentDamage,
@@ -91,6 +91,7 @@ impl WaylandShmSurface {
             return Err("window does not expose a Wayland surface".to_string());
         };
 
+        // SAFETY: winit exposes a live Wayland display handle for this window.
         let backend =
             unsafe { Backend::from_foreign_display(display_handle.display.as_ptr().cast()) };
         let conn = Connection::from_backend(backend);
@@ -100,6 +101,7 @@ impl WaylandShmSurface {
         let shm: wl_shm::WlShm = globals
             .bind(&qh, 1..=1, ())
             .map_err(|e| format!("wl_shm bind failed: {e}"))?;
+        // SAFETY: winit exposes a live Wayland surface handle for this window.
         let surface_id = unsafe {
             ObjectId::from_ptr(
                 wl_surface::WlSurface::interface(),
@@ -147,6 +149,7 @@ impl WaylandShmSurface {
         record_phase(&mut timings.seed, &mut phase_start);
         let buffer_age = self.buffers[buffer_index].age;
         let damage = {
+            // SAFETY: ensure_buffers sizes the selected buffer for width * height pixels.
             let pixels = unsafe { self.buffers[buffer_index].mapped_mut() };
             render_fn(buffer_age, pixels)
         };
@@ -210,6 +213,7 @@ impl WaylandShmSurface {
         let Some(target_index) = self.released_unretained_buffer_index() else {
             return Ok(false);
         };
+        // SAFETY: pixel_count is bounded by the target buffer dimensions above.
         let target_pixels = unsafe { self.buffers[target_index].mapped_prefix_mut(pixel_count) };
         target_pixels.copy_from_slice(&pixels[..pixel_count]);
         self.buffers[target_index].age = 1;
@@ -467,6 +471,7 @@ impl WaylandShmBuffer {
         tempfile
             .set_len(u64::try_from(pool_size).map_err(|_| "SHM pool size is negative")?)
             .map_err(|e| format!("SHM file resize failed: {e}"))?;
+        // SAFETY: tempfile is resized to the wl_shm pool size before mapping.
         let map = unsafe { map_file(&tempfile)? };
         let pool = shm.create_pool(tempfile.as_fd(), pool_size, qh, ());
         let released = Arc::new(AtomicBool::new(true));
@@ -501,10 +506,12 @@ impl WaylandShmBuffer {
         surface.attach(Some(&self.buffer), 0, 0);
     }
 
+    #[allow(clippy::cast_ptr_alignment)]
     unsafe fn mapped_mut(&mut self) -> &mut [u32] {
         let len = usize::try_from(self.width)
             .unwrap_or(0)
             .saturating_mul(usize::try_from(self.height).unwrap_or(0));
+        // SAFETY: memfd mappings are page-aligned and len stays inside the mapped pool.
         unsafe { slice::from_raw_parts_mut(self.map.as_mut_ptr().cast::<u32>(), len) }
     }
 
@@ -514,11 +521,15 @@ impl WaylandShmBuffer {
             .saturating_mul(usize::try_from(self.height).unwrap_or(0))
     }
 
+    #[allow(clippy::cast_ptr_alignment)]
     unsafe fn mapped_prefix(&self, len: usize) -> &[u32] {
+        // SAFETY: callers pass len values bounded by mapped_word_len.
         unsafe { slice::from_raw_parts(self.map.as_ptr().cast::<u32>(), len) }
     }
 
+    #[allow(clippy::cast_ptr_alignment)]
     unsafe fn mapped_prefix_mut(&mut self, len: usize) -> &mut [u32] {
+        // SAFETY: callers pass len values bounded by mapped_word_len.
         unsafe { slice::from_raw_parts_mut(self.map.as_mut_ptr().cast::<u32>(), len) }
     }
 }
@@ -534,7 +545,7 @@ impl Drop for WaylandShmBuffer {
 fn create_memfile() -> Result<File, String> {
     use rustix::fs::{MemfdFlags, SealFlags};
 
-    let name = unsafe { CStr::from_bytes_with_nul_unchecked(b"silksurf-wayland-shm\0") };
+    let name = c"silksurf-wayland-shm";
     let fd = rustix::fs::memfd_create(name, MemfdFlags::CLOEXEC | MemfdFlags::ALLOW_SEALING)
         .map_err(|e| format!("memfd_create failed: {e}"))?;
     rustix::fs::fcntl_add_seals(&fd, SealFlags::SHRINK | SealFlags::SEAL)
@@ -543,6 +554,7 @@ fn create_memfile() -> Result<File, String> {
 }
 
 unsafe fn map_file(file: &File) -> Result<MmapMut, String> {
+    // SAFETY: callers resize the memfd before mapping it for wl_shm use.
     unsafe { MmapMut::map_mut(file.as_raw_fd()).map_err(|e| format!("mmap failed: {e}")) }
 }
 
@@ -625,7 +637,9 @@ fn copy_buffer_pair(
     if source.mapped_word_len() < pixel_count || target.mapped_word_len() < pixel_count {
         return false;
     }
+    // SAFETY: source and target lengths are checked against pixel_count above.
     let source_pixels = unsafe { source.mapped_prefix(pixel_count) };
+    // SAFETY: source and target lengths are checked against pixel_count above.
     let target_pixels = unsafe { target.mapped_prefix_mut(pixel_count) };
     target_pixels.copy_from_slice(source_pixels);
     true
