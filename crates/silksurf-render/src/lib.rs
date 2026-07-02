@@ -913,7 +913,7 @@ pub fn rasterize_skia_into(display_list: &DisplayList, width: u32, height: u32, 
     let required = (width * height * 4) as usize;
     let resize_start = std::time::Instant::now();
     if buf.len() != required {
-        buf.resize(required, 0xffu8);
+        resize_bytes_for_overwrite(buf, required);
     }
     trace_render_full_phase(trace_full, "resize", resize_start.elapsed());
     // White, fully-opaque background. In premultiplied RGBA8 this is
@@ -973,7 +973,7 @@ pub fn rasterize_skia_damage_into(
     };
     let scratch_required = damage_pixels.width as usize * damage_pixels.height as usize * 4;
     if scratch.pixels.len() != scratch_required {
-        scratch.pixels.resize(scratch_required, 0xffu8);
+        resize_bytes_for_overwrite(&mut scratch.pixels, scratch_required);
     }
     scratch.pixels.fill(0xffu8);
 
@@ -1095,7 +1095,7 @@ fn rasterize_skia_translated_damage_scratch_impl(
     };
     let scratch_required = damage_pixels.width as usize * damage_pixels.height as usize * 4;
     if scratch.pixels.len() != scratch_required {
-        scratch.pixels.resize(scratch_required, 0xffu8);
+        resize_bytes_for_overwrite(&mut scratch.pixels, scratch_required);
     }
     trace_damage_phase(trace_damage, "translated-setup", setup_start.elapsed());
 
@@ -1232,6 +1232,23 @@ fn prepare_seen_items(seen_items: &mut Vec<bool>, item_count: usize) {
         seen_items.fill(false);
     } else {
         seen_items.resize(item_count, false);
+    }
+}
+
+fn resize_bytes_for_overwrite(bytes: &mut Vec<u8>, target_len: usize) {
+    if target_len <= bytes.len() {
+        bytes.truncate(target_len);
+        return;
+    }
+    if bytes.capacity() < target_len {
+        bytes.reserve_exact(target_len - bytes.len());
+    }
+    /*
+     * SAFETY: Callers overwrite every newly exposed byte before any read.
+     * u8 has no destructor, so an early panic only releases the allocation.
+     */
+    unsafe {
+        bytes.set_len(target_len);
     }
 }
 

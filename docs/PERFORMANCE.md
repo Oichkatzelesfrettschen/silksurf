@@ -224,6 +224,17 @@ budget drops from hundreds of milliseconds to 4.596ms to 4.849ms. The remaining
 first-render cost is the fused style/layout/paint pass at about 3.85ms to
 3.97ms for 1798 styled nodes and 1194 display items.
 
+An O0 Wayland AI-chat smoke probe on 2026-07-02 exposes duplicated viewport
+buffer initialization in `rasterize_skia_into`: `Vec::resize` writes
+4,096,000 bytes with 0xff and the renderer immediately fills the same buffer
+again. `resize_bytes_for_overwrite` reserves the full-raster buffer without
+pre-filling it, then the existing renderer fill writes the initialized image.
+The traced full-raster resize phase drops from 17.832600ms to 2.380us. The
+navigation raster phase drops from 24.377701ms to 6.829842ms, and total O0
+navigation build drops from 99.544898ms to 82.849724ms. The remaining O0
+first-render terms are fused layout/paint and the 4,096,000 byte
+`argb-pack`.
+
 The viewport-backed path is the first tile-cache step. The retained bitmap now
 has an origin (`bitmap_scroll_y`) and a bounded height (`bitmap_height`), while
 `raster_height` remains the scrollable document height. The next renderer step
