@@ -20,6 +20,10 @@ ignore = [
     # maintenance status, not a security vulnerability. We cannot remove
     # it without upgrading boa_engine to a future release that drops paste.
     { id = "RUSTSEC-2024-0436", reason = "transitive dep of boa_engine 0.21.1; maintenance-only advisory, no CVE" },
+    # ttf-parser is a transitive dependency pulled in by cosmic-text 0.19.0
+    # through fontdb 0.23.0. The winit decoration path is disabled; this
+    # remaining path stays until the text stack moves fully to skrifa.
+    { id = "RUSTSEC-2026-0192", reason = "transitive dep of cosmic-text 0.19.0 via fontdb 0.23.0; migration target is skrifa/fontations" },
 ]
 
 [licenses]
@@ -34,6 +38,7 @@ allow = [
   "CDLA-Permissive-2.0",
   "Unicode-3.0",
   "CC0-1.0",
+  "BSL-1.0",
 ]
 exceptions = []
 
