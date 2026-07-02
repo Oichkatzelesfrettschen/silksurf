@@ -1410,7 +1410,7 @@ fn build_browser_page_with_buffers_for_height(
         viewport,
         &replaced_sizes,
     );
-    let mut fused = fused_workspace.snapshot_result();
+    let mut fused = fused_workspace.take_result();
     let mut display_list = silksurf_render::DisplayList {
         items: std::mem::take(&mut fused.display_items),
         tiles: None,
@@ -2208,7 +2208,7 @@ fn repaint_runtime_dirty_nodes(
         runtime.viewport,
         &replaced_sizes,
     );
-    let mut new_fused = runtime.fused_workspace.snapshot_result();
+    let mut new_fused = runtime.fused_workspace.take_result();
     let mut display_list = silksurf_render::DisplayList {
         items: std::mem::take(&mut new_fused.display_items),
         tiles: None,
@@ -2259,7 +2259,8 @@ fn repaint_runtime_dirty_nodes(
     };
     runtime.display_list = display_list;
 
-    runtime.fused = new_fused;
+    let old_fused = std::mem::replace(&mut runtime.fused, new_fused);
+    runtime.fused_workspace.recycle_result_storage(old_fused);
     Some(redraw_mode)
 }
 
