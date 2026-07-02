@@ -12,7 +12,7 @@ cd "${REPO_ROOT}"
 
 usage() {
     cat <<'EOF'
-Usage: scripts/gui_probe.sh [--release|--debug|--o0] [--backend auto|wayland|x11] [--presenter auto|shm|softbuffer] [--shm] [--fixture ai-chat|form-submit|post-submit] [--probe smoke|address|address-caret|chrome|hover|page-input|runtime-text|form-submit|reload|scroll|stop] [--runs N] [--timeout-seconds N] [--max-input-ns N] [--max-any-input-ns N] [--max-buffer-ns N] [--max-any-buffer-ns N] [--max-render-ns N] [--max-overhead-ns N] [--max-total-ns N] [--max-focus-total-ns N] [--trace-app-frame] [URL]
+Usage: scripts/gui_probe.sh [--release|--debug|--o0] [--backend auto|wayland|x11] [--presenter auto|shm|softbuffer] [--shm] [--fixture ai-chat|form-submit|post-submit] [--probe smoke|address|address-caret|chrome|browser-home|hover|page-input|runtime-text|form-submit|reload|scroll|stop] [--runs N] [--timeout-seconds N] [--max-input-ns N] [--max-any-input-ns N] [--max-buffer-ns N] [--max-any-buffer-ns N] [--max-render-ns N] [--max-overhead-ns N] [--max-total-ns N] [--max-focus-total-ns N] [--trace-app-frame] [URL]
 
 Runs the silksurf winit GUI probe with SILKSURF_PROBE_EXIT_AFTER_INPUT=1.
 The process exits successfully only after the final synthetic address input
@@ -26,7 +26,7 @@ Options:
   --presenter VALUE      Select auto, shm, or softbuffer. Default: auto.
   --shm                  Select the Wayland SHM presenter.
   --fixture VALUE        Serve a local probe fixture. Supported: ai-chat, form-submit, post-submit.
-  --probe VALUE          Select smoke, address, address-caret, chrome, hover, page-input, runtime-text, form-submit, reload, scroll, or stop input sequence. Default: address.
+  --probe VALUE          Select smoke, address, address-caret, chrome, browser-home, hover, page-input, runtime-text, form-submit, reload, scroll, or stop input sequence. Default: address.
   --runs N               Run the probe N times after building. Default: 1.
   --timeout-seconds N    Kill one app run after N seconds. Default: 10.
   --max-input-ns N       Fail when final_input_to_present_ns is greater than N.
@@ -291,9 +291,9 @@ case "${fixture}" in
 esac
 
 case "${probe}" in
-    smoke|address|address-caret|chrome|hover|page-input|runtime-text|form-submit|reload|scroll|stop) ;;
+    smoke|address|address-caret|chrome|browser-home|hover|page-input|runtime-text|form-submit|reload|scroll|stop) ;;
     *)
-        echo "gui_probe: probe must be smoke, address, address-caret, chrome, hover, page-input, runtime-text, form-submit, reload, scroll, or stop" >&2
+        echo "gui_probe: probe must be smoke, address, address-caret, chrome, browser-home, hover, page-input, runtime-text, form-submit, reload, scroll, or stop" >&2
         exit 2
         ;;
 esac
@@ -307,6 +307,10 @@ if [ "${probe}" = "form-submit" ] && [ "${fixture}" != "form-submit" ] && [ "${f
 fi
 if [ "${probe}" = "reload" ] && [ -z "${fixture}" ]; then
     echo "gui_probe: --probe reload requires --fixture" >&2
+    exit 2
+fi
+if [ "${probe}" = "browser-home" ] && [ -z "${fixture}" ]; then
+    echo "gui_probe: --probe browser-home requires --fixture" >&2
     exit 2
 fi
 if [ "${probe}" = "scroll" ] && [ -z "${fixture}" ]; then
@@ -767,7 +771,7 @@ PY
         sleep 0.05
     done
     url="http://127.0.0.1:$(cat "${port_file}")/"
-    if [ "${probe}" = "chrome" ]; then
+    if [ "${probe}" = "chrome" ] || [ "${probe}" = "browser-home" ]; then
         env_args+=("SILKSURF_HOME_URL=${url}")
         url="${url}start/"
     elif [ "${probe}" = "stop" ]; then
@@ -1254,6 +1258,10 @@ run_probe_once() {
         check_reload_probe_log "${log_file}"
         return 0
     fi
+    if [ "${probe}" = "browser-home" ]; then
+        check_browser_home_probe_log "${log_file}"
+        return 0
+    fi
     if [ "${probe}" = "scroll" ]; then
         check_scroll_probe_log "${log_file}"
         return 0
@@ -1312,6 +1320,35 @@ check_reload_probe_log() {
         exit 1
     fi
     echo "gui_probe: reload image cache OK"
+}
+
+check_browser_home_probe_log() {
+    local log_file="$1"
+    local root_url
+    local start_url
+
+    if [ -z "${fixture}" ]; then
+        echo "gui_probe: browser-home probe requires --fixture" >&2
+        exit 1
+    fi
+
+    root_url="${url%start/}"
+    start_url="${url}"
+
+    if ! grep -q "probe input: BrowserHome" "${log_file}"; then
+        echo "gui_probe: missing browser-home probe input" >&2
+        exit 1
+    fi
+    if ! grep -Eq "Navigation build total: .* for ${start_url}" "${log_file}"; then
+        echo "gui_probe: missing initial start navigation build" >&2
+        exit 1
+    fi
+    if ! grep -Fxq "[SilkSurf] Navigation complete: ${root_url}" "${log_file}"; then
+        echo "gui_probe: missing browser-home navigation completion" >&2
+        exit 1
+    fi
+
+    echo "gui_probe: browser-home navigation OK"
 }
 
 check_smoke_probe_log() {

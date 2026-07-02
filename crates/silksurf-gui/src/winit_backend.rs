@@ -101,6 +101,7 @@ pub enum WinitInput {
     MoveCaretRight,
     Back,
     Forward,
+    BrowserHome,
     Reload,
     Stop,
     PageDown,
@@ -704,6 +705,7 @@ fn translate_logical_key(key: &Key<&str>, modifiers: ModifiersState) -> Option<W
         }
         Key::Named(NamedKey::BrowserBack | NamedKey::GoBack) => Some(WinitInput::Back),
         Key::Named(NamedKey::BrowserForward) => Some(WinitInput::Forward),
+        Key::Named(NamedKey::BrowserHome) => Some(WinitInput::BrowserHome),
         Key::Named(NamedKey::BrowserRefresh | NamedKey::F5) => Some(WinitInput::Reload),
         Key::Named(NamedKey::BrowserStop | NamedKey::Cancel) => Some(WinitInput::Stop),
         Key::Named(NamedKey::Enter) => Some(WinitInput::SubmitAddress),
@@ -711,6 +713,9 @@ fn translate_logical_key(key: &Key<&str>, modifiers: ModifiersState) -> Option<W
         Key::Named(NamedKey::Tab) => Some(WinitInput::FocusNextPageInput),
         Key::Named(NamedKey::PageDown) => Some(WinitInput::PageDown),
         Key::Named(NamedKey::PageUp) => Some(WinitInput::PageUp),
+        Key::Named(NamedKey::Home) if modifiers.alt_key() && !command_modifier => {
+            Some(WinitInput::BrowserHome)
+        }
         Key::Named(NamedKey::Home) => Some(WinitInput::Home),
         Key::Named(NamedKey::End) => Some(WinitInput::End),
         Key::Named(NamedKey::ArrowLeft) => Some(WinitInput::MoveCaretLeft),
@@ -1290,6 +1295,7 @@ const CHROME_INPUT_PROBE_STEPS: &[WinitInput] = &[
     WinitInput::PrimaryClick { x: 75.0, y: 22.0 },
     WinitInput::PrimaryClick { x: 15.0, y: 22.0 },
 ];
+const BROWSER_HOME_INPUT_PROBE_STEPS: &[WinitInput] = &[WinitInput::BrowserHome];
 const PAGE_INPUT_PROBE_STEPS: &[WinitInput] =
     &[WinitInput::FocusNextPageInput, WinitInput::TextInput('!')];
 const FORM_SUBMIT_PROBE_STEPS: &[WinitInput] = &[
@@ -1355,6 +1361,15 @@ impl WinitInputProbe {
                 armed: false,
                 exit_after_finish: probe_exit_after_finish_enabled(),
                 exit_frame_delay: 0,
+            }),
+            Some("browser-home") => Some(Self {
+                steps: BROWSER_HOME_INPUT_PROBE_STEPS.to_vec(),
+                wait_after_step: wait_after_each_step(BROWSER_HOME_INPUT_PROBE_STEPS.len()),
+                next_index: 0,
+                waiting_for_redraw: true,
+                armed: false,
+                exit_after_finish: probe_exit_after_finish_enabled(),
+                exit_frame_delay: 1,
             }),
             Some("hover") => Some(Self {
                 steps: HOVER_INPUT_PROBE_STEPS.to_vec(),
@@ -2016,6 +2031,25 @@ mod tests {
     }
 
     #[test]
+    fn browser_home_shortcuts_translate_to_navigation_input() {
+        assert_eq!(
+            super::translate_logical_key(
+                &Key::Named(NamedKey::BrowserHome),
+                ModifiersState::empty()
+            ),
+            Some(WinitInput::BrowserHome)
+        );
+        assert_eq!(
+            super::translate_logical_key(&Key::Named(NamedKey::Home), ModifiersState::ALT),
+            Some(WinitInput::BrowserHome)
+        );
+        assert_eq!(
+            super::translate_logical_key(&Key::Named(NamedKey::Home), ModifiersState::empty()),
+            Some(WinitInput::Home)
+        );
+    }
+
+    #[test]
     fn redraw_pacing_increases_only_after_buffer_waits() {
         assert_eq!(
             next_redraw_pace_interval(Duration::from_millis(1), Duration::from_millis(2), 2),
@@ -2289,6 +2323,14 @@ mod tests {
     #[test]
     fn reload_probe_submits_reload_input() {
         assert_eq!(super::RELOAD_INPUT_PROBE_STEPS, &[WinitInput::Reload]);
+    }
+
+    #[test]
+    fn browser_home_probe_submits_navigation_input() {
+        assert_eq!(
+            super::BROWSER_HOME_INPUT_PROBE_STEPS,
+            &[WinitInput::BrowserHome]
+        );
     }
 
     #[test]
