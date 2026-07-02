@@ -48,8 +48,8 @@ use silksurf_engine::fused_pipeline::{
     FusedResult, FusedWorkspace, ReplacedSize, fused_style_layout_paint,
     fused_style_layout_paint_with_replaced_sizes,
 };
-use silksurf_engine::parse_html;
 use silksurf_engine::speculative::{FetchOrigin, SpeculativeRenderer};
+use silksurf_engine::{ParsedDocument, parse_html};
 use silksurf_js::SilkContext;
 use silksurf_layout::Rect;
 use silksurf_net::{HttpMethod, HttpRequest};
@@ -248,6 +248,7 @@ struct BrowserPagePayload {
     module_texts: Vec<(String, String)>,
     images: Vec<DecodedPageImage>,
     render_config: BrowserRenderConfig,
+    parsed_document: Option<ParsedDocument>,
 }
 
 #[derive(Debug, Default)]
@@ -1244,6 +1245,7 @@ fn load_navigation_payload(
         module_texts,
         images,
         render_config: config.clone(),
+        parsed_document: Some(document),
     })
 }
 
@@ -1260,7 +1262,7 @@ fn build_browser_page_with_buffers(
 }
 
 fn build_browser_page_with_buffers_for_height(
-    payload: BrowserPagePayload,
+    mut payload: BrowserPagePayload,
     buffers: BrowserFrameBuffers,
     live_window_height: Option<u32>,
 ) -> Result<BrowserPage, BrowserPageBuildError> {
@@ -1268,14 +1270,17 @@ fn build_browser_page_with_buffers_for_height(
         || std::env::var_os("SILKSURF_TRACE_NAV_BUILD").is_some();
     let build_start = std::time::Instant::now();
     let phase_start = std::time::Instant::now();
-    let document = match parse_html(&payload.html) {
-        Ok(document) => document,
-        Err(err) => {
-            return Err(BrowserPageBuildError {
-                message: format!("{}: parse error: {err:?}", payload.url),
-                buffers,
-            });
-        }
+    let document = match payload.parsed_document.take() {
+        Some(document) => document,
+        None => match parse_html(&payload.html) {
+            Ok(document) => document,
+            Err(err) => {
+                return Err(BrowserPageBuildError {
+                    message: format!("{}: parse error: {err:?}", payload.url),
+                    buffers,
+                });
+            }
+        },
     };
     trace_navigation_build_phase(trace_build, &payload.url, "html", phase_start.elapsed());
     let doc_node = document.document;
@@ -10359,6 +10364,7 @@ mod tests {
             module_texts: Vec::new(),
             images: Vec::new(),
             render_config: BrowserRenderConfig::default(),
+            parsed_document: None,
         };
         let rgba_capacity = (FRAME_WIDTH * FRAME_HEIGHT * 4) as usize;
         let argb_capacity = (FRAME_WIDTH * FRAME_HEIGHT) as usize;
@@ -10371,6 +10377,45 @@ mod tests {
 
         assert!(page.runtime.rgba.capacity() >= rgba_capacity);
         assert!(page.frame.argb.capacity() >= argb_capacity);
+    }
+
+    #[test]
+    fn browser_page_build_uses_supplied_parsed_document() {
+        let parsed_html = concat!(
+            "<!doctype html><html><body>",
+            "<p>parsed handoff document</p>",
+            "</body></html>"
+        );
+        let document = parse_html(parsed_html).expect("html parses");
+        let payload = BrowserPagePayload {
+            url: "https://example.com/".to_string(),
+            html: "<!doctype html><html><body><p>fallback html</p></body></html>".to_string(),
+            css_text: stylesheet_text_with_user_agent_defaults(""),
+            script_texts: Vec::new(),
+            module_texts: Vec::new(),
+            images: Vec::new(),
+            render_config: BrowserRenderConfig::default(),
+            parsed_document: Some(document),
+        };
+
+        let page = build_browser_page(payload).expect("payload builds page");
+        let text_items: Vec<&str> = page
+            .runtime
+            .display_list
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                DisplayItem::Text { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+
+        assert!(
+            text_items
+                .iter()
+                .any(|text| text.contains("parsed handoff document"))
+        );
+        assert!(!text_items.iter().any(|text| text.contains("fallback html")));
     }
 
     #[test]
@@ -10401,6 +10446,7 @@ mod tests {
             module_texts: Vec::new(),
             images: Vec::new(),
             render_config: BrowserRenderConfig::default(),
+            parsed_document: None,
         };
 
         let page = build_browser_page(payload).expect("payload builds page");
@@ -10443,6 +10489,7 @@ mod tests {
             module_texts: Vec::new(),
             images: Vec::new(),
             render_config: BrowserRenderConfig::default(),
+            parsed_document: None,
         };
 
         let page = build_browser_page_with_buffers_for_height(
@@ -10467,6 +10514,7 @@ mod tests {
             module_texts: Vec::new(),
             images: Vec::new(),
             render_config: BrowserRenderConfig::default(),
+            parsed_document: None,
         };
         let page = build_browser_page(payload).expect("payload builds page");
         let input_node = page.frame.input_targets[0].node;
@@ -10513,6 +10561,7 @@ mod tests {
             module_texts: Vec::new(),
             images: Vec::new(),
             render_config: BrowserRenderConfig::default(),
+            parsed_document: None,
         };
         let page = build_browser_page(payload).expect("payload builds page");
         let textarea_node = page.frame.input_targets[0].node;
@@ -10560,6 +10609,7 @@ mod tests {
             module_texts: Vec::new(),
             images: Vec::new(),
             render_config: BrowserRenderConfig::default(),
+            parsed_document: None,
         };
         let page = build_browser_page(payload).expect("payload builds page");
         let editable_node = page.frame.input_targets[0].node;
@@ -10607,6 +10657,7 @@ mod tests {
             module_texts: Vec::new(),
             images: Vec::new(),
             render_config: BrowserRenderConfig::default(),
+            parsed_document: None,
         };
         let page = build_browser_page(payload).expect("payload builds page");
         let textarea_node = page.frame.input_targets[0].node;
@@ -10650,6 +10701,7 @@ mod tests {
             module_texts: Vec::new(),
             images: Vec::new(),
             render_config: BrowserRenderConfig::default(),
+            parsed_document: None,
         };
         let page = build_browser_page(payload).expect("payload builds page");
         let input_node = page.frame.input_targets[0].node;
@@ -10701,6 +10753,7 @@ mod tests {
             module_texts: Vec::new(),
             images: Vec::new(),
             render_config: BrowserRenderConfig::default(),
+            parsed_document: None,
         };
         let page = build_browser_page(payload).expect("payload builds page");
         let input_node = page.frame.input_targets[0].node;
@@ -10749,6 +10802,7 @@ mod tests {
             module_texts: Vec::new(),
             images: Vec::new(),
             render_config: BrowserRenderConfig::default(),
+            parsed_document: None,
         };
         let page = build_browser_page(payload).expect("payload builds page");
         let input_node = page.frame.input_targets[0].node;
@@ -10799,6 +10853,7 @@ mod tests {
             module_texts: Vec::new(),
             images: Vec::new(),
             render_config: BrowserRenderConfig::default(),
+            parsed_document: None,
         };
         let page = build_browser_page(payload).expect("payload builds page");
         let input_node = page.frame.input_targets[0].node;
@@ -10846,6 +10901,7 @@ mod tests {
             module_texts: Vec::new(),
             images: Vec::new(),
             render_config: BrowserRenderConfig::default(),
+            parsed_document: None,
         };
         let page = build_browser_page(payload).expect("payload builds page");
         let textarea_node = page.frame.input_targets[0].node;
@@ -11018,6 +11074,7 @@ mod tests {
             module_texts: Vec::new(),
             images: Vec::new(),
             render_config: BrowserRenderConfig::default(),
+            parsed_document: None,
         };
         let page = build_browser_page(payload).expect("payload builds page");
         let checkbox_node = page.frame.input_targets[0].node;
@@ -11043,6 +11100,7 @@ mod tests {
             module_texts: Vec::new(),
             images: Vec::new(),
             render_config: BrowserRenderConfig::default(),
+            parsed_document: None,
         };
         let page = build_browser_page(payload).expect("payload builds page");
         let checkbox_node = page.frame.input_targets[0].node;
@@ -11176,6 +11234,7 @@ mod tests {
             module_texts: Vec::new(),
             images: Vec::new(),
             render_config: BrowserRenderConfig::default(),
+            parsed_document: None,
         };
 
         let page = build_browser_page(payload).expect("payload builds page");
@@ -11210,6 +11269,7 @@ mod tests {
             module_texts: Vec::new(),
             images: Vec::new(),
             render_config: BrowserRenderConfig::default(),
+            parsed_document: None,
         };
         let page = build_browser_page(payload).expect("payload builds page");
         let scroll_y = first_focus_target_scroll(
@@ -12712,6 +12772,7 @@ mod tests {
             module_texts: Vec::new(),
             images: Vec::new(),
             render_config: BrowserRenderConfig::default(),
+            parsed_document: None,
         };
 
         let mut page = build_browser_page(payload).expect("payload builds page");
@@ -12743,6 +12804,7 @@ mod tests {
             module_texts: Vec::new(),
             images: Vec::new(),
             render_config: BrowserRenderConfig::default(),
+            parsed_document: None,
         };
 
         let page = build_browser_page(payload).expect("payload builds page");
@@ -12773,6 +12835,7 @@ mod tests {
             ],
             images: Vec::new(),
             render_config: BrowserRenderConfig::default(),
+            parsed_document: None,
         };
 
         let page = build_browser_page(payload).expect("payload builds page");
@@ -12803,6 +12866,7 @@ mod tests {
             module_texts: Vec::new(),
             images: Vec::new(),
             render_config: BrowserRenderConfig::default(),
+            parsed_document: None,
         };
 
         let page = build_browser_page(payload).expect("payload builds page");
@@ -12824,6 +12888,7 @@ mod tests {
             module_texts: Vec::new(),
             images: Vec::new(),
             render_config: BrowserRenderConfig::default(),
+            parsed_document: None,
         };
 
         let mut page = build_browser_page(payload).expect("payload builds page");
