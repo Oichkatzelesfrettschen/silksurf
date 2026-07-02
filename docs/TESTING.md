@@ -11,8 +11,12 @@ Legacy, long-form test plans live in `docs/archive/testing/`.
   - `cargo test -p silksurf-engine`
 
 ## Compliance Inputs
-- HTML tokenizer: html5lib JSON tests (smoke harness wired).
+- HTML tokenizer: html5lib JSON cases run through the tokenizer harness.
+  - Local corpus fetch: `make fetch-conformance-test-corpora`
+  - Default fetched path: `silksurf-extras/html5lib-tests/tokenizer`
+  - Override path: `HTML5LIB_TESTS_DIR=/abs/path/to/html5lib-tests/tokenizer`
 - CSS: WPT-oriented external corpus harness in `crates/silksurf-css/tests/css_harness.rs`.
+  - Default path in `scripts/conformance_run.sh`: `crates/silksurf-css/tests/fixtures/css_harness_corpus`
   - Run with corpus path: `CSS_TESTS_DIR=/abs/path/to/css-tests cargo test -p silksurf-css --test css_harness -- --nocapture`
   - Default expectations file: `${CSS_TESTS_DIR}/silksurf-css-harness.expectations`
   - Override expectations file: `CSS_TEST_EXPECTATIONS=/abs/path/to/expectations`
