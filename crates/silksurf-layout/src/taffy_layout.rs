@@ -19,18 +19,20 @@
 
 use rustc_hash::FxHashMap;
 use silksurf_css::{
-    AlignItems as CssAlignItems, AlignSelf as CssAlignSelf, ComputedStyle, Display as CssDisplay,
-    FlexBasis, FlexDirection as CssFlexDirection, FlexWrap as CssFlexWrap,
-    GridAutoFlow as CssGridAutoFlow, GridLine as CssGridLine, GridTrackMax as CssGridTrackMax,
-    GridTrackMin as CssGridTrackMin, GridTrackSize as CssGridTrackSize,
-    JustifyContent as CssJustifyContent, Length, LengthOrAuto, WhiteSpace,
+    AlignItems as CssAlignItems, AlignSelf as CssAlignSelf, BoxSizing as CssBoxSizing,
+    ComputedStyle, Display as CssDisplay, FlexBasis, FlexDirection as CssFlexDirection,
+    FlexWrap as CssFlexWrap, GridAutoFlow as CssGridAutoFlow, GridLine as CssGridLine,
+    GridTrackMax as CssGridTrackMax, GridTrackMin as CssGridTrackMin,
+    GridTrackSize as CssGridTrackSize, JustifyContent as CssJustifyContent, Length, LengthOrAuto,
+    WhiteSpace,
 };
 use silksurf_dom::{Dom, NodeId as DomNodeId, NodeKind, TagName};
 use taffy::{
-    AlignItems, AlignSelf, AvailableSpace, Dimension, Display as TaffyDisplay, FlexDirection,
-    FlexWrap, GridAutoFlow, GridPlacement, GridTemplateComponent, JustifyContent, LengthPercentage,
-    LengthPercentageAuto, Line, MaxTrackSizingFunction, MinTrackSizingFunction, NodeId as TaffyId,
-    Size, Style, TaffyTree, TrackSizingFunction,
+    AlignItems, AlignSelf, AvailableSpace, BoxSizing as TaffyBoxSizing, Dimension,
+    Display as TaffyDisplay, FlexDirection, FlexWrap, GridAutoFlow, GridPlacement,
+    GridTemplateComponent, JustifyContent, LengthPercentage, LengthPercentageAuto, Line,
+    MaxTrackSizingFunction, MinTrackSizingFunction, NodeId as TaffyId, Size, Style, TaffyTree,
+    TrackSizingFunction,
     geometry::Rect as TaffyRect,
     style_helpers::{
         TaffyAuto as _, TaffyFitContent as _, TaffyMaxContent as _, TaffyMinContent as _, fr,
@@ -1026,9 +1028,14 @@ fn css_to_taffy_style(style: Option<&ComputedStyle>) -> Style {
         start: grid_line_to_taffy(style.grid_item.row_start),
         end: grid_line_to_taffy(style.grid_item.row_end),
     };
+    let box_sizing = match style.box_sizing {
+        CssBoxSizing::ContentBox => TaffyBoxSizing::ContentBox,
+        CssBoxSizing::BorderBox => TaffyBoxSizing::BorderBox,
+    };
 
     Style {
         display,
+        box_sizing,
         flex_direction,
         flex_wrap,
         justify_content,
@@ -1518,6 +1525,34 @@ mod tests {
         assert_eq!(grid_style.display, TaffyDisplay::Flex);
         assert_eq!(grid_style.flex_wrap, FlexWrap::Wrap);
         assert_eq!(child_style.flex_basis, Dimension::percent(0.5));
+    }
+
+    #[test]
+    fn css_box_sizing_maps_to_taffy() {
+        let mut content = ComputedStyle {
+            display: CssDisplay::Block,
+            box_sizing: CssBoxSizing::ContentBox,
+            ..Default::default()
+        };
+        let border = ComputedStyle {
+            display: CssDisplay::Block,
+            box_sizing: CssBoxSizing::BorderBox,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            css_to_taffy_style(Some(&content)).box_sizing,
+            TaffyBoxSizing::ContentBox
+        );
+        content.box_sizing = CssBoxSizing::BorderBox;
+        assert_eq!(
+            css_to_taffy_style(Some(&content)).box_sizing,
+            TaffyBoxSizing::BorderBox
+        );
+        assert_eq!(
+            css_to_taffy_style(Some(&border)).box_sizing,
+            TaffyBoxSizing::BorderBox
+        );
     }
 
     #[test]

@@ -26,9 +26,9 @@
  */
 
 use crate::{
-    BorderStyle, BoxShadow, Color, ComputedStyle, Display, Edges, FlexContainerStyle,
-    FlexItemStyle, FontStyle, FontWeight, Length, LengthOrAuto, LinearGradient, Margins, Overflow,
-    Position, TextAlign, TextDecoration, Visibility, WhiteSpace,
+    BorderStyle, BoxShadow, BoxSizing, Color, ComputedStyle, Display, Edges, FlexContainerStyle,
+    FlexItemStyle, FontStyle, FontWeight, GridContainerStyle, GridItemStyle, Length, LengthOrAuto,
+    LinearGradient, Margins, Overflow, Position, TextAlign, TextDecoration, Visibility, WhiteSpace,
 };
 use rustc_hash::FxHashMap;
 use silksurf_dom::NodeId;
@@ -72,6 +72,7 @@ pub struct StyleSoA {
     pub border_right: Vec<f32>,
     pub border_bottom: Vec<f32>,
     pub border_left: Vec<f32>,
+    pub box_sizing: Vec<BoxSizing>,
 
     // Positioning
     pub position: Vec<Position>,
@@ -124,6 +125,7 @@ impl StyleSoA {
             border_right: Vec::with_capacity(n),
             border_bottom: Vec::with_capacity(n),
             border_left: Vec::with_capacity(n),
+            box_sizing: Vec::with_capacity(n),
             position: Vec::with_capacity(n),
             z_index: Vec::with_capacity(n),
             overflow_x: Vec::with_capacity(n),
@@ -160,6 +162,7 @@ impl StyleSoA {
             soa.border_right.push(length_to_f32(style.border.right));
             soa.border_bottom.push(length_to_f32(style.border.bottom));
             soa.border_left.push(length_to_f32(style.border.left));
+            soa.box_sizing.push(style.box_sizing);
 
             soa.position.push(style.position);
             soa.z_index.push(style.z_index);
@@ -202,6 +205,7 @@ impl StyleSoA {
             border_right: Vec::with_capacity(n),
             border_bottom: Vec::with_capacity(n),
             border_left: Vec::with_capacity(n),
+            box_sizing: Vec::with_capacity(n),
             position: Vec::with_capacity(n),
             z_index: Vec::with_capacity(n),
             overflow_x: Vec::with_capacity(n),
@@ -237,6 +241,7 @@ impl StyleSoA {
             soa.border_right.push(length_to_f32(style.border.right));
             soa.border_bottom.push(length_to_f32(style.border.bottom));
             soa.border_left.push(length_to_f32(style.border.left));
+            soa.box_sizing.push(style.box_sizing);
 
             soa.position.push(style.position);
             soa.z_index.push(style.z_index);
@@ -318,6 +323,8 @@ pub(crate) struct ComputedStyleSoA {
     pub(crate) border: Vec<Edges>,
     pub(crate) flex_container: Vec<FlexContainerStyle>,
     pub(crate) flex_item: Vec<FlexItemStyle>,
+    pub(crate) grid_container: Vec<GridContainerStyle>,
+    pub(crate) grid_item: Vec<GridItemStyle>,
     pub(crate) position: Vec<Position>,
     pub(crate) top: Vec<LengthOrAuto>,
     pub(crate) right: Vec<LengthOrAuto>,
@@ -342,6 +349,7 @@ pub(crate) struct ComputedStyleSoA {
     pub(crate) max_width: Vec<Option<Length>>,
     pub(crate) min_height: Vec<Length>,
     pub(crate) max_height: Vec<Option<Length>>,
+    pub(crate) box_sizing: Vec<BoxSizing>,
     // Border rendering
     pub(crate) border_color: Vec<Color>,
     pub(crate) border_style: Vec<BorderStyle>,
@@ -377,6 +385,8 @@ impl ComputedStyleSoA {
             border: Vec::new(),
             flex_container: Vec::new(),
             flex_item: Vec::new(),
+            grid_container: Vec::new(),
+            grid_item: Vec::new(),
             position: Vec::new(),
             top: Vec::new(),
             right: Vec::new(),
@@ -398,6 +408,7 @@ impl ComputedStyleSoA {
             max_width: Vec::new(),
             min_height: Vec::new(),
             max_height: Vec::new(),
+            box_sizing: Vec::new(),
             border_color: Vec::new(),
             border_style: Vec::new(),
             text_decoration: Vec::new(),
@@ -427,6 +438,8 @@ impl ComputedStyleSoA {
         self.border.push(style.border);
         self.flex_container.push(style.flex_container);
         self.flex_item.push(style.flex_item);
+        self.grid_container.push(style.grid_container.clone());
+        self.grid_item.push(style.grid_item);
         self.position.push(style.position);
         self.top.push(style.top);
         self.right.push(style.right);
@@ -448,6 +461,7 @@ impl ComputedStyleSoA {
         self.max_width.push(style.max_width);
         self.min_height.push(style.min_height);
         self.max_height.push(style.max_height);
+        self.box_sizing.push(style.box_sizing);
         self.border_color.push(style.border_color);
         self.border_style.push(style.border_style);
         self.text_decoration.push(style.text_decoration);
@@ -479,6 +493,8 @@ impl ComputedStyleSoA {
             border: self.border[index],
             flex_container: self.flex_container[index],
             flex_item: self.flex_item[index],
+            grid_container: self.grid_container[index].clone(),
+            grid_item: self.grid_item[index],
             position: self.position[index],
             top: self.top[index],
             right: self.right[index],
@@ -500,6 +516,7 @@ impl ComputedStyleSoA {
             max_width: self.max_width[index],
             min_height: self.min_height[index],
             max_height: self.max_height[index],
+            box_sizing: self.box_sizing[index],
             border_color: self.border_color[index],
             border_style: self.border_style[index],
             text_decoration: self.text_decoration[index],
@@ -569,6 +586,11 @@ mod computed_soa_tests {
         assert_eq!(got_a.margin, a.margin);
         assert_eq!(got_a.padding, a.padding);
         assert_eq!(got_a.border, a.border);
+        assert_eq!(got_a.flex_container, a.flex_container);
+        assert_eq!(got_a.flex_item, a.flex_item);
+        assert_eq!(got_a.grid_container, a.grid_container);
+        assert_eq!(got_a.grid_item, a.grid_item);
+        assert_eq!(got_a.box_sizing, a.box_sizing);
         assert_eq!(got_a.position, a.position);
         assert_eq!(got_a.top, a.top);
         assert_eq!(got_a.right, a.right);
@@ -620,6 +642,7 @@ mod tests {
         let soa = StyleSoA::from_computed(&styles);
         assert_eq!(soa.len(), 1);
         assert_eq!(soa.display[0], Display::Inline);
+        assert_eq!(soa.box_sizing[0], BoxSizing::ContentBox);
         assert_eq!(soa.opacity[0], 1.0);
         assert_eq!(soa.index_of(node), Some(0));
     }
