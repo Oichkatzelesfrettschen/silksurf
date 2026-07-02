@@ -754,6 +754,8 @@ impl CascadedStyle {
         let raw_font_size = {
             let fs_kw = ks.get(&PropertyId::FontSize);
             if keyword_beats_typed(fs_kw, &self.font_size) {
+                // UNWRAP-OK: keyword_beats_typed returns true only when the keyword exists.
+
                 match fs_kw.unwrap().value {
                     CascadeKeyword::Inherit | CascadeKeyword::Unset => {
                         parent.map_or(fallback.font_size, |s| s.font_size)
@@ -804,6 +806,8 @@ impl CascadedStyle {
                 {
                     let lh_kw = ks.get(&PropertyId::LineHeight);
                     if keyword_beats_typed(lh_kw, &self.line_height) {
+                        // UNWRAP-OK: keyword_beats_typed returns true only when the keyword exists.
+
                         match lh_kw.unwrap().value {
                             CascadeKeyword::Inherit | CascadeKeyword::Unset => {
                                 parent.map_or(resolved_font_size, |s| s.line_height)
@@ -823,6 +827,8 @@ impl CascadedStyle {
             font_family: {
                 let ff_kw = ks.get(&PropertyId::FontFamily);
                 if keyword_beats_typed(ff_kw, &self.font_family) {
+                    // UNWRAP-OK: keyword_beats_typed returns true only when the keyword exists.
+
                     match ff_kw.unwrap().value {
                         CascadeKeyword::Inherit | CascadeKeyword::Unset => parent.map_or_else(
                             || fallback.font_family.clone(),
@@ -1220,6 +1226,8 @@ impl CascadedStyle {
             box_shadow: {
                 let bs_kw = ks.get(&PropertyId::BoxShadow);
                 if keyword_beats_typed(bs_kw, &self.box_shadow) {
+                    // UNWRAP-OK: keyword_beats_typed returns true only when the keyword exists.
+
                     match bs_kw.unwrap().value {
                         CascadeKeyword::Inherit => parent.and_then(|s| s.box_shadow),
                         CascadeKeyword::Initial | CascadeKeyword::Unset => None,
@@ -1231,6 +1239,8 @@ impl CascadedStyle {
             background_image: {
                 let bi_kw = ks.get(&PropertyId::BackgroundImage);
                 if keyword_beats_typed(bi_kw, &self.background_image) {
+                    // UNWRAP-OK: keyword_beats_typed returns true only when the keyword exists.
+
                     match bi_kw.unwrap().value {
                         CascadeKeyword::Inherit => parent.and_then(|s| s.background_image.clone()),
                         CascadeKeyword::Initial | CascadeKeyword::Unset => None,
@@ -1315,6 +1325,8 @@ fn resolve_inherited_kw<T: Clone>(
     initial: T,
 ) -> T {
     if keyword_beats_typed(kw, &typed) {
+        // UNWRAP-OK: keyword_beats_typed returns true only when the keyword exists.
+
         match kw.unwrap().value {
             CascadeKeyword::Inherit | CascadeKeyword::Unset => parent_val.unwrap_or(initial),
             CascadeKeyword::Initial => initial,
@@ -1332,6 +1344,8 @@ fn resolve_non_inherited_kw<T: Clone>(
     initial: T,
 ) -> T {
     if keyword_beats_typed(kw, &typed) {
+        // UNWRAP-OK: keyword_beats_typed returns true only when the keyword exists.
+
         match kw.unwrap().value {
             CascadeKeyword::Inherit => parent_val.unwrap_or(initial),
             CascadeKeyword::Initial | CascadeKeyword::Unset => initial,
