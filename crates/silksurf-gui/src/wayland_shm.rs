@@ -272,6 +272,9 @@ impl WaylandShmSurface {
     }
 
     fn acquire_released_buffer(&mut self) -> Result<Option<usize>, String> {
+        if let Some(index) = self.released_current_buffer_index() {
+            return Ok(Some(index));
+        }
         if let Some(index) = self.released_warm_buffer_index() {
             return Ok(Some(index));
         }
@@ -280,8 +283,14 @@ impl WaylandShmSurface {
         }
         self.read_and_dispatch_events()?;
         Ok(self
-            .released_warm_buffer_index()
+            .released_current_buffer_index()
+            .or_else(|| self.released_warm_buffer_index())
             .or_else(|| self.released_buffer_index()))
+    }
+
+    fn released_current_buffer_index(&self) -> Option<usize> {
+        let index = self.last_presented_buffer?;
+        self.buffers.get(index)?.released().then_some(index)
     }
 
     fn released_warm_buffer_index(&self) -> Option<usize> {
@@ -364,7 +373,11 @@ impl WaylandShmSurface {
             .surface
             .as_ref()
             .ok_or_else(|| "Wayland surface is already dropped".to_string())?;
-        self.buffers[buffer_index].attach(surface);
+        if self.last_presented_buffer == Some(buffer_index) {
+            self.buffers[buffer_index].mark_busy();
+        } else {
+            self.buffers[buffer_index].attach(surface);
+        }
         match damage {
             WinitPresentDamage::Clean => {}
             WinitPresentDamage::Full => damage_full(surface),
@@ -502,8 +515,12 @@ impl WaylandShmBuffer {
     }
 
     fn attach(&self, surface: &wl_surface::WlSurface) {
-        self.released.store(false, Ordering::Release);
+        self.mark_busy();
         surface.attach(Some(&self.buffer), 0, 0);
+    }
+
+    fn mark_busy(&self) {
+        self.released.store(false, Ordering::Release);
     }
 
     #[allow(clippy::cast_ptr_alignment)]
