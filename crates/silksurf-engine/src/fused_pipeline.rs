@@ -250,6 +250,17 @@ impl FusedWorkspace {
     pub fn table(&self) -> &LayoutNeighborTable {
         &self.table
     }
+
+    /// Clone the current workspace output into the owned result shape.
+    #[must_use]
+    pub fn snapshot_result(&self) -> FusedResult {
+        FusedResult {
+            styles: self.styles.clone(),
+            display_items: self.display_items.clone(),
+            node_rects: self.node_rects.clone(),
+            table: self.table.clone(),
+        }
+    }
 }
 
 /*

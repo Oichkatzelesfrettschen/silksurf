@@ -32,7 +32,7 @@
 use silksurf_dom::{Dom, NodeId};
 
 /// Pre-computed BFS-level decomposition for parallel layout.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct LayoutNeighborTable {
     /// Start index of each BFS level in `bfs_order`.
     /// Level i contains `bfs_order[level_starts[i]..level_starts[i+1]]`.
