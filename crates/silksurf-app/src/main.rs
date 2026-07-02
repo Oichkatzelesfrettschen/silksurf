@@ -6521,23 +6521,76 @@ fn rasterize_browser_viewport_argb_direct(
     pixels: &mut Vec<u32>,
     item_indices: &mut Vec<usize>,
 ) -> bool {
+    let trace_argb = trace_argb_direct_enabled();
+    let source_start = std::time::Instant::now();
     let viewport = scroll_visible_document_rect(scroll_y, bitmap_height);
     browser_viewport_source_item_indices(display_list, viewport, item_indices);
-    if !viewport_argb_direct_items_supported(display_list, item_indices, viewport) {
+    let source_elapsed = source_start.elapsed();
+    let support_start = std::time::Instant::now();
+    let supported = viewport_argb_direct_items_supported(display_list, item_indices, viewport);
+    let support_elapsed = support_start.elapsed();
+    if !supported {
         trace_viewport_argb_direct_miss(display_list, item_indices, viewport);
         return false;
     }
+    let resize_start = std::time::Instant::now();
     resize_argb_words_uninit(pixels, FRAME_WIDTH as usize * bitmap_height as usize);
-    if viewport_argb_direct_needs_default_fill(display_list, item_indices, viewport) {
-        pixels.fill(argb(255, 255, 255, 255));
+    let resize_elapsed = resize_start.elapsed();
+    let fill_start = std::time::Instant::now();
+    let default_filled =
+        viewport_argb_direct_needs_default_fill(display_list, item_indices, viewport);
+    if default_filled {
+        fill_argb_words(pixels, argb(255, 255, 255, 255));
     }
+    let fill_elapsed = fill_start.elapsed();
+    let toolbar_start = std::time::Instant::now();
     fill_browser_toolbar_background_argb(pixels, FRAME_WIDTH, bitmap_height);
+    let toolbar_elapsed = toolbar_start.elapsed();
+    let paint_start = std::time::Instant::now();
+    let mut painted_items = 0usize;
     for item in display_items_for_indices(display_list, item_indices) {
         if display_item_intersects_viewport(item, viewport) {
+            painted_items += 1;
             paint_viewport_argb_direct_item(pixels, bitmap_height, item, scroll_y);
         }
     }
+    trace_argb_direct_phases(
+        trace_argb,
+        item_indices.len(),
+        painted_items,
+        default_filled,
+        source_elapsed,
+        support_elapsed,
+        resize_elapsed,
+        fill_elapsed,
+        toolbar_elapsed,
+        paint_start.elapsed(),
+    );
     true
+}
+
+fn trace_argb_direct_enabled() -> bool {
+    std::env::var_os("SILKSURF_TRACE_RENDER_FULL").is_some()
+        || std::env::var_os("SILKSURF_TRACE_NAV_BUILD").is_some()
+}
+
+fn trace_argb_direct_phases(
+    enabled: bool,
+    source_items: usize,
+    painted_items: usize,
+    default_filled: bool,
+    source_elapsed: std::time::Duration,
+    support_elapsed: std::time::Duration,
+    resize_elapsed: std::time::Duration,
+    fill_elapsed: std::time::Duration,
+    toolbar_elapsed: std::time::Duration,
+    paint_elapsed: std::time::Duration,
+) {
+    if enabled {
+        eprintln!(
+            "[SilkSurf] argb-direct phases: source_items={source_items} painted_items={painted_items} default_fill={default_filled} source={source_elapsed:?} support={support_elapsed:?} resize={resize_elapsed:?} fill={fill_elapsed:?} toolbar={toolbar_elapsed:?} paint={paint_elapsed:?}"
+        );
+    }
 }
 
 fn rasterize_browser_document_damage_argb_direct(
@@ -9064,7 +9117,7 @@ fn fill_argb_rect(
         let start = y as usize * width as usize;
         let end = y_end as usize * width as usize;
         if end <= pixels.len() {
-            pixels[start..end].fill(color);
+            fill_argb_words(&mut pixels[start..end], color);
         }
         return;
     }
@@ -9072,8 +9125,32 @@ fn fill_argb_rect(
         let start = row as usize * width as usize + x as usize;
         let end = row as usize * width as usize + x_end as usize;
         if end <= pixels.len() {
-            pixels[start..end].fill(color);
+            fill_argb_words(&mut pixels[start..end], color);
         }
+    }
+}
+
+fn fill_argb_words(pixels: &mut [u32], color: u32) {
+    match color {
+        0 => {
+            /*
+             * SAFETY: the slice is valid for pixels.len() u32 writes, and
+             * every byte pattern is a valid u32 value.
+             */
+            unsafe {
+                std::ptr::write_bytes(pixels.as_mut_ptr(), 0, pixels.len());
+            }
+        }
+        0xffff_ffff => {
+            /*
+             * SAFETY: the slice is valid for pixels.len() u32 writes, and
+             * every byte pattern is a valid u32 value.
+             */
+            unsafe {
+                std::ptr::write_bytes(pixels.as_mut_ptr(), 0xff, pixels.len());
+            }
+        }
+        _ => pixels.fill(color),
     }
 }
 
@@ -9845,6 +9922,17 @@ mod tests {
         rgba_bytes_to_argb_words_into(&rgba, &mut argb);
 
         assert_eq!(argb, expected);
+    }
+
+    #[test]
+    fn fill_argb_words_preserves_byte_pattern_colors() {
+        let mut pixels = vec![0x1234_5678; 5];
+
+        fill_argb_words(&mut pixels, 0xffff_ffff);
+        assert_eq!(pixels, vec![0xffff_ffff; 5]);
+
+        fill_argb_words(&mut pixels[1..4], 0);
+        assert_eq!(pixels, vec![0xffff_ffff, 0, 0, 0, 0xffff_ffff]);
     }
 
     #[test]
