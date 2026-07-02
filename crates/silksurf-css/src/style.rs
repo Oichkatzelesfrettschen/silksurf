@@ -4205,10 +4205,11 @@ fn hex_to_u8(value: &str) -> Option<u8> {
 // CSS Grid parsing
 // ---------------------------------------------------------------------------
 
-/// Parse a track-list token sequence into a Vec<GridTrackSize>.
+/// Parse a track-list token sequence into a `Vec<GridTrackSize>`.
 ///
-/// Handles: auto, min-content, max-content, <length-percentage>, <flex>,
-/// minmax(<min>, <max>), fit-content(<lp>), and integer repeat().
+/// Handles `auto`, `min-content`, `max-content`, `<length-percentage>`,
+/// `<flex>`, `minmax(<min>, <max>)`, `fit-content(<lp>)`, and integer
+/// `repeat()`.
 ///
 /// Whitespace tokens are ignored; unrecognized tokens cause the individual
 /// track to be skipped (graceful degradation).

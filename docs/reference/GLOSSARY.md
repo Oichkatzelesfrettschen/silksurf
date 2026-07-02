@@ -698,6 +698,10 @@ files and the relevant ADRs.
 **Type**: Viewport damage rasterizer function
 **Definition**: Rasterizes translated display-list damage into a caller-owned framebuffer. The paint offset maps document coordinates into the visible viewport.
 
+### rasterize_skia_translated_damage_scratch
+**Type**: Viewport damage scratch rasterizer function
+**Definition**: Rasterizes translated display-list damage into reusable `DamageScratch` pixels without copying them into the retained RGBA framebuffer. The caller consumes `DamageScratch::last_damage()` and the scratch pixel slice for direct presenter-format synchronization.
+
 ### remove_child
 **Type**: DOM mutation function
 **Definition**: Detaches a child node from its parent in the DOM tree. The node is retained in the arena; call within a `with_mutation_batch` for correct generation tracking.

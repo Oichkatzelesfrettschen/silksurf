@@ -338,7 +338,7 @@ pub struct Node {
 pub struct Dom {
     nodes: Vec<Node>,
     interner: RwLock<SilkInterner>,
-    /// Lock-free resolve table: `resolve_table`[`atom.raw()`] = `SmallString`.
+    /// Lock-free resolve table maps `atom.raw()` indexes to `SmallString`.
     /// Materialized from interner at phase boundaries, monotonically growing.
     resolve_table: Vec<SmallString>,
     dirty_nodes: Vec<NodeId>,
