@@ -9011,11 +9011,38 @@ const CHROME_GLYPHS: &[(u8, [u8; 7])] = &[
     ),
 ];
 
+const fn build_chrome_glyph_table() -> [[u8; 7]; 128] {
+    let mut table = [[0; 7]; 128];
+    let mut index = 0;
+    while index < CHROME_GLYPHS.len() {
+        let (byte, glyph) = CHROME_GLYPHS[index];
+        table[byte as usize] = glyph;
+        index += 1;
+    }
+    table
+}
+
+const fn build_chrome_glyph_presence_table() -> [bool; 128] {
+    let mut present = [false; 128];
+    let mut index = 0;
+    while index < CHROME_GLYPHS.len() {
+        let (byte, _) = CHROME_GLYPHS[index];
+        present[byte as usize] = true;
+        index += 1;
+    }
+    present
+}
+
+const CHROME_GLYPH_TABLE: [[u8; 7]; 128] = build_chrome_glyph_table();
+const CHROME_GLYPH_PRESENT: [bool; 128] = build_chrome_glyph_presence_table();
+
 fn chrome_glyph_byte(byte: u8) -> Option<[u8; 7]> {
     let ascii = byte.to_ascii_lowercase();
-    CHROME_GLYPHS
-        .iter()
-        .find_map(|(candidate, glyph)| (*candidate == ascii).then_some(*glyph))
+    if ascii < 128 && CHROME_GLYPH_PRESENT[ascii as usize] {
+        Some(CHROME_GLYPH_TABLE[ascii as usize])
+    } else {
+        None
+    }
 }
 
 fn fill_argb_rect(
@@ -9818,6 +9845,14 @@ mod tests {
         rgba_bytes_to_argb_words_into(&rgba, &mut argb);
 
         assert_eq!(argb, expected);
+    }
+
+    #[test]
+    fn chrome_glyph_lookup_preserves_ascii_contract() {
+        assert_eq!(chrome_glyph_byte(b'A'), chrome_glyph_byte(b'a'));
+        assert_eq!(chrome_glyph_byte(b' '), Some([0, 0, 0, 0, 0, 0, 0]));
+        assert!(chrome_glyph_byte(b'!').is_some());
+        assert_eq!(chrome_glyph_byte(0x7f), None);
     }
 
     #[test]
