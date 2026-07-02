@@ -2293,6 +2293,7 @@ fn repaint_runtime_text_only_dirty_nodes(
     drop(dom);
 
     let damage = damage?;
+    trace_runtime_text_repaint(dirty_nodes.len(), damage);
     for (item_index, text) in updates {
         update_text_display_item_content(&mut runtime.display_list.items[item_index], &text)?;
     }
@@ -2321,6 +2322,16 @@ fn repaint_runtime_text_only_dirty_nodes(
         );
     }
     Some(BrowserRedrawMode::Damage(damage))
+}
+
+fn trace_runtime_text_repaint(dirty_count: usize, damage: Rect) {
+    if std::env::var_os("SILKSURF_TRACE_RUNTIME_TEXT").is_none() {
+        return;
+    }
+    eprintln!(
+        "[SilkSurf] Runtime text repaint: dirty_nodes={} damage=({}, {}, {}, {})",
+        dirty_count, damage.x, damage.y, damage.width, damage.height
+    );
 }
 
 fn dirty_text_node_content(dom: &silksurf_dom::Dom, node: silksurf_dom::NodeId) -> Option<&str> {
