@@ -18,12 +18,16 @@ docs/conformance/
 
 ```sh
 scripts/conformance_run.sh                  # all available harnesses
+scripts/conformance_run.sh html5lib css     # HTML/CSS parser harnesses
 scripts/conformance_run.sh test262          # one named harness
 TEST262_PATH=language scripts/conformance_run.sh test262
                                             # custom test262 subset
 ```
 
 See `SCORECARD.md` for the current numbers and per-harness scope notes.
+
+Primary HTML/CSS source material lives in
+`docs/external_sources/html_css_conformance_2026-07-02/`.
 
 ## Writing a new harness
 

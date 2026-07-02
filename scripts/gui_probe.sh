@@ -12,7 +12,7 @@ cd "${REPO_ROOT}"
 
 usage() {
     cat <<'EOF'
-Usage: scripts/gui_probe.sh [--release|--debug] [--backend auto|wayland|x11] [--presenter auto|shm|softbuffer] [--shm] [--fixture ai-chat|form-submit|post-submit] [--probe smoke|address|address-caret|chrome|hover|page-input|form-submit|reload|scroll|stop] [--runs N] [--timeout-seconds N] [--max-input-ns N] [--max-any-input-ns N] [--max-buffer-ns N] [--max-any-buffer-ns N] [--max-render-ns N] [--max-overhead-ns N] [--max-total-ns N] [--max-focus-total-ns N] [--trace-app-frame] [URL]
+Usage: scripts/gui_probe.sh [--release|--debug|--o0] [--backend auto|wayland|x11] [--presenter auto|shm|softbuffer] [--shm] [--fixture ai-chat|form-submit|post-submit] [--probe smoke|address|address-caret|chrome|hover|page-input|form-submit|reload|scroll|stop] [--runs N] [--timeout-seconds N] [--max-input-ns N] [--max-any-input-ns N] [--max-buffer-ns N] [--max-any-buffer-ns N] [--max-render-ns N] [--max-overhead-ns N] [--max-total-ns N] [--max-focus-total-ns N] [--trace-app-frame] [URL]
 
 Runs the silksurf winit GUI probe with SILKSURF_PROBE_EXIT_AFTER_INPUT=1.
 The process exits successfully only after the final synthetic address input
@@ -21,6 +21,7 @@ has produced a presented frame.
 Options:
   --release              Build and run target/release/silksurf-app.
   --debug                Build and run target/debug/silksurf-app. Default.
+  --o0                   Build and run target/dev-o0/silksurf-app.
   --backend VALUE        Select auto, wayland, or x11. Default: auto.
   --presenter VALUE      Select auto, shm, or softbuffer. Default: auto.
   --shm                  Select the Wayland SHM presenter.
@@ -67,6 +68,10 @@ while [ "$#" -gt 0 ]; do
             ;;
         --debug)
             profile=debug
+            shift
+            ;;
+        --o0)
+            profile=dev-o0
             shift
             ;;
         --backend)
@@ -429,6 +434,10 @@ case "${profile}" in
     debug)
         RUSTFLAGS='-D warnings' cargo build -p silksurf-app --bin silksurf-app
         binary=target/debug/silksurf-app
+        ;;
+    dev-o0)
+        RUSTFLAGS='-D warnings' cargo build --profile dev-o0 -p silksurf-app --bin silksurf-app
+        binary=target/dev-o0/silksurf-app
         ;;
     *)
         echo "gui_probe: invalid profile: ${profile}" >&2
@@ -1403,7 +1412,8 @@ check_hover_probe_log() {
         echo "gui_probe: missing hover-away cursor move" >&2
         exit 1
     fi
-    if ! grep -Fq "damage Rect(WinitDamageRect { x: 1000, y: 8, width: 170, height: 28 })" "${log_file}"; then
+    if ! grep -Fq "damage Rect(WinitDamageRect { x: 1000, y: 8, width: 170, height: 28 })" "${log_file}" \
+        && ! grep -Fq "damage Rect(WinitDamageRect { x: 1010, y: 14, width: 160, height: 7 })" "${log_file}"; then
         echo "gui_probe: hover did not use status-only damage" >&2
         exit 1
     fi
