@@ -498,6 +498,22 @@ files and the relevant ADRs.
 **Type**: Streaming lexer
 **Definition**: Tokenizes CSS source text into a sequence of `CssToken`s following the CSS Syntax Level 3 specification. Advances by calling `next_token()`.
 
+### DamagePixelRect
+**Type**: Raster damage rectangle
+**Definition**: Pixel-space rectangle that bounds a damaged framebuffer region. The rasterizer clips drawing and buffer writes to this rectangle.
+
+### DamageScratch
+**Type**: Rasterizer scratch state
+**Definition**: Reusable damage-tracking storage for Skia raster passes. Holds display-list tile lookup state and the last accepted damage rectangle across redraws.
+
+### DecodedImage
+**Type**: Image decode output structure
+**Definition**: RGBA8 image payload plus width and height after format sniffing and codec decode. Consumed by image layout and render surfaces.
+
+### decode_image
+**Type**: Image decode function
+**Definition**: Sniffs the image format from magic bytes and content type, decodes PNG, JPEG, or WebP bytes, and returns a `DecodedImage`.
+
 ### DisplayItem
 **Type**: Render command
 **Definition**: A single draw command in a display list. Variants: `Rect` (filled rectangle for background or border), `Text` (positioned text run), `Image` (decoded image at a rect). Consumed by the rasterizer.
@@ -505,6 +521,10 @@ files and the relevant ADRs.
 ### DisplayListTiles
 **Type**: Tiled display list partition
 **Definition**: A `DisplayList` that has been subdivided into 64x64 pixel tiles for parallel rasterization. Built by `DisplayList::with_tiles(width, height, 64)`. Each tile holds a clipped subset of `DisplayItem`s.
+
+### items_for_rect
+**Type**: Display-list tile query function
+**Definition**: Returns display-list item indices whose tile coverage intersects a rectangle. Damage rasterization uses it to skip unrelated draw commands.
 
 ### DomError
 **Type**: Error type
@@ -538,6 +558,18 @@ files and the relevant ADRs.
 **Type**: Layout unit conversion
 **Definition**: Converts a fixed-point layout unit back to `f32` pixels. Used when passing layout geometry to the rasterizer.
 
+### ImageError
+**Type**: Image decode error type
+**Definition**: Error returned when image format sniffing or codec decode fails. Carries a direct diagnostic string for the rejected image bytes.
+
+### ImageFormat
+**Type**: Image format enum
+**Definition**: Discriminates supported image codecs: PNG, JPEG, and WebP. Produced by `sniff_format` and consumed by `decode_image`.
+
+### ImageSurface
+**Type**: Render image surface
+**Definition**: RGBA8 image buffer with explicit width, height, and byte data. Display-list image items reference this surface during rasterization.
+
 ### HttpMethod
 **Type**: HTTP vocabulary enum
 **Definition**: Enum of HTTP request methods: `Get`, `Post`, `Put`, `Delete`, `Head`, `Options`, `Patch`. Used in `HttpRequest`.
@@ -565,6 +597,10 @@ files and the relevant ADRs.
 ### length_to_px
 **Type**: CSS unit conversion function
 **Definition**: Converts a CSS length value in any unit (em, rem, px, %, vh, vw, pt, etc.) to an absolute pixel float given the current font metrics and viewport dimensions.
+
+### length_or_auto_to_px
+**Type**: CSS length conversion function
+**Definition**: Converts concrete CSS lengths to pixel floats and maps `auto` to zero at layout boundaries that require a numeric inset.
 
 ### linear_to_srgb
 **Type**: Color conversion function
@@ -650,13 +686,25 @@ files and the relevant ADRs.
 **Type**: Rasterizer function
 **Definition**: Rasterizes a `DisplayList` into a newly-allocated RGBA `Vec<u8>` using tiny-skia for anti-aliased path rendering and cosmic-text for glyph shaping. Returns `width * height * 4` bytes.
 
+### rasterize_skia_damage_into
+**Type**: Damage rasterizer function
+**Definition**: Rasterizes only the damaged portion of a display list into a caller-owned framebuffer while reusing `DamageScratch`.
+
 ### rasterize_skia_into
 **Type**: Rasterizer function
 **Definition**: Rasterizes a `DisplayList` into a caller-supplied `Vec<u8>` using tiny-skia. Reuses the buffer across frames to avoid repeated large allocations. Preferred over `rasterize_skia` in render loops.
 
+### rasterize_skia_translated_damage_into
+**Type**: Viewport damage rasterizer function
+**Definition**: Rasterizes translated display-list damage into a caller-owned framebuffer. The paint offset maps document coordinates into the visible viewport.
+
 ### remove_child
 **Type**: DOM mutation function
 **Definition**: Detaches a child node from its parent in the DOM tree. The node is retained in the arena; call within a `with_mutation_batch` for correct generation tracking.
+
+### remove_attribute
+**Type**: DOM mutation function
+**Definition**: Removes an attribute from an element node and returns whether the attribute existed. Call within a mutation batch so style and layout caches observe the change.
 
 ### render_document
 **Type**: Engine pipeline function
@@ -689,6 +737,14 @@ files and the relevant ADRs.
 ### set_attribute
 **Type**: DOM mutation function
 **Definition**: Sets or replaces an attribute on a DOM element node. Creates the attribute if absent; overwrites the value if present. Must be called inside a `with_mutation_batch`.
+
+### set_text_content
+**Type**: DOM mutation function
+**Definition**: Replaces a text node payload or replaces an element subtree with a single text child. Marks affected nodes dirty through the mutation batch.
+
+### sniff_format
+**Type**: Image format detector
+**Definition**: Detects PNG, JPEG, and WebP from magic bytes before falling back to the HTTP content type.
 
 ### srgb_to_linear
 **Type**: Color conversion function

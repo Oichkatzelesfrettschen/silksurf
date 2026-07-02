@@ -81,20 +81,27 @@ fn is_wide_cjk(ch: char) -> bool {
 mod tests {
     use super::*;
 
+    fn assert_close(actual: f32, expected: f32) {
+        assert!(
+            (actual - expected).abs() <= f32::EPSILON,
+            "actual={actual}, expected={expected}"
+        );
+    }
+
     #[test]
     fn ascii_measurement_uses_deterministic_advances() {
         let (width, height) = measure_text("abc", 10.0, None);
 
-        assert_eq!(width, 16.5);
-        assert_eq!(height, 12.0);
+        assert_close(width, 16.5);
+        assert_close(height, 12.0);
     }
 
     #[test]
     fn ascii_measurement_wraps_to_width_limit() {
         let (width, height) = measure_text("abcd", 10.0, Some(12.0));
 
-        assert_eq!(width, 11.0);
-        assert_eq!(height, 24.0);
+        assert_close(width, 11.0);
+        assert_close(height, 24.0);
     }
 
     #[test]
@@ -102,6 +109,6 @@ mod tests {
         let (width, height) = measure_text("Hi cafe\u{0301}", 10.0, None);
 
         assert!(width > 0.0);
-        assert_eq!(height, 12.0);
+        assert_close(height, 12.0);
     }
 }

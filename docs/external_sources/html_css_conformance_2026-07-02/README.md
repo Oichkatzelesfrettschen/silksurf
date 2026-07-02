@@ -16,15 +16,11 @@ This bundle retains primary source material for HTML and CSS conformance work.
 ## Fetch Command
 
 ```sh
-bundle_dir=docs/external_sources/html_css_conformance_2026-07-02
-ua='Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0'
-mkdir -p "$bundle_dir"
-wget --user-agent="$ua" -O "$bundle_dir/css21.pdf" https://www.w3.org/TR/CSS21/css2.pdf
-wget --user-agent="$ua" -O "$bundle_dir/css22.pdf" https://www.w3.org/TR/CSS22/css2.pdf
-wget --user-agent="$ua" -O "$bundle_dir/html40.pdf" https://www.w3.org/TR/1998/REC-html40-19980424/html40.pdf
-wget --user-agent="$ua" -O "$bundle_dir/html-living-standard.html" https://html.spec.whatwg.org/multipage/
-( cd "$bundle_dir" && sha256sum css21.pdf css22.pdf html40.pdf html-living-standard.html > SHA256SUMS )
+scripts/fetch_html_css_conformance_sources.sh
 ```
+
+`SILKSURF_WGET_UA` overrides the default Mozilla user agent when a source
+requires a different replay string.
 
 ## Notes
 

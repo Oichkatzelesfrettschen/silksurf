@@ -447,6 +447,7 @@ impl WinitWindow {
     /// `render_action_fn(width, height)` can request a retained presenter buffer
     /// before the backend maps a render buffer. The backend falls back to
     /// `render_fn` when the retained buffer is unavailable.
+    #[allow(clippy::too_many_arguments)]
     pub fn run_with_input_wake_and_render_actions(
         self,
         render_fn: impl FnMut(u32, u32, u8, &mut [u32]) -> WinitPresentDamage + 'static,
@@ -681,10 +682,10 @@ fn resolve_wayland_presenter_from_environment(
 }
 
 fn translate_keyboard_input(key_event: &KeyEvent, modifiers: ModifiersState) -> Option<WinitInput> {
-    translate_logical_key(key_event.logical_key.as_ref(), modifiers)
+    translate_logical_key(&key_event.logical_key.as_ref(), modifiers)
 }
 
-fn translate_logical_key(key: Key<&str>, modifiers: ModifiersState) -> Option<WinitInput> {
+fn translate_logical_key(key: &Key<&str>, modifiers: ModifiersState) -> Option<WinitInput> {
     let command_modifier = modifiers.control_key() || modifiers.super_key();
     match key {
         Key::Character(ch) if command_modifier && ch.eq_ignore_ascii_case("l") => {
@@ -811,7 +812,7 @@ impl ApplicationHandler<WinitUserEvent> for WinitApp {
             WindowEvent::KeyboardInput {
                 event: key_event, ..
             } => {
-                self.handle_keyboard_input(event_loop, key_event);
+                self.handle_keyboard_input(event_loop, &key_event);
             }
 
             WindowEvent::ModifiersChanged(modifiers) => {
@@ -865,7 +866,7 @@ impl ApplicationHandler<WinitUserEvent> for WinitApp {
 }
 
 impl WinitApp {
-    fn handle_keyboard_input(&mut self, event_loop: &ActiveEventLoop, key_event: KeyEvent) {
+    fn handle_keyboard_input(&mut self, event_loop: &ActiveEventLoop, key_event: &KeyEvent) {
         if key_event.logical_key == Key::Named(NamedKey::Escape) {
             event_loop.exit();
             return;
@@ -873,7 +874,7 @@ impl WinitApp {
         if key_event.state != ElementState::Pressed {
             return;
         }
-        if let Some(input) = translate_keyboard_input(&key_event, self.modifiers) {
+        if let Some(input) = translate_keyboard_input(key_event, self.modifiers) {
             self.handle_input(input);
         }
     }
@@ -941,6 +942,7 @@ impl WinitApp {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn draw_resized_surface(
         &mut self,
         event_loop: &ActiveEventLoop,
@@ -1472,6 +1474,7 @@ fn softbuffer_damage_rect(
     })
 }
 
+#[allow(clippy::large_enum_variant)]
 enum WinitSurfaceKind {
     Softbuffer(WinitSurface),
     #[cfg(target_os = "linux")]
@@ -1511,6 +1514,7 @@ fn create_surface_kind(
         .map_err(|e| format!("softbuffer surface: {e}"))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_surface_kind(
     surface: &mut WinitSurfaceKind,
     width: u32,
@@ -1572,6 +1576,7 @@ fn write_retained_surface_kind(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_softbuffer_surface(
     surface: &mut WinitSurface,
     width: u32,
@@ -1643,6 +1648,7 @@ fn draw_softbuffer_surface(
 }
 
 #[cfg(target_os = "linux")]
+#[allow(clippy::too_many_arguments)]
 fn draw_wayland_shm_surface(
     surface: &mut WaylandShmSurface,
     width: u32,
@@ -1927,15 +1933,15 @@ mod tests {
     #[test]
     fn command_shortcuts_translate_to_clipboard_inputs() {
         assert_eq!(
-            super::translate_logical_key(Key::Character("c"), ModifiersState::CONTROL),
+            super::translate_logical_key(&Key::Character("c"), ModifiersState::CONTROL),
             Some(WinitInput::Copy)
         );
         assert_eq!(
-            super::translate_logical_key(Key::Character("v"), ModifiersState::SUPER),
+            super::translate_logical_key(&Key::Character("v"), ModifiersState::SUPER),
             Some(WinitInput::Paste)
         );
         assert_eq!(
-            super::translate_logical_key(Key::Character("x"), ModifiersState::CONTROL),
+            super::translate_logical_key(&Key::Character("x"), ModifiersState::CONTROL),
             Some(WinitInput::Cut)
         );
     }
@@ -1943,15 +1949,15 @@ mod tests {
     #[test]
     fn command_shortcuts_do_not_emit_text_input() {
         assert_eq!(
-            super::translate_logical_key(Key::Character("c"), ModifiersState::empty()),
+            super::translate_logical_key(&Key::Character("c"), ModifiersState::empty()),
             Some(WinitInput::TextInput('c'))
         );
         assert_eq!(
-            super::translate_logical_key(Key::Character("c"), ModifiersState::ALT),
+            super::translate_logical_key(&Key::Character("c"), ModifiersState::ALT),
             None
         );
         assert_eq!(
-            super::translate_logical_key(Key::Character("c"), ModifiersState::CONTROL),
+            super::translate_logical_key(&Key::Character("c"), ModifiersState::CONTROL),
             Some(WinitInput::Copy)
         );
     }
@@ -1959,11 +1965,14 @@ mod tests {
     #[test]
     fn horizontal_arrows_translate_to_caret_inputs() {
         assert_eq!(
-            super::translate_logical_key(Key::Named(NamedKey::ArrowLeft), ModifiersState::empty()),
+            super::translate_logical_key(&Key::Named(NamedKey::ArrowLeft), ModifiersState::empty()),
             Some(WinitInput::MoveCaretLeft)
         );
         assert_eq!(
-            super::translate_logical_key(Key::Named(NamedKey::ArrowRight), ModifiersState::empty()),
+            super::translate_logical_key(
+                &Key::Named(NamedKey::ArrowRight),
+                ModifiersState::empty()
+            ),
             Some(WinitInput::MoveCaretRight)
         );
     }
@@ -2076,7 +2085,10 @@ mod tests {
     #[test]
     fn expired_busy_redraw_deadline_falls_back_to_pacing() {
         let now = Instant::now();
-        let busy_deadline = now - Duration::from_millis(1);
+        let busy_deadline = now
+            .checked_sub(Duration::from_millis(1))
+            // UNWRAP-OK: Instant::now supports subtracting one millisecond.
+            .expect("instant supports a one millisecond subtraction");
         let paced_deadline = now + Duration::from_millis(4);
 
         assert_eq!(
@@ -2088,8 +2100,14 @@ mod tests {
     #[test]
     fn expired_redraw_deadlines_allow_request() {
         let now = Instant::now();
-        let busy_deadline = now - Duration::from_millis(2);
-        let paced_deadline = now - Duration::from_millis(1);
+        let busy_deadline = now
+            .checked_sub(Duration::from_millis(2))
+            // UNWRAP-OK: Instant::now supports subtracting two milliseconds.
+            .expect("instant supports a two millisecond subtraction");
+        let paced_deadline = now
+            .checked_sub(Duration::from_millis(1))
+            // UNWRAP-OK: Instant::now supports subtracting one millisecond.
+            .expect("instant supports a one millisecond subtraction");
 
         assert_eq!(
             redraw_flush_wait_deadline(Some(busy_deadline), Some(paced_deadline), now),

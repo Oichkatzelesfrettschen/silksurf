@@ -18,6 +18,7 @@
 #   make bench   -- run the benchmark suite
 #   make gui-probe -- run the live winit GUI probe when a display is present
 #   make gui-probe-o0 -- run the live GUI probe with opt-level 0
+#   make fetch-conformance-sources -- refresh retained HTML/CSS source bundle
 #   make release   -- guarded release (requires explicit VERSION=x.y.z)
 #
 # All Rust targets pass RUSTFLAGS='-D warnings'. This is the project policy.
@@ -67,7 +68,7 @@ BOLT_OPTS     ?= -reorder-blocks=ext-tsp -reorder-functions=cdsort \
 # Rust targets (primary)
 # ---------------------------------------------------------------------------
 
-.PHONY: check test full fmt doc clean clean-cargo clean-build-artifacts hooks cross miri fuzz bench gui-probe gui-probe-o0 release
+.PHONY: check test full fmt doc clean clean-cargo clean-build-artifacts hooks cross miri fuzz bench gui-probe gui-probe-o0 fetch-conformance-sources release
 
 # Fast gate: format check + clippy -D warnings + lint helpers.
 # Wired into pre-commit hook.
@@ -172,6 +173,10 @@ gui-probe:
 # Live GUI O0 smoke. This target exercises the custom dev-o0 Cargo profile.
 gui-probe-o0:
 	scripts/gui_probe.sh $(GUI_PROBE_O0_ARGS)
+
+# Refresh retained HTML/CSS source material with the recorded Mozilla UA.
+fetch-conformance-sources:
+	scripts/fetch_html_css_conformance_sources.sh
 
 # Guarded release. Requires VERSION=x.y.z on the command line.
 release:

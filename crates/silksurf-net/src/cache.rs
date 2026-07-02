@@ -27,8 +27,9 @@
  * See: silksurf-app/src/main.rs for speculative pre-render integration
  */
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHasher};
 use serde::{Deserialize, Serialize};
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -246,8 +247,6 @@ fn put_to_disk(dir: &Path, url: &str, entry: &CachedResponse) {
     let Some(body_utf8) = disk_cache_body(entry) else {
         return;
     };
-    use rustc_hash::FxHasher;
-    use std::hash::{Hash, Hasher};
     let mut hasher = FxHasher::default();
     url.hash(&mut hasher);
     let key = hasher.finish();

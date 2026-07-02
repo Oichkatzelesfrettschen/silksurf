@@ -415,6 +415,7 @@ fn fill_rect(buffer: &mut [u8], width: u32, height: u32, rect: Rect, color: Colo
     // pointer cast even when the underlying allocation guarantees alignment.
     #[allow(clippy::cast_ptr_alignment)]
     let buffer_u32 =
+        // SAFETY: the buffer allocation uses u32 framebuffer alignment and len_u32 stays in bounds.
         unsafe { std::slice::from_raw_parts_mut(buffer.as_mut_ptr().cast::<u32>(), len_u32) };
 
     for y in y0..y1 {
@@ -1007,6 +1008,7 @@ pub fn rasterize_skia_damage_into(
 /// `buffer_damage` names the destination pixels. `item_damage` names the
 /// same damage in display-list coordinates. `paint_offset` maps display-list
 /// coordinates into destination buffer coordinates before clipping to damage.
+#[allow(clippy::too_many_arguments)]
 pub fn rasterize_skia_translated_damage_into(
     display_list: &DisplayList,
     width: u32,
@@ -1167,10 +1169,10 @@ fn collect_damage_item_indices(
 }
 
 fn prepare_seen_items(seen_items: &mut Vec<bool>, item_count: usize) {
-    if seen_items.len() != item_count {
-        seen_items.resize(item_count, false);
-    } else {
+    if seen_items.len() == item_count {
         seen_items.fill(false);
+    } else {
+        seen_items.resize(item_count, false);
     }
 }
 
