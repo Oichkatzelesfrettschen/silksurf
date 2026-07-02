@@ -119,7 +119,6 @@ struct NodeSnapshot {
     node_value: String,
     id_val: String,
     class_val: String,
-    text: String,
 }
 
 fn snapshot_node(dom: &Dom, node_id: NodeId) -> NodeSnapshot {
@@ -133,7 +132,6 @@ fn snapshot_node(dom: &Dom, node_id: NodeId) -> NodeSnapshot {
                     node_value: text.clone(),
                     id_val: String::new(),
                     class_val: String::new(),
-                    text: text.clone(),
                 };
             }
             NodeKind::Document => {
@@ -144,7 +142,6 @@ fn snapshot_node(dom: &Dom, node_id: NodeId) -> NodeSnapshot {
                     node_value: String::new(),
                     id_val: String::new(),
                     class_val: String::new(),
-                    text: String::new(),
                 };
             }
             NodeKind::Comment { data: comment_text } => {
@@ -155,7 +152,6 @@ fn snapshot_node(dom: &Dom, node_id: NodeId) -> NodeSnapshot {
                     node_value: comment_text.clone(),
                     id_val: String::new(),
                     class_val: String::new(),
-                    text: String::new(),
                 };
             }
             _ => {}
@@ -182,7 +178,6 @@ fn snapshot_node(dom: &Dom, node_id: NodeId) -> NodeSnapshot {
     } else {
         (String::new(), String::new())
     };
-    let text = collect_text(dom, node_id);
     NodeSnapshot {
         node_name: tag.clone(),
         tag_name: tag,
@@ -190,7 +185,6 @@ fn snapshot_node(dom: &Dom, node_id: NodeId) -> NodeSnapshot {
         node_value: String::new(),
         id_val: id_v,
         class_val: cls_v,
-        text,
     }
 }
 
@@ -770,13 +764,14 @@ fn append_child_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunc
 
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
-            let child = extract_node_id(args.first(), ctx)?;
+            let child_arg = args.first();
+            let child = extract_node_id(child_arg, ctx)?;
             {
                 let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
                 detach_from_parent(&mut dom, child);
                 let _ = dom.append_child(node_id, child);
             }
-            Ok(node_to_js_object(&arc, child, ctx))
+            Ok(child_arg.cloned().unwrap_or(JsValue::undefined()))
         })
     }
 }
@@ -787,12 +782,13 @@ fn remove_child_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunc
 
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
-            let child = extract_node_id(args.first(), ctx)?;
+            let child_arg = args.first();
+            let child = extract_node_id(child_arg, ctx)?;
             {
                 let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
                 let _ = dom.remove_child(node_id, child);
             }
-            Ok(node_to_js_object(&arc, child, ctx))
+            Ok(child_arg.cloned().unwrap_or(JsValue::undefined()))
         })
     }
 }
@@ -803,10 +799,11 @@ fn insert_before_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFun
 
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
-            let child = extract_node_id(args.first(), ctx)?;
+            let child_arg = args.first();
+            let child = extract_node_id(child_arg, ctx)?;
             let reference = extract_optional_node_id(args.get(1), ctx)?;
             insert_before_or_append(&arc, node_id, child, reference);
-            Ok(node_to_js_object(&arc, child, ctx))
+            Ok(child_arg.cloned().unwrap_or(JsValue::undefined()))
         })
     }
 }
@@ -833,13 +830,14 @@ fn replace_child_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFun
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let child = extract_node_id(args.first(), ctx)?;
-            let old_child = extract_node_id(args.get(1), ctx)?;
+            let old_child_arg = args.get(1);
+            let old_child = extract_node_id(old_child_arg, ctx)?;
             {
                 let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
                 let _ = dom.insert_before(node_id, child, old_child);
                 let _ = dom.remove_child(node_id, old_child);
             }
-            Ok(node_to_js_object(&arc, old_child, ctx))
+            Ok(old_child_arg.cloned().unwrap_or(JsValue::undefined()))
         })
     }
 }
