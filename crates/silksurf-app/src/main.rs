@@ -42,9 +42,10 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 
 use quick_cache::{Weighter, unsync::Cache};
+use silksurf_css::StyleIndex;
 use silksurf_dom::diff::{ChangeKind, DomDiff};
 use silksurf_engine::fused_pipeline::{
-    FusedResult, ReplacedSize, fused_style_layout_paint,
+    FusedResult, FusedWorkspace, ReplacedSize, fused_style_layout_paint,
     fused_style_layout_paint_with_replaced_sizes,
 };
 use silksurf_engine::parse_html;
@@ -317,9 +318,11 @@ struct BrowserPageRuntime {
     dom: Arc<Mutex<silksurf_dom::Dom>>,
     document: silksurf_dom::NodeId,
     stylesheet: silksurf_css::Stylesheet,
+    style_index: StyleIndex,
     viewport: Rect,
     js_ctx: SilkContext,
     fused: FusedResult,
+    fused_workspace: FusedWorkspace,
     display_list: silksurf_render::DisplayList,
     images: Vec<DecodedPageImage>,
     rgba: Vec<u8>,
@@ -1302,6 +1305,7 @@ fn build_browser_page_with_buffers_for_height(
         width: FRAME_WIDTH as f32,
         height: FRAME_HEIGHT as f32 - BROWSER_CHROME_HEIGHT,
     };
+    let style_index = StyleIndex::for_viewport(&stylesheet, viewport.width, viewport.height);
     let dom_arc = Arc::new(Mutex::new(dom));
     let mut js_ctx = SilkContext::with_dom(&dom_arc);
     {
@@ -1494,9 +1498,11 @@ fn build_browser_page_with_buffers_for_height(
             dom: dom_arc,
             document: doc_node,
             stylesheet,
+            style_index,
             viewport,
             js_ctx,
             fused,
+            fused_workspace: FusedWorkspace::new(),
             display_list,
             images: payload.images,
             rgba,
@@ -2190,13 +2196,15 @@ fn repaint_runtime_dirty_nodes(
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let replaced_sizes =
         collect_image_replaced_sizes(&dom, runtime.document, &frame.url, &runtime.images);
-    let mut new_fused = fused_style_layout_paint_with_replaced_sizes(
+    runtime.fused_workspace.run_with_replaced_sizes(
         &dom,
         &runtime.stylesheet,
+        &runtime.style_index,
         runtime.document,
         runtime.viewport,
         &replaced_sizes,
     );
+    let mut new_fused = runtime.fused_workspace.snapshot_result();
     let mut display_list = silksurf_render::DisplayList {
         items: std::mem::take(&mut new_fused.display_items),
         tiles: None,
@@ -12059,6 +12067,7 @@ mod tests {
         };
         let dom_arc = Arc::new(Mutex::new(document.dom));
         let mut js_ctx = SilkContext::with_dom(&dom_arc);
+        let style_index = StyleIndex::for_viewport(&stylesheet, viewport.width, viewport.height);
         let mut fused = {
             let dom = dom_arc
                 .lock()
@@ -12110,9 +12119,11 @@ mod tests {
                 dom: Arc::clone(&dom_arc),
                 document: document.document,
                 stylesheet,
+                style_index,
                 viewport,
                 js_ctx,
                 fused,
+                fused_workspace: FusedWorkspace::new(),
                 display_list: runtime_display_list,
                 images: Vec::new(),
                 rgba,
