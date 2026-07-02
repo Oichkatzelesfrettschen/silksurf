@@ -25,7 +25,7 @@ use silksurf_css::{
     GridTrackMin as CssGridTrackMin, GridTrackSize as CssGridTrackSize,
     JustifyContent as CssJustifyContent, Length, LengthOrAuto, WhiteSpace,
 };
-use silksurf_dom::{Dom, NodeId as DomNodeId, NodeKind};
+use silksurf_dom::{Dom, NodeId as DomNodeId, NodeKind, TagName};
 use taffy::{
     AlignItems, AlignSelf, AvailableSpace, Dimension, Display as TaffyDisplay, FlexDirection,
     FlexWrap, GridAutoFlow, GridPlacement, GridTemplateComponent, JustifyContent, LengthPercentage,
@@ -507,6 +507,9 @@ fn taffy_node_merges_into_parent(
     {
         return index != 0;
     }
+    if transparent_code_wrapper_merges_into_parent(dom, table, styles, index) {
+        return true;
+    }
     let Some(node_id) = table.bfs_order.get(index).copied() else {
         return false;
     };
@@ -515,6 +518,81 @@ fn taffy_node_merges_into_parent(
     };
     matches!(node.kind(), NodeKind::Text { .. })
         && text_node_parent_is_text_leaf(dom, table, styles, index)
+}
+
+fn transparent_code_wrapper_merges_into_parent(
+    dom: &Dom,
+    table: &LayoutNeighborTable,
+    styles: &[Option<ComputedStyle>],
+    index: usize,
+) -> bool {
+    let Some(node_id) = table.bfs_order.get(index).copied() else {
+        return false;
+    };
+    let Ok(node) = dom.node(node_id) else {
+        return false;
+    };
+    if !matches!(node.kind(), NodeKind::Element { name, .. } if *name == TagName::Code) {
+        return false;
+    }
+    let Some(style) = styles.get(index).and_then(Option::as_ref) else {
+        return false;
+    };
+    style.display == CssDisplay::Inline
+        && style_has_no_layout_or_paint_box(style)
+        && single_direct_text_child(dom, node_id).is_some()
+        && parent_has_only_this_rendered_child(table, styles, index)
+}
+
+fn style_has_no_layout_or_paint_box(style: &ComputedStyle) -> bool {
+    margins_are_zero(style.margin)
+        && edges_are_zero(style.padding)
+        && edges_are_zero(style.border)
+        && style.background_color.a == 0
+        && style.background_image.is_none()
+        && style.box_shadow.is_none()
+        && style.border_radius == 0.0
+        && style.width == LengthOrAuto::Auto
+        && style.height == LengthOrAuto::Auto
+}
+
+fn margins_are_zero(margins: silksurf_css::Margins) -> bool {
+    [margins.top, margins.right, margins.bottom, margins.left]
+        .into_iter()
+        .all(|length| length == LengthOrAuto::Length(Length::zero()))
+}
+
+fn edges_are_zero(edges: silksurf_css::Edges) -> bool {
+    [edges.top, edges.right, edges.bottom, edges.left]
+        .into_iter()
+        .all(|length| length == Length::zero())
+}
+
+fn parent_has_only_this_rendered_child(
+    table: &LayoutNeighborTable,
+    styles: &[Option<ComputedStyle>],
+    index: usize,
+) -> bool {
+    let parent = table.parent_idx.get(index).copied().unwrap_or(u32::MAX);
+    if parent == u32::MAX {
+        return false;
+    }
+    let parent = parent as usize;
+    let Some(first_child) = table.child_start.get(parent).copied() else {
+        return false;
+    };
+    if first_child == u32::MAX {
+        return false;
+    }
+    let start = first_child as usize;
+    let end = start + usize::from(table.child_count[parent]);
+    (start..end).all(|child| {
+        child == index
+            || styles
+                .get(child)
+                .and_then(Option::as_ref)
+                .is_some_and(|style| style.display == CssDisplay::None)
+    })
 }
 
 fn text_node_collapses_to_empty_layout(
@@ -1128,5 +1206,52 @@ mod tests {
         tl.rebuild(&dom, &table, &styles);
 
         assert!(tl.taffy_nodes[whitespace_idx].is_some());
+    }
+
+    #[test]
+    fn transparent_code_wrapper_reuses_parent_layout_node() {
+        let mut dom = Dom::new();
+        let root = dom.create_document();
+        let pre = dom.create_element("pre");
+        let code = dom.create_element("code");
+        let text = dom.create_text("fn main() {}");
+        dom.append_child(root, pre).unwrap();
+        dom.append_child(pre, code).unwrap();
+        dom.append_child(code, text).unwrap();
+
+        let table = LayoutNeighborTable::build(&dom, root);
+        let mut styles: Vec<Option<ComputedStyle>> = vec![
+            Some(ComputedStyle {
+                display: CssDisplay::Block,
+                ..Default::default()
+            });
+            table.len()
+        ];
+        let code_idx = table.node_to_bfs_idx[&code] as usize;
+        let text_idx = table.node_to_bfs_idx[&text] as usize;
+        styles[code_idx] = Some(ComputedStyle {
+            display: CssDisplay::Inline,
+            ..Default::default()
+        });
+        styles[text_idx] = Some(ComputedStyle {
+            display: CssDisplay::Inline,
+            ..Default::default()
+        });
+
+        let viewport = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 800.0,
+            height: 600.0,
+        };
+        let mut tl = TaffyLayout::new();
+        tl.rebuild(&dom, &table, &styles);
+        tl.compute(&dom, &styles, &table.bfs_order, viewport);
+        let mut node_rects = vec![Rect::default(); table.len()];
+        tl.write_rects(&table.parent_idx, &mut node_rects, viewport);
+
+        assert!(tl.taffy_nodes[code_idx].is_none());
+        assert!(tl.taffy_nodes[text_idx].is_none());
+        assert_eq!(node_rects[code_idx], node_rects[text_idx]);
     }
 }
