@@ -222,6 +222,13 @@ pub struct GridItemStyle {
     pub row_end: GridLine,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BoxSizing {
+    #[default]
+    ContentBox,
+    BorderBox,
+}
+
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -488,6 +495,7 @@ pub struct ComputedStyle {
     pub max_width: Option<Length>,
     pub min_height: Length,
     pub max_height: Option<Length>,
+    pub box_sizing: BoxSizing,
     // Overflow
     pub overflow_x: Overflow,
     pub overflow_y: Overflow,
@@ -543,6 +551,7 @@ impl Default for ComputedStyle {
             max_width: None,
             min_height: Length::Px(0.0),
             max_height: None,
+            box_sizing: BoxSizing::default(),
             overflow_x: Overflow::default(),
             overflow_y: Overflow::default(),
             border_color: Color::black(),
@@ -671,6 +680,7 @@ struct CascadedStyle {
     max_width: Option<ResolvedProperty<Option<Length>>>,
     min_height: Option<ResolvedProperty<Length>>,
     max_height: Option<ResolvedProperty<Option<Length>>>,
+    box_sizing: Option<ResolvedProperty<BoxSizing>>,
     // Overflow
     overflow_x: Option<ResolvedProperty<Overflow>>,
     overflow_y: Option<ResolvedProperty<Overflow>>,
@@ -1163,6 +1173,12 @@ impl CascadedStyle {
                 ),
                 em_px,
                 rem_base_px,
+            ),
+            box_sizing: resolve_non_inherited_kw(
+                self.box_sizing,
+                ks.get(&PropertyId::BoxSizing),
+                parent.map(|s| s.box_sizing),
+                BoxSizing::default(),
             ),
             overflow_x: resolve_non_inherited_kw(
                 self.overflow_x,
@@ -3010,6 +3026,17 @@ fn apply_declaration(
                 );
             }
         }
+        PropertyId::BoxSizing => {
+            if let Some(value) = parse_box_sizing(&declaration.value) {
+                apply_property(
+                    &mut cascaded.box_sizing,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
         // Border rendering
         PropertyId::BorderColor => {
             if let Some(value) = parse_color(&declaration.value) {
@@ -3294,6 +3321,17 @@ fn parse_display(tokens: &[CssToken]) -> Option<Display> {
         "grid" => Some(Display::Grid),
         "none" => Some(Display::None),
         _ => None,
+    }
+}
+
+fn parse_box_sizing(tokens: &[CssToken]) -> Option<BoxSizing> {
+    let ident = first_ident(tokens)?;
+    if ident.eq_ignore_ascii_case("content-box") {
+        Some(BoxSizing::ContentBox)
+    } else if ident.eq_ignore_ascii_case("border-box") {
+        Some(BoxSizing::BorderBox)
+    } else {
+        None
     }
 }
 

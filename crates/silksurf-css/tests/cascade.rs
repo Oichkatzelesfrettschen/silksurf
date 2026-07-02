@@ -1,5 +1,5 @@
 use silksurf_css::{
-    Color, Display, Length, LengthOrAuto, Margins, compute_styles, parse_stylesheet,
+    BoxSizing, Color, Display, Length, LengthOrAuto, Margins, compute_styles, parse_stylesheet,
 };
 use silksurf_dom::Dom;
 
@@ -83,6 +83,28 @@ fn cascades_line_height_and_border() {
             left: Length::Px(4.0),
         }
     );
+}
+
+#[test]
+fn box_sizing_cascades_as_non_inherited_sizing_state() {
+    let stylesheet =
+        parse_stylesheet("body { box-sizing: border-box; } div { display: block; }").unwrap();
+
+    let mut dom = Dom::new();
+    let doc = dom.create_document();
+    let html = dom.create_element("html");
+    dom.append_child(doc, html).unwrap();
+    let body = dom.create_element("body");
+    dom.append_child(html, body).unwrap();
+    let div = dom.create_element("div");
+    dom.append_child(body, div).unwrap();
+
+    let styles = compute_styles(&dom, doc, &stylesheet);
+    let body_style = styles.get(&body).expect("body style");
+    let div_style = styles.get(&div).expect("div style");
+
+    assert_eq!(body_style.box_sizing, BoxSizing::BorderBox);
+    assert_eq!(div_style.box_sizing, BoxSizing::ContentBox);
 }
 
 #[test]
