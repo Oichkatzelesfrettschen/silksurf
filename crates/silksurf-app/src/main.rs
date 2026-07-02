@@ -5120,6 +5120,12 @@ fn pack_rgba_bytes_to_argb_words(rgba: &[u8], argb: &mut [u32]) {
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     {
         if std::is_x86_feature_detected!("sse2") {
+            if std::is_x86_feature_detected!("ssse3") {
+                // SAFETY: the runtime feature gate above proves SSSE3 support.
+                let packed = unsafe { pack_rgba_bytes_to_argb_words_ssse3(rgba, argb) };
+                pack_rgba_bytes_to_argb_words_scalar(&rgba[packed * 4..], &mut argb[packed..]);
+                return;
+            }
             // SAFETY: the runtime feature gate above proves SSE2 support.
             let packed = unsafe { pack_rgba_bytes_to_argb_words_sse2(rgba, argb) };
             pack_rgba_bytes_to_argb_words_scalar(&rgba[packed * 4..], &mut argb[packed..]);
@@ -5135,19 +5141,19 @@ fn pack_rgba_bytes_to_argb_words(rgba: &[u8], argb: &mut [u32]) {
 unsafe fn pack_rgba_bytes_to_argb_words_avx2(rgba: &[u8], argb: &mut [u32]) -> usize {
     #[cfg(target_arch = "x86")]
     use std::arch::x86::{
-        __m256i, _mm256_and_si256, _mm256_loadu_si256, _mm256_or_si256, _mm256_set1_epi32,
-        _mm256_slli_epi32, _mm256_srli_epi32, _mm256_storeu_si256,
+        __m256i, _mm256_loadu_si256, _mm256_setr_epi8, _mm256_shuffle_epi8, _mm256_storeu_si256,
     };
     #[cfg(target_arch = "x86_64")]
     use std::arch::x86_64::{
-        __m256i, _mm256_and_si256, _mm256_loadu_si256, _mm256_or_si256, _mm256_set1_epi32,
-        _mm256_slli_epi32, _mm256_srli_epi32, _mm256_storeu_si256,
+        __m256i, _mm256_loadu_si256, _mm256_setr_epi8, _mm256_shuffle_epi8, _mm256_storeu_si256,
     };
 
     let pixels = argb.len().min(rgba.len() / 4);
     let lanes = pixels / 8;
-    let red_blue_mask = _mm256_set1_epi32(0x00ff_00ff);
-    let green_alpha_mask = _mm256_set1_epi32(0xff00_ff00u32 as i32);
+    let shuffle_mask = _mm256_setr_epi8(
+        2, 1, 0, 3, 6, 5, 4, 7, 10, 9, 8, 11, 14, 13, 12, 15, 2, 1, 0, 3, 6, 5, 4, 7, 10, 9, 8, 11,
+        14, 13, 12, 15,
+    );
 
     for lane in 0..lanes {
         let rgba_offset = lane * 32;
@@ -5155,11 +5161,7 @@ unsafe fn pack_rgba_bytes_to_argb_words_avx2(rgba: &[u8], argb: &mut [u32]) -> u
         let source = unsafe { rgba.as_ptr().add(rgba_offset).cast::<__m256i>() };
         let dest = unsafe { argb.as_mut_ptr().add(argb_offset).cast::<__m256i>() };
         let raw = unsafe { _mm256_loadu_si256(source) };
-        let red_blue = _mm256_and_si256(raw, red_blue_mask);
-        let green_alpha = _mm256_and_si256(raw, green_alpha_mask);
-        let red = _mm256_slli_epi32(red_blue, 16);
-        let blue = _mm256_srli_epi32(red_blue, 16);
-        let argb_words = _mm256_or_si256(green_alpha, _mm256_or_si256(red, blue));
+        let argb_words = _mm256_shuffle_epi8(raw, shuffle_mask);
         unsafe {
             _mm256_storeu_si256(dest, argb_words);
         }
@@ -5176,6 +5178,37 @@ fn pack_rgba_bytes_to_argb_words_scalar(rgba: &[u8], argb: &mut [u32]) {
 
 fn argb_word_from_rgba(px: &[u8]) -> u32 {
     (u32::from(px[3]) << 24) | (u32::from(px[0]) << 16) | (u32::from(px[1]) << 8) | u32::from(px[2])
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[target_feature(enable = "ssse3")]
+unsafe fn pack_rgba_bytes_to_argb_words_ssse3(rgba: &[u8], argb: &mut [u32]) -> usize {
+    #[cfg(target_arch = "x86")]
+    use std::arch::x86::{
+        __m128i, _mm_loadu_si128, _mm_setr_epi8, _mm_shuffle_epi8, _mm_storeu_si128,
+    };
+    #[cfg(target_arch = "x86_64")]
+    use std::arch::x86_64::{
+        __m128i, _mm_loadu_si128, _mm_setr_epi8, _mm_shuffle_epi8, _mm_storeu_si128,
+    };
+
+    let pixels = argb.len().min(rgba.len() / 4);
+    let lanes = pixels / 4;
+    let shuffle_mask = _mm_setr_epi8(2, 1, 0, 3, 6, 5, 4, 7, 10, 9, 8, 11, 14, 13, 12, 15);
+
+    for lane in 0..lanes {
+        let rgba_offset = lane * 16;
+        let argb_offset = lane * 4;
+        let source = unsafe { rgba.as_ptr().add(rgba_offset).cast::<__m128i>() };
+        let dest = unsafe { argb.as_mut_ptr().add(argb_offset).cast::<__m128i>() };
+        let raw = unsafe { _mm_loadu_si128(source) };
+        let argb_words = _mm_shuffle_epi8(raw, shuffle_mask);
+        unsafe {
+            _mm_storeu_si128(dest, argb_words);
+        }
+    }
+
+    lanes * 4
 }
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
@@ -8203,6 +8236,27 @@ mod tests {
         rgba_bytes_to_argb_words_into(&rgba[..4], &mut argb);
         assert_eq!(argb, vec![0x44112233]);
         assert_eq!(argb.capacity(), capacity);
+    }
+
+    #[test]
+    fn rgba_bytes_to_argb_words_into_packs_simd_lanes_and_tail() {
+        let mut rgba = Vec::new();
+        let mut expected = Vec::new();
+        for index in 0..17u8 {
+            let r = index.wrapping_mul(3).wrapping_add(1);
+            let g = index.wrapping_mul(5).wrapping_add(2);
+            let b = index.wrapping_mul(7).wrapping_add(3);
+            let a = index.wrapping_mul(11).wrapping_add(4);
+            rgba.extend_from_slice(&[r, g, b, a]);
+            expected.push(
+                (u32::from(a) << 24) | (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b),
+            );
+        }
+
+        let mut argb = Vec::new();
+        rgba_bytes_to_argb_words_into(&rgba, &mut argb);
+
+        assert_eq!(argb, expected);
     }
 
     #[test]
