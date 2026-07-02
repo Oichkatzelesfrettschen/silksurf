@@ -8629,6 +8629,20 @@ fn draw_page_bitmap_glyph_clipped(
 ) {
     let clip_x1 = clip.x.saturating_add(clip.width);
     let clip_y1 = clip.y.saturating_add(clip.height);
+    if let Some((glyph_x, glyph_y, glyph_scale)) =
+        page_bitmap_glyph_fast_bounds(width, height, x, y, scale, clip)
+    {
+        draw_page_bitmap_glyph_unchecked(
+            pixels,
+            width,
+            glyph_x,
+            glyph_y,
+            glyph_scale,
+            glyph,
+            color,
+        );
+        return;
+    }
     for (row, bits) in glyph.iter().enumerate() {
         for col in 0..5 {
             if (bits >> (4 - col)) & 1 == 0 {
@@ -8646,6 +8660,79 @@ fn draw_page_bitmap_glyph_clipped(
                         continue;
                     }
                     put_argb_pixel(pixels, width, height, pixel_x as u32, pixel_y as u32, color);
+                }
+            }
+        }
+    }
+}
+
+fn page_bitmap_glyph_fast_bounds(
+    width: u32,
+    height: u32,
+    x: i32,
+    y: i32,
+    scale: i32,
+    clip: PixelRect,
+) -> Option<(u32, u32, u32)> {
+    if scale <= 0 {
+        return None;
+    }
+    if x < 0 {
+        return None;
+    }
+    if y < 0 {
+        return None;
+    }
+    let glyph_x = x as u32;
+    let glyph_y = y as u32;
+    let glyph_scale = scale as u32;
+    let glyph_right = glyph_x.checked_add(5_u32.saturating_mul(glyph_scale))?;
+    let glyph_bottom = glyph_y.checked_add(7_u32.saturating_mul(glyph_scale))?;
+    if glyph_x < clip.x {
+        return None;
+    }
+    if glyph_y < clip.y {
+        return None;
+    }
+    if glyph_right > clip.x.saturating_add(clip.width) {
+        return None;
+    }
+    if glyph_bottom > clip.y.saturating_add(clip.height) {
+        return None;
+    }
+    if glyph_right > width {
+        return None;
+    }
+    if glyph_bottom > height {
+        return None;
+    }
+    Some((glyph_x, glyph_y, glyph_scale))
+}
+
+fn draw_page_bitmap_glyph_unchecked(
+    pixels: &mut [u32],
+    width: u32,
+    x: u32,
+    y: u32,
+    scale: u32,
+    glyph: [u8; 7],
+    color: u32,
+) {
+    let stride = width as usize;
+    let base_x = x as usize;
+    let base_y = y as usize;
+    let scale = scale as usize;
+    for (row, bits) in glyph.iter().enumerate() {
+        let row_base = base_y + row * scale;
+        for col in 0..5 {
+            if (bits >> (4 - col)) & 1 == 0 {
+                continue;
+            }
+            let col_base = base_x + col * scale;
+            for dy in 0..scale {
+                let row_start = (row_base + dy) * stride + col_base;
+                for dx in 0..scale {
+                    pixels[row_start + dx] = color;
                 }
             }
         }
