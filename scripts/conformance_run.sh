@@ -31,9 +31,16 @@ mkdir -p "$SCORECARD_DIR"
 
 run_html5lib() {
     echo "==> html5lib tokenizer corpus"
-    if [ -z "${HTML5LIB_TESTS_DIR:-}" ] \
-        && [ ! -d "silksurf-extras/html5lib-tests/tokenizer" ]; then
-        echo "    html5lib corpus not present; test emits a skip notice."
+    if [ -z "${HTML5LIB_TESTS_DIR:-}" ]; then
+        if [ -d "$REPO_ROOT/silksurf-extras/html5lib-tests/tokenizer" ]; then
+            export HTML5LIB_TESTS_DIR="$REPO_ROOT/silksurf-extras/html5lib-tests/tokenizer"
+        else
+            echo "    html5lib corpus not present; run scripts/fetch_html_css_test_corpora.sh."
+            echo "    test emits a skip notice."
+        fi
+    fi
+    if [ -n "${HTML5LIB_TESTS_DIR:-}" ]; then
+        echo "    HTML5LIB_TESTS_DIR=$HTML5LIB_TESTS_DIR"
     fi
     RUSTFLAGS='-D warnings' cargo test -p silksurf-html --test html5lib_harness -- --nocapture
 }
@@ -41,7 +48,9 @@ run_html5lib() {
 run_css() {
     echo "==> css external corpus"
     if [ -z "${CSS_TESTS_DIR:-}" ]; then
-        echo "    CSS_TESTS_DIR not set; test emits a skip notice."
+        export CSS_TESTS_DIR="$REPO_ROOT/crates/silksurf-css/tests/fixtures/css_harness_corpus"
+        echo "    CSS_TESTS_DIR=$CSS_TESTS_DIR"
+        echo "    set CSS_TESTS_DIR=/path/to/css-corpus for a broader sweep."
     fi
     RUSTFLAGS='-D warnings' cargo test -p silksurf-css --test css_harness -- --nocapture
 }

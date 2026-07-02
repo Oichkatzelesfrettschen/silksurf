@@ -20,6 +20,7 @@
 #   make conformance-html-css -- run the HTML/CSS harness subset
 #   make verify-conformance-sources -- verify retained HTML/CSS source bytes
 #   make fetch-conformance-sources -- refresh retained HTML/CSS source bundle
+#   make fetch-conformance-test-corpora -- fetch ignored external test corpora
 #   make release   -- guarded release (requires explicit VERSION=x.y.z)
 #
 # All Rust targets pass RUSTFLAGS='-D warnings'. This is the project policy.
@@ -69,7 +70,7 @@ BOLT_OPTS     ?= -reorder-blocks=ext-tsp -reorder-functions=cdsort \
 # Rust targets (primary)
 # ---------------------------------------------------------------------------
 
-.PHONY: check test full fmt doc clean clean-cargo clean-build-artifacts hooks cross miri fuzz bench gui-probe gui-probe-o0 gui-probe-o0-ai-chat conformance conformance-html-css verify-conformance-sources fetch-conformance-sources release
+.PHONY: check test full fmt doc clean clean-cargo clean-build-artifacts hooks cross miri fuzz bench gui-probe gui-probe-o0 gui-probe-o0-ai-chat conformance conformance-html-css verify-conformance-sources fetch-conformance-sources fetch-conformance-test-corpora release
 
 # Fast gate: format check + clippy -D warnings + lint helpers.
 # Wired into pre-commit hook.
@@ -197,6 +198,10 @@ verify-conformance-sources:
 # Refresh retained HTML/CSS source material with the recorded Mozilla UA.
 fetch-conformance-sources:
 	scripts/fetch_html_css_conformance_sources.sh
+
+# fetch-conformance-test-corpora keeps external HTML/CSS tests under silksurf-extras/.
+fetch-conformance-test-corpora:
+	scripts/fetch_html_css_test_corpora.sh
 
 # Guarded release. Requires VERSION=x.y.z on the command line.
 release:
