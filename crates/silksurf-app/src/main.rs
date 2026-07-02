@@ -9150,7 +9150,22 @@ fn fill_argb_words(pixels: &mut [u32], color: u32) {
                 std::ptr::write_bytes(pixels.as_mut_ptr(), 0xff, pixels.len());
             }
         }
+        _ if pixels.len() >= 64 => fill_argb_words_by_copy(pixels, color),
         _ => pixels.fill(color),
+    }
+}
+
+fn fill_argb_words_by_copy(pixels: &mut [u32], color: u32) {
+    let Some(first) = pixels.first_mut() else {
+        return;
+    };
+    *first = color;
+    let mut initialized = 1usize;
+    while initialized < pixels.len() {
+        let copy_len = initialized.min(pixels.len() - initialized);
+        let (src, dst) = pixels.split_at_mut(initialized);
+        dst[..copy_len].copy_from_slice(&src[..copy_len]);
+        initialized += copy_len;
     }
 }
 
@@ -9933,6 +9948,10 @@ mod tests {
 
         fill_argb_words(&mut pixels[1..4], 0);
         assert_eq!(pixels, vec![0xffff_ffff, 0, 0, 0, 0xffff_ffff]);
+
+        let mut arbitrary = vec![0; 96];
+        fill_argb_words(&mut arbitrary, 0xfff3_f4f6);
+        assert!(arbitrary.iter().all(|pixel| *pixel == 0xfff3_f4f6));
     }
 
     #[test]
