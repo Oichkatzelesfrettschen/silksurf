@@ -363,7 +363,7 @@ impl DisplayListTiles {
         items
     }
 
-    fn items_for_rect_into(&self, rect: Rect, items: &mut Vec<usize>) {
+    pub fn items_for_rect_into(&self, rect: Rect, items: &mut Vec<usize>) {
         let x0 = rect.x.max(0.0).floor() as i32;
         let y0 = rect.y.max(0.0).floor() as i32;
         let x1 = (rect.x + rect.width).max(0.0).ceil() as i32;
