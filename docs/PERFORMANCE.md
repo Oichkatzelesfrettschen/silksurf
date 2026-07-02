@@ -309,6 +309,21 @@ reports final typed-input `render 947ns`, `buffer 3.260us`, and `total
 4.400us` across three runs. The O0 miss remains in the Wayland damage/commit
 submission path, not in page render work.
 
+Taffy tree construction now creates the backing slotmaps at the current BFS
+node count when the DOM outgrows the retained capacity, and disables Taffy
+integer rounding before layout. The browser raster path already resolves
+subpixel rects into damage and pixel writes, so layout keeps float geometry and
+avoids the extra Taffy rounding traversal. The trace-only text measurement
+counters now stay behind `SILKSURF_TRACE_TAFFY`, so normal O0 layout does not
+pay for per-measurement `Instant` calls. A 2026-07-02 O0 Wayland fused trace
+on the AI-chat fixture reports `taffy-rebuild 2.488484ms`, `taffy-compute
+21.395760ms`, `fused total 32.331066ms`, `layout-paint 35.305760ms`, and
+navigation build `49.799470ms`. A matching `make gui-probe-o0-ai-chat` run
+reports navigation build totals of `49.363159ms`, `53.495905ms`, and
+`50.152831ms`; final typed-input total CPU work reports `27.041us`,
+`28.100us`, and `33.540us`. The remaining O0 backend cost is the Taffy solver
+itself, not tree allocation, rounding, text measurement, or paint emission.
+
 The runtime-text GUI probe schedules a module-script timer after the initial
 dynamic script drain, mutates one same-box text node at runtime, and requires
 the retained text repaint path to present damage without a later

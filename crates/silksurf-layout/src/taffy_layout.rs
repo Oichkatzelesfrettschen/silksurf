@@ -144,7 +144,7 @@ impl TaffyLayout {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            tree: TaffyTree::new(),
+            tree: new_taffy_tree(16),
             taffy_nodes: Vec::new(),
             taffy_to_bfs: FxHashMap::default(),
             child_ids_scratch: Vec::new(),
@@ -163,8 +163,12 @@ impl TaffyLayout {
     ) {
         let trace_taffy = std::env::var_os("SILKSURF_TRACE_TAFFY").is_some();
         let mut stats = TaffyRebuildStats::default();
-        self.tree.clear();
         let n = table.len();
+        if self.taffy_nodes.capacity() < n {
+            self.tree = new_taffy_tree(n);
+        } else {
+            self.tree.clear();
+        }
         self.taffy_nodes.clear();
         self.taffy_nodes.resize(n, None);
         self.taffy_to_bfs.clear();
@@ -236,12 +240,7 @@ impl TaffyLayout {
         viewport: Rect,
     ) -> bool {
         let trace_taffy = std::env::var_os("SILKSURF_TRACE_TAFFY").is_some();
-        let mut measure_calls = 0usize;
-        let mut text_measure_calls = 0usize;
-        let mut text_measure_bytes = 0usize;
-        let mut max_text_measure_bytes = 0usize;
-        let mut text_measure_elapsed = std::time::Duration::ZERO;
-        let mut text_cache_hits = 0usize;
+        let mut trace_stats = trace_taffy.then(TaffyMeasureStats::default);
         let Some(root) = self.taffy_nodes.first().and_then(|n| *n) else {
             return false;
         };
@@ -265,7 +264,9 @@ impl TaffyLayout {
             root,
             available,
             |known, avail, taffy_node_id, _ctx, _style| {
-                measure_calls += 1;
+                if let Some(stats) = trace_stats.as_mut() {
+                    stats.calls += 1;
+                }
                 let Some(&bfs_idx) = taffy_to_bfs.get(&taffy_node_id) else {
                     return Size::ZERO;
                 };
@@ -290,15 +291,18 @@ impl TaffyLayout {
                     font_size,
                     max_w,
                     text_measure_cache,
+                    trace_taffy,
                 ) {
-                    if cache_hit {
-                        text_cache_hits += 1;
-                    } else {
-                        text_measure_elapsed += elapsed;
+                    if let Some(stats) = trace_stats.as_mut() {
+                        if cache_hit {
+                            stats.text_cache_hits += 1;
+                        } else {
+                            stats.text_elapsed += elapsed;
+                        }
+                        stats.text_calls += 1;
+                        stats.text_bytes += text_len;
+                        stats.max_text_bytes = stats.max_text_bytes.max(text_len);
                     }
-                    text_measure_calls += 1;
-                    text_measure_bytes += text_len;
-                    max_text_measure_bytes = max_text_measure_bytes.max(text_len);
                     return size;
                 }
 
@@ -325,9 +329,15 @@ impl TaffyLayout {
                 }
             },
         );
-        if trace_taffy {
+        if let Some(stats) = trace_stats {
             eprintln!(
-                "[SilkSurf] taffy measure: calls={measure_calls}, text_calls={text_measure_calls}, text_cache_hits={text_cache_hits}, text_bytes={text_measure_bytes}, max_text_bytes={max_text_measure_bytes}, text_time={text_measure_elapsed:?}"
+                "[SilkSurf] taffy measure: calls={}, text_calls={}, text_cache_hits={}, text_bytes={}, max_text_bytes={}, text_time={:?}",
+                stats.calls,
+                stats.text_calls,
+                stats.text_cache_hits,
+                stats.text_bytes,
+                stats.max_text_bytes,
+                stats.text_elapsed
             );
         }
         result.is_ok()
@@ -385,6 +395,22 @@ impl Default for TaffyLayout {
 // Private helpers
 // ---------------------------------------------------------------------------
 
+fn new_taffy_tree(capacity: usize) -> SilkTaffy {
+    let mut tree = TaffyTree::with_capacity(capacity);
+    tree.disable_rounding();
+    tree
+}
+
+#[derive(Default)]
+struct TaffyMeasureStats {
+    calls: usize,
+    text_calls: usize,
+    text_bytes: usize,
+    max_text_bytes: usize,
+    text_elapsed: std::time::Duration,
+    text_cache_hits: usize,
+}
+
 fn measure_taffy_text_node(
     dom: &Dom,
     bfs_order: &[DomNodeId],
@@ -392,6 +418,7 @@ fn measure_taffy_text_node(
     font_size: f32,
     max_width: Option<f32>,
     cache: &mut [CachedTextMeasures],
+    trace_taffy: bool,
 ) -> Option<(Size<f32>, usize, std::time::Duration, bool)> {
     if let Some(cached) = cache
         .get(bfs_idx)
@@ -410,9 +437,7 @@ fn measure_taffy_text_node(
 
     let dom_node_id = *bfs_order.get(bfs_idx)?;
     let text = taffy_measure_text(dom, dom_node_id)?;
-    let measure_start = std::time::Instant::now();
-    let (width, height) = silksurf_text::measure_text(text, font_size, max_width);
-    let elapsed = measure_start.elapsed();
+    let (width, height, elapsed) = measure_text_for_taffy(text, font_size, max_width, trace_taffy);
     let text_len = text.len();
     if let Some(slot) = cache.get_mut(bfs_idx) {
         slot.insert(CachedTextMeasure {
@@ -424,6 +449,21 @@ fn measure_taffy_text_node(
         });
     }
     Some((Size { width, height }, text_len, elapsed, false))
+}
+
+fn measure_text_for_taffy(
+    text: &str,
+    font_size: f32,
+    max_width: Option<f32>,
+    trace_taffy: bool,
+) -> (f32, f32, std::time::Duration) {
+    if !trace_taffy {
+        let (width, height) = silksurf_text::measure_text(text, font_size, max_width);
+        return (width, height, std::time::Duration::ZERO);
+    }
+    let measure_start = std::time::Instant::now();
+    let (width, height) = silksurf_text::measure_text(text, font_size, max_width);
+    (width, height, measure_start.elapsed())
 }
 
 fn taffy_measure_text(dom: &Dom, node_id: DomNodeId) -> Option<&str> {
