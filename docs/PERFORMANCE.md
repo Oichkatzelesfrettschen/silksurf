@@ -298,6 +298,17 @@ after a `66.984688ms` navigation build, focus damage at `total 21.680us`, and
 typed input damage at `render 17.660us`, `total 41.470us`, and `117.500us`
 input-to-present.
 
+The Wayland SHM presenter now prefers a released last-presented buffer before
+cycling through the warm pool. When the surface state already references that
+buffer, the presenter marks it busy, submits damage, and commits the frame
+without another `wl_surface.attach` call. An O0 Wayland `make
+gui-probe-o0-ai-chat` run reports final typed-input `render 3.783us`, `buffer
+22.440us`, and `total 27.090us` across three runs. The matching release probe
+with `--backend wayland --presenter shm --fixture ai-chat --probe page-input`
+reports final typed-input `render 947ns`, `buffer 3.260us`, and `total
+4.400us` across three runs. The O0 miss remains in the Wayland damage/commit
+submission path, not in page render work.
+
 The runtime-text GUI probe schedules a module-script timer after the initial
 dynamic script drain, mutates one same-box text node at runtime, and requires
 the retained text repaint path to present damage without a later

@@ -1,15 +1,13 @@
 # Makefile -- canonical build entry point for silksurf.
 #
-# WHY: Centralises all build, lint, test, and release commands so contributors
-# have a single discoverable interface. Scripts under scripts/ are implementation
-# details invoked FROM targets here, not the public interface.
+# The Makefile presents the public build, lint, test, conformance, and release
+# interface. Scripts under scripts/ carry target implementation details.
 #
-# HOW:
 #   make check   -- fast gate: fmt + clippy -D warnings + lint_unwrap + lint_unsafe
 #   make test    -- workspace tests with -D warnings
 #   make full    -- check + test + cargo deny + cargo doc
 #   make fmt     -- auto-format all Rust and C sources
-#   make clean   -- remove build artefacts (Rust + CMake)
+#   make clean   -- remove build artifacts (Rust + CMake)
 #   make doc     -- build rustdoc
 #   make hooks   -- install git pre-commit/pre-push hooks
 #   make cross   -- cross-compile to aarch64
@@ -18,6 +16,9 @@
 #   make bench   -- run the benchmark suite
 #   make gui-probe -- run the live winit GUI probe when a display is present
 #   make gui-probe-o0 -- run the live GUI probe with opt-level 0
+#   make gui-probe-o0-ai-chat -- run the O0 AI-chat page-input canary
+#   make conformance-html-css -- run the HTML/CSS harness subset
+#   make verify-conformance-sources -- verify retained HTML/CSS source bytes
 #   make fetch-conformance-sources -- refresh retained HTML/CSS source bundle
 #   make release   -- guarded release (requires explicit VERSION=x.y.z)
 #
@@ -68,7 +69,7 @@ BOLT_OPTS     ?= -reorder-blocks=ext-tsp -reorder-functions=cdsort \
 # Rust targets (primary)
 # ---------------------------------------------------------------------------
 
-.PHONY: check test full fmt doc clean clean-cargo clean-build-artifacts hooks cross miri fuzz bench gui-probe gui-probe-o0 fetch-conformance-sources release
+.PHONY: check test full fmt doc clean clean-cargo clean-build-artifacts hooks cross miri fuzz bench gui-probe gui-probe-o0 gui-probe-o0-ai-chat conformance conformance-html-css verify-conformance-sources fetch-conformance-sources release
 
 # Fast gate: format check + clippy -D warnings + lint helpers.
 # Wired into pre-commit hook.
@@ -167,6 +168,7 @@ bench:
 
 GUI_PROBE_ARGS ?= --release --backend auto
 GUI_PROBE_O0_ARGS ?= --o0 --backend auto
+GUI_PROBE_O0_AI_CHAT_ARGS ?= --o0 --backend auto --presenter auto --fixture ai-chat --probe page-input --runs 3 --timeout-seconds 60
 
 # Live GUI smoke. This target requires a working Wayland or X11 session.
 gui-probe:
@@ -175,6 +177,22 @@ gui-probe:
 # Live GUI O0 smoke. This target exercises the custom dev-o0 Cargo profile.
 gui-probe-o0:
 	scripts/gui_probe.sh $(GUI_PROBE_O0_ARGS)
+
+# O0 browser-latency canary for the AI-chat fixture.
+gui-probe-o0-ai-chat:
+	scripts/gui_probe.sh $(GUI_PROBE_O0_AI_CHAT_ARGS)
+
+# Run the published conformance harness set.
+conformance:
+	scripts/conformance_run.sh
+
+# Run the HTML/CSS parser and synthetic browser-engine subset.
+conformance-html-css:
+	scripts/conformance_run.sh html5lib css wpt
+
+# Verify retained primary source bytes without network access.
+verify-conformance-sources:
+	scripts/verify_html_css_conformance_sources.sh
 
 # Refresh retained HTML/CSS source material with the recorded Mozilla UA.
 fetch-conformance-sources:
