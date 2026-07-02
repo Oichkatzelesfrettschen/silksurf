@@ -263,6 +263,17 @@ height: 48.0 })`, `blit 7.970us`, `render 392.771us`, and `total
 band through tiny-skia translated damage and reported `bitmap refresh:
 18.155403ms`, `render 18.482354ms`, and `total 18.527935ms`.
 
+Browser runtime dirty-node repaint now keeps a viewport-specific `StyleIndex`
+and a retained `FusedWorkspace` beside the live DOM. Page input and script
+mutation redraws reuse cascade, layout, and traversal scratch across frames
+instead of allocating a fresh fused pipeline for every dirty-node pass. An O0
+Wayland page-input probe on the AI-chat fixture reports focus damage at
+`total 39.630us`, typed input damage at `render 16.080us` and
+`total 48.240us`, and typed input-to-present at `296.370us`. The same run
+still reports first-navigation fused layout at `82.840182ms`, with
+`taffy-rebuild 51.466431ms` and `taffy-compute 21.791996ms` as the dominant
+initial-page backend costs.
+
 The viewport-backed path is the first tile-cache step. The retained bitmap now
 has an origin (`bitmap_scroll_y`) and a bounded height (`bitmap_height`), while
 `raster_height` remains the scrollable document height. The next renderer step
