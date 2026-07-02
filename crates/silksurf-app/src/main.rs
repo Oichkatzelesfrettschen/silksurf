@@ -6670,7 +6670,7 @@ fn viewport_argb_direct_items_supported(
 ) -> bool {
     display_items_for_indices(display_list, item_indices)
         .filter(|item| display_item_intersects_viewport(item, viewport))
-        .all(|item| viewport_argb_direct_item_supported(item))
+        .all(viewport_argb_direct_item_supported)
 }
 
 fn viewport_argb_direct_item_supported(item: &silksurf_render::DisplayItem) -> bool {

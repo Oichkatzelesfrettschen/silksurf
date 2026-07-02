@@ -106,6 +106,7 @@ pub enum PropertyId {
     GridColumn = 74,
     GridRow = 75,
     GridArea = 76,
+    BoxSizing = 77,
     Unknown = 255,
 }
 
@@ -145,6 +146,7 @@ pub fn lookup_property_id(name: &str) -> PropertyId {
         (b'b', 12) if name.eq_ignore_ascii_case("border-right") => PropertyId::BorderRight,
         (b'b', 13) if name.eq_ignore_ascii_case("border-bottom") => PropertyId::BorderBottom,
         (b'b', 10) if name.eq_ignore_ascii_case("box-shadow") => PropertyId::BoxShadow,
+        (b'b', 10) if name.eq_ignore_ascii_case("box-sizing") => PropertyId::BoxSizing,
         // 'f' prefix
         (b'f', 9) if name.eq_ignore_ascii_case("font-size") => PropertyId::FontSize,
         (b'f', 11) if name.eq_ignore_ascii_case("font-family") => PropertyId::FontFamily,
@@ -258,6 +260,7 @@ mod tests {
             PropertyId::JustifyContent
         );
         assert_eq!(lookup_property_id("z-index"), PropertyId::ZIndex);
+        assert_eq!(lookup_property_id("box-sizing"), PropertyId::BoxSizing);
     }
 
     #[test]

@@ -526,6 +526,10 @@ files and the relevant ADRs.
 **Type**: Display-list tile query function
 **Definition**: Returns display-list item indices whose tile coverage intersects a rectangle. Damage rasterization uses it to skip unrelated draw commands.
 
+### items_for_rect_into
+**Type**: Display-list tile query function
+**Definition**: Writes display-list item indices whose tile coverage intersects a rectangle into caller-owned storage. Damage rasterization reuses the vector and avoids per-frame query allocation.
+
 ### DomError
 **Type**: Error type
 **Definition**: Error returned by DOM tree manipulation operations (node-not-found, invalid parent, detached node, etc.). Converts to `SilkError::Html` at workspace boundaries.
