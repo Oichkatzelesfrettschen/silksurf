@@ -1,20 +1,15 @@
 #!/usr/bin/env bash
-# scripts/conformance_run.sh
+# conformance_run.sh runs the available silksurf conformance harnesses.
 #
-# Run all available conformance harnesses and emit per-harness JSON
-# scorecards under docs/conformance/. The aggregated dashboard at
-# docs/conformance/SCORECARD.md is updated by hand from the JSON files.
-#
-# WHY: the SNAZZY-WAFFLE roadmap (P5) tracks web/network/spec
-# conformance as scoreboards. This script is the single entry point so
-# numbers are reproducible.
+# Each harness emits its own JSON scorecard. The aggregated dashboard at
+# docs/conformance/SCORECARD.md records the current published numbers.
 #
 # Available harnesses:
 #   test262    -- silksurf-js lexer-only test262 runner (subset by default)
 #   tls        -- silksurf-tls loader sanity unit tests
 #   h2spec     -- HTTP/2 conformance via the external `h2spec` binary
 #                 (skipped if not installed)
-#   wpt        -- DEFERRED (not vendored yet)
+#   wpt        -- synthetic in-tree HTML/CSS/layout/paint fixture subset
 #
 # Usage:
 #   scripts/conformance_run.sh                    # run all available
@@ -98,4 +93,4 @@ done
 
 echo
 echo "Conformance run complete."
-echo "Scorecards under: $SCORECARD_DIR"
+echo "Dashboard: $SCORECARD_DIR/SCORECARD.md"

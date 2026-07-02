@@ -16,7 +16,8 @@
 #   make miri    -- miri smoke (requires nightly + miri component)
 #   make fuzz    -- cargo-fuzz smoke, 30s per target (requires cargo-fuzz)
 #   make bench   -- run the benchmark suite
-#   make release -- guarded release (requires explicit VERSION=x.y.z)
+#   make gui-probe -- run the live winit GUI probe when a display is present
+#   make release   -- guarded release (requires explicit VERSION=x.y.z)
 #
 # All Rust targets pass RUSTFLAGS='-D warnings'. This is the project policy.
 # Do NOT set RUSTFLAGS globally in .cargo/config.toml -- that breaks IDEs.
@@ -40,6 +41,9 @@ MSRV := $(shell awk -F'"' '/^rust-version =/ {print $$2; exit}' Cargo.toml)
 
 # CMake / C legacy variables (Phase C tree, ADR-007)
 BUILD_DIR      = build
+CARGO_TARGET_DIRS = target silksurf-js/target
+BUILD_ARTIFACT_DIRS = $(BUILD_DIR) build-* infer-out perf/results \
+                      fuzz_out fuzz_out_css fuzz/artifacts logs/cores
 RICING_FLAGS   = -march=x86-64-v3 -O3 -flto -fomit-frame-pointer \
                  -fno-strict-aliasing -ftree-vectorize -D_SILK_NO_THREADS
 GUI_LIBS       = $(shell pkg-config --cflags --libs xcb xcb-damage xcb-composite \
@@ -62,7 +66,7 @@ BOLT_OPTS     ?= -reorder-blocks=ext-tsp -reorder-functions=cdsort \
 # Rust targets (primary)
 # ---------------------------------------------------------------------------
 
-.PHONY: check test full fmt doc clean hooks cross miri fuzz bench release
+.PHONY: check test full fmt doc clean clean-cargo clean-build-artifacts hooks cross miri fuzz bench gui-probe release
 
 # Fast gate: format check + clippy -D warnings + lint helpers.
 # Wired into pre-commit hook.
@@ -110,12 +114,22 @@ doc:
 	@echo "==> cargo doc"
 	RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --document-private-items
 
-# Remove all build artefacts.
-clean:
-	cargo clean
-	@rm -rf $(BUILD_DIR) logs/cores
-	@rm -f core core.*
+# Remove Cargo outputs, build trees, runtime logs, and generated artifacts.
+clean: clean-cargo clean-build-artifacts
 	@mkdir -p logs/cores
+
+# cargo clean owns the workspace target tree; the explicit removals cover
+# historical nested target directories created by running Cargo in subtrees.
+clean-cargo:
+	cargo clean
+	@for dir in $(CARGO_TARGET_DIRS); do \
+	    if [ -d "$$dir" ]; then rm -rf "$$dir"; fi; \
+	done
+
+# Build artifact directories stay reproducible and untracked.
+clean-build-artifacts:
+	@rm -rf $(BUILD_ARTIFACT_DIRS)
+	@rm -f core core.*
 
 # Install git pre-commit / pre-push hooks.
 hooks:
@@ -147,6 +161,12 @@ bench:
 	@echo "==> cargo bench"
 	$(RUSTFLAGS_DENY) cargo bench --workspace
 
+GUI_PROBE_ARGS ?= --release --backend auto
+
+# Live GUI smoke. This target requires a working Wayland or X11 session.
+gui-probe:
+	scripts/gui_probe.sh $(GUI_PROBE_ARGS)
+
 # Guarded release. Requires VERSION=x.y.z on the command line.
 release:
 	@[ -n "$(VERSION)" ] || (echo "Usage: make release VERSION=x.y.z" && exit 1)
@@ -170,9 +190,7 @@ $(BUILD_DIR)/Makefile:
 cmake-build: $(BUILD_DIR)/Makefile
 	$(MAKE) -C $(BUILD_DIR)
 
-cmake-clean:
-	rm -rf $(BUILD_DIR) logs/cores
-	rm -f core core.*
+cmake-clean: clean-build-artifacts
 	mkdir -p logs/cores
 
 core-dumps:

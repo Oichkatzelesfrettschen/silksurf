@@ -27,7 +27,7 @@ use crate::CssToken;
 /// against the given viewport dimensions (pixels).
 ///
 /// Returns true when the media condition applies to this viewport.
-#[must_use] 
+#[must_use]
 pub fn evaluate_media_query(prelude: &[CssToken], viewport_w: f32, viewport_h: f32) -> bool {
     let toks: Vec<&CssToken> = prelude
         .iter()
@@ -113,7 +113,8 @@ fn eval_single(toks: &[&CssToken], w: f32, h: f32) -> bool {
                 }
                 i = end + 1;
                 // Skip "and" connector between conditions.
-                if matches!(toks.get(i), Some(CssToken::Ident(kw)) if kw.eq_ignore_ascii_case("and")) {
+                if matches!(toks.get(i), Some(CssToken::Ident(kw)) if kw.eq_ignore_ascii_case("and"))
+                {
                     i += 1;
                 }
             }
@@ -242,7 +243,11 @@ fn eval_feature(inner: &[&CssToken], w: f32, h: f32) -> bool {
         // prefers-color-scheme: assume the user has no special scheme set
         // (i.e., light mode). "light" -> true; "dark" -> false.
         "prefers-color-scheme" => match ident_value {
-            Some(s) if s.eq_ignore_ascii_case("light") | s.eq_ignore_ascii_case("no-preference") => true,
+            Some(s)
+                if s.eq_ignore_ascii_case("light") | s.eq_ignore_ascii_case("no-preference") =>
+            {
+                true
+            }
             Some(s) if s.eq_ignore_ascii_case("dark") => false,
             _ => true,
         },

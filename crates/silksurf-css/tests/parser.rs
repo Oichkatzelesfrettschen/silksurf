@@ -1,5 +1,6 @@
 use silksurf_css::{
-    AtRuleBlock, CssToken, Rule, TypeSelector, parse_stylesheet, parse_stylesheet_bytes,
+    AtRuleBlock, CssToken, Rule, TypeSelector, parse_declaration_list, parse_stylesheet,
+    parse_stylesheet_bytes,
 };
 use silksurf_dom::TagName;
 
@@ -87,6 +88,34 @@ fn parses_multiple_selectors() {
 }
 
 #[test]
+fn parses_inline_declaration_list() {
+    let declarations = parse_declaration_list("color: red; display: flex;").unwrap();
+    assert_eq!(declarations.len(), 2);
+    assert_eq!(declarations[0].name, "color");
+    assert_eq!(declarations[0].value, vec![CssToken::Ident("red".into())]);
+    assert_eq!(declarations[1].name, "display");
+    assert_eq!(declarations[1].value, vec![CssToken::Ident("flex".into())]);
+}
+
+#[test]
+fn inline_declaration_limit_preserves_utf8_boundary() {
+    let multibyte = char::from_u32(0x1f642).expect("valid scalar");
+    let prefix = "color: red; background: ";
+    let fill_len = (16 * 1024) - prefix.len() - 1;
+    let input = format!("{prefix}{}{};", "a".repeat(fill_len), multibyte);
+
+    let declarations = parse_declaration_list(&input).unwrap();
+    assert_eq!(declarations.len(), 1);
+    assert_eq!(declarations[0].name, "color");
+}
+
+#[test]
+fn malformed_functional_selector_argument_reaches_eof() {
+    let sheet = parse_stylesheet(":where(.) { color: red; }").unwrap();
+    assert_eq!(sheet.rules.len(), 1);
+}
+
+#[test]
 fn parses_utf16le_stylesheet_bytes_with_bom() {
     let utf16: Vec<u16> = "body { color: red; }".encode_utf16().collect();
     let mut bytes = Vec::with_capacity(2 + utf16.len() * 2);
@@ -120,6 +149,6 @@ body { content: ""#
     assert_eq!(rule.declarations[0].name, "content");
     assert_eq!(
         rule.declarations[0].value,
-        vec![CssToken::String("Š".to_string())]
+        vec![CssToken::String("\u{0160}".to_string())]
     );
 }

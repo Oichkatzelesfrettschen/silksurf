@@ -1,26 +1,12 @@
 /*
- * dom_bridge.rs -- Thin adapter between silksurf_dom::Dom and the boa_engine
- * JavaScript context.
+ * dom_bridge maps silksurf_dom::Dom into Boa host objects.
  *
- * WHY: The boa_backend document stub always returns null for getElementById
- * and friends.  This module replaces those stubs with real DOM traversal so
- * that scripts can read and write the parsed document tree.
+ * SilkContext::with_dom installs closures that capture Arc<Mutex<Dom>> and
+ * NodeId values. These capture types contain no Boa GC-managed pointers, so
+ * NativeFunction::from_closure does not need GC tracing for them.
  *
- * HOW: SilkContext::with_dom(arc: &Arc<Mutex<Dom>>) installs closures that
- * capture the Arc.  The closures are registered via
- * NativeFunction::from_closure (unsafe), which is sound here because:
- *   - Arc<Mutex<Dom>> is a pure Rust reference-counted type with no boa
- *     GC-managed pointers.  The GC cannot dereference or move it.
- *   - NodeId is usize -- not a GC-traced type.
- *   - None of the captured values participate in boa's garbage collector.
- *
- * The safety invariant required by from_closure (captured vars must not
- * need GC tracing) is satisfied by these capture types.
- *
- * Mutex acquisition discipline: always drop the dom lock guard BEFORE calling
- * node_to_js_object recursively.  node_to_js_object itself acquires the lock,
- * and Mutex is not reentrant -- holding the lock across a recursive call
- * would deadlock.
+ * Host callbacks drop the DOM lock before calling node_to_js_object. That
+ * keeps recursive wrapper construction outside the non-reentrant mutex.
  */
 
 use std::sync::{Arc, Mutex, PoisonError};
@@ -28,20 +14,18 @@ use std::sync::{Arc, Mutex, PoisonError};
 use boa_engine::{
     Context, JsNativeError, JsResult, JsString, JsValue, NativeFunction, js_string,
     object::{
-        FunctionObjectBuilder, ObjectInitializer,
+        FunctionObjectBuilder, JsObject, ObjectInitializer,
         builtins::{JsArray, JsFunction},
     },
     property::Attribute,
 };
-use silksurf_dom::{Dom, Node, NodeId, NodeKind};
+use silksurf_dom::{Dom, DomError, NodeId, NodeKind, TagName};
+
+const EVENT_LISTENERS_REGISTRY: &str = "__silksurfEventListeners";
 
 // ---- helpers ---------------------------------------------------------------
 
-/// Extract a `NodeId` from the first argument of a DOM method.
-///
-/// All node objects built by `node_to_js_object` carry a `nodeId` u32 property.
-/// This helper reads that property back so callers can route mutations to the
-/// right slot in the Dom arena.
+/// Node wrappers carry `nodeId`, and mutation methods route it back to Dom.
 fn extract_node_id(arg: Option<&JsValue>, ctx: &mut Context) -> JsResult<NodeId> {
     let v = arg.ok_or_else(|| JsNativeError::typ().with_message("expected a node argument"))?;
     let obj = v
@@ -49,6 +33,14 @@ fn extract_node_id(arg: Option<&JsValue>, ctx: &mut Context) -> JsResult<NodeId>
         .ok_or_else(|| JsNativeError::typ().with_message("argument is not a node object"))?;
     let raw = obj.get(js_string!("nodeId"), ctx)?.to_u32(ctx)?;
     Ok(NodeId::from_raw(raw as usize))
+}
+
+fn extract_optional_node_id(arg: Option<&JsValue>, ctx: &mut Context) -> JsResult<Option<NodeId>> {
+    match arg {
+        None => Ok(None),
+        Some(value) if value.is_null() || value.is_undefined() => Ok(None),
+        Some(value) => extract_node_id(Some(value), ctx).map(Some),
+    }
 }
 
 // ---- text collection -------------------------------------------------------
@@ -202,12 +194,201 @@ fn snapshot_node(dom: &Dom, node_id: NodeId) -> NodeSnapshot {
     }
 }
 
+fn is_form_control_node(dom: &Dom, node_id: NodeId) -> bool {
+    dom.element_name(node_id)
+        .ok()
+        .flatten()
+        .is_some_and(|name| matches!(TagName::from_str(&name), TagName::Input | TagName::Textarea))
+}
+
+fn form_control_value(dom: &Dom, node_id: NodeId) -> String {
+    if !is_form_control_node(dom, node_id) {
+        return String::new();
+    }
+    dom.attributes(node_id)
+        .ok()
+        .and_then(|attrs| {
+            attrs
+                .iter()
+                .find(|attr| attr.name.as_str() == "value")
+                .map(|attr| attr.value.to_string())
+        })
+        .unwrap_or_default()
+}
+
+fn event_listener_key(node_id: NodeId, event_type: &str) -> JsString {
+    JsString::from(format!("{}:{event_type}", node_id.raw()).as_str())
+}
+
+fn event_listener_registry(ctx: &mut Context) -> JsResult<JsObject> {
+    let key = js_string!(EVENT_LISTENERS_REGISTRY);
+    let global = ctx.global_object().clone();
+    let existing = global.get(key.clone(), ctx)?;
+    if let Some(registry) = existing.as_object() {
+        return Ok(registry.clone());
+    }
+
+    let registry = ObjectInitializer::new(ctx).build();
+    global.set(key, registry.clone(), false, ctx)?;
+    Ok(registry)
+}
+
+fn event_type_arg(arg: Option<&JsValue>, ctx: &mut Context) -> JsResult<Option<String>> {
+    let Some(value) = arg else {
+        return Ok(None);
+    };
+    if value.is_undefined() || value.is_null() {
+        return Ok(None);
+    }
+    Ok(Some(value.to_string(ctx)?.to_std_string_lossy()))
+}
+
+fn event_type_from_dispatch_arg(arg: Option<&JsValue>, ctx: &mut Context) -> JsResult<String> {
+    let Some(value) = arg else {
+        return Ok(String::new());
+    };
+    if let Some(object) = value.as_object() {
+        return Ok(object
+            .get(js_string!("type"), ctx)?
+            .to_string(ctx)?
+            .to_std_string_lossy());
+    }
+    Ok(value.to_string(ctx)?.to_std_string_lossy())
+}
+
+fn listener_array(
+    node_id: NodeId,
+    event_type: &str,
+    create: bool,
+    ctx: &mut Context,
+) -> JsResult<Option<JsArray>> {
+    let registry = event_listener_registry(ctx)?;
+    let key = event_listener_key(node_id, event_type);
+    let existing = registry.get(key.clone(), ctx)?;
+    if let Some(object) = existing.as_object()
+        && object.is_array()
+    {
+        return Ok(Some(JsArray::from_object(object.clone())?));
+    }
+    if !create {
+        return Ok(None);
+    }
+
+    let array = JsArray::new(ctx);
+    registry.set(key, array.clone(), false, ctx)?;
+    Ok(Some(array))
+}
+
+fn add_event_listener(
+    node_id: NodeId,
+    event_type: Option<&JsValue>,
+    callback: Option<&JsValue>,
+    ctx: &mut Context,
+) -> JsResult<JsValue> {
+    let Some(event_type) = event_type_arg(event_type, ctx)? else {
+        return Ok(JsValue::undefined());
+    };
+    let Some(callback_object) = callback.and_then(JsValue::as_callable) else {
+        return Ok(JsValue::undefined());
+    };
+
+    let Some(array) = listener_array(node_id, event_type.as_str(), true, ctx)? else {
+        return Ok(JsValue::undefined());
+    };
+    let callback_value = JsValue::from(callback_object.clone());
+    let length = array.length(ctx)?;
+    for index in 0..length {
+        if array.get(index, ctx)?.strict_equals(&callback_value) {
+            return Ok(JsValue::undefined());
+        }
+    }
+    array.push(callback_value, ctx)?;
+    Ok(JsValue::undefined())
+}
+
+fn remove_event_listener(
+    node_id: NodeId,
+    event_type: Option<&JsValue>,
+    callback: Option<&JsValue>,
+    ctx: &mut Context,
+) -> JsResult<JsValue> {
+    let Some(event_type) = event_type_arg(event_type, ctx)? else {
+        return Ok(JsValue::undefined());
+    };
+    let Some(callback_object) = callback.and_then(JsValue::as_callable) else {
+        return Ok(JsValue::undefined());
+    };
+    let Some(array) = listener_array(node_id, event_type.as_str(), false, ctx)? else {
+        return Ok(JsValue::undefined());
+    };
+
+    let callback_value = JsValue::from(callback_object.clone());
+    let mut write_index = 0_u64;
+    let length = array.length(ctx)?;
+    for read_index in 0..length {
+        let value = array.get(read_index, ctx)?;
+        if value.strict_equals(&callback_value) {
+            continue;
+        }
+        if write_index != read_index {
+            array.set(write_index, value, false, ctx)?;
+        }
+        write_index += 1;
+    }
+    array.set(js_string!("length"), write_index, false, ctx)?;
+    Ok(JsValue::undefined())
+}
+
+fn dispatch_event(
+    this: &JsValue,
+    node_id: NodeId,
+    event_arg: Option<&JsValue>,
+    ctx: &mut Context,
+) -> JsResult<JsValue> {
+    let event_type = event_type_from_dispatch_arg(event_arg, ctx)?;
+    if event_type.is_empty() {
+        return Ok(JsValue::from(false));
+    }
+    let Some(array) = listener_array(node_id, event_type.as_str(), false, ctx)? else {
+        return Ok(JsValue::from(true));
+    };
+
+    let event = match event_arg.and_then(JsValue::as_object) {
+        Some(object) => {
+            object.set(js_string!("target"), this.clone(), false, ctx)?;
+            JsValue::from(object.clone())
+        }
+        None => {
+            let object = ObjectInitializer::new(ctx)
+                .property(
+                    js_string!("type"),
+                    JsString::from(event_type.as_str()),
+                    Attribute::all(),
+                )
+                .property(js_string!("target"), this.clone(), Attribute::all())
+                .build();
+            JsValue::from(object)
+        }
+    };
+
+    let mut callbacks = Vec::new();
+    let length = array.length(ctx)?;
+    for index in 0..length {
+        if let Some(callback) = array.get(index, ctx)?.as_callable() {
+            callbacks.push(callback.clone());
+        }
+    }
+    for callback in callbacks {
+        callback.call(this, std::slice::from_ref(&event), ctx)?;
+    }
+    Ok(JsValue::from(true))
+}
+
 // ---- accessor getter builder -----------------------------------------------
 
-/// Wrap a `NativeFunction` as a `JsFunction` for use with `ObjectInitializer::accessor`.
+/// `NativeFunction` becomes a `JsFunction` for ObjectInitializer accessors.
 ///
-/// Borrows `ctx.realm()` briefly; the returned `JsFunction` is independent of ctx's
-/// lifetime after `build()` returns.
+/// The returned function owns the built object after `ctx.realm()` is borrowed.
 fn make_getter(ctx: &mut Context, f: NativeFunction) -> JsFunction {
     FunctionObjectBuilder::new(ctx.realm(), f).build()
 }
@@ -216,266 +397,23 @@ fn make_getter(ctx: &mut Context, f: NativeFunction) -> JsFunction {
 
 /// Build a JS object for a single DOM node.
 ///
-/// Static properties (tagName, id, className, textContent, innerHTML, nodeId,
-/// nodeType, nodeName, nodeValue) are snapshotted at call time.
+/// Static properties snapshot the node at wrapper creation time.
 ///
-/// Accessor properties (parentNode, childNodes, children, firstChild, lastChild,
-/// nextSibling, previousSibling) use lazy getters that re-lock the Dom Arc on
-/// each access -- they always reflect current tree state.
+/// Accessor properties re-lock the DOM and reflect current tree state.
 ///
-/// Mutation methods (appendChild, removeChild, insertBefore, replaceChild)
-/// acquire and release the lock on each call.
+/// Mutation methods acquire and release the DOM lock on each call.
 ///
-/// Invariant: the Dom lock is NOT held when this function is called.
-/// Do not call this function while holding the `Arc<Mutex<Dom>>` lock.
+/// Callers pass no held DOM lock into this function.
 pub(super) fn node_to_js_object(
     dom_arc: &Arc<Mutex<Dom>>,
     node_id: NodeId,
     ctx: &mut Context,
 ) -> JsValue {
-    // Snapshot static properties with a single lock/unlock.
-    let snap = {
-        let dom = dom_arc.lock().unwrap_or_else(PoisonError::into_inner);
-        snapshot_node(&dom, node_id)
-    };
-
-    // ---- accessor getter closures (all lazy, lock released before each call) --
-
-    // SAFETY: Arc<Mutex<Dom>> and NodeId (usize) are not boa GC-traced types;
-    // from_closure is sound because none of the captures need GC tracing.
-    let arc_pn = Arc::clone(dom_arc);
-    let pn_native = unsafe {
-        NativeFunction::from_closure(move |_this, _args, ctx| {
-            let parent_id = {
-                let dom = arc_pn.lock().unwrap_or_else(PoisonError::into_inner);
-                dom.parent(node_id).ok().flatten()
-            };
-            match parent_id {
-                Some(pid) => Ok(node_to_js_object(&arc_pn, pid, ctx)),
-                None => Ok(JsValue::null()),
-            }
-        })
-    };
-
-    // SAFETY: same -- Arc<Mutex<Dom>> and NodeId captures are not GC-traced.
-    let arc_cn = Arc::clone(dom_arc);
-    let child_nodes_native = unsafe {
-        NativeFunction::from_closure(move |_this, _args, ctx| {
-            let child_ids = {
-                let dom = arc_cn.lock().unwrap_or_else(PoisonError::into_inner);
-                dom.children(node_id)
-                    .map(<[NodeId]>::to_vec)
-                    .unwrap_or_default()
-            };
-            let arr = JsArray::new(ctx);
-            for cid in child_ids {
-                let obj = node_to_js_object(&arc_cn, cid, ctx);
-                arr.push(obj, ctx)
-                    .map_err(|e| JsNativeError::error().with_message(e.to_string()))?;
-            }
-            Ok(JsValue::from(arr))
-        })
-    };
-
-    // SAFETY: same -- Arc<Mutex<Dom>> and NodeId captures are not GC-traced.
-    let arc_ch = Arc::clone(dom_arc);
-    let children_native = unsafe {
-        NativeFunction::from_closure(move |_this, _args, ctx| {
-            let child_ids = {
-                let dom = arc_ch.lock().unwrap_or_else(PoisonError::into_inner);
-                dom.children(node_id)
-                    .map(<[NodeId]>::to_vec)
-                    .unwrap_or_default()
-            };
-            // children only includes element nodes (nodeType == 1)
-            let mut element_ids: Vec<NodeId> = Vec::new();
-            for cid in &child_ids {
-                let is_element = {
-                    let dom = arc_ch.lock().unwrap_or_else(PoisonError::into_inner);
-                    matches!(dom.node(*cid).map(Node::kind), Ok(NodeKind::Element { .. }))
-                };
-                if is_element {
-                    element_ids.push(*cid);
-                }
-            }
-            let arr = JsArray::new(ctx);
-            for cid in element_ids {
-                let obj = node_to_js_object(&arc_ch, cid, ctx);
-                arr.push(obj, ctx)
-                    .map_err(|e| JsNativeError::error().with_message(e.to_string()))?;
-            }
-            Ok(JsValue::from(arr))
-        })
-    };
-
-    // SAFETY: same -- Arc<Mutex<Dom>> and NodeId captures are not GC-traced.
-    let arc_fc = Arc::clone(dom_arc);
-    let first_child_native = unsafe {
-        NativeFunction::from_closure(move |_this, _args, ctx| {
-            let fid = {
-                let dom = arc_fc.lock().unwrap_or_else(PoisonError::into_inner);
-                dom.first_child(node_id).ok().flatten()
-            };
-            match fid {
-                Some(id) => Ok(node_to_js_object(&arc_fc, id, ctx)),
-                None => Ok(JsValue::null()),
-            }
-        })
-    };
-
-    // SAFETY: same -- Arc<Mutex<Dom>> and NodeId captures are not GC-traced.
-    let arc_lc = Arc::clone(dom_arc);
-    let last_child_native = unsafe {
-        NativeFunction::from_closure(move |_this, _args, ctx| {
-            let lid = {
-                let dom = arc_lc.lock().unwrap_or_else(PoisonError::into_inner);
-                dom.last_child(node_id).ok().flatten()
-            };
-            match lid {
-                Some(id) => Ok(node_to_js_object(&arc_lc, id, ctx)),
-                None => Ok(JsValue::null()),
-            }
-        })
-    };
-
-    // SAFETY: same -- Arc<Mutex<Dom>> and NodeId captures are not GC-traced.
-    let arc_ns = Arc::clone(dom_arc);
-    let next_sibling_native = unsafe {
-        NativeFunction::from_closure(move |_this, _args, ctx| {
-            let sid = {
-                let dom = arc_ns.lock().unwrap_or_else(PoisonError::into_inner);
-                dom.next_sibling(node_id).ok().flatten()
-            };
-            match sid {
-                Some(id) => Ok(node_to_js_object(&arc_ns, id, ctx)),
-                None => Ok(JsValue::null()),
-            }
-        })
-    };
-
-    // SAFETY: same -- Arc<Mutex<Dom>> and NodeId captures are not GC-traced.
-    let arc_ps = Arc::clone(dom_arc);
-    let prev_sibling_native = unsafe {
-        NativeFunction::from_closure(move |_this, _args, ctx| {
-            let sid = {
-                let dom = arc_ps.lock().unwrap_or_else(PoisonError::into_inner);
-                dom.previous_sibling(node_id).ok().flatten()
-            };
-            match sid {
-                Some(id) => Ok(node_to_js_object(&arc_ps, id, ctx)),
-                None => Ok(JsValue::null()),
-            }
-        })
-    };
-
-    // ---- mutation method closures (NativeFunction, passed to .function()) ----
-
-    // SAFETY: same -- Arc<Mutex<Dom>> and NodeId captures are not GC-traced.
-    let arc_get = Arc::clone(dom_arc);
-    let get_attribute = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
-            let name = match args.first() {
-                Some(v) => v.to_string(ctx)?.to_std_string_lossy(),
-                None => return Ok(JsValue::null()),
-            };
-            let dom = arc_get.lock().unwrap_or_else(PoisonError::into_inner);
-            let val = if let Ok(attrs) = dom.attributes(node_id) {
-                attrs
-                    .iter()
-                    .find(|a| a.name.as_str() == name.as_str())
-                    .map_or(JsValue::null(), |a| {
-                        JsValue::from(JsString::from(a.value.as_str()))
-                    })
-            } else {
-                JsValue::null()
-            };
-            Ok(val)
-        })
-    };
-
-    // SAFETY: same -- Arc<Mutex<Dom>> and NodeId captures are not GC-traced.
-    let arc_set = Arc::clone(dom_arc);
-    let set_attribute = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
-            let name = match args.first() {
-                Some(v) => v.to_string(ctx)?.to_std_string_lossy(),
-                None => return Ok(JsValue::undefined()),
-            };
-            let val = match args.get(1) {
-                Some(v) => v.to_string(ctx)?.to_std_string_lossy(),
-                None => String::new(),
-            };
-            let mut dom = arc_set.lock().unwrap_or_else(PoisonError::into_inner);
-            let _ = dom.set_attribute(node_id, name.as_str(), val.as_str());
-            Ok(JsValue::undefined())
-        })
-    };
-
-    // SAFETY: same -- Arc<Mutex<Dom>> and NodeId captures are not GC-traced.
-    let arc_ac = Arc::clone(dom_arc);
-    let append_child = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
-            let child_id = extract_node_id(args.first(), ctx)?;
-            {
-                let mut dom = arc_ac.lock().unwrap_or_else(PoisonError::into_inner);
-                let _ = dom.append_child(node_id, child_id);
-            }
-            Ok(node_to_js_object(&arc_ac, child_id, ctx))
-        })
-    };
-
-    // SAFETY: same -- Arc<Mutex<Dom>> and NodeId captures are not GC-traced.
-    let arc_rc = Arc::clone(dom_arc);
-    let remove_child = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
-            let child_id = extract_node_id(args.first(), ctx)?;
-            {
-                let mut dom = arc_rc.lock().unwrap_or_else(PoisonError::into_inner);
-                let _ = dom.remove_child(node_id, child_id);
-            }
-            Ok(node_to_js_object(&arc_rc, child_id, ctx))
-        })
-    };
-
-    // SAFETY: same -- Arc<Mutex<Dom>> and NodeId captures are not GC-traced.
-    let arc_ib = Arc::clone(dom_arc);
-    let insert_before = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
-            let new_id = extract_node_id(args.first(), ctx)?;
-            let ref_id = extract_node_id(args.get(1), ctx)?;
-            {
-                let mut dom = arc_ib.lock().unwrap_or_else(PoisonError::into_inner);
-                let _ = dom.insert_before(node_id, new_id, ref_id);
-            }
-            Ok(node_to_js_object(&arc_ib, new_id, ctx))
-        })
-    };
-
-    // SAFETY: same -- Arc<Mutex<Dom>> and NodeId captures are not GC-traced.
-    let arc_rp = Arc::clone(dom_arc);
-    let replace_child = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
-            let new_id = extract_node_id(args.first(), ctx)?;
-            let old_id = extract_node_id(args.get(1), ctx)?;
-            {
-                let mut dom = arc_rp.lock().unwrap_or_else(PoisonError::into_inner);
-                let _ = dom.insert_before(node_id, new_id, old_id);
-                let _ = dom.remove_child(node_id, old_id);
-            }
-            Ok(node_to_js_object(&arc_rp, old_id, ctx))
-        })
-    };
-
-    // ---- convert accessor NativeFunctions to JsFunctions --------------------
-    // This borrows ctx.realm() briefly; borrows end before ObjectInitializer::new(ctx).
-
-    let pn_getter: JsFunction = make_getter(ctx, pn_native);
-    let child_nodes_getter: JsFunction = make_getter(ctx, child_nodes_native);
-    let children_getter: JsFunction = make_getter(ctx, children_native);
-    let first_child_getter: JsFunction = make_getter(ctx, first_child_native);
-    let last_child_getter: JsFunction = make_getter(ctx, last_child_native);
-    let next_sibling_getter: JsFunction = make_getter(ctx, next_sibling_native);
-    let prev_sibling_getter: JsFunction = make_getter(ctx, prev_sibling_native);
+    let snap = node_snapshot(dom_arc, node_id);
+    let accessors = node_accessors(dom_arc, node_id, ctx);
+    let methods = node_methods(dom_arc, node_id);
+    let style = ObjectInitializer::new(ctx).build();
+    let dataset = ObjectInitializer::new(ctx).build();
 
     // ---- assemble the JS object ---------------------------------------------
 
@@ -507,85 +445,475 @@ pub(super) fn node_to_js_object(
             JsString::from(snap.class_val.as_str()),
             Attribute::all(),
         )
-        .property(
-            js_string!("textContent"),
-            JsString::from(snap.text.as_str()),
-            Attribute::all(),
-        )
-        .property(
-            js_string!("innerHTML"),
-            JsString::from(snap.text.as_str()),
-            Attribute::all(),
-        )
+        .property(js_string!("style"), style, Attribute::all())
+        .property(js_string!("dataset"), dataset, Attribute::all())
         .property(js_string!("nodeId"), node_id.raw() as u32, Attribute::all())
         // -- live accessor properties --
         .accessor(
             js_string!("parentNode"),
-            Some(pn_getter),
+            Some(accessors.parent_node),
             None,
             Attribute::CONFIGURABLE | Attribute::ENUMERABLE,
         )
         .accessor(
             js_string!("childNodes"),
-            Some(child_nodes_getter),
+            Some(accessors.child_nodes),
             None,
             Attribute::CONFIGURABLE | Attribute::ENUMERABLE,
         )
         .accessor(
             js_string!("children"),
-            Some(children_getter),
+            Some(accessors.children),
             None,
             Attribute::CONFIGURABLE | Attribute::ENUMERABLE,
         )
         .accessor(
             js_string!("firstChild"),
-            Some(first_child_getter),
+            Some(accessors.first_child),
             None,
             Attribute::CONFIGURABLE | Attribute::ENUMERABLE,
         )
         .accessor(
             js_string!("lastChild"),
-            Some(last_child_getter),
+            Some(accessors.last_child),
             None,
             Attribute::CONFIGURABLE | Attribute::ENUMERABLE,
         )
         .accessor(
             js_string!("nextSibling"),
-            Some(next_sibling_getter),
+            Some(accessors.next_sibling),
             None,
             Attribute::CONFIGURABLE | Attribute::ENUMERABLE,
         )
         .accessor(
             js_string!("previousSibling"),
-            Some(prev_sibling_getter),
+            Some(accessors.previous_sibling),
             None,
             Attribute::CONFIGURABLE | Attribute::ENUMERABLE,
         )
-        // -- live mutation methods --
-        .function(get_attribute, js_string!("getAttribute"), 1)
-        .function(set_attribute, js_string!("setAttribute"), 2)
-        .function(append_child, js_string!("appendChild"), 1)
-        .function(remove_child, js_string!("removeChild"), 1)
-        .function(insert_before, js_string!("insertBefore"), 2)
-        .function(replace_child, js_string!("replaceChild"), 2)
-        // -- event stubs (no-op; event loop deferred to a future phase) --
-        .function(
-            NativeFunction::from_fn_ptr(|_, _, _| Ok(JsValue::undefined())),
-            js_string!("addEventListener"),
-            2,
+        .accessor(
+            js_string!("textContent"),
+            Some(accessors.text_content_get),
+            Some(accessors.text_content_set),
+            Attribute::CONFIGURABLE | Attribute::ENUMERABLE,
         )
+        .accessor(
+            js_string!("innerHTML"),
+            Some(accessors.inner_html_get),
+            Some(accessors.inner_html_set),
+            Attribute::CONFIGURABLE | Attribute::ENUMERABLE,
+        )
+        .accessor(
+            js_string!("value"),
+            Some(accessors.value_get),
+            Some(accessors.value_set),
+            Attribute::CONFIGURABLE | Attribute::ENUMERABLE,
+        )
+        .accessor(
+            js_string!("src"),
+            Some(accessors.src_get),
+            Some(accessors.src_set),
+            Attribute::CONFIGURABLE | Attribute::ENUMERABLE,
+        )
+        // -- live mutation methods --
+        .function(methods.get_attribute, js_string!("getAttribute"), 1)
+        .function(methods.set_attribute, js_string!("setAttribute"), 2)
+        .function(methods.append_child, js_string!("appendChild"), 1)
+        .function(methods.remove_child, js_string!("removeChild"), 1)
+        .function(methods.insert_before, js_string!("insertBefore"), 2)
+        .function(methods.replace_child, js_string!("replaceChild"), 2)
+        // -- event listener methods --
+        .function(methods.add_event_listener, js_string!("addEventListener"), 2)
         .function(
-            NativeFunction::from_fn_ptr(|_, _, _| Ok(JsValue::undefined())),
+            methods.remove_event_listener,
             js_string!("removeEventListener"),
             2,
         )
-        .function(
-            NativeFunction::from_fn_ptr(|_, _, _| Ok(JsValue::undefined())),
-            js_string!("dispatchEvent"),
-            1,
-        )
+        .function(methods.dispatch_event, js_string!("dispatchEvent"), 1)
         .build()
         .into()
+}
+
+struct NodeAccessors {
+    parent_node: JsFunction,
+    child_nodes: JsFunction,
+    children: JsFunction,
+    first_child: JsFunction,
+    last_child: JsFunction,
+    next_sibling: JsFunction,
+    previous_sibling: JsFunction,
+    text_content_get: JsFunction,
+    text_content_set: JsFunction,
+    inner_html_get: JsFunction,
+    inner_html_set: JsFunction,
+    value_get: JsFunction,
+    value_set: JsFunction,
+    src_get: JsFunction,
+    src_set: JsFunction,
+}
+
+struct NodeMethods {
+    get_attribute: NativeFunction,
+    set_attribute: NativeFunction,
+    append_child: NativeFunction,
+    remove_child: NativeFunction,
+    insert_before: NativeFunction,
+    replace_child: NativeFunction,
+    add_event_listener: NativeFunction,
+    remove_event_listener: NativeFunction,
+    dispatch_event: NativeFunction,
+}
+
+fn node_snapshot(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NodeSnapshot {
+    let dom = dom_arc.lock().unwrap_or_else(PoisonError::into_inner);
+    snapshot_node(&dom, node_id)
+}
+
+fn node_accessors(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId, ctx: &mut Context) -> NodeAccessors {
+    NodeAccessors {
+        parent_node: make_getter(ctx, related_node_native(dom_arc, node_id, Dom::parent)),
+        child_nodes: make_getter(ctx, child_nodes_native(dom_arc, node_id, false)),
+        children: make_getter(ctx, child_nodes_native(dom_arc, node_id, true)),
+        first_child: make_getter(ctx, related_node_native(dom_arc, node_id, Dom::first_child)),
+        last_child: make_getter(ctx, related_node_native(dom_arc, node_id, Dom::last_child)),
+        next_sibling: make_getter(
+            ctx,
+            related_node_native(dom_arc, node_id, Dom::next_sibling),
+        ),
+        previous_sibling: make_getter(
+            ctx,
+            related_node_native(dom_arc, node_id, Dom::previous_sibling),
+        ),
+        text_content_get: make_getter(ctx, text_content_get_native(dom_arc, node_id)),
+        text_content_set: make_getter(ctx, text_content_set_native(dom_arc, node_id)),
+        inner_html_get: make_getter(ctx, text_content_get_native(dom_arc, node_id)),
+        inner_html_set: make_getter(ctx, text_content_set_native(dom_arc, node_id)),
+        value_get: make_getter(ctx, value_get_native(dom_arc, node_id)),
+        value_set: make_getter(ctx, value_set_native(dom_arc, node_id)),
+        src_get: make_getter(ctx, attribute_get_native(dom_arc, node_id, "src")),
+        src_set: make_getter(ctx, attribute_set_native(dom_arc, node_id, "src")),
+    }
+}
+
+fn node_methods(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NodeMethods {
+    NodeMethods {
+        get_attribute: get_attribute_native(dom_arc, node_id),
+        set_attribute: set_attribute_native(dom_arc, node_id),
+        append_child: append_child_native(dom_arc, node_id),
+        remove_child: remove_child_native(dom_arc, node_id),
+        insert_before: insert_before_native(dom_arc, node_id),
+        replace_child: replace_child_native(dom_arc, node_id),
+        add_event_listener: node_add_event_listener_native(node_id),
+        remove_event_listener: node_remove_event_listener_native(node_id),
+        dispatch_event: node_dispatch_event_native(node_id),
+    }
+}
+
+fn related_node_native(
+    dom_arc: &Arc<Mutex<Dom>>,
+    node_id: NodeId,
+    relation: fn(&Dom, NodeId) -> Result<Option<NodeId>, DomError>,
+) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    unsafe {
+        NativeFunction::from_closure(move |_this, _args, ctx| {
+            let related = {
+                let dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+                relation(&dom, node_id).unwrap_or(None)
+            };
+            match related {
+                Some(id) => Ok(node_to_js_object(&arc, id, ctx)),
+                None => Ok(JsValue::null()),
+            }
+        })
+    }
+}
+
+fn child_nodes_native(
+    dom_arc: &Arc<Mutex<Dom>>,
+    node_id: NodeId,
+    elements_only: bool,
+) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    unsafe {
+        NativeFunction::from_closure(move |_this, _args, ctx| {
+            let nodes = node_children(&arc, node_id, elements_only);
+            node_array(&arc, nodes, ctx)
+        })
+    }
+}
+
+fn node_children(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId, elements_only: bool) -> Vec<NodeId> {
+    let dom = dom_arc.lock().unwrap_or_else(PoisonError::into_inner);
+    let Ok(children) = dom.children(node_id) else {
+        return Vec::new();
+    };
+    children
+        .iter()
+        .copied()
+        .filter(|id| !elements_only || dom.element_name(*id).ok().flatten().is_some())
+        .collect()
+}
+
+fn node_array(
+    dom_arc: &Arc<Mutex<Dom>>,
+    nodes: Vec<NodeId>,
+    ctx: &mut Context,
+) -> JsResult<JsValue> {
+    let arr = JsArray::new(ctx);
+    for node_id in nodes {
+        arr.push(node_to_js_object(dom_arc, node_id, ctx), ctx)?;
+    }
+    Ok(JsValue::from(arr))
+}
+
+fn get_attribute_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let name = match args.first() {
+                Some(value) => value.to_string(ctx)?.to_std_string_lossy(),
+                None => return Ok(JsValue::null()),
+            };
+            let value = {
+                let dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+                dom.attributes(node_id).ok().and_then(|attrs| {
+                    attrs
+                        .iter()
+                        .find(|attr| attr.name.as_str() == name)
+                        .map(|attr| attr.value.to_string())
+                })
+            };
+            Ok(value
+                .map(|value| JsValue::from(JsString::from(value.as_str())))
+                .unwrap_or_else(JsValue::null))
+        })
+    }
+}
+
+fn set_attribute_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let name = match args.first() {
+                Some(value) => value.to_string(ctx)?.to_std_string_lossy(),
+                None => return Ok(JsValue::undefined()),
+            };
+            let value = args
+                .get(1)
+                .map(|value| value.to_string(ctx).map(|s| s.to_std_string_lossy()))
+                .transpose()?
+                .unwrap_or_default();
+            let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+            let _ = dom.set_attribute(node_id, name, value);
+            Ok(JsValue::undefined())
+        })
+    }
+}
+
+fn attribute_get_native(
+    dom_arc: &Arc<Mutex<Dom>>,
+    node_id: NodeId,
+    attribute_name: &'static str,
+) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    unsafe {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
+            let value = {
+                let dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+                dom.attributes(node_id).ok().and_then(|attrs| {
+                    attrs
+                        .iter()
+                        .find(|attr| attr.name.as_str() == attribute_name)
+                        .map(|attr| attr.value.to_string())
+                })
+            };
+            Ok(JsValue::from(JsString::from(
+                value.unwrap_or_default().as_str(),
+            )))
+        })
+    }
+}
+
+fn attribute_set_native(
+    dom_arc: &Arc<Mutex<Dom>>,
+    node_id: NodeId,
+    attribute_name: &'static str,
+) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let value = args
+                .first()
+                .map(|value| value.to_string(ctx).map(|s| s.to_std_string_lossy()))
+                .transpose()?
+                .unwrap_or_default();
+            let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+            let _ = dom.set_attribute(node_id, attribute_name, value);
+            Ok(JsValue::undefined())
+        })
+    }
+}
+
+fn append_child_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let child = extract_node_id(args.first(), ctx)?;
+            {
+                let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+                detach_from_parent(&mut dom, child);
+                let _ = dom.append_child(node_id, child);
+            }
+            Ok(node_to_js_object(&arc, child, ctx))
+        })
+    }
+}
+
+fn remove_child_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let child = extract_node_id(args.first(), ctx)?;
+            {
+                let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+                let _ = dom.remove_child(node_id, child);
+            }
+            Ok(node_to_js_object(&arc, child, ctx))
+        })
+    }
+}
+
+fn insert_before_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let child = extract_node_id(args.first(), ctx)?;
+            let reference = extract_optional_node_id(args.get(1), ctx)?;
+            insert_before_or_append(&arc, node_id, child, reference);
+            Ok(node_to_js_object(&arc, child, ctx))
+        })
+    }
+}
+
+fn insert_before_or_append(
+    dom_arc: &Arc<Mutex<Dom>>,
+    parent: NodeId,
+    child: NodeId,
+    reference: Option<NodeId>,
+) {
+    let mut dom = dom_arc.lock().unwrap_or_else(PoisonError::into_inner);
+    match reference {
+        Some(reference) => {
+            let _ = dom.insert_before(parent, child, reference);
+        }
+        None => {
+            detach_from_parent(&mut dom, child);
+            let _ = dom.append_child(parent, child);
+        }
+    }
+}
+
+fn replace_child_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let child = extract_node_id(args.first(), ctx)?;
+            let old_child = extract_node_id(args.get(1), ctx)?;
+            {
+                let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+                let _ = dom.insert_before(node_id, child, old_child);
+                let _ = dom.remove_child(node_id, old_child);
+            }
+            Ok(node_to_js_object(&arc, old_child, ctx))
+        })
+    }
+}
+
+fn text_content_get_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    unsafe {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
+            let dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+            Ok(JsValue::from(JsString::from(
+                collect_text(&dom, node_id).as_str(),
+            )))
+        })
+    }
+}
+
+fn text_content_set_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let text = args
+                .first()
+                .map(|value| value.to_string(ctx).map(|s| s.to_std_string_lossy()))
+                .transpose()?
+                .unwrap_or_default();
+            let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+            let _ = dom.set_text_content(node_id, text);
+            Ok(JsValue::undefined())
+        })
+    }
+}
+
+fn value_get_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    unsafe {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
+            let dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+            Ok(JsValue::from(JsString::from(
+                form_control_value(&dom, node_id).as_str(),
+            )))
+        })
+    }
+}
+
+fn value_set_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let value = args
+                .first()
+                .map(|value| value.to_string(ctx).map(|s| s.to_std_string_lossy()))
+                .transpose()?
+                .unwrap_or_default();
+            let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+            let _ = dom.set_attribute(node_id, "value", value);
+            Ok(JsValue::undefined())
+        })
+    }
+}
+
+fn node_add_event_listener_native(node_id: NodeId) -> NativeFunction {
+    unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            add_event_listener(node_id, args.first(), args.get(1), ctx)
+        })
+    }
+}
+
+fn node_remove_event_listener_native(node_id: NodeId) -> NativeFunction {
+    unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            remove_event_listener(node_id, args.first(), args.get(1), ctx)
+        })
+    }
+}
+
+fn node_dispatch_event_native(node_id: NodeId) -> NativeFunction {
+    unsafe {
+        NativeFunction::from_closure(move |this, args, ctx| {
+            dispatch_event(this, node_id, args.first(), ctx)
+        })
+    }
+}
+
+fn detach_from_parent(dom: &mut Dom, node_id: NodeId) {
+    if let Ok(Some(parent_id)) = dom.parent(node_id) {
+        let _ = dom.remove_child(parent_id, node_id);
+    }
 }
 
 // ---- document object builder ------------------------------------------------
@@ -593,201 +921,70 @@ pub(super) fn node_to_js_object(
 /// Replace the stub document object in `ctx` with one that queries `dom_arc`.
 pub(super) fn install_document(dom_arc: &Arc<Mutex<Dom>>, ctx: &mut Context) {
     let root = NodeId::from_raw(0);
-
-    // getElementById(id: string) -> element | null
-    // SAFETY: Arc<Mutex<Dom>> and NodeId are not boa GC-traced types.
-    let arc1 = Arc::clone(dom_arc);
-    let get_element_by_id = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
-            let id = match args.first() {
-                Some(v) => v.to_string(ctx)?.to_std_string_lossy(),
-                None => return Ok(JsValue::null()),
-            };
-            let found = {
-                let dom = arc1.lock().unwrap_or_else(PoisonError::into_inner);
-                query_all(&dom, root, &format!("#{id}")).into_iter().next()
-            };
-            match found {
-                Some(node_id) => Ok(node_to_js_object(&arc1, node_id, ctx)),
-                None => Ok(JsValue::null()),
-            }
-        })
-    };
-
-    // querySelector(selector: string) -> element | null
-    // SAFETY: same as above.
-    let arc2 = Arc::clone(dom_arc);
-    let query_selector = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
-            let sel = match args.first() {
-                Some(v) => v.to_string(ctx)?.to_std_string_lossy(),
-                None => return Ok(JsValue::null()),
-            };
-            let found = {
-                let dom = arc2.lock().unwrap_or_else(PoisonError::into_inner);
-                query_all(&dom, root, &sel).into_iter().next()
-            };
-            match found {
-                Some(node_id) => Ok(node_to_js_object(&arc2, node_id, ctx)),
-                None => Ok(JsValue::null()),
-            }
-        })
-    };
-
-    // querySelectorAll(selector: string) -> Array<element>
-    // SAFETY: same as above.
-    let arc3 = Arc::clone(dom_arc);
-    let query_selector_all = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
-            let sel = match args.first() {
-                Some(v) => v.to_string(ctx)?.to_std_string_lossy(),
-                None => {
-                    return Ok(JsValue::from(JsArray::new(ctx)));
-                }
-            };
-            let nodes = {
-                let dom = arc3.lock().unwrap_or_else(PoisonError::into_inner);
-                query_all(&dom, root, &sel)
-            };
-            let arr = JsArray::new(ctx);
-            for node_id in nodes {
-                let obj = node_to_js_object(&arc3, node_id, ctx);
-                arr.push(obj, ctx)
-                    .map_err(|e| JsNativeError::error().with_message(e.to_string()))?;
-            }
-            Ok(JsValue::from(arr))
-        })
-    };
-
-    // createElement(tag: string) -> element
-    // SAFETY: same as above.
-    let arc4 = Arc::clone(dom_arc);
-    let create_element = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
-            let tag = match args.first() {
-                Some(v) => v.to_string(ctx)?.to_std_string_lossy(),
-                None => return Ok(JsValue::null()),
-            };
-            let node_id = {
-                let mut dom = arc4.lock().unwrap_or_else(PoisonError::into_inner);
-                dom.create_element(tag.as_str())
-            };
-            Ok(node_to_js_object(&arc4, node_id, ctx))
-        })
-    };
-
-    // createTextNode(text: string) -> text node
-    // SAFETY: same as above.
-    let arc5 = Arc::clone(dom_arc);
-    let create_text_node = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
-            let text = match args.first() {
-                Some(v) => v.to_string(ctx)?.to_std_string_lossy(),
-                None => String::new(),
-            };
-            let node_id = {
-                let mut dom = arc5.lock().unwrap_or_else(PoisonError::into_inner);
-                dom.create_text(text.as_str())
-            };
-            Ok(node_to_js_object(&arc5, node_id, ctx))
-        })
-    };
-
-    // document.body getter
-    // SAFETY: same as above.
-    let arc_body = Arc::clone(dom_arc);
-    let body_native = unsafe {
-        NativeFunction::from_closure(move |_this, _args, ctx| {
-            let found = {
-                let dom = arc_body.lock().unwrap_or_else(PoisonError::into_inner);
-                query_all(&dom, root, "body").into_iter().next()
-            };
-            match found {
-                Some(id) => Ok(node_to_js_object(&arc_body, id, ctx)),
-                None => Ok(JsValue::null()),
-            }
-        })
-    };
-
-    // document.head getter
-    // SAFETY: same as above.
-    let arc_head = Arc::clone(dom_arc);
-    let head_native = unsafe {
-        NativeFunction::from_closure(move |_this, _args, ctx| {
-            let found = {
-                let dom = arc_head.lock().unwrap_or_else(PoisonError::into_inner);
-                query_all(&dom, root, "head").into_iter().next()
-            };
-            match found {
-                Some(id) => Ok(node_to_js_object(&arc_head, id, ctx)),
-                None => Ok(JsValue::null()),
-            }
-        })
-    };
-
-    // document.documentElement getter (the <html> element)
-    // SAFETY: same as above.
-    let arc_de = Arc::clone(dom_arc);
-    let doc_el_native = unsafe {
-        NativeFunction::from_closure(move |_this, _args, ctx| {
-            let found = {
-                let dom = arc_de.lock().unwrap_or_else(PoisonError::into_inner);
-                query_all(&dom, root, "html").into_iter().next()
-            };
-            match found {
-                Some(id) => Ok(node_to_js_object(&arc_de, id, ctx)),
-                None => Ok(JsValue::null()),
-            }
-        })
-    };
-
-    // Convert accessor NativeFunctions to JsFunctions before borrowing ctx mutably.
-    let body_getter = make_getter(ctx, body_native);
-    let head_getter = make_getter(ctx, head_native);
-    let doc_el_getter = make_getter(ctx, doc_el_native);
+    let methods = document_methods(dom_arc, root);
+    let accessors = document_accessors(dom_arc, root, ctx);
+    let cookie_jar = super::new_cookie_jar();
+    let cookie_getter = super::document_cookie_getter(ctx, &cookie_jar);
+    let cookie_setter = super::document_cookie_setter(ctx, &cookie_jar);
 
     let document = ObjectInitializer::new(ctx)
-        .function(get_element_by_id, js_string!("getElementById"), 1)
-        .function(query_selector, js_string!("querySelector"), 1)
-        .function(query_selector_all, js_string!("querySelectorAll"), 1)
-        .function(create_element, js_string!("createElement"), 1)
-        .function(create_text_node, js_string!("createTextNode"), 1)
+        .function(methods.get_element_by_id, js_string!("getElementById"), 1)
+        .function(methods.query_selector, js_string!("querySelector"), 1)
+        .function(
+            methods.query_selector_all,
+            js_string!("querySelectorAll"),
+            1,
+        )
+        .function(
+            methods.get_elements_by_tag_name,
+            js_string!("getElementsByTagName"),
+            1,
+        )
+        .function(methods.create_element, js_string!("createElement"), 1)
+        .function(methods.create_text_node, js_string!("createTextNode"), 1)
         .function(
             NativeFunction::from_fn_ptr(|_, _, _| Ok(JsValue::null())),
             js_string!("createElementNS"),
             2,
         )
         .function(
-            NativeFunction::from_fn_ptr(|_, _, _| Ok(JsValue::undefined())),
+            methods.add_event_listener,
             js_string!("addEventListener"),
             2,
         )
         .function(
-            NativeFunction::from_fn_ptr(|_, _, _| Ok(JsValue::undefined())),
+            methods.remove_event_listener,
             js_string!("removeEventListener"),
             2,
         )
-        .function(
-            NativeFunction::from_fn_ptr(|_, _, _| Ok(JsValue::undefined())),
-            js_string!("dispatchEvent"),
-            1,
+        .function(methods.dispatch_event, js_string!("dispatchEvent"), 1)
+        .property(
+            js_string!("readyState"),
+            js_string!("loading"),
+            Attribute::all(),
         )
         .accessor(
             js_string!("body"),
-            Some(body_getter),
+            Some(accessors.body),
             None,
             Attribute::CONFIGURABLE | Attribute::ENUMERABLE,
         )
         .accessor(
             js_string!("head"),
-            Some(head_getter),
+            Some(accessors.head),
             None,
             Attribute::CONFIGURABLE | Attribute::ENUMERABLE,
         )
         .accessor(
             js_string!("documentElement"),
-            Some(doc_el_getter),
+            Some(accessors.document_element),
             None,
+            Attribute::CONFIGURABLE | Attribute::ENUMERABLE,
+        )
+        .accessor(
+            js_string!("cookie"),
+            Some(cookie_getter),
+            Some(cookie_setter),
             Attribute::CONFIGURABLE | Attribute::ENUMERABLE,
         )
         .build();
@@ -796,12 +993,186 @@ pub(super) fn install_document(dom_arc: &Arc<Mutex<Dom>>, ctx: &mut Context) {
     let _ = ctx.register_global_property(js_string!("document"), document, Attribute::all());
 }
 
+struct DocumentAccessors {
+    body: JsFunction,
+    head: JsFunction,
+    document_element: JsFunction,
+}
+
+struct DocumentMethods {
+    get_element_by_id: NativeFunction,
+    query_selector: NativeFunction,
+    query_selector_all: NativeFunction,
+    get_elements_by_tag_name: NativeFunction,
+    create_element: NativeFunction,
+    create_text_node: NativeFunction,
+    add_event_listener: NativeFunction,
+    remove_event_listener: NativeFunction,
+    dispatch_event: NativeFunction,
+}
+
+fn document_accessors(
+    dom_arc: &Arc<Mutex<Dom>>,
+    root: NodeId,
+    ctx: &mut Context,
+) -> DocumentAccessors {
+    DocumentAccessors {
+        body: make_getter(ctx, document_selector_getter_native(dom_arc, root, "body")),
+        head: make_getter(ctx, document_selector_getter_native(dom_arc, root, "head")),
+        document_element: make_getter(ctx, document_selector_getter_native(dom_arc, root, "html")),
+    }
+}
+
+fn document_methods(dom_arc: &Arc<Mutex<Dom>>, root: NodeId) -> DocumentMethods {
+    DocumentMethods {
+        get_element_by_id: document_get_element_by_id_native(dom_arc, root),
+        query_selector: document_query_selector_native(dom_arc, root),
+        query_selector_all: document_query_selector_all_native(dom_arc, root),
+        get_elements_by_tag_name: document_get_elements_by_tag_name_native(dom_arc, root),
+        create_element: document_create_element_native(dom_arc),
+        create_text_node: document_create_text_node_native(dom_arc),
+        add_event_listener: node_add_event_listener_native(root),
+        remove_event_listener: node_remove_event_listener_native(root),
+        dispatch_event: node_dispatch_event_native(root),
+    }
+}
+
+fn selector_arg(arg: Option<&JsValue>, ctx: &mut Context) -> JsResult<Option<String>> {
+    match arg {
+        Some(value) => Ok(Some(value.to_string(ctx)?.to_std_string_lossy())),
+        None => Ok(None),
+    }
+}
+
+fn query_first_value(
+    dom_arc: &Arc<Mutex<Dom>>,
+    root: NodeId,
+    selector: &str,
+    ctx: &mut Context,
+) -> JsResult<JsValue> {
+    let found = {
+        let dom = dom_arc.lock().unwrap_or_else(PoisonError::into_inner);
+        query_all(&dom, root, selector).into_iter().next()
+    };
+    match found {
+        Some(node_id) => Ok(node_to_js_object(dom_arc, node_id, ctx)),
+        None => Ok(JsValue::null()),
+    }
+}
+
+fn query_array_value(
+    dom_arc: &Arc<Mutex<Dom>>,
+    root: NodeId,
+    selector: &str,
+    ctx: &mut Context,
+) -> JsResult<JsValue> {
+    let nodes = {
+        let dom = dom_arc.lock().unwrap_or_else(PoisonError::into_inner);
+        query_all(&dom, root, selector)
+    };
+    node_array(dom_arc, nodes, ctx)
+}
+
+fn document_selector_getter_native(
+    dom_arc: &Arc<Mutex<Dom>>,
+    root: NodeId,
+    selector: &'static str,
+) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    unsafe {
+        NativeFunction::from_closure(move |_this, _args, ctx| {
+            query_first_value(&arc, root, selector, ctx)
+        })
+    }
+}
+
+fn document_get_element_by_id_native(dom_arc: &Arc<Mutex<Dom>>, root: NodeId) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let Some(id) = selector_arg(args.first(), ctx)? else {
+                return Ok(JsValue::null());
+            };
+            query_first_value(&arc, root, &format!("#{id}"), ctx)
+        })
+    }
+}
+
+fn document_query_selector_native(dom_arc: &Arc<Mutex<Dom>>, root: NodeId) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let Some(selector) = selector_arg(args.first(), ctx)? else {
+                return Ok(JsValue::null());
+            };
+            query_first_value(&arc, root, &selector, ctx)
+        })
+    }
+}
+
+fn document_query_selector_all_native(dom_arc: &Arc<Mutex<Dom>>, root: NodeId) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let Some(selector) = selector_arg(args.first(), ctx)? else {
+                return Ok(JsValue::from(JsArray::new(ctx)));
+            };
+            query_array_value(&arc, root, &selector, ctx)
+        })
+    }
+}
+
+fn document_get_elements_by_tag_name_native(
+    dom_arc: &Arc<Mutex<Dom>>,
+    root: NodeId,
+) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let Some(tag) = selector_arg(args.first(), ctx)? else {
+                return Ok(JsValue::from(JsArray::new(ctx)));
+            };
+            query_array_value(&arc, root, &tag, ctx)
+        })
+    }
+}
+
+fn document_create_element_native(dom_arc: &Arc<Mutex<Dom>>) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let Some(tag) = selector_arg(args.first(), ctx)? else {
+                return Ok(JsValue::null());
+            };
+            let node_id = {
+                let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+                dom.create_element(tag.as_str())
+            };
+            Ok(node_to_js_object(&arc, node_id, ctx))
+        })
+    }
+}
+
+fn document_create_text_node_native(dom_arc: &Arc<Mutex<Dom>>) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let text = selector_arg(args.first(), ctx)?.unwrap_or_default();
+            let node_id = {
+                let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+                dom.create_text(text.as_str())
+            };
+            Ok(node_to_js_object(&arc, node_id, ctx))
+        })
+    }
+}
+
 // ---- tests ------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     use crate::boa_backend::SilkContext;
-    use silksurf_dom::{Dom, NodeId};
+    use silksurf_dom::{Dom, NodeId, NodeKind};
     use std::sync::{Arc, Mutex};
 
     fn simple_dom() -> (Arc<Mutex<Dom>>, NodeId) {
@@ -817,6 +1188,17 @@ mod tests {
         let _ = dom.append_child(root, span);
         dom.materialize_resolve_table();
         (Arc::new(Mutex::new(dom)), root)
+    }
+
+    fn input_dom() -> (Arc<Mutex<Dom>>, NodeId) {
+        let mut dom = Dom::new();
+        let root = dom.create_document();
+        let input = dom.create_element("input");
+        let _ = dom.set_attribute(input, "id", "prompt");
+        let _ = dom.set_attribute(input, "value", "Hi");
+        let _ = dom.append_child(root, input);
+        dom.materialize_resolve_table();
+        (Arc::new(Mutex::new(dom)), input)
     }
 
     #[test]
@@ -870,12 +1252,156 @@ mod tests {
     }
 
     #[test]
+    fn text_content_assignment_marks_text_node_dirty() {
+        let (arc, _root) = simple_dom();
+        let text_node = {
+            let mut dom = arc.lock().unwrap();
+            let parent = document_greeting(&dom);
+            let text_node = dom.first_child(parent).unwrap().expect("text child");
+            let _ = dom.take_dirty_nodes();
+            text_node
+        };
+
+        let mut ctx = SilkContext::with_dom(&arc);
+        ctx.eval(
+            "var el = document.getElementById('greeting'); \
+             el.firstChild.textContent = 'Updated';",
+        )
+        .expect("eval should succeed");
+
+        let mut dom = arc.lock().unwrap();
+        assert_eq!(
+            dom.node(text_node).unwrap().kind(),
+            &NodeKind::Text {
+                text: "Updated".to_string()
+            }
+        );
+        assert_eq!(dom.take_dirty_nodes(), vec![text_node]);
+    }
+
+    #[test]
     fn get_attribute_returns_value() {
         let (arc, _root) = simple_dom();
         let mut ctx = SilkContext::with_dom(&arc);
         ctx.eval(
             "var el = document.getElementById('greeting'); \
              globalThis._id = el ? el.getAttribute('id') : null;",
+        )
+        .expect("eval should succeed");
+    }
+
+    #[test]
+    fn input_value_accessor_reads_attribute() {
+        let (arc, _input) = input_dom();
+        let mut ctx = SilkContext::with_dom(&arc);
+        ctx.eval(
+            "var el = document.getElementById('prompt'); \
+             if (el.value !== 'Hi') { throw new Error('input value mismatch'); }",
+        )
+        .expect("eval should succeed");
+    }
+
+    #[test]
+    fn input_value_assignment_marks_input_dirty() {
+        let (arc, input) = input_dom();
+        {
+            let mut dom = arc.lock().unwrap();
+            let _ = dom.take_dirty_nodes();
+        }
+
+        let mut ctx = SilkContext::with_dom(&arc);
+        ctx.eval(
+            "var el = document.getElementById('prompt'); \
+             el.value = 'Updated';",
+        )
+        .expect("eval should succeed");
+
+        let mut dom = arc.lock().unwrap();
+        let value = dom
+            .attributes(input)
+            .unwrap()
+            .iter()
+            .find(|attr| attr.name.as_str() == "value")
+            .map(|attr| attr.value.as_str().to_string());
+        assert_eq!(value.as_deref(), Some("Updated"));
+        assert_eq!(dom.take_dirty_nodes(), vec![input]);
+    }
+
+    #[test]
+    fn event_listener_dispatch_invokes_callback() {
+        let (arc, _input) = input_dom();
+        let mut ctx = SilkContext::with_dom(&arc);
+        ctx.eval(
+            "var el = document.getElementById('prompt'); \
+             var count = 0; \
+             function onInput(event) { \
+               if (event.type !== 'input') { throw new Error('event type mismatch'); } \
+               if (event.target !== el) { throw new Error('event target mismatch'); } \
+               count = count + 1; \
+             } \
+             el.addEventListener('input', onInput); \
+             if (el.dispatchEvent({ type: 'input' }) !== true) { throw new Error('dispatch failed'); } \
+             if (count !== 1) { throw new Error('listener count mismatch'); }",
+        )
+        .expect("eval should succeed");
+    }
+
+    #[test]
+    fn event_listener_deduplicates_same_callback() {
+        let (arc, _input) = input_dom();
+        let mut ctx = SilkContext::with_dom(&arc);
+        ctx.eval(
+            "var el = document.getElementById('prompt'); \
+             var count = 0; \
+             function onInput() { count = count + 1; } \
+             el.addEventListener('input', onInput); \
+             el.addEventListener('input', onInput); \
+             el.dispatchEvent('input'); \
+             if (count !== 1) { throw new Error('duplicate listener fired'); }",
+        )
+        .expect("eval should succeed");
+    }
+
+    #[test]
+    fn remove_event_listener_skips_removed_callback() {
+        let (arc, _input) = input_dom();
+        let mut ctx = SilkContext::with_dom(&arc);
+        ctx.eval(
+            "var el = document.getElementById('prompt'); \
+             var count = 0; \
+             function onInput() { count = count + 1; } \
+             el.addEventListener('input', onInput); \
+             el.removeEventListener('input', onInput); \
+             el.dispatchEvent({ type: 'input' }); \
+             if (count !== 0) { throw new Error('removed listener fired'); }",
+        )
+        .expect("eval should succeed");
+    }
+
+    #[test]
+    fn document_event_listener_dispatch_invokes_callback() {
+        let (arc, _input) = input_dom();
+        let mut ctx = SilkContext::with_dom(&arc);
+        ctx.eval(
+            "var count = 0; \
+             document.addEventListener('visibilitychange', function(event) { \
+               if (event.target !== document) { throw new Error('document target mismatch'); } \
+               count = count + 1; \
+             }); \
+             document.dispatchEvent({ type: 'visibilitychange' }); \
+             if (count !== 1) { throw new Error('document listener count mismatch'); }",
+        )
+        .expect("eval should succeed");
+    }
+
+    #[test]
+    fn document_cookie_accessor_survives_dom_document_install() {
+        let (arc, _input) = input_dom();
+        let mut ctx = SilkContext::with_dom(&arc);
+        ctx.eval(
+            "document.cookie = 'sid=dom'; \
+             document.cookie = 'mode=chat'; \
+             if (document.cookie !== 'sid=dom; mode=chat') { throw new Error('cookie mismatch'); }",
         )
         .expect("eval should succeed");
     }
@@ -890,6 +1416,50 @@ mod tests {
              parent.appendChild(child); \
              var kids = parent.children; \
              globalThis._len = kids.length;",
+        )
+        .expect("eval should succeed");
+    }
+
+    #[test]
+    fn insert_before_null_appends_child() {
+        let (arc, _root) = simple_dom();
+        let mut ctx = SilkContext::with_dom(&arc);
+        ctx.eval(
+            "var parent = document.getElementById('greeting'); \
+             var child = document.createElement('span'); \
+             var returned = parent.insertBefore(child, null); \
+             if (returned.nodeId !== child.nodeId) { throw new Error('insertBefore return mismatch'); } \
+             if (parent.lastChild.nodeId !== child.nodeId) { throw new Error('insertBefore did not append'); }",
+        )
+        .expect("eval should succeed");
+    }
+
+    #[test]
+    fn insert_before_moves_existing_child() {
+        let (arc, _root) = simple_dom();
+        let mut ctx = SilkContext::with_dom(&arc);
+        ctx.eval(
+            "var parent = document.getElementById('greeting'); \
+             var child = document.querySelector('span'); \
+             parent.insertBefore(child, null); \
+             if (child.parentNode.nodeId !== parent.nodeId) { throw new Error('child parent mismatch'); } \
+             if (parent.lastChild.nodeId !== child.nodeId) { throw new Error('child did not move'); }",
+        )
+        .expect("eval should succeed");
+    }
+
+    #[test]
+    fn element_style_dataset_and_tag_lookup_exist() {
+        let (arc, _root) = simple_dom();
+        let mut ctx = SilkContext::with_dom(&arc);
+        ctx.eval(
+            "var el = document.createElement('iframe'); \
+             el.style.position = 'absolute'; \
+             el.dataset.kind = 'probe'; \
+             if (el.style.position !== 'absolute') { throw new Error('style write failed'); } \
+             if (el.dataset.kind !== 'probe') { throw new Error('dataset write failed'); } \
+             if (document.readyState !== 'loading') { throw new Error('readyState mismatch'); } \
+             if (document.getElementsByTagName('body').length !== 0) { throw new Error('unexpected body'); }",
         )
         .expect("eval should succeed");
     }
@@ -928,5 +1498,12 @@ mod tests {
              globalThis._has_parent = pn !== null;",
         )
         .expect("eval should succeed");
+    }
+
+    fn document_greeting(dom: &Dom) -> NodeId {
+        super::query_all(dom, NodeId::from_raw(0), "#greeting")
+            .into_iter()
+            .next()
+            .expect("greeting node")
     }
 }

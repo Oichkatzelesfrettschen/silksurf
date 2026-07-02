@@ -12,13 +12,13 @@ pub struct NodeId(usize);
 
 impl NodeId {
     /// Create a `NodeId` from a raw index. Use only for testing or FFI.
-    #[must_use] 
+    #[must_use]
     pub fn from_raw(index: usize) -> Self {
         NodeId(index)
     }
 
     /// Get the raw index.
-    #[must_use] 
+    #[must_use]
     pub fn raw(self) -> usize {
         self.0
     }
@@ -107,7 +107,7 @@ pub enum TagName {
 
 impl TagName {
     #[allow(clippy::should_implement_trait)]
-    #[must_use] 
+    #[must_use]
     pub fn from_str(name: &str) -> Self {
         let lower = name.to_ascii_lowercase();
         match lower.as_str() {
@@ -165,7 +165,7 @@ impl TagName {
         }
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn as_str(&self) -> &str {
         match self {
             TagName::Html => "html",
@@ -241,7 +241,7 @@ pub enum AttributeName {
 
 impl AttributeName {
     #[allow(clippy::should_implement_trait)]
-    #[must_use] 
+    #[must_use]
     pub fn from_str(name: &str) -> Self {
         let lower = name.to_ascii_lowercase();
         match lower.as_str() {
@@ -260,7 +260,7 @@ impl AttributeName {
         }
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn as_str(&self) -> &str {
         match self {
             AttributeName::Id => "id",
@@ -278,7 +278,7 @@ impl AttributeName {
         }
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn matches(&self, name: &str) -> bool {
         self.as_str().eq_ignore_ascii_case(name)
     }
@@ -550,6 +550,46 @@ impl Dom {
         Ok(text_node)
     }
 
+    pub fn set_text_content(
+        &mut self,
+        id: NodeId,
+        text: impl Into<String>,
+    ) -> Result<(), DomError> {
+        let text = text.into();
+        let index = self.node_index(id)?;
+        match self.nodes[index].kind {
+            NodeKind::Text { .. } => {
+                if let NodeKind::Text { text: existing } = &mut self.nodes[index].kind
+                    && *existing != text
+                {
+                    *existing = text;
+                    self.mark_dirty(id);
+                }
+                Ok(())
+            }
+            NodeKind::Element { .. } | NodeKind::Document => {
+                let old_children: Vec<NodeId> =
+                    self.nodes[index].children.iter().copied().collect();
+                self.nodes[index].children.clear();
+                for child in old_children {
+                    if let Ok(child_index) = self.node_index(child) {
+                        self.nodes[child_index].parent = None;
+                    }
+                }
+                if !text.is_empty() {
+                    let text_node = self.create_text(text);
+                    let text_index = self.node_index(text_node)?;
+                    self.nodes[text_index].parent = Some(id);
+                    self.nodes[index].children.push(text_node);
+                    self.mark_dirty(text_node);
+                }
+                self.mark_dirty(id);
+                Ok(())
+            }
+            _ => Err(DomError::NotText(id)),
+        }
+    }
+
     pub fn set_attribute(
         &mut self,
         id: NodeId,
@@ -611,6 +651,27 @@ impl Dom {
                 }
                 self.mark_dirty(id);
                 Ok(())
+            }
+            _ => Err(DomError::NotElement(id)),
+        }
+    }
+
+    pub fn remove_attribute(
+        &mut self,
+        id: NodeId,
+        name: impl Into<String>,
+    ) -> Result<bool, DomError> {
+        let attr_name = AttributeName::from_str(&name.into());
+        let index = self.node_index(id)?;
+        match &mut self.nodes[index].kind {
+            NodeKind::Element { attributes, .. } => {
+                let Some(position) = attributes.iter().position(|attr| attr.name == attr_name)
+                else {
+                    return Ok(false);
+                };
+                attributes.remove(position);
+                self.mark_dirty(id);
+                Ok(true)
             }
             _ => Err(DomError::NotElement(id)),
         }
@@ -700,7 +761,9 @@ impl Dom {
     }
 
     pub fn next_sibling(&self, id: NodeId) -> Result<Option<NodeId>, DomError> {
-        let Some(parent) = self.parent(id)? else { return Ok(None); };
+        let Some(parent) = self.parent(id)? else {
+            return Ok(None);
+        };
         let siblings = self.children(parent)?;
         for (idx, sibling) in siblings.iter().enumerate() {
             if *sibling == id {
@@ -711,7 +774,9 @@ impl Dom {
     }
 
     pub fn previous_sibling(&self, id: NodeId) -> Result<Option<NodeId>, DomError> {
-        let Some(parent) = self.parent(id)? else { return Ok(None); };
+        let Some(parent) = self.parent(id)? else {
+            return Ok(None);
+        };
         let siblings = self.children(parent)?;
         for (idx, sibling) in siblings.iter().enumerate() {
             if *sibling == id {
@@ -785,7 +850,7 @@ impl Dom {
 }
 
 impl Node {
-    #[must_use] 
+    #[must_use]
     pub fn kind(&self) -> &NodeKind {
         &self.kind
     }

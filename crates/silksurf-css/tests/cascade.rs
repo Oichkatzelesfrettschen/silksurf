@@ -84,3 +84,93 @@ fn cascades_line_height_and_border() {
         }
     );
 }
+
+#[test]
+fn inline_style_overrides_stylesheet_specificity() {
+    let stylesheet = parse_stylesheet("#main { color: blue; display: block; }").unwrap();
+
+    let mut dom = Dom::new();
+    let doc = dom.create_document();
+    let html = dom.create_element("html");
+    dom.append_child(doc, html).unwrap();
+    let body = dom.create_element("body");
+    dom.append_child(html, body).unwrap();
+    let div = dom.create_element("div");
+    dom.set_attribute(div, "id", "main").unwrap();
+    dom.set_attribute(div, "style", "color: red; display: flex;")
+        .unwrap();
+    dom.append_child(body, div).unwrap();
+
+    let styles = compute_styles(&dom, doc, &stylesheet);
+    let div_style = styles.get(&div).expect("div style");
+
+    assert_eq!(div_style.display, Display::Flex);
+    assert_eq!(
+        div_style.color,
+        Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255
+        }
+    );
+}
+
+#[test]
+fn stylesheet_important_overrides_inline_normal() {
+    let stylesheet = parse_stylesheet("#main { color: blue !important; }").unwrap();
+
+    let mut dom = Dom::new();
+    let doc = dom.create_document();
+    let html = dom.create_element("html");
+    dom.append_child(doc, html).unwrap();
+    let body = dom.create_element("body");
+    dom.append_child(html, body).unwrap();
+    let div = dom.create_element("div");
+    dom.set_attribute(div, "id", "main").unwrap();
+    dom.set_attribute(div, "style", "color: red;").unwrap();
+    dom.append_child(body, div).unwrap();
+
+    let styles = compute_styles(&dom, doc, &stylesheet);
+    let div_style = styles.get(&div).expect("div style");
+
+    assert_eq!(
+        div_style.color,
+        Color {
+            r: 0,
+            g: 0,
+            b: 255,
+            a: 255
+        }
+    );
+}
+
+#[test]
+fn inline_important_overrides_stylesheet_important() {
+    let stylesheet = parse_stylesheet("#main { color: blue !important; }").unwrap();
+
+    let mut dom = Dom::new();
+    let doc = dom.create_document();
+    let html = dom.create_element("html");
+    dom.append_child(doc, html).unwrap();
+    let body = dom.create_element("body");
+    dom.append_child(html, body).unwrap();
+    let div = dom.create_element("div");
+    dom.set_attribute(div, "id", "main").unwrap();
+    dom.set_attribute(div, "style", "color: red !important;")
+        .unwrap();
+    dom.append_child(body, div).unwrap();
+
+    let styles = compute_styles(&dom, doc, &stylesheet);
+    let div_style = styles.get(&div).expect("div style");
+
+    assert_eq!(
+        div_style.color,
+        Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255
+        }
+    );
+}

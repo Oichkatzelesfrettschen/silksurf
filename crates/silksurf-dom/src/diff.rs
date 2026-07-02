@@ -76,13 +76,13 @@ pub struct DomDiff {
 
 impl DomDiff {
     /// True if the two DOMs are identical (no changes, additions, or removals).
-    #[must_use] 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.changed.is_empty() && self.added.is_empty() && self.removed.is_empty()
     }
 
     /// Total number of changed, added, and removed nodes.
-    #[must_use] 
+    #[must_use]
     pub fn total_changes(&self) -> usize {
         self.changed.len() + self.added.len() + self.removed.len()
     }
@@ -272,8 +272,12 @@ fn diff_children(
  * small in number (< 10), so this is effectively O(1) per node.
  */
 fn attributes_changed(old_dom: &Dom, old_node: NodeId, new_dom: &Dom, new_node: NodeId) -> bool {
-    let Ok(old_attrs) = old_dom.attributes(old_node) else { return false; };
-    let Ok(new_attrs) = new_dom.attributes(new_node) else { return false; };
+    let Ok(old_attrs) = old_dom.attributes(old_node) else {
+        return false;
+    };
+    let Ok(new_attrs) = new_dom.attributes(new_node) else {
+        return false;
+    };
 
     if old_attrs.len() != new_attrs.len() {
         return true;

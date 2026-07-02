@@ -11,7 +11,7 @@ silksurf-html = { path = "../silksurf-html" }
 silksurf-css = { path = "../silksurf-css" }
 silksurf-dom = { path = "../silksurf-dom" }
 silksurf-layout = { path = "../silksurf-layout" }
-silksurf-render = { path = "../silksurf-render", features = ["parallel"] }
+silksurf-render = { path = "../silksurf-render" }
 rustc-hash = { workspace = true }
 mimalloc = { workspace = true }
 serde_json = { workspace = true }
@@ -28,6 +28,7 @@ default = []
 full = ["net"]
 net = ["dep:silksurf-net", "dep:silksurf-tls"]
 platform-verifier = ["net", "silksurf-tls/platform-verifier"]
+parallel-render = ["silksurf-render/parallel"]
 
 # =============================================================================
 # Binaries
@@ -35,6 +36,11 @@ platform-verifier = ["net", "silksurf-tls/platform-verifier"]
 # bench_pipeline and bench_js are autodiscovered from src/bin/. wpt_runner is
 # declared explicitly so external tooling (scripts/conformance_run.sh, CI)
 # can reference the binary name without relying on autodiscovery semantics.
+[[bin]]
+name = "bench_pipeline"
+path = "src/bin/bench_pipeline.rs"
+required-features = ["parallel-render"]
+
 [[bin]]
 name = "wpt_runner"
 path = "src/bin/wpt_runner.rs"

@@ -111,13 +111,13 @@ impl RevalidationHandle {
      * WHY: Lets the caller render from cache and check for an update only when
      * the revalidation has already completed (zero additional latency).
      */
-    #[must_use] 
+    #[must_use]
     pub fn try_recv(&self) -> Option<Result<RevalidationResult, NetError>> {
         self.rx.try_recv().ok()
     }
 
     /// The URL being revalidated.
-    #[must_use] 
+    #[must_use]
     pub fn url(&self) -> &str {
         &self.url
     }
@@ -233,10 +233,13 @@ fn save_stylesheet_to_disk(path: &PathBuf, sheet: &Stylesheet) {
  * ResponseCache::with_disk creates it on first write).
  */
 fn http_cache_dir() -> std::path::PathBuf {
-    let base = std::env::var_os("XDG_CACHE_HOME").map_or_else(|| {
+    let base = std::env::var_os("XDG_CACHE_HOME").map_or_else(
+        || {
             let home = std::env::var_os("HOME").unwrap_or_else(|| "/tmp".into());
             std::path::PathBuf::from(home).join(".cache")
-        }, std::path::PathBuf::from);
+        },
+        std::path::PathBuf::from,
+    );
     base.join("silksurf").join("http")
 }
 
@@ -249,10 +252,19 @@ pub struct SpeculativeRenderer {
 type FetchResult = Result<(HttpResponse, FetchOrigin, std::time::Duration), NetError>;
 
 impl SpeculativeRenderer {
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self {
             cache: ResponseCache::with_disk(&http_cache_dir()),
+            client: Arc::new(BasicClient::new()),
+            stylesheet_cache: StylesheetCache::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn new_ephemeral() -> Self {
+        Self {
+            cache: ResponseCache::new(),
             client: Arc::new(BasicClient::new()),
             stylesheet_cache: StylesheetCache::new(),
         }
@@ -265,11 +277,23 @@ impl SpeculativeRenderer {
      * testing with self-signed certs without changing the production code path.
      * NEVER use in production.
      */
-    #[must_use] 
+    #[must_use]
     pub fn with_insecure() -> Self {
         use silksurf_tls::RustlsProvider;
         Self {
             cache: ResponseCache::with_disk(&http_cache_dir()),
+            client: Arc::new(BasicClient::with_tls(Arc::new(
+                RustlsProvider::new_insecure(),
+            ))),
+            stylesheet_cache: StylesheetCache::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_insecure_ephemeral() -> Self {
+        use silksurf_tls::RustlsProvider;
+        Self {
+            cache: ResponseCache::new(),
             client: Arc::new(BasicClient::with_tls(Arc::new(
                 RustlsProvider::new_insecure(),
             ))),
@@ -303,6 +327,20 @@ impl SpeculativeRenderer {
         })
     }
 
+    pub fn with_extra_ca_file_ephemeral(path: &std::path::Path) -> Result<Self, NetError> {
+        use silksurf_tls::RustlsProvider;
+
+        let provider = RustlsProvider::new_with_extra_ca_file(path).map_err(|e| NetError {
+            message: format!("TLS CA file {}: {e}", path.display()),
+        })?;
+
+        Ok(Self {
+            cache: ResponseCache::new(),
+            client: Arc::new(BasicClient::with_tls(Arc::new(provider))),
+            stylesheet_cache: StylesheetCache::new(),
+        })
+    }
+
     /*
      * with_platform_verifier -- constructor that asks rustls to use the best
      * platform verifier available for this target.
@@ -321,6 +359,21 @@ impl SpeculativeRenderer {
 
         Ok(Self {
             cache: ResponseCache::with_disk(&http_cache_dir()),
+            client: Arc::new(BasicClient::with_tls(Arc::new(provider))),
+            stylesheet_cache: StylesheetCache::new(),
+        })
+    }
+
+    #[cfg(feature = "platform-verifier")]
+    pub fn with_platform_verifier_ephemeral() -> Result<Self, NetError> {
+        use silksurf_tls::RustlsProvider;
+
+        let provider = RustlsProvider::new_platform_verifier().map_err(|e| NetError {
+            message: format!("TLS platform verifier setup: {e}"),
+        })?;
+
+        Ok(Self {
+            cache: ResponseCache::new(),
             client: Arc::new(BasicClient::with_tls(Arc::new(provider))),
             stylesheet_cache: StylesheetCache::new(),
         })
@@ -445,6 +498,15 @@ impl SpeculativeRenderer {
         Ok((response, FetchOrigin::Fresh, t0.elapsed()))
     }
 
+    pub fn fetch_uncached_request(
+        &mut self,
+        request: &HttpRequest,
+    ) -> Result<(HttpResponse, FetchOrigin, std::time::Duration), NetError> {
+        let t0 = Instant::now();
+        let response = self.client.fetch(request)?;
+        Ok((response, FetchOrigin::Fresh, t0.elapsed()))
+    }
+
     /*
      * fetch_all_or_speculate -- cache-first parallel fetch for multiple URLs.
      *
@@ -552,7 +614,7 @@ impl SpeculativeRenderer {
      * returned FetchOrigin::Cache. Calling on an uncached URL sends an
      * unconditional GET (no validation headers), which is wasteful.
      */
-    #[must_use] 
+    #[must_use]
     pub fn spawn_revalidation(&self, url: &str) -> RevalidationHandle {
         /*
          * Clone conditional headers before spawning: ResponseCache is !Send
@@ -619,7 +681,7 @@ impl SpeculativeRenderer {
     }
 
     /// Total bytes held in cache across all URLs.
-    #[must_use] 
+    #[must_use]
     pub fn cache_bytes(&self) -> usize {
         self.cache.total_bytes()
     }
