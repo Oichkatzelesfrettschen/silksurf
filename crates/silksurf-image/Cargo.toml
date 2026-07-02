@@ -1,0 +1,15 @@
+[package]
+name = "silksurf-image"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94.1"
+publish = false
+
+[dependencies]
+image-webp = { workspace = true }
+png = { workspace = true }
+zune-core = { workspace = true }
+zune-jpeg = { workspace = true }
+
+[lints]
+workspace = true

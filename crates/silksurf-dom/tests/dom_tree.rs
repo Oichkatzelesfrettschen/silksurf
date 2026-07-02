@@ -98,6 +98,45 @@ fn tracks_dirty_nodes_on_mutations() {
 }
 
 #[test]
+fn set_text_content_marks_text_node_dirty() {
+    let mut dom = Dom::new();
+    let text = dom.create_text("old");
+    let _ = dom.take_dirty_nodes();
+
+    dom.set_text_content(text, "new").unwrap();
+
+    let dirty = dom.take_dirty_nodes();
+    assert_eq!(
+        dom.node(text).unwrap().kind(),
+        &NodeKind::Text { text: "new".into() }
+    );
+    assert_eq!(dirty, vec![text]);
+}
+
+#[test]
+fn set_text_content_on_element_replaces_children() {
+    let mut dom = Dom::new();
+    let parent = dom.create_element("p");
+    let first = dom.create_text("old");
+    dom.append_child(parent, first).unwrap();
+    let _ = dom.take_dirty_nodes();
+
+    dom.set_text_content(parent, "new").unwrap();
+
+    let children = dom.children(parent).unwrap();
+    assert_eq!(children.len(), 1);
+    assert_ne!(children[0], first);
+    let new_child = children[0];
+    assert_eq!(
+        dom.node(new_child).unwrap().kind(),
+        &NodeKind::Text { text: "new".into() }
+    );
+    let dirty = dom.take_dirty_nodes();
+    assert!(dirty.contains(&parent));
+    assert!(dirty.contains(&new_child));
+}
+
+#[test]
 fn batches_dirty_nodes_until_flush() {
     let mut dom = Dom::new();
     let doc = dom.create_document();

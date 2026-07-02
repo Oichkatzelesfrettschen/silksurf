@@ -1,19 +1,13 @@
 /*
  * silksurf-text -- Unicode-aware text measurement and glyph rasterization.
  *
- * WHY: Layout needs accurate text dimensions (not a char-count heuristic) to
- * compute inline box widths correctly. Rendering needs actual glyph bitmaps
- * to produce readable text rather than colored rectangles.
+ * Layout needs text dimensions before taffy can resolve boxes. Rendering needs
+ * glyph bitmaps for readable text. Layout uses deterministic metrics.
+ * Glyph rasterization uses cosmic-text.
  *
- * WHAT: Exposes two public entry points:
- *   measure_text   -- shaped text dimensions in pixels (width, height)
- *   rasterize_glyphs -- blits anti-aliased glyphs into a PixmapMut
- *
- * HOW: cosmic-text provides the full shaping+layout+rasterization stack via
- * FontSystem (font discovery), Buffer (shaped layout runs), and SwashCache
- * (glyph bitmap cache). Both entry points share a single process-wide
- * TextState wrapped in LazyLock<Mutex<_>> to amortize FontSystem init cost
- * (~1 s on first call; free on subsequent calls).
+ * cosmic-text owns FontSystem, Buffer, and SwashCache. Both public entry
+ * points share one process-wide TextState behind LazyLock<Mutex<_>> so font
+ * discovery occurs once per process.
  *
  * Thread safety: TextState is protected by Mutex. Rayon tile workers must
  * not call measure_text or rasterize_glyphs in parallel -- call before

@@ -60,7 +60,7 @@ pub struct StoragePartition {
 /// `origin` must be a serialised origin as defined by the HTML spec
 /// (scheme + "://" + host + optional port).  An opaque origin ("null")
 /// is returned as-is; it is already maximally partitioned.
-#[must_use] 
+#[must_use]
 pub fn partition_key(origin: &str) -> String {
     // PLACEHOLDER: return origin verbatim until (site, top-level-site)
     // partitioning is implemented.  See AD-022 for the full design.

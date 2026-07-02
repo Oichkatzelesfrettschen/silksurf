@@ -85,7 +85,7 @@ pub struct Dimensions {
 }
 
 impl Dimensions {
-    #[must_use] 
+    #[must_use]
     pub fn margin_box(&self) -> Rect {
         Rect {
             x: self.content.x - self.margin.left,
@@ -580,7 +580,7 @@ fn inline_text_width_fixed(dom: &Dom, node: NodeId, font_size_fixed: i32) -> i32
 /// can position inline boxes correctly under UAX #9.
 ///
 /// Returns 0 for empty input (no `BiDi` runs -> LTR default per UAX #9 SS2).
-#[must_use] 
+#[must_use]
 pub fn bidi_level(text: &str) -> u8 {
     if text.is_empty() {
         return 0;
@@ -604,7 +604,7 @@ pub fn bidi_level(text: &str) -> u8 {
 /// The returned offsets are the byte indices *after* the last code unit
 /// that may appear on the preceding line (matching the unicode-linebreak
 /// crate convention).
-#[must_use] 
+#[must_use]
 pub fn linebreak_opportunities(text: &str) -> Vec<usize> {
     linebreaks(text)
         .filter_map(|(offset, opportunity)| {

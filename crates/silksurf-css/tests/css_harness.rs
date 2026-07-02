@@ -43,7 +43,8 @@ impl HarnessOptions {
 
 impl ExpectationConfig {
     fn load(root: &Path) -> Result<Self, String> {
-        let manifest = env::var("CSS_TEST_EXPECTATIONS").map_or_else(|_| root.join(DEFAULT_EXPECTATIONS_FILE), PathBuf::from);
+        let manifest = env::var("CSS_TEST_EXPECTATIONS")
+            .map_or_else(|_| root.join(DEFAULT_EXPECTATIONS_FILE), PathBuf::from);
         if !manifest.exists() {
             return Ok(Self::default());
         }

@@ -1,24 +1,9 @@
 //! Synchronous XCB event pump that translates wire events into `Event`.
 //!
-//! WHY: We want to keep the event loop separate from the window so it can
-//! be reused for multi-window setups in the future and so it can be
-//! mocked/tested without touching libxcb. The loop is intentionally
-//! single-threaded and synchronous -- the speculative networking layer
-//! does its own threading, and the rasterizer is invoked from inside
-//! the handler closure so the GPU/CPU back-pressure naturally throttles
-//! event processing.
-//!
-//! WHAT: `EventLoop::run` blocks on `wait_for_event`, translates each
-//! XCB event into our `Event` enum, and calls the user handler. The
-//! handler returns `ControlFlow` to keep going or stop. A
-//! `ClientMessage` whose payload matches the cached
-//! `WM_DELETE_WINDOW` atom is reported as `Event::Close` and ends the
-//! pump unconditionally regardless of what the handler returns -- the
-//! rationale is that ignoring a WM close request is bad behaviour.
-//!
-//! HOW: Construct with `EventLoop::new()`, call `run(window, handler)`
-//! once. The loop terminates on Close, on `ControlFlow::Exit` from the
-//! handler, or on a connection error.
+//! EventLoop::run blocks on wait_for_event, translates XCB events into the
+//! crate's Event enum, and calls the user handler. The handler returns
+//! ControlFlow to continue or stop. A ClientMessage carrying WM_DELETE_WINDOW
+//! reports Event::Close and terminates the pump.
 
 use silksurf_core::SilkError;
 use xcb::Xid;
@@ -27,9 +12,8 @@ use xcb::x;
 use crate::input::{ControlFlow, Event};
 use crate::window::XcbWindow;
 
-/// XCB event pump. Currently stateless -- the struct exists so that
-/// future per-loop state (deferred work queues, redraw debouncing,
-/// frame timestamps for vsync) can be added without breaking the API.
+/// XCB event pump. The struct is stateless and leaves room for later
+/// per-loop queues, redraw debouncing, and frame timestamps.
 #[derive(Default, Debug)]
 pub struct EventLoop {
     /// Reserved for future use. The unit field keeps the struct
@@ -40,7 +24,7 @@ pub struct EventLoop {
 
 impl EventLoop {
     /// Construct a new event loop. Cheap; no syscalls.
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self { _reserved: () }
     }
@@ -56,15 +40,13 @@ impl EventLoop {
     {
         let wm_delete = window.wm_delete_window();
         loop {
-            // wait_for_event blocks until an event arrives. On a clean
-            // WM-shutdown (we did not register WM_DELETE_WINDOW, or the
-            // connection was forcibly closed) this returns
-            // Err(Error::Connection(ConnError::Connection)) -- treat
-            // that as a graceful exit rather than a hard failure.
+            // wait_for_event blocks until an event arrives. A clean window
+            // manager shutdown may close the connection; that reports a
+            // connection error and exits the pump normally.
             let xcb_event = match window.connection().wait_for_event() {
                 Ok(ev) => ev,
                 Err(xcb::Error::Connection(xcb::ConnError::Connection)) => {
-                    // Connection torn down by the server / WM. Exit cleanly.
+                    // The display server closed the connection.
                     return Ok(());
                 }
                 Err(err) => {
@@ -72,8 +54,7 @@ impl EventLoop {
                 }
             };
 
-            // Translate. translate_event may need to update window
-            // size on Resize, so it takes &mut window.
+            // translate_event updates cached window size on Resize.
             let translated = translate_event(&xcb_event, window, wm_delete);
 
             if let Some(event) = translated {
@@ -89,8 +70,7 @@ impl EventLoop {
 
 /// Translate a single XCB event into our normalized `Event`.
 ///
-/// Returns `None` for events we do not surface (`KeymapNotify`, `MapNotify`,
-/// `ReparentNotify`, etc.) -- the loop just polls the next one.
+/// Returns `None` for events the app does not surface.
 fn translate_event(
     event: &xcb::Event,
     window: &mut XcbWindow,
@@ -124,8 +104,7 @@ fn translate_event(
         xcb::Event::X(x::Event::ConfigureNotify(configure)) => {
             let new_w = u32::from(configure.width());
             let new_h = u32::from(configure.height());
-            // Only report a Resize when the size actually changed -- WMs
-            // send ConfigureNotify for moves too.
+            // Window managers send ConfigureNotify for moves and resizes.
             if new_w != window.width() || new_h != window.height() {
                 window.set_size(new_w, new_h);
                 Some(Event::Resize {
@@ -144,12 +123,10 @@ fn translate_event(
                     None
                 }
             }
-            // 8- and 16-bit ClientMessage formats are not used by
-            // any WM protocol we care about; ignore.
+            // WM protocols used here carry 32-bit ClientMessage data.
             _ => None,
         },
-        // Ignore everything else -- KeymapNotify, MapNotify,
-        // ReparentNotify, GraphicsExposure, NoExposure, ...
+        // Unhandled XCB events do not enter the normalized input stream.
         _ => None,
     }
 }

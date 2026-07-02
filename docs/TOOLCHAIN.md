@@ -20,6 +20,51 @@
 - `cargo llvm-lines -p silksurf-engine`
 - `cargo nextest run -p silksurf-css`
 
+## Low-Latency Evidence Ladder
+- Complexity: `/home/eirikr/.local/bin/lizard -l rust -C 16 <touched-rust-files>`
+  is the gate for every touched Rust path.
+- Source shape: `rust-analyzer`, `rg`, `fd`, `cargo tree`, `cargo machete`,
+  `scc`, and `cloc` explain code and dependency surface before profiling.
+- Legacy C/XCB shape: `cflow`, `cscope`, `global`, `ctags`, and `readtags`
+  map C call and symbol flow. They do not prove Rust call graphs.
+- Binary size: `cargo bloat` and `cargo llvm-lines` identify codegen and
+  monomorphization pressure.
+- Command timing: `hyperfine` measures repeatable CLI paths. GUI address input
+  uses `scripts/gui_probe.sh` trace metrics instead.
+- Runtime timing: `perf stat`, `perf record`, `cargo flamegraph`, `hotspot`,
+  `sysprof-cli`, `uftrace`, and `valgrind --tool=callgrind` localize CPU,
+  indirect-call, branch, cache, and scheduler cost.
+- Allocation and RSS: `heaptrack` and Valgrind explain heap growth and
+  allocator churn when built-in counters do not isolate it.
+- Syscall and compositor waits: `strace`, `ltrace`, `bpftrace`,
+  `wayland-info`, `wev`, `xprop`, `xwininfo`, `Xvfb`, and `xvfb-run`
+  separate app work from display-backend behavior.
+- Host counters: `likwid-topology` and `likwid-perfctr` ground cache,
+  bandwidth, and CPU-topology claims.
+
+## Local Tool Inventory (2026-06-30)
+
+The current workstation exposes the full low-latency evidence ladder:
+
+| Surface | Available tools |
+|---------|-----------------|
+| Source and metrics | `rg`, `fd`, `rust-analyzer`, `lizard`, `scc`, `cloc` |
+| Rust dependency and size pressure | `cargo tree`, `cargo machete`, `cargo udeps`, `cargo deny`, `cargo bloat`, `cargo llvm-lines` |
+| C and legacy symbol flow | `cflow`, `ctags`, `readtags`, `gtags`, `global` |
+| Repeatable timing | `hyperfine`, `scripts/gui_probe.sh` |
+| CPU and timeline profiling | `perf`, `sysprof-cli`, `uftrace`, `valgrind`, `flamegraph` |
+| Allocation and syscall evidence | `heaptrack`, `strace`, `ltrace`, `bpftrace` |
+| Display backend evidence | `wayland-info`, `wev`, `xprop`, `xwininfo`, `Xvfb`, `xvfb-run` |
+| Host counter evidence | `likwid-topology`, `likwid-perfctr` |
+
+`rg` resolves through the Codex vendor path in this shell. Use `/usr/bin/rg`
+when package ownership or system-path evidence matters.
+
+`scripts/gui_probe.sh --backend auto` treats a live Wayland socket as the first
+display truth surface and falls back to `DISPLAY` only when Wayland is absent.
+`xvfb-run` supplies `DISPLAY` for X11-only probe runs; it does not replace a
+live Wayland evidence run.
+
 ## PGO + BOLT (Linux)
 - `./scripts/pgo_build.sh bench_pipeline`
 - `./scripts/bolt_build.sh bench_pipeline`

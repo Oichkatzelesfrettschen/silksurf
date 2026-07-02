@@ -6,7 +6,7 @@ pub struct SilkArena {
 }
 
 impl SilkArena {
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self { bump: Bump::new() }
     }

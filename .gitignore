@@ -6,6 +6,7 @@
 /build-*/
 build-fuzz/
 /target
+/silksurf-js/target/
 /**/target/
 *.a
 *.dll
@@ -50,6 +51,10 @@ core
 
 ## Static analysis -------------------------------------------------------
 /infer-out/
+
+## Packaged artifacts ----------------------------------------------------
+/artifacts/
+/dist/
 
 ## Tool / IDE / per-user state ------------------------------------------
 /.claude/settings.local.json

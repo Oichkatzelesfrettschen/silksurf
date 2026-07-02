@@ -1,23 +1,8 @@
 //! XCB-backed window: connection, drawable, and pixel-buffer presentation.
 //!
-//! WHY: The render pipeline produces an ARGB pixel buffer (one u32 per pixel,
-//! row-major). To make those pixels visible we need a real X11 drawable. We
-//! deliberately do not use SHM (`XShm`) yet -- the raw `PutImage` path is
-//! simpler, has no shared-memory teardown semantics to get wrong, and is
-//! fast enough for the P6 slice (1280x720 @ ~3.5MB per frame is a single
-//! request thanks to BIG-REQUESTS, which xcb negotiates by default).
-//!
-//! WHAT: `XcbWindow` owns the `Connection`, the screen index, the X window
-//! ID, a graphics context for `PutImage`, the cached `WM_DELETE_WINDOW`
-//! atom, and the current logical size. The `present()` method ships a u32
-//! ARGB buffer to the server; `new()` opens the display, creates the
-//! window, sets `WM_NAME`, and registers `WM_DELETE_WINDOW` so the WM close
-//! button funnels through our event loop instead of slamming the
-//! connection shut.
-//!
-//! HOW: Drop the `XcbWindow` to release everything -- libxcb closes the
-//! connection in its own `Drop` impl on the inner `Connection`, which
-//! also takes the GC and window IDs with it server-side.
+//! The render pipeline produces a row-major ARGB pixel buffer. XcbWindow owns
+//! the X11 connection, drawable, graphics context, close-protocol atoms, and
+//! logical size. present() ships the u32 ARGB buffer through PutImage.
 
 use silksurf_core::SilkError;
 use xcb::Xid;
@@ -25,9 +10,8 @@ use xcb::x;
 
 /// An X11 window that can present a CPU-rendered ARGB framebuffer.
 ///
-/// One instance owns one `xcb::Connection`. We do not currently support
-/// sharing a connection between multiple windows -- that pattern is
-/// useful for tabbed/multi-window browsers and is a P6.S4 follow-up.
+/// One instance owns one `xcb::Connection`. The current API does not share a
+/// connection across multiple windows.
 pub struct XcbWindow {
     /// Live X server connection. Dropping this closes the socket.
     connection: xcb::Connection,
@@ -44,8 +28,7 @@ pub struct XcbWindow {
     /// `ClientMessage` payloads against this atom to detect the close
     /// button being clicked in the window manager titlebar.
     wm_delete_window: x::Atom,
-    /// Cached `WM_PROTOCOLS` atom -- the property we wrote
-    /// `WM_DELETE_WINDOW` into. Kept for symmetry / future use.
+    /// Cached `WM_PROTOCOLS` atom. This property carries `WM_DELETE_WINDOW`.
     wm_protocols: x::Atom,
     /// Logical width in pixels. Updated on Resize.
     width: u32,
@@ -64,16 +47,12 @@ impl XcbWindow {
     /// returns `SilkError::Engine("no display: ...")` so the caller can
     /// fall back to a headless mode rather than panicking.
     pub fn new(title: &str, width: u32, height: u32) -> Result<Self, SilkError> {
-        // 1) Open the connection. This is the only failure mode that
-        //    distinguishes "no display" from "everything else", so map
-        //    it explicitly so the app entry point can detect it.
+        // Connect to the default display and preserve "no display" as the
+        // diagnostic surface for the app entry point.
         let (connection, screen_num) = xcb::Connection::connect(None)
             .map_err(|err| SilkError::Engine(format!("no display: {err}")))?;
 
-        // 2) Pull the requested screen out of the setup. nth() returns
-        //    None if the server reported zero screens (impossible in
-        //    practice but we still surface it as an Engine error rather
-        //    than panicking).
+        // Select the requested screen from the server setup.
         let setup = connection.get_setup();
         let screen = setup
             .roots()
@@ -84,13 +63,11 @@ impl XcbWindow {
         let depth = screen.root_depth();
         let white_pixel = screen.white_pixel();
 
-        // 3) Allocate XIDs for the window and the graphics context.
+        // Allocate XIDs for the window and graphics context.
         let window_id: x::Window = connection.generate_id();
         let gc: x::Gcontext = connection.generate_id();
 
-        // Width/height fit into u16 on the X11 wire. We clamp at u16::MAX
-        // (65535) which is well above any realistic screen size; this
-        // never triggers in practice but keeps the cast lossless.
+        // X11 window dimensions travel as u16 values on the wire.
         let wire_w: u16 = width.min(u32::from(u16::MAX)) as u16;
         let wire_h: u16 = height.min(u32::from(u16::MAX)) as u16;
 
@@ -107,11 +84,11 @@ impl XcbWindow {
             visual: root_visual,
             value_list: &[
                 x::Cw::BackPixel(white_pixel),
-                // EXPOSURE              -- redraw events
-                // KEY_PRESS/RELEASE     -- keyboard
-                // BUTTON_PRESS/RELEASE  -- mouse buttons
-                // POINTER_MOTION        -- pointer movement
-                // STRUCTURE_NOTIFY      -- resize / configure events
+                // EXPOSURE reports redraw requests.
+                // KEY_PRESS and KEY_RELEASE report keyboard input.
+                // BUTTON_PRESS and BUTTON_RELEASE report mouse buttons.
+                // POINTER_MOTION reports pointer movement.
+                // STRUCTURE_NOTIFY reports resize and configure events.
                 x::Cw::EventMask(
                     x::EventMask::EXPOSURE
                         | x::EventMask::KEY_PRESS
@@ -124,18 +101,15 @@ impl XcbWindow {
             ],
         });
 
-        // 4) Build a default GC bound to the new window. We do not set
-        //    foreground/background -- PutImage carries its own pixels --
-        //    but we suppress GraphicsExposures so we do not get spurious
-        //    NoExposure events back after every blit.
+        // Build a default GC bound to the new window. PutImage carries its
+        // own pixels, and GraphicsExposures stays disabled after blits.
         connection.send_request(&x::CreateGc {
             cid: gc,
             drawable: x::Drawable::Window(window_id),
             value_list: &[x::Gc::GraphicsExposures(false)],
         });
 
-        // 5) Set WM_NAME so the title bar shows our title rather than
-        //    the WM's "Untitled" placeholder.
+        // WM_NAME supplies the title bar label.
         connection.send_request(&x::ChangeProperty {
             mode: x::PropMode::Replace,
             window: window_id,
@@ -144,10 +118,8 @@ impl XcbWindow {
             data: title.as_bytes(),
         });
 
-        // 6) Look up WM_PROTOCOLS and WM_DELETE_WINDOW, then advertise
-        //    that we handle WM_DELETE_WINDOW. Without this, the WM
-        //    closes our window by terminating the connection, which
-        //    libxcb surfaces as `ConnError::Connection` -- ugly.
+        // WM_PROTOCOLS advertises WM_DELETE_WINDOW so the event loop receives
+        // a close event instead of a torn-down connection.
         let cookie_protocols = connection.send_request(&x::InternAtom {
             only_if_exists: false,
             name: b"WM_PROTOCOLS",
@@ -173,8 +145,7 @@ impl XcbWindow {
             data: &[wm_delete_window],
         });
 
-        // 7) Map (show) the window and flush. Without flush, the server
-        //    sees nothing until the first event-loop blocking call.
+        // Map the window and flush setup requests to the server.
         connection.send_request(&x::MapWindow { window: window_id });
         connection
             .flush()
@@ -196,13 +167,13 @@ impl XcbWindow {
     /// X11 window ID. Useful for callers that want to make their own
     /// requests against the window (custom properties, sub-windows,
     /// etc.) without going through this wrapper.
-    #[must_use] 
+    #[must_use]
     pub fn window_id(&self) -> x::Window {
         self.window_id
     }
 
     /// Default screen index for this connection.
-    #[must_use] 
+    #[must_use]
     pub fn screen_num(&self) -> i32 {
         self.screen_num
     }
@@ -213,11 +184,8 @@ impl XcbWindow {
         self.wm_delete_window
     }
 
-    /// Cached `WM_PROTOCOLS` atom. Currently unused outside `new()`
-    /// but kept in the API surface so that future protocol additions
-    /// (`NET_WM_PING`, `NET_WM_SYNC_REQUEST`, ...) do not need another
-    /// `InternAtom` round-trip.
-    #[must_use] 
+    /// Cached `WM_PROTOCOLS` atom.
+    #[must_use]
     pub fn wm_protocols(&self) -> x::Atom {
         self.wm_protocols
     }
@@ -225,19 +193,19 @@ impl XcbWindow {
     /// Width in pixels. Tracks the most recent Resize event observed
     /// by the event loop -- not necessarily the server-side state if
     /// no events have been pumped yet.
-    #[must_use] 
+    #[must_use]
     pub fn width(&self) -> u32 {
         self.width
     }
 
     /// Height in pixels. Same caveat as `width()`.
-    #[must_use] 
+    #[must_use]
     pub fn height(&self) -> u32 {
         self.height
     }
 
     /// Borrow the underlying connection for advanced use cases.
-    #[must_use] 
+    #[must_use]
     pub fn connection(&self) -> &xcb::Connection {
         &self.connection
     }

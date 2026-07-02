@@ -52,7 +52,7 @@ pub struct SiteIsolation {
 }
 
 impl SiteIsolation {
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -82,14 +82,14 @@ pub struct StoragePartition {
 impl StoragePartition {
     pub const SHARED: &'static str = "<v0.1-shared-partition>";
 
-    #[must_use] 
+    #[must_use]
     pub fn shared() -> Self {
         Self {
             key: Arc::from(Self::SHARED),
         }
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn for_origin(origin: &str) -> Self {
         Self {
             key: Arc::from(origin),
