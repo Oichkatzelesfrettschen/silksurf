@@ -235,6 +235,21 @@ navigation build drops from 99.544898ms to 82.849724ms. The remaining O0
 first-render terms are fused layout/paint and the 4,096,000 byte
 `argb-pack`.
 
+A follow-up O0 Wayland smoke probe on 2026-07-02 routes the supported visible
+viewport subset directly into the ARGB presenter buffer. The fast path accepts
+opaque solid fills, zero-radius opaque rounded rects, bitmap text, and RGBA
+images; gradients, shadows, translucent items, unsupported text, and
+antialiased corners keep the tiny-skia RGBA fallback. The AI-chat fixture first
+missed only on code punctuation in five visible text items, so the bitmap table
+now covers printable code punctuation used by AI chat pages. The traced run
+`scripts/gui_probe.sh --o0 --backend auto --presenter auto --fixture ai-chat
+--probe smoke --timeout-seconds 30 --trace-app-frame` reports
+`argb-direct: 4.789450ms`, `rgba buffer: 0 bytes`, `argb buffer: 4096000
+bytes`, and `total: 70.790538ms`. The previous same-day O0 path reported
+`raster: 6.724633ms`, `argb-pack: 15.502070ms`, and `total: 88.828181ms`.
+The remaining O0 first-navigation budget is dominated by fused
+style/layout/paint and the one required ARGB viewport write.
+
 The viewport-backed path is the first tile-cache step. The retained bitmap now
 has an origin (`bitmap_scroll_y`) and a bounded height (`bitmap_height`), while
 `raster_height` remains the scrollable document height. The next renderer step

@@ -1428,14 +1428,31 @@ fn build_browser_page_with_buffers_for_height(
     trace_navigation_build_phase(trace_build, &payload.url, "tiles", phase_start.elapsed());
     let BrowserFrameBuffers { mut rgba, mut argb } = buffers;
     let phase_start = std::time::Instant::now();
-    rasterize_browser_viewport_into(&display_list, 0, bitmap_height, &mut rgba);
-    trace_navigation_build_phase(trace_build, &payload.url, "raster", phase_start.elapsed());
-    trace_navigation_build_buffer(trace_build, &payload.url, "rgba", rgba.len());
-    let phase_start = std::time::Instant::now();
-    let (resize_elapsed, pack_elapsed) = rgba_bytes_to_argb_words_into_timed(&rgba, &mut argb);
-    trace_navigation_build_phase(trace_build, &payload.url, "argb-resize", resize_elapsed);
-    trace_navigation_build_phase(trace_build, &payload.url, "argb-pack", pack_elapsed);
-    trace_navigation_build_phase(trace_build, &payload.url, "argb", phase_start.elapsed());
+    if rasterize_browser_viewport_argb_direct(&display_list, 0, bitmap_height, &mut argb) {
+        trace_navigation_build_phase(
+            trace_build,
+            &payload.url,
+            "argb-direct",
+            phase_start.elapsed(),
+        );
+        trace_navigation_build_buffer(trace_build, &payload.url, "rgba", rgba.len());
+    } else {
+        trace_navigation_build_phase(
+            trace_build,
+            &payload.url,
+            "argb-direct-miss",
+            phase_start.elapsed(),
+        );
+        let phase_start = std::time::Instant::now();
+        rasterize_browser_viewport_into(&display_list, 0, bitmap_height, &mut rgba);
+        trace_navigation_build_phase(trace_build, &payload.url, "raster", phase_start.elapsed());
+        trace_navigation_build_buffer(trace_build, &payload.url, "rgba", rgba.len());
+        let phase_start = std::time::Instant::now();
+        let (resize_elapsed, pack_elapsed) = rgba_bytes_to_argb_words_into_timed(&rgba, &mut argb);
+        trace_navigation_build_phase(trace_build, &payload.url, "argb-resize", resize_elapsed);
+        trace_navigation_build_phase(trace_build, &payload.url, "argb-pack", pack_elapsed);
+        trace_navigation_build_phase(trace_build, &payload.url, "argb", phase_start.elapsed());
+    }
     trace_navigation_build_buffer(trace_build, &payload.url, "argb", argb.len() * 4);
     let phase_start = std::time::Instant::now();
     let focus_viewport_cache = build_focus_viewport_cache(
@@ -5252,7 +5269,7 @@ fn rgba_bytes_to_argb_words_into_timed(
     argb: &mut Vec<u32>,
 ) -> (std::time::Duration, std::time::Duration) {
     let resize_start = std::time::Instant::now();
-    resize_argb_words_for_rgba_uninit(argb, rgba);
+    resize_argb_words_uninit(argb, rgba.len() / 4);
     let resize_elapsed = resize_start.elapsed();
 
     let pack_start = std::time::Instant::now();
@@ -5260,8 +5277,7 @@ fn rgba_bytes_to_argb_words_into_timed(
     (resize_elapsed, pack_start.elapsed())
 }
 
-fn resize_argb_words_for_rgba_uninit(argb: &mut Vec<u32>, rgba: &[u8]) {
-    let target_len = rgba.len() / 4;
+fn resize_argb_words_uninit(argb: &mut Vec<u32>, target_len: usize) {
     if target_len <= argb.len() {
         argb.truncate(target_len);
         return;
@@ -5270,9 +5286,9 @@ fn resize_argb_words_for_rgba_uninit(argb: &mut Vec<u32>, rgba: &[u8]) {
         argb.reserve_exact(target_len - argb.len());
     }
     /*
-     * SAFETY: pack_rgba_bytes_to_argb_words overwrites every exposed word before any
-     * caller reads the framebuffer. u32 has no destructor, so an early panic
-     * only releases the allocation.
+     * SAFETY: each caller overwrites every exposed word before any framebuffer
+     * read. u32 has no destructor, so an early panic only releases the
+     * allocation.
      */
     unsafe {
         argb.set_len(target_len);
@@ -6110,6 +6126,324 @@ fn fill_browser_toolbar_background_rgba(rgba: &mut [u8], width: u32, height: u32
     }
 }
 
+fn fill_browser_toolbar_background_argb(pixels: &mut [u32], width: u32, height: u32) {
+    let toolbar_rows = (BROWSER_CHROME_HEIGHT as u32).min(height);
+    if width == 0 || toolbar_rows == 0 {
+        return;
+    }
+    fill_argb_rect(
+        pixels,
+        width,
+        height,
+        0,
+        0,
+        width,
+        toolbar_rows,
+        argb(243, 244, 246, 255),
+    );
+    fill_argb_rect(
+        pixels,
+        width,
+        height,
+        0,
+        toolbar_rows - 1,
+        width,
+        1,
+        argb(209, 213, 219, 255),
+    );
+}
+
+fn rasterize_browser_viewport_argb_direct(
+    display_list: &silksurf_render::DisplayList,
+    scroll_y: u32,
+    bitmap_height: u32,
+    pixels: &mut Vec<u32>,
+) -> bool {
+    let viewport = scroll_visible_document_rect(scroll_y, bitmap_height);
+    let items = browser_viewport_source_items(display_list, viewport);
+    if !viewport_argb_direct_items_supported(&items, viewport) {
+        trace_viewport_argb_direct_miss(&items, viewport);
+        return false;
+    }
+    resize_argb_words_uninit(pixels, FRAME_WIDTH as usize * bitmap_height as usize);
+    if viewport_argb_direct_needs_default_fill(&items, viewport) {
+        pixels.fill(argb(255, 255, 255, 255));
+    }
+    fill_browser_toolbar_background_argb(pixels, FRAME_WIDTH, bitmap_height);
+    for item in items {
+        if display_item_intersects_viewport(item, viewport) {
+            paint_viewport_argb_direct_item(pixels, bitmap_height, item, scroll_y);
+        }
+    }
+    true
+}
+
+fn viewport_argb_direct_needs_default_fill(
+    items: &[&silksurf_render::DisplayItem],
+    viewport: Rect,
+) -> bool {
+    for item in items {
+        if !display_item_intersects_viewport(item, viewport) {
+            continue;
+        }
+        return !opaque_fill_covers_rect(item, viewport);
+    }
+    true
+}
+
+fn opaque_fill_covers_rect(item: &silksurf_render::DisplayItem, rect: Rect) -> bool {
+    match item {
+        silksurf_render::DisplayItem::SolidColor {
+            rect: item_rect,
+            color,
+        } => color.a == 255 && rect_contains_rect(*item_rect, rect),
+        silksurf_render::DisplayItem::RoundedRect {
+            rect: item_rect,
+            radii,
+            color,
+        } => {
+            color.a == 255
+                && radii.iter().all(|radius| *radius <= 0.0)
+                && rect_contains_rect(*item_rect, rect)
+        }
+        _ => false,
+    }
+}
+
+fn viewport_argb_direct_items_supported(
+    items: &[&silksurf_render::DisplayItem],
+    viewport: Rect,
+) -> bool {
+    items
+        .iter()
+        .filter(|item| display_item_intersects_viewport(item, viewport))
+        .all(|item| viewport_argb_direct_item_supported(item))
+}
+
+fn viewport_argb_direct_item_supported(item: &silksurf_render::DisplayItem) -> bool {
+    match item {
+        silksurf_render::DisplayItem::SolidColor { color, .. } => color.a == 255,
+        silksurf_render::DisplayItem::Text {
+            text,
+            font_size,
+            color,
+            ..
+        } => color.a == 255 && page_bitmap_text_supported(text, *font_size),
+        silksurf_render::DisplayItem::RoundedRect { radii, color, .. } => {
+            color.a == 255 && radii.iter().all(|radius| *radius <= 0.0)
+        }
+        silksurf_render::DisplayItem::Image { image, .. } => image_has_full_rgba_argb(image),
+        silksurf_render::DisplayItem::BoxShadow { .. }
+        | silksurf_render::DisplayItem::LinearGradient { .. } => false,
+    }
+}
+
+fn trace_viewport_argb_direct_miss(items: &[&silksurf_render::DisplayItem], viewport: Rect) {
+    if std::env::var_os("SILKSURF_TRACE_APP_FRAME").is_none()
+        && std::env::var_os("SILKSURF_TRACE_NAV_BUILD").is_none()
+    {
+        return;
+    }
+    let mut unsupported_text = 0usize;
+    let mut unsupported_rounding = 0usize;
+    let mut unsupported_alpha = 0usize;
+    let mut unsupported_shadow = 0usize;
+    let mut unsupported_gradient = 0usize;
+    let mut unsupported_image = 0usize;
+    let mut visible = 0usize;
+    for item in items {
+        if !display_item_intersects_viewport(item, viewport) {
+            continue;
+        }
+        visible += 1;
+        match *item {
+            silksurf_render::DisplayItem::SolidColor { color, .. } if color.a != 255 => {
+                unsupported_alpha += 1;
+            }
+            silksurf_render::DisplayItem::Text {
+                text,
+                font_size,
+                color,
+                ..
+            } if color.a != 255 || !page_bitmap_text_supported(text, *font_size) => {
+                unsupported_text += 1;
+            }
+            silksurf_render::DisplayItem::RoundedRect { radii, color, .. } => {
+                if color.a != 255 {
+                    unsupported_alpha += 1;
+                } else if radii.iter().any(|radius| *radius > 0.0) {
+                    unsupported_rounding += 1;
+                }
+            }
+            silksurf_render::DisplayItem::Image { image, .. }
+                if !image_has_full_rgba_argb(image) =>
+            {
+                unsupported_image += 1;
+            }
+            silksurf_render::DisplayItem::BoxShadow { .. } => {
+                unsupported_shadow += 1;
+            }
+            silksurf_render::DisplayItem::LinearGradient { .. } => {
+                unsupported_gradient += 1;
+            }
+            _ => {}
+        }
+    }
+    eprintln!(
+        "[SilkSurf] argb direct miss: visible_items={visible} text={unsupported_text} rounding={unsupported_rounding} alpha={unsupported_alpha} shadow={unsupported_shadow} gradient={unsupported_gradient} image={unsupported_image}"
+    );
+}
+
+fn paint_viewport_argb_direct_item(
+    pixels: &mut [u32],
+    bitmap_height: u32,
+    item: &silksurf_render::DisplayItem,
+    scroll_y: u32,
+) {
+    match item {
+        silksurf_render::DisplayItem::SolidColor { rect, color }
+        | silksurf_render::DisplayItem::RoundedRect { rect, color, .. } => {
+            fill_shifted_argb_rect(
+                pixels,
+                bitmap_height,
+                *rect,
+                scroll_y,
+                css_color_to_argb(*color),
+            );
+        }
+        silksurf_render::DisplayItem::Text {
+            rect,
+            text,
+            font_size,
+            color,
+            ..
+        } => {
+            draw_shifted_argb_text(
+                pixels,
+                bitmap_height,
+                *rect,
+                scroll_y,
+                text,
+                *font_size,
+                *color,
+            );
+        }
+        silksurf_render::DisplayItem::Image { rect, image } => {
+            blit_shifted_argb_image(pixels, bitmap_height, *rect, scroll_y, image);
+        }
+        silksurf_render::DisplayItem::BoxShadow { .. }
+        | silksurf_render::DisplayItem::LinearGradient { .. } => {}
+    }
+}
+
+fn fill_shifted_argb_rect(
+    pixels: &mut [u32],
+    bitmap_height: u32,
+    rect: Rect,
+    scroll_y: u32,
+    color: u32,
+) {
+    let shifted = viewport_damage_rect(rect, scroll_y);
+    if let Some(pixel_rect) = pixel_rect_from_rect(shifted, FRAME_WIDTH, bitmap_height) {
+        fill_argb_rect(
+            pixels,
+            FRAME_WIDTH,
+            bitmap_height,
+            pixel_rect.x,
+            pixel_rect.y,
+            pixel_rect.width,
+            pixel_rect.height,
+            color,
+        );
+    }
+}
+
+fn draw_shifted_argb_text(
+    pixels: &mut [u32],
+    bitmap_height: u32,
+    rect: Rect,
+    scroll_y: u32,
+    text: &str,
+    font_size: f32,
+    color: silksurf_css::Color,
+) {
+    let shifted = viewport_damage_rect(rect, scroll_y);
+    if let Some(pixel_rect) = pixel_rect_from_rect(shifted, FRAME_WIDTH, bitmap_height) {
+        let _ = draw_page_bitmap_text_clipped(
+            pixels,
+            FRAME_WIDTH,
+            bitmap_height,
+            shifted.x,
+            shifted.y,
+            text,
+            font_size,
+            css_color_to_argb(color),
+            pixel_rect,
+        );
+    }
+}
+
+fn blit_shifted_argb_image(
+    pixels: &mut [u32],
+    bitmap_height: u32,
+    rect: Rect,
+    scroll_y: u32,
+    image: &silksurf_render::ImageSurface,
+) {
+    let shifted = viewport_damage_rect(rect, scroll_y);
+    let Some(dst) = pixel_rect_from_rect(shifted, FRAME_WIDTH, bitmap_height) else {
+        return;
+    };
+    let dst_width = shifted.width.max(1.0);
+    let dst_height = shifted.height.max(1.0);
+    let surface_width = image.width as usize;
+    for y in dst.y..dst.y + dst.height {
+        let src_y = image_source_coord_argb(y as f32 - shifted.y, dst_height, image.height);
+        for x in dst.x..dst.x + dst.width {
+            let src_x = image_source_coord_argb(x as f32 - shifted.x, dst_width, image.width);
+            let src = (src_y as usize * surface_width + src_x as usize) * 4;
+            let dst = y as usize * FRAME_WIDTH as usize + x as usize;
+            copy_image_pixel_argb(pixels, dst, &image.rgba, src);
+        }
+    }
+}
+
+fn image_has_full_rgba_argb(image: &silksurf_render::ImageSurface) -> bool {
+    image.width > 0
+        && image.height > 0
+        && image.rgba.len() >= image.width as usize * image.height as usize * 4
+}
+
+fn image_source_coord_argb(dst_offset: f32, dst_extent: f32, src_extent: u32) -> u32 {
+    let coord = (dst_offset.max(0.0) * src_extent as f32 / dst_extent).floor() as u32;
+    coord.min(src_extent.saturating_sub(1))
+}
+
+fn copy_image_pixel_argb(pixels: &mut [u32], dst: usize, rgba: &[u8], src: usize) {
+    if dst >= pixels.len() || src + 4 > rgba.len() {
+        return;
+    }
+    let alpha = rgba[src + 3];
+    if alpha == 255 {
+        pixels[dst] = argb(rgba[src], rgba[src + 1], rgba[src + 2], 255);
+        return;
+    }
+    pixels[dst] = blend_image_pixel_argb(pixels[dst], &rgba[src..src + 4]);
+}
+
+fn blend_image_pixel_argb(dst: u32, src: &[u8]) -> u32 {
+    let alpha = u16::from(src[3]);
+    let inv_alpha = 255 - alpha;
+    let red = blend_argb_channel(src[0], (dst >> 16) as u8, alpha, inv_alpha);
+    let green = blend_argb_channel(src[1], (dst >> 8) as u8, alpha, inv_alpha);
+    let blue = blend_argb_channel(src[2], dst as u8, alpha, inv_alpha);
+    argb(red, green, blue, 255)
+}
+
+fn blend_argb_channel(src: u8, dst: u8, alpha: u16, inv_alpha: u16) -> u8 {
+    ((u16::from(src) * alpha + u16::from(dst) * inv_alpha + 127) / 255) as u8
+}
+
 fn viewport_damage_rect(damage: Rect, scroll_y: u32) -> Rect {
     Rect {
         x: damage.x,
@@ -6377,6 +6711,13 @@ fn rects_intersect(a: Rect, b: Rect) -> bool {
     let bx1 = b.x + b.width;
     let by1 = b.y + b.height;
     a.x < bx1 && ax1 > b.x && a.y < by1 && ay1 > b.y
+}
+
+fn rect_contains_rect(outer: Rect, inner: Rect) -> bool {
+    outer.x <= inner.x
+        && outer.y <= inner.y
+        && outer.x + outer.width >= inner.x + inner.width
+        && outer.y + outer.height >= inner.y + inner.height
 }
 
 fn shift_display_item_y(
@@ -7721,9 +8062,21 @@ const CHROME_GLYPHS: &[(u8, [u8; 7])] = &[
         ],
     ),
     (
+        b'"',
+        [
+            0b01010, 0b01010, 0b01010, 0b00000, 0b00000, 0b00000, 0b00000,
+        ],
+    ),
+    (
         b'#',
         [
             0b01010, 0b01010, 0b11111, 0b01010, 0b11111, 0b01010, 0b01010,
+        ],
+    ),
+    (
+        b'$',
+        [
+            0b00100, 0b01111, 0b10100, 0b01110, 0b00101, 0b11110, 0b00100,
         ],
     ),
     (
@@ -7736,6 +8089,42 @@ const CHROME_GLYPHS: &[(u8, [u8; 7])] = &[
         b'&',
         [
             0b01100, 0b10010, 0b10100, 0b01000, 0b10101, 0b10010, 0b01101,
+        ],
+    ),
+    (
+        b'\'',
+        [
+            0b00100, 0b00100, 0b01000, 0b00000, 0b00000, 0b00000, 0b00000,
+        ],
+    ),
+    (
+        b'(',
+        [
+            0b00010, 0b00100, 0b01000, 0b01000, 0b01000, 0b00100, 0b00010,
+        ],
+    ),
+    (
+        b')',
+        [
+            0b01000, 0b00100, 0b00010, 0b00010, 0b00010, 0b00100, 0b01000,
+        ],
+    ),
+    (
+        b'*',
+        [
+            0b00000, 0b10101, 0b01110, 0b11111, 0b01110, 0b10101, 0b00000,
+        ],
+    ),
+    (
+        b'+',
+        [
+            0b00000, 0b00100, 0b00100, 0b11111, 0b00100, 0b00100, 0b00000,
+        ],
+    ),
+    (
+        b',',
+        [
+            0b00000, 0b00000, 0b00000, 0b00000, 0b00100, 0b00100, 0b01000,
         ],
     ),
     (
@@ -7823,9 +8212,27 @@ const CHROME_GLYPHS: &[(u8, [u8; 7])] = &[
         ],
     ),
     (
+        b';',
+        [
+            0b00000, 0b00100, 0b00100, 0b00000, 0b00100, 0b00100, 0b01000,
+        ],
+    ),
+    (
+        b'<',
+        [
+            0b00010, 0b00100, 0b01000, 0b10000, 0b01000, 0b00100, 0b00010,
+        ],
+    ),
+    (
         b'=',
         [
             0b00000, 0b11111, 0b00000, 0b00000, 0b11111, 0b00000, 0b00000,
+        ],
+    ),
+    (
+        b'>',
+        [
+            0b01000, 0b00100, 0b00010, 0b00001, 0b00010, 0b00100, 0b01000,
         ],
     ),
     (
@@ -7835,9 +8242,45 @@ const CHROME_GLYPHS: &[(u8, [u8; 7])] = &[
         ],
     ),
     (
+        b'@',
+        [
+            0b01110, 0b10001, 0b10111, 0b10101, 0b10111, 0b10000, 0b01110,
+        ],
+    ),
+    (
+        b'[',
+        [
+            0b01110, 0b01000, 0b01000, 0b01000, 0b01000, 0b01000, 0b01110,
+        ],
+    ),
+    (
+        b'\\',
+        [
+            0b10000, 0b01000, 0b01000, 0b00100, 0b00010, 0b00010, 0b00001,
+        ],
+    ),
+    (
+        b']',
+        [
+            0b01110, 0b00010, 0b00010, 0b00010, 0b00010, 0b00010, 0b01110,
+        ],
+    ),
+    (
+        b'^',
+        [
+            0b00100, 0b01010, 0b10001, 0b00000, 0b00000, 0b00000, 0b00000,
+        ],
+    ),
+    (
         b'_',
         [
             0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b11111,
+        ],
+    ),
+    (
+        b'`',
+        [
+            0b01000, 0b00100, 0b00010, 0b00000, 0b00000, 0b00000, 0b00000,
         ],
     ),
     (
@@ -7996,6 +8439,30 @@ const CHROME_GLYPHS: &[(u8, [u8; 7])] = &[
             0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b11111,
         ],
     ),
+    (
+        b'{',
+        [
+            0b00010, 0b00100, 0b00100, 0b01000, 0b00100, 0b00100, 0b00010,
+        ],
+    ),
+    (
+        b'|',
+        [
+            0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100,
+        ],
+    ),
+    (
+        b'}',
+        [
+            0b01000, 0b00100, 0b00100, 0b00010, 0b00100, 0b00100, 0b01000,
+        ],
+    ),
+    (
+        b'~',
+        [
+            0b00000, 0b00000, 0b01000, 0b10101, 0b00010, 0b00000, 0b00000,
+        ],
+    ),
 ];
 
 fn chrome_glyph_byte(byte: u8) -> Option<[u8; 7]> {
@@ -8070,6 +8537,94 @@ mod tests {
             .expect("document body rule");
 
         assert!(ua_pos < document_pos);
+    }
+
+    #[test]
+    fn viewport_argb_direct_paints_supported_items() {
+        let image_rgba: Arc<[u8]> = Arc::from(vec![255, 0, 0, 255].into_boxed_slice());
+        let display_list = silksurf_render::DisplayList {
+            items: vec![
+                DisplayItem::SolidColor {
+                    rect: Rect {
+                        x: 0.0,
+                        y: BROWSER_CHROME_HEIGHT,
+                        width: 32.0,
+                        height: 32.0,
+                    },
+                    color: rgba(1, 2, 3, 255),
+                },
+                DisplayItem::Text {
+                    rect: Rect {
+                        x: 2.0,
+                        y: BROWSER_CHROME_HEIGHT + 2.0,
+                        width: 64.0,
+                        height: 16.0,
+                    },
+                    node: silksurf_dom::NodeId::from_raw(1),
+                    text_len: 2,
+                    text: "ok".to_string(),
+                    font_size: 12.0,
+                    color: rgba(255, 255, 255, 255),
+                },
+                DisplayItem::Image {
+                    rect: Rect {
+                        x: 8.0,
+                        y: BROWSER_CHROME_HEIGHT + 8.0,
+                        width: 1.0,
+                        height: 1.0,
+                    },
+                    image: silksurf_render::ImageSurface {
+                        width: 1,
+                        height: 1,
+                        rgba: image_rgba,
+                    },
+                },
+            ],
+            tiles: None,
+        };
+        let mut pixels = Vec::new();
+
+        assert!(rasterize_browser_viewport_argb_direct(
+            &display_list,
+            0,
+            96,
+            &mut pixels
+        ));
+        assert_eq!(pixels.len(), FRAME_WIDTH as usize * 96);
+        assert_eq!(
+            pixels[BROWSER_CHROME_HEIGHT as usize * FRAME_WIDTH as usize],
+            argb(1, 2, 3, 255)
+        );
+        assert_eq!(
+            pixels[(BROWSER_CHROME_HEIGHT as usize + 8) * FRAME_WIDTH as usize + 8],
+            argb(255, 0, 0, 255)
+        );
+    }
+
+    #[test]
+    fn viewport_argb_direct_rejects_unsupported_items() {
+        let display_list = silksurf_render::DisplayList {
+            items: vec![DisplayItem::LinearGradient {
+                rect: Rect {
+                    x: 0.0,
+                    y: BROWSER_CHROME_HEIGHT,
+                    width: 32.0,
+                    height: 32.0,
+                },
+                angle: 90.0,
+                stops: vec![(0.0, rgba(0, 0, 0, 255)), (1.0, rgba(255, 255, 255, 255))],
+            }],
+            tiles: None,
+        };
+        let mut pixels = vec![0x12345678];
+
+        assert!(!rasterize_browser_viewport_argb_direct(
+            &display_list,
+            0,
+            96,
+            &mut pixels
+        ));
+        assert_eq!(pixels, vec![0x12345678]);
     }
 
     #[test]
