@@ -309,6 +309,16 @@ formatting and source-bundle refresh keeps the same retained path and reports
 app blit `9.670us`, chrome `240ns`, render `27.840us`, buffer `49.880us`,
 and total CPU work `80.260us`.
 
+Runtime same-box text damage now uses the dirty suffix instead of the full
+retained text line. The repaint updates the display item in place, fills the
+small damage rect directly in ARGB when the text and background stay in the
+bitmap-supported subset, and leaves `DamageScratch` unused. An O0 Wayland
+AI-chat run reports `damage=(244.2, 228, 35.199997, 19)`, then a damage frame
+with app blit `2.140us`, chrome `170ns`, render `16.660us`, buffer
+`28.550us`, and total CPU work `46.610us`. A final rerun keeps the same
+`36x19` presented damage and reports app blit `3.280us`, chrome `220ns`,
+render `27.850us`, buffer `31.370us`, and total CPU work `61.070us`.
+
 The viewport-backed path is the first tile-cache step. The retained bitmap now
 has an origin (`bitmap_scroll_y`) and a bounded height (`bitmap_height`), while
 `raster_height` remains the scrollable document height. The next renderer step
