@@ -328,6 +328,7 @@ struct BrowserPageRuntime {
     images: Vec<DecodedPageImage>,
     rgba: Vec<u8>,
     damage_scratch: silksurf_render::DamageScratch,
+    viewport_item_indices: Vec<usize>,
 }
 
 struct BrowserState {
@@ -1438,8 +1439,15 @@ fn build_browser_page_with_buffers_for_height(
     let bitmap_height = browser_page_bitmap_height(document_height, live_window_height);
     trace_navigation_build_phase(trace_build, &payload.url, "tiles", phase_start.elapsed());
     let BrowserFrameBuffers { mut rgba, mut argb } = buffers;
+    let mut viewport_item_indices = Vec::new();
     let phase_start = std::time::Instant::now();
-    if rasterize_browser_viewport_argb_direct(&display_list, 0, bitmap_height, &mut argb) {
+    if rasterize_browser_viewport_argb_direct(
+        &display_list,
+        0,
+        bitmap_height,
+        &mut argb,
+        &mut viewport_item_indices,
+    ) {
         trace_navigation_build_phase(
             trace_build,
             &payload.url,
@@ -1455,7 +1463,13 @@ fn build_browser_page_with_buffers_for_height(
             phase_start.elapsed(),
         );
         let phase_start = std::time::Instant::now();
-        rasterize_browser_viewport_into(&display_list, 0, bitmap_height, &mut rgba);
+        rasterize_browser_viewport_into(
+            &display_list,
+            0,
+            bitmap_height,
+            &mut rgba,
+            &mut viewport_item_indices,
+        );
         trace_navigation_build_phase(trace_build, &payload.url, "raster", phase_start.elapsed());
         trace_navigation_build_buffer(trace_build, &payload.url, "rgba", rgba.len());
         let phase_start = std::time::Instant::now();
@@ -1507,6 +1521,7 @@ fn build_browser_page_with_buffers_for_height(
             images: payload.images,
             rgba,
             damage_scratch: silksurf_render::DamageScratch::default(),
+            viewport_item_indices,
         },
     })
 }
@@ -2254,6 +2269,7 @@ fn repaint_runtime_dirty_nodes(
             frame.bitmap_height,
             &mut runtime.rgba,
             &mut frame.argb,
+            &mut runtime.viewport_item_indices,
         );
         BrowserRedrawMode::Full
     };
@@ -3285,6 +3301,7 @@ fn prepare_scroll_viewport_caches(state: &mut BrowserState, window_width: u32, w
     }
 
     let mut caches = Vec::with_capacity(targets.len());
+    let mut viewport_item_indices = Vec::new();
     for scroll_y in targets {
         let mut rgba = Vec::new();
         let mut argb = Vec::new();
@@ -3294,6 +3311,7 @@ fn prepare_scroll_viewport_caches(state: &mut BrowserState, window_width: u32, w
             window_height,
             &mut rgba,
             &mut argb,
+            &mut viewport_item_indices,
         );
         caches.push(ScrollViewportCache {
             scroll_y,
@@ -6293,8 +6311,10 @@ fn rasterize_browser_viewport_into(
     scroll_y: u32,
     bitmap_height: u32,
     rgba: &mut Vec<u8>,
+    item_indices: &mut Vec<usize>,
 ) {
-    let viewport_list = browser_viewport_display_list(display_list, scroll_y, bitmap_height);
+    let viewport_list =
+        browser_viewport_display_list(display_list, scroll_y, bitmap_height, item_indices);
     silksurf_render::rasterize_skia_into(&viewport_list, FRAME_WIDTH, bitmap_height, rgba);
     fill_browser_toolbar_background_rgba(rgba, FRAME_WIDTH, bitmap_height);
 }
@@ -6305,11 +6325,18 @@ fn rasterize_browser_viewport_argb_preferred(
     bitmap_height: u32,
     rgba: &mut Vec<u8>,
     argb: &mut Vec<u32>,
+    item_indices: &mut Vec<usize>,
 ) -> bool {
-    if rasterize_browser_viewport_argb_direct(display_list, scroll_y, bitmap_height, argb) {
+    if rasterize_browser_viewport_argb_direct(
+        display_list,
+        scroll_y,
+        bitmap_height,
+        argb,
+        item_indices,
+    ) {
         return true;
     }
-    rasterize_browser_viewport_into(display_list, scroll_y, bitmap_height, rgba);
+    rasterize_browser_viewport_into(display_list, scroll_y, bitmap_height, rgba, item_indices);
     rgba_bytes_to_argb_words_into(rgba, argb);
     false
 }
@@ -6333,12 +6360,14 @@ fn render_focus_viewport_cache(
 ) -> FocusViewportCache {
     let mut rgba = Vec::new();
     let mut argb = Vec::new();
+    let mut viewport_item_indices = Vec::new();
     rasterize_browser_viewport_argb_preferred(
         display_list,
         scroll_y,
         bitmap_height,
         &mut rgba,
         &mut argb,
+        &mut viewport_item_indices,
     );
     FocusViewportCache {
         scroll_y,
@@ -6416,7 +6445,9 @@ fn trace_visible_document_raster(display_list: &silksurf_render::DisplayList, da
     let mut item_count = 0usize;
     let mut text_count = 0usize;
     let mut text_bytes = 0usize;
-    for item in browser_viewport_source_items(display_list, damage) {
+    let mut item_indices = Vec::new();
+    browser_viewport_source_item_indices(display_list, damage, &mut item_indices);
+    for item in display_items_for_indices(display_list, &item_indices) {
         if !display_item_intersects_viewport(item, damage) {
             continue;
         }
@@ -6488,19 +6519,20 @@ fn rasterize_browser_viewport_argb_direct(
     scroll_y: u32,
     bitmap_height: u32,
     pixels: &mut Vec<u32>,
+    item_indices: &mut Vec<usize>,
 ) -> bool {
     let viewport = scroll_visible_document_rect(scroll_y, bitmap_height);
-    let items = browser_viewport_source_items(display_list, viewport);
-    if !viewport_argb_direct_items_supported(&items, viewport) {
-        trace_viewport_argb_direct_miss(&items, viewport);
+    browser_viewport_source_item_indices(display_list, viewport, item_indices);
+    if !viewport_argb_direct_items_supported(display_list, item_indices, viewport) {
+        trace_viewport_argb_direct_miss(display_list, item_indices, viewport);
         return false;
     }
     resize_argb_words_uninit(pixels, FRAME_WIDTH as usize * bitmap_height as usize);
-    if viewport_argb_direct_needs_default_fill(&items, viewport) {
+    if viewport_argb_direct_needs_default_fill(display_list, item_indices, viewport) {
         pixels.fill(argb(255, 255, 255, 255));
     }
     fill_browser_toolbar_background_argb(pixels, FRAME_WIDTH, bitmap_height);
-    for item in items {
+    for item in display_items_for_indices(display_list, item_indices) {
         if display_item_intersects_viewport(item, viewport) {
             paint_viewport_argb_direct_item(pixels, bitmap_height, item, scroll_y);
         }
@@ -6514,17 +6546,18 @@ fn rasterize_browser_document_damage_argb_direct(
     bitmap_height: u32,
     damage: Rect,
     pixels: &mut [u32],
+    item_indices: &mut Vec<usize>,
 ) -> bool {
     let viewport_damage = viewport_damage_rect(damage, scroll_y);
     let Some(clip) = pixel_rect_from_rect(viewport_damage, FRAME_WIDTH, bitmap_height) else {
         return true;
     };
-    let items = browser_viewport_source_items(display_list, damage);
-    if !viewport_argb_direct_items_supported(&items, damage) {
-        trace_viewport_argb_direct_miss(&items, damage);
+    browser_viewport_source_item_indices(display_list, damage, item_indices);
+    if !viewport_argb_direct_items_supported(display_list, item_indices, damage) {
+        trace_viewport_argb_direct_miss(display_list, item_indices, damage);
         return false;
     }
-    if viewport_argb_direct_needs_default_fill(&items, damage) {
+    if viewport_argb_direct_needs_default_fill(display_list, item_indices, damage) {
         fill_argb_rect(
             pixels,
             FRAME_WIDTH,
@@ -6536,7 +6569,7 @@ fn rasterize_browser_document_damage_argb_direct(
             argb(255, 255, 255, 255),
         );
     }
-    for item in items {
+    for item in display_items_for_indices(display_list, item_indices) {
         if display_item_intersects_viewport(item, damage) {
             paint_viewport_argb_direct_item_clipped(pixels, bitmap_height, item, scroll_y, clip);
         }
@@ -6545,10 +6578,11 @@ fn rasterize_browser_document_damage_argb_direct(
 }
 
 fn viewport_argb_direct_needs_default_fill(
-    items: &[&silksurf_render::DisplayItem],
+    display_list: &silksurf_render::DisplayList,
+    item_indices: &[usize],
     viewport: Rect,
 ) -> bool {
-    for item in items {
+    for item in display_items_for_indices(display_list, item_indices) {
         if !display_item_intersects_viewport(item, viewport) {
             continue;
         }
@@ -6577,11 +6611,11 @@ fn opaque_fill_covers_rect(item: &silksurf_render::DisplayItem, rect: Rect) -> b
 }
 
 fn viewport_argb_direct_items_supported(
-    items: &[&silksurf_render::DisplayItem],
+    display_list: &silksurf_render::DisplayList,
+    item_indices: &[usize],
     viewport: Rect,
 ) -> bool {
-    items
-        .iter()
+    display_items_for_indices(display_list, item_indices)
         .filter(|item| display_item_intersects_viewport(item, viewport))
         .all(|item| viewport_argb_direct_item_supported(item))
 }
@@ -6604,7 +6638,11 @@ fn viewport_argb_direct_item_supported(item: &silksurf_render::DisplayItem) -> b
     }
 }
 
-fn trace_viewport_argb_direct_miss(items: &[&silksurf_render::DisplayItem], viewport: Rect) {
+fn trace_viewport_argb_direct_miss(
+    display_list: &silksurf_render::DisplayList,
+    item_indices: &[usize],
+    viewport: Rect,
+) {
     if std::env::var_os("SILKSURF_TRACE_APP_FRAME").is_none()
         && std::env::var_os("SILKSURF_TRACE_NAV_BUILD").is_none()
     {
@@ -6617,12 +6655,12 @@ fn trace_viewport_argb_direct_miss(items: &[&silksurf_render::DisplayItem], view
     let mut unsupported_gradient = 0usize;
     let mut unsupported_image = 0usize;
     let mut visible = 0usize;
-    for item in items {
+    for item in display_items_for_indices(display_list, item_indices) {
         if !display_item_intersects_viewport(item, viewport) {
             continue;
         }
         visible += 1;
-        match *item {
+        match item {
             silksurf_render::DisplayItem::SolidColor { color, .. } if color.a != 255 => {
                 unsupported_alpha += 1;
             }
@@ -6966,6 +7004,7 @@ fn refresh_browser_frame_bitmap(
         bitmap_height,
         &mut runtime.rgba,
         &mut state.frame.argb,
+        &mut runtime.viewport_item_indices,
     );
     state.frame.bitmap_height = bitmap_height;
     state.frame.bitmap_scroll_y = scroll_y;
@@ -7009,6 +7048,7 @@ fn scroll_browser_frame_bitmap(
         bitmap_height,
         exposed_damage,
         &mut state.frame.argb,
+        &mut runtime.viewport_item_indices,
     ) {
         rasterize_browser_document_damage_into(
             &runtime.display_list,
@@ -7148,6 +7188,7 @@ fn browser_viewport_display_list(
     display_list: &silksurf_render::DisplayList,
     scroll_y: u32,
     bitmap_height: u32,
+    item_indices: &mut Vec<usize>,
 ) -> silksurf_render::DisplayList {
     let viewport = Rect {
         x: 0.0,
@@ -7155,8 +7196,9 @@ fn browser_viewport_display_list(
         width: FRAME_WIDTH as f32,
         height: bitmap_height.saturating_sub(BROWSER_CHROME_HEIGHT as u32) as f32,
     };
+    browser_viewport_source_item_indices(display_list, viewport, item_indices);
     let mut items = Vec::with_capacity(display_list.items.len().min(256));
-    for item in browser_viewport_source_items(display_list, viewport) {
+    for item in display_items_for_indices(display_list, item_indices) {
         if !display_item_intersects_viewport(item, viewport) {
             continue;
         }
@@ -7165,20 +7207,28 @@ fn browser_viewport_display_list(
     silksurf_render::DisplayList { items, tiles: None }
 }
 
-fn browser_viewport_source_items(
+fn browser_viewport_source_item_indices(
     display_list: &silksurf_render::DisplayList,
     viewport: Rect,
-) -> Vec<&silksurf_render::DisplayItem> {
+    item_indices: &mut Vec<usize>,
+) {
     let Some(tiles) = &display_list.tiles else {
-        return display_list.items.iter().collect();
+        item_indices.clear();
+        item_indices.extend(0..display_list.items.len());
+        return;
     };
-    let mut indices = tiles.items_for_rect(viewport);
-    indices.sort_unstable();
-    indices.dedup();
-    indices
-        .into_iter()
-        .filter_map(|index| display_list.items.get(index))
-        .collect()
+    tiles.items_for_rect_into(viewport, item_indices);
+    item_indices.sort_unstable();
+    item_indices.dedup();
+}
+
+fn display_items_for_indices<'a>(
+    display_list: &'a silksurf_render::DisplayList,
+    item_indices: &'a [usize],
+) -> impl Iterator<Item = &'a silksurf_render::DisplayItem> + 'a {
+    item_indices
+        .iter()
+        .filter_map(|index| display_list.items.get(*index))
 }
 
 fn display_item_intersects_viewport(item: &silksurf_render::DisplayItem, viewport: Rect) -> bool {
@@ -9079,12 +9129,14 @@ mod tests {
             tiles: None,
         };
         let mut pixels = Vec::new();
+        let mut item_indices = Vec::new();
 
         assert!(rasterize_browser_viewport_argb_direct(
             &display_list,
             0,
             96,
-            &mut pixels
+            &mut pixels,
+            &mut item_indices
         ));
         assert_eq!(pixels.len(), FRAME_WIDTH as usize * 96);
         assert_eq!(
@@ -9113,12 +9165,14 @@ mod tests {
             tiles: None,
         };
         let mut pixels = vec![0x12345678];
+        let mut item_indices = Vec::new();
 
         assert!(!rasterize_browser_viewport_argb_direct(
             &display_list,
             0,
             96,
-            &mut pixels
+            &mut pixels,
+            &mut item_indices
         ));
         assert_eq!(pixels, vec![0x12345678]);
     }
@@ -9139,13 +9193,15 @@ mod tests {
         };
         let mut rgba = Vec::new();
         let mut argb = Vec::new();
+        let mut item_indices = Vec::new();
 
         assert!(rasterize_browser_viewport_argb_preferred(
             &display_list,
             0,
             96,
             &mut rgba,
-            &mut argb
+            &mut argb,
+            &mut item_indices
         ));
         assert!(rgba.is_empty());
         assert_eq!(argb.len(), FRAME_WIDTH as usize * 96);
@@ -9168,13 +9224,15 @@ mod tests {
         };
         let mut rgba = Vec::new();
         let mut argb = Vec::new();
+        let mut item_indices = Vec::new();
 
         assert!(!rasterize_browser_viewport_argb_preferred(
             &display_list,
             0,
             96,
             &mut rgba,
-            &mut argb
+            &mut argb,
+            &mut item_indices
         ));
         assert_eq!(rgba.len(), FRAME_WIDTH as usize * 96 * 4);
         assert_eq!(argb.len(), FRAME_WIDTH as usize * 96);
@@ -9195,6 +9253,7 @@ mod tests {
             tiles: None,
         };
         let mut pixels = vec![0; FRAME_WIDTH as usize * 96];
+        let mut item_indices = Vec::new();
         let damage = Rect {
             x: 0.0,
             y: BROWSER_CHROME_HEIGHT + 12.0,
@@ -9207,7 +9266,8 @@ mod tests {
             0,
             96,
             damage,
-            &mut pixels
+            &mut pixels,
+            &mut item_indices
         ));
         assert_eq!(
             pixels[(BROWSER_CHROME_HEIGHT as usize + 11) * FRAME_WIDTH as usize],
@@ -9239,6 +9299,7 @@ mod tests {
             tiles: None,
         };
         let mut pixels = vec![0x12345678; FRAME_WIDTH as usize * 96];
+        let mut item_indices = Vec::new();
         let damage = Rect {
             x: 0.0,
             y: BROWSER_CHROME_HEIGHT,
@@ -9251,7 +9312,8 @@ mod tests {
             0,
             96,
             damage,
-            &mut pixels
+            &mut pixels,
+            &mut item_indices
         ));
         assert!(pixels.iter().all(|pixel| *pixel == 0x12345678));
     }
@@ -10362,11 +10424,18 @@ mod tests {
             height: 756.0,
         };
 
-        let items = browser_viewport_source_items(&display_list, viewport);
+        let mut item_indices = Vec::new();
+        browser_viewport_source_item_indices(&display_list, viewport, &mut item_indices);
 
-        assert_eq!(items.len(), 2);
-        assert_eq!(display_item_rect(items[0]).y, 44.0);
-        assert_eq!(display_item_rect(items[1]).y, 260.0);
+        assert_eq!(item_indices.len(), 2);
+        assert_eq!(
+            display_item_rect(&display_list.items[item_indices[0]]).y,
+            44.0
+        );
+        assert_eq!(
+            display_item_rect(&display_list.items[item_indices[1]]).y,
+            260.0
+        );
     }
 
     #[test]
@@ -12585,7 +12654,14 @@ mod tests {
         let raster_height = browser_frame_height(&display_list.items, BROWSER_CHROME_HEIGHT as u32);
         let bitmap_height = initial_browser_window_height(raster_height);
         let mut rgba = Vec::new();
-        rasterize_browser_viewport_into(&display_list, 0, bitmap_height, &mut rgba);
+        let mut viewport_item_indices = Vec::new();
+        rasterize_browser_viewport_into(
+            &display_list,
+            0,
+            bitmap_height,
+            &mut rgba,
+            &mut viewport_item_indices,
+        );
         let mut argb = Vec::new();
         rgba_bytes_to_argb_words_into(&rgba, &mut argb);
         let old_argb = argb.clone();
@@ -12632,6 +12708,7 @@ mod tests {
                 images: Vec::new(),
                 rgba,
                 damage_scratch: silksurf_render::DamageScratch::default(),
+                viewport_item_indices,
             }),
             navigation_pending: false,
             status_text: "ready".to_string(),
@@ -12690,7 +12767,14 @@ mod tests {
         let raster_height = browser_frame_height(&display_list.items, BROWSER_CHROME_HEIGHT as u32);
         let bitmap_height = initial_browser_window_height(raster_height);
         let mut rgba = Vec::new();
-        rasterize_browser_viewport_into(&display_list, 0, bitmap_height, &mut rgba);
+        let mut viewport_item_indices = Vec::new();
+        rasterize_browser_viewport_into(
+            &display_list,
+            0,
+            bitmap_height,
+            &mut rgba,
+            &mut viewport_item_indices,
+        );
         let mut argb = Vec::new();
         rgba_bytes_to_argb_words_into(&rgba, &mut argb);
         let old_argb = argb.clone();
@@ -12737,6 +12821,7 @@ mod tests {
                 images: Vec::new(),
                 rgba,
                 damage_scratch: silksurf_render::DamageScratch::default(),
+                viewport_item_indices,
             }),
             navigation_pending: false,
             status_text: "ready".to_string(),
