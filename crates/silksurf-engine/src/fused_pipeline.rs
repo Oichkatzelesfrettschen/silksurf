@@ -72,8 +72,14 @@ pub struct FusedWorkspace {
     pub display_items: Vec<DisplayItem>,
     /// Render-tree suppression flags per BFS-indexed node.
     render_suppressed: Vec<bool>,
-    /// Cached DOM generation to skip rebuild when DOM unchanged.
-    dom_generation: u64,
+    /// Cached tree-shape generation for the BFS table.
+    table_generation: u64,
+    /// Cached selector-input generation for the cascade view.
+    cascade_generation: u64,
+    /// Cached tree-shape generation for the taffy node graph.
+    taffy_structure_generation: u64,
+    /// Cached selector-input generation for the taffy style graph.
+    taffy_style_generation: u64,
 }
 
 impl Default for FusedWorkspace {
@@ -101,7 +107,10 @@ impl FusedWorkspace {
             node_rects: Vec::new(),
             display_items: Vec::new(),
             render_suppressed: Vec::new(),
-            dom_generation: u64::MAX, // force first rebuild
+            table_generation: u64::MAX,
+            cascade_generation: u64::MAX,
+            taffy_structure_generation: u64::MAX,
+            taffy_style_generation: u64::MAX,
         }
     }
 
@@ -144,23 +153,35 @@ impl FusedWorkspace {
         viewport: Rect,
         replaced_sizes: &[ReplacedSize],
     ) {
+        let trace_fused = std::env::var_os("SILKSURF_TRACE_FUSED").is_some();
+        let total_start = std::time::Instant::now();
         /*
-         * Conditional rebuild: skip BFS table and CascadeView materialization
-         * when the DOM has not changed since the last run(). This hoists ~2us
-         * of rebuild cost out of the steady-state re-render path.
-         *
-         * The DOM's mutation_generation increments on end_mutation_batch() and
-         * materialize_resolve_table(). If it matches our cached value, the
-         * topology and attribute data are identical -- skip rebuild.
+         * DOM structure and selector-input generations separate text edits
+         * from tree or attribute changes. Text-only mutations keep the BFS
+         * table, cascade view, and taffy node graph warm while layout computes
+         * with the updated text contents.
          */
-        let dom_gen = dom.generation();
-        if dom_gen != self.dom_generation {
+        let structure_gen = dom.structure_generation();
+        let style_gen = dom.style_generation();
+        let phase_start = std::time::Instant::now();
+        if structure_gen != self.table_generation {
             self.table
                 .rebuild_filtered(dom, root, node_starts_non_rendered_subtree);
+            self.table_generation = structure_gen;
+        }
+        if style_gen != self.cascade_generation {
             self.cascade_view.rebuild(dom);
-            self.dom_generation = dom_gen;
+            self.cascade_generation = style_gen;
         }
         let n = self.table.len();
+        trace_fused_phase(
+            trace_fused,
+            "table",
+            phase_start.elapsed(),
+            n,
+            style_index.active_rules.len(),
+            0,
+        );
 
         self.styles.clear();
         self.styles.resize(n, None);
@@ -173,6 +194,7 @@ impl FusedWorkspace {
         // Pass 1: cascade -- compute ComputedStyle for every BFS node.
         // Each node reads its parent's style (already computed, since BFS
         // processes parents before children).
+        let phase_start = std::time::Instant::now();
         let mut rem_base_px = 16.0_f32;
         for (i, &node) in self.table.bfs_order.iter().enumerate() {
             let pidx = self.table.parent_idx[i];
@@ -209,16 +231,58 @@ impl FusedWorkspace {
             }
             self.styles[i] = Some(style);
         }
+        trace_fused_phase(
+            trace_fused,
+            "cascade",
+            phase_start.elapsed(),
+            n,
+            style_index.active_rules.len(),
+            0,
+        );
 
         // Pass 2: layout -- rebuild taffy tree from styles and compute
         // Flexbox/Grid positions, then write absolute rects into node_rects[].
-        self.taffy_layout.rebuild(dom, &self.table, &self.styles);
+        let phase_start = std::time::Instant::now();
+        if structure_gen != self.taffy_structure_generation
+            || style_gen != self.taffy_style_generation
+        {
+            self.taffy_layout.rebuild(dom, &self.table, &self.styles);
+            self.taffy_structure_generation = structure_gen;
+            self.taffy_style_generation = style_gen;
+        }
+        trace_fused_phase(
+            trace_fused,
+            "taffy-rebuild",
+            phase_start.elapsed(),
+            n,
+            style_index.active_rules.len(),
+            0,
+        );
+        let phase_start = std::time::Instant::now();
         self.taffy_layout
             .compute(dom, &self.styles, &self.table.bfs_order, viewport);
+        trace_fused_phase(
+            trace_fused,
+            "taffy-compute",
+            phase_start.elapsed(),
+            n,
+            style_index.active_rules.len(),
+            0,
+        );
+        let phase_start = std::time::Instant::now();
         self.taffy_layout
             .write_rects(&self.table.parent_idx, &mut self.node_rects, viewport);
+        trace_fused_phase(
+            trace_fused,
+            "rects",
+            phase_start.elapsed(),
+            n,
+            style_index.active_rules.len(),
+            0,
+        );
 
         // Pass 3: paint -- emit display items for each visible node.
+        let phase_start = std::time::Instant::now();
         for (i, &node) in self.table.bfs_order.iter().enumerate() {
             let Some(ref style) = self.styles[i] else {
                 continue;
@@ -237,6 +301,22 @@ impl FusedWorkspace {
                 &mut self.display_items,
             );
         }
+        trace_fused_phase(
+            trace_fused,
+            "paint",
+            phase_start.elapsed(),
+            n,
+            style_index.active_rules.len(),
+            self.display_items.len(),
+        );
+        trace_fused_phase(
+            trace_fused,
+            "total",
+            total_start.elapsed(),
+            n,
+            style_index.active_rules.len(),
+            self.display_items.len(),
+        );
     }
 
     /// Number of BFS-ordered nodes from the last `run()` call.

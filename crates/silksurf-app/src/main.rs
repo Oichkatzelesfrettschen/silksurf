@@ -1396,13 +1396,16 @@ fn build_browser_page_with_buffers_for_height(
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let replaced_sizes =
         collect_image_replaced_sizes(&dom_guard, doc_node, &payload.url, &payload.images);
-    let mut fused = fused_style_layout_paint_with_replaced_sizes(
+    let mut fused_workspace = FusedWorkspace::new();
+    fused_workspace.run_with_replaced_sizes(
         &dom_guard,
         &stylesheet,
+        &style_index,
         doc_node,
         viewport,
         &replaced_sizes,
     );
+    let mut fused = fused_workspace.snapshot_result();
     let mut display_list = silksurf_render::DisplayList {
         items: std::mem::take(&mut fused.display_items),
         tiles: None,
@@ -1502,7 +1505,7 @@ fn build_browser_page_with_buffers_for_height(
             viewport,
             js_ctx,
             fused,
-            fused_workspace: FusedWorkspace::new(),
+            fused_workspace,
             display_list,
             images: payload.images,
             rgba,

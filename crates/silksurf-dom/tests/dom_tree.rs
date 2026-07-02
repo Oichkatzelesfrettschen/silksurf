@@ -155,3 +155,41 @@ fn batches_dirty_nodes_until_flush() {
     assert!(dirty.contains(&html));
     assert_eq!(dirty.iter().filter(|&&id| id == html).count(), 1);
 }
+
+#[test]
+fn text_edits_preserve_structure_and_style_generations() {
+    let mut dom = Dom::new();
+    let parent = dom.create_element("p");
+    let text = dom.append_text(parent, "old").unwrap();
+    dom.materialize_resolve_table();
+
+    let base_generation = dom.generation();
+    let base_structure_generation = dom.structure_generation();
+    let base_style_generation = dom.style_generation();
+
+    dom.with_mutation_batch(|dom| {
+        dom.set_text_content(text, "new").unwrap();
+    });
+
+    assert_ne!(dom.generation(), base_generation);
+    assert_eq!(dom.structure_generation(), base_structure_generation);
+    assert_eq!(dom.style_generation(), base_style_generation);
+
+    dom.with_mutation_batch(|dom| {
+        dom.set_attribute(parent, "class", "hero").unwrap();
+    });
+    assert_ne!(dom.style_generation(), base_style_generation);
+
+    let style_generation_after_attribute = dom.style_generation();
+    let structure_generation_before_child = dom.structure_generation();
+    dom.with_mutation_batch(|dom| {
+        let child = dom.create_element("span");
+        dom.append_child(parent, child).unwrap();
+    });
+
+    assert_ne!(
+        dom.structure_generation(),
+        structure_generation_before_child
+    );
+    assert_ne!(dom.style_generation(), style_generation_after_attribute);
+}
