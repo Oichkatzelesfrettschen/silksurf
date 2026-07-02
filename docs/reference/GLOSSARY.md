@@ -387,7 +387,7 @@
 
 ### Generation-gated rebuild
 **Type**: Cache-coherence pattern
-**Definition**: `Dom::generation()` = (instance_id << 32) | mutation_counter. The fused pipeline skips `table.rebuild()` and `cascade_view.rebuild()` when the cached generation matches the current DOM. Saves ~2us on hover/resize/media-query re-renders over an unchanged DOM.
+**Definition**: `Dom::generation()` tracks all DOM mutations, while `Dom::structure_generation()` tracks tree-shape changes and `Dom::style_generation()` tracks selector-input changes. The fused pipeline skips BFS-table, cascade-view, and taffy-graph rebuilds when the narrower cached generations match the current DOM.
 
 ### IndexedSelector.pair_id
 **Type**: Sequential u32 identifier
@@ -756,7 +756,11 @@ files and the relevant ADRs.
 
 ### style_generation
 **Type**: Cache coherence counter
-**Definition**: Monotonic u64 counter embedded in the `Dom` generation word. Advances on every `end_mutation_batch()`. Downstream caches (CascadeView, FusedWorkspace) compare their stored generation against this value to detect staleness.
+**Definition**: Monotonic `Dom` counter that advances on attribute changes and tree-shape changes. Text-only edits leave it stable, so `FusedWorkspace` keeps cascade and taffy structure warm while layout measures the updated text.
+
+### structure_generation
+**Type**: Cache coherence counter
+**Definition**: Monotonic `Dom` counter that advances on child insertion, removal, or reparenting. Text-only edits leave it stable, so `FusedWorkspace` keeps the BFS table and taffy node graph warm for existing text nodes.
 
 ### take_dirty_nodes
 **Type**: DOM change detection function
