@@ -146,11 +146,16 @@ sub-0.01ms totals.
 `make verify-conformance-sources` verifies the retained W3C and WHATWG source
 bundle without network access. `make fetch-conformance-sources` refreshes the
 same bundle with the recorded Mozilla user agent and rewrites `SHA256SUMS`.
+`make fetch-conformance-test-corpora` fetches ignored external test corpora
+under `silksurf-extras/` and records the fetched revisions there.
 
 `make conformance-html-css` runs the HTML tokenizer harness, CSS corpus harness,
 and synthetic WPT-style engine runner. The lane exercises the embedded
 `html5ever` tree builder, the local CSS parser and cascade, Taffy-backed
-layout, and fused paint-list checks.
+layout, and fused paint-list checks. If `silksurf-extras/html5lib-tests` is
+present, the html5lib harness reads that tokenizer corpus. If `CSS_TESTS_DIR`
+is unset, the CSS harness runs the checked-in fixture corpus; set
+`CSS_TESTS_DIR=/path/to/css-corpus` for a broader external sweep.
 
 ## Pre-commit/pre-push hook semantics
 
