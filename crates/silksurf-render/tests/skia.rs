@@ -129,7 +129,7 @@ fn skia_damage_updates_only_dirty_rectangle() {
         })
     );
 
-    let retained_pixel = (1 * 16 + 1) * 4;
+    let retained_pixel = 17 * 4;
     assert_eq!(&buf[retained_pixel..retained_pixel + 4], &[0, 0, 200, 255]);
 }
 
@@ -176,7 +176,7 @@ fn skia_translated_damage_maps_document_rect_into_viewport() {
         })
     );
 
-    let retained_pixel = (1 * 16 + 1) * 4;
+    let retained_pixel = 17 * 4;
     assert_eq!(&buf[retained_pixel..retained_pixel + 4], &[17, 17, 17, 17]);
 }
 

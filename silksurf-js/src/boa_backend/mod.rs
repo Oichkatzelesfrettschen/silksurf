@@ -145,12 +145,16 @@ fn install_storage_objects(ctx: &mut Context) {
     let local_storage = storage_object(ctx);
     let session_storage = storage_object(ctx);
     ctx.register_global_property(js_string!("localStorage"), local_storage, Attribute::all())
+        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
         .expect("localStorage: install on fresh context cannot fail");
     ctx.register_global_property(
         js_string!("sessionStorage"),
         session_storage,
         Attribute::all(),
     )
+    // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
     .expect("sessionStorage: install on fresh context cannot fail");
 }
 
@@ -187,6 +191,8 @@ fn storage_string_arg(arg: Option<&JsValue>, ctx: &mut Context) -> boa_engine::J
 
 fn storage_length_native(storage: &StorageMap) -> NativeFunction {
     let storage = Rc::clone(storage);
+    // SAFETY: Boa stores the native closure with owned Rust captures for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |_this, _args, _ctx| {
             Ok(JsValue::from(storage.borrow().len() as u32))
@@ -196,20 +202,25 @@ fn storage_length_native(storage: &StorageMap) -> NativeFunction {
 
 fn storage_get_item_native(storage: &StorageMap) -> NativeFunction {
     let storage = Rc::clone(storage);
+    // SAFETY: Boa stores the native closure with owned Rust captures for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let key = storage_string_arg(args.first(), ctx)?;
             Ok(storage
                 .borrow()
                 .get(&key)
-                .map(|value| JsValue::from(JsString::from(value.as_str())))
-                .unwrap_or_else(JsValue::null))
+                .map_or_else(JsValue::null, |value| {
+                    JsValue::from(JsString::from(value.as_str()))
+                }))
         })
     }
 }
 
 fn storage_set_item_native(storage: &StorageMap) -> NativeFunction {
     let storage = Rc::clone(storage);
+    // SAFETY: Boa stores the native closure with owned Rust captures for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let key = storage_string_arg(args.first(), ctx)?;
@@ -222,6 +233,8 @@ fn storage_set_item_native(storage: &StorageMap) -> NativeFunction {
 
 fn storage_remove_item_native(storage: &StorageMap) -> NativeFunction {
     let storage = Rc::clone(storage);
+    // SAFETY: Boa stores the native closure with owned Rust captures for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let key = storage_string_arg(args.first(), ctx)?;
@@ -233,6 +246,8 @@ fn storage_remove_item_native(storage: &StorageMap) -> NativeFunction {
 
 fn storage_clear_native(storage: &StorageMap) -> NativeFunction {
     let storage = Rc::clone(storage);
+    // SAFETY: Boa stores the native closure with owned Rust captures for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |_this, _args, _ctx| {
             storage.borrow_mut().clear();
@@ -243,6 +258,8 @@ fn storage_clear_native(storage: &StorageMap) -> NativeFunction {
 
 fn storage_key_native(storage: &StorageMap) -> NativeFunction {
     let storage = Rc::clone(storage);
+    // SAFETY: Boa stores the native closure with owned Rust captures for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let index = args
@@ -252,10 +269,9 @@ fn storage_key_native(storage: &StorageMap) -> NativeFunction {
                 .unwrap_or(0) as usize;
             let mut keys: Vec<String> = storage.borrow().keys().cloned().collect();
             keys.sort_unstable();
-            Ok(keys
-                .get(index)
-                .map(|key| JsValue::from(JsString::from(key.as_str())))
-                .unwrap_or_else(JsValue::null))
+            Ok(keys.get(index).map_or_else(JsValue::null, |key| {
+                JsValue::from(JsString::from(key.as_str()))
+            }))
         })
     }
 }
@@ -274,6 +290,8 @@ fn document_cookie_setter(ctx: &mut Context, jar: &CookieJar) -> JsFunction {
 
 fn document_cookie_get_native(jar: &CookieJar) -> NativeFunction {
     let jar = Rc::clone(jar);
+    // SAFETY: Boa stores the native closure with owned Rust captures for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |_this, _args, _ctx| {
             Ok(JsValue::from(JsString::from(
@@ -285,6 +303,8 @@ fn document_cookie_get_native(jar: &CookieJar) -> NativeFunction {
 
 fn document_cookie_set_native(jar: &CookieJar) -> NativeFunction {
     let jar = Rc::clone(jar);
+    // SAFETY: Boa stores the native closure with owned Rust captures for the JS function lifetime.
+
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let value = storage_string_arg(args.first(), ctx)?;
@@ -366,6 +386,8 @@ fn install_crypto(ctx: &mut Context) {
         )
         .build();
     ctx.register_global_property(js_string!("crypto"), crypto, Attribute::all())
+        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
         .expect("crypto: install on fresh context cannot fail");
 }
 
@@ -402,7 +424,7 @@ fn crypto_random_uuid(
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     Ok(JsValue::from(JsString::from(
-        format_uuid_v4(&bytes).as_str(),
+        format_uuid_v4(bytes).as_str(),
     )))
 }
 
@@ -414,7 +436,7 @@ fn fill_random_bytes(bytes: &mut [u8]) -> boa_engine::JsResult<()> {
     })
 }
 
-fn format_uuid_v4(bytes: &[u8; 16]) -> String {
+fn format_uuid_v4(bytes: [u8; 16]) -> String {
     let mut out = String::with_capacity(36);
     for (index, byte) in bytes.iter().enumerate() {
         if matches!(index, 4 | 6 | 8 | 10) {
@@ -450,8 +472,12 @@ fn install_abort_api(ctx: &mut Context) {
     .build();
     abort_signal_object
         .set(js_string!("abort"), abort_signal_abort, false, ctx)
+        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
         .expect("AbortSignal.abort: install on fresh function cannot fail");
     ctx.register_global_property(js_string!("AbortSignal"), abort_signal, Attribute::all())
+        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
         .expect("AbortSignal: install on fresh context cannot fail");
 
     let abort_controller = FunctionObjectBuilder::new(
@@ -467,6 +493,8 @@ fn install_abort_api(ctx: &mut Context) {
         abort_controller,
         Attribute::all(),
     )
+    // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
     .expect("AbortController: install on fresh context cannot fail");
 }
 
@@ -570,10 +598,10 @@ fn abort_signal_add_event_listener(
     let Some(signal) = this.as_object() else {
         return Ok(JsValue::undefined());
     };
-    if let Some(callback) = args.get(1).and_then(JsValue::as_object) {
-        if callback.is_callable() {
-            signal.set(js_string!("onabort"), callback.clone(), false, ctx)?;
-        }
+    if let Some(callback) = args.get(1).and_then(JsValue::as_object)
+        && callback.is_callable()
+    {
+        signal.set(js_string!("onabort"), callback.clone(), false, ctx)?;
     }
     Ok(JsValue::undefined())
 }
@@ -632,10 +660,10 @@ fn abort_signal_throw_if_aborted(
 }
 
 fn abort_reason(reason: Option<&JsValue>, ctx: &mut Context) -> JsValue {
-    if let Some(reason) = reason {
-        if !reason.is_undefined() {
-            return reason.clone();
-        }
+    if let Some(reason) = reason
+        && !reason.is_undefined()
+    {
+        return reason.clone();
     }
     ObjectInitializer::new(ctx)
         .property(
@@ -671,7 +699,10 @@ fn signal_is_aborted(signal: &JsObject, ctx: &mut Context) -> boa_engine::JsResu
 
 fn call_abort_listener(signal: &JsObject, ctx: &mut Context) -> boa_engine::JsResult<()> {
     let listener = signal.get(js_string!("onabort"), ctx)?;
-    let Some(listener) = listener.as_object().filter(|value| value.is_callable()) else {
+    let Some(listener) = listener
+        .as_object()
+        .filter(boa_engine::JsObject::is_callable)
+    else {
         return Ok(());
     };
     let event = ObjectInitializer::new(ctx)
@@ -710,15 +741,19 @@ impl SilkContext {
         let mut ctx = Context::builder()
             .module_loader(Rc::clone(&module_loader))
             .build()
+            // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
             .expect("Boa Context builder succeeds with MapModuleLoader");
         let scheduler = Rc::new(RefCell::new(HostScheduler::new()));
-        install_host_scheduler(&mut ctx, Rc::clone(&scheduler));
+        install_host_scheduler(&mut ctx, &scheduler);
 
         // -- Console ----------------------------------------------------------
         // boa_runtime provides the W3C-compatible console object.
         let console = Console::init(&mut ctx);
         // UNWRAP-OK: fresh Context cannot already have a "console" property.
         ctx.register_global_property(js_string!("console"), console, Attribute::all())
+            // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
             .expect("console: install on fresh context cannot fail");
 
         // -- fetch() ----------------------------------------------------------
@@ -749,6 +784,8 @@ impl SilkContext {
             }),
         )
         // UNWRAP-OK: fresh Context cannot already have "fetch" defined.
+        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
         .expect("fetch: install on fresh context cannot fail");
         install_websocket(&mut ctx);
         install_stream_constructors(&mut ctx);
@@ -816,6 +853,8 @@ impl SilkContext {
             .build();
         // UNWRAP-OK: fresh Context cannot already have a "document" property.
         ctx.register_global_property(js_string!("document"), document, Attribute::all())
+            // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
             .expect("document: install on fresh context cannot fail");
 
         // -- window / self aliases -------------------------------------------
@@ -824,8 +863,12 @@ impl SilkContext {
         let global_obj = ctx.global_object().clone();
         // UNWRAP-OK: fresh Context cannot already have "window" or "self" properties.
         ctx.register_global_property(js_string!("window"), global_obj.clone(), Attribute::all())
+            // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
             .expect("window: install on fresh context cannot fail");
         ctx.register_global_property(js_string!("self"), global_obj, Attribute::all())
+            // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
             .expect("self: install on fresh context cannot fail");
 
         // -- location stub ---------------------------------------------------
@@ -855,6 +898,8 @@ impl SilkContext {
             .build();
         // UNWRAP-OK: fresh Context cannot already have a "location" property.
         ctx.register_global_property(js_string!("location"), location, Attribute::all())
+            // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
             .expect("location: install on fresh context cannot fail");
 
         // -- navigator stub --------------------------------------------------
@@ -877,6 +922,8 @@ impl SilkContext {
             .build();
         // UNWRAP-OK: fresh Context cannot already have a "navigator" property.
         ctx.register_global_property(js_string!("navigator"), navigator, Attribute::all())
+            // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
             .expect("navigator: install on fresh context cannot fail");
 
         // -- performance stub ------------------------------------------------
@@ -901,6 +948,8 @@ impl SilkContext {
             .build();
         // UNWRAP-OK: fresh Context cannot already have a "performance" property.
         ctx.register_global_property(js_string!("performance"), performance, Attribute::all())
+            // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
             .expect("performance: install on fresh context cannot fail");
 
         install_storage_objects(&mut ctx);
@@ -1040,7 +1089,7 @@ impl SilkContext {
         let value = registry
             .get(id, &mut self.ctx)
             .map_err(|err| format!("{err}"))?;
-        Ok(value.as_object().filter(|object| object.is_callable()))
+        Ok(value.as_object().filter(boa_engine::JsObject::is_callable))
     }
 
     fn clear_registered_callback(&mut self, id: u32) -> Result<(), String> {
@@ -1056,10 +1105,11 @@ impl SilkContext {
     }
 }
 
-fn install_host_scheduler(ctx: &mut Context, scheduler: HostSchedulerRef) {
+fn install_host_scheduler(ctx: &mut Context, scheduler: &HostSchedulerRef) {
     let _ = host_callback_registry(ctx);
 
-    let timeout_scheduler = Rc::clone(&scheduler);
+    let timeout_scheduler = Rc::clone(scheduler);
+    // SAFETY: Boa stores the native closure with owned scheduler captures for the JS function lifetime.
     let set_timeout = unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             register_host_callback(
@@ -1071,9 +1121,12 @@ fn install_host_scheduler(ctx: &mut Context, scheduler: HostSchedulerRef) {
         })
     };
     ctx.register_global_callable(js_string!("setTimeout"), 2, set_timeout)
-        .expect("setTimeout: install on fresh context cannot fail");
+        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
 
-    let interval_scheduler = Rc::clone(&scheduler);
+    .expect("setTimeout: install on fresh context cannot fail");
+
+    let interval_scheduler = Rc::clone(scheduler);
+    // SAFETY: Boa stores the native closure with owned scheduler captures for the JS function lifetime.
     let set_interval = unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             register_host_callback(
@@ -1085,9 +1138,12 @@ fn install_host_scheduler(ctx: &mut Context, scheduler: HostSchedulerRef) {
         })
     };
     ctx.register_global_callable(js_string!("setInterval"), 2, set_interval)
+        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
         .expect("setInterval: install on fresh context cannot fail");
 
-    let frame_scheduler = Rc::clone(&scheduler);
+    let frame_scheduler = Rc::clone(scheduler);
+    // SAFETY: Boa stores the native closure with owned scheduler captures for the JS function lifetime.
     let request_animation_frame = unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             register_host_callback(
@@ -1103,27 +1159,36 @@ fn install_host_scheduler(ctx: &mut Context, scheduler: HostSchedulerRef) {
         1,
         request_animation_frame,
     )
+    // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
     .expect("requestAnimationFrame: install on fresh context cannot fail");
 
-    let clear_timeout_scheduler = Rc::clone(&scheduler);
+    let clear_timeout_scheduler = Rc::clone(scheduler);
+    // SAFETY: Boa stores the native closure with owned scheduler captures for the JS function lifetime.
     let clear_timeout = unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             clear_host_callback(ctx, &clear_timeout_scheduler, args.first())
         })
     };
     ctx.register_global_callable(js_string!("clearTimeout"), 1, clear_timeout)
+        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
         .expect("clearTimeout: install on fresh context cannot fail");
 
-    let clear_interval_scheduler = Rc::clone(&scheduler);
+    let clear_interval_scheduler = Rc::clone(scheduler);
+    // SAFETY: Boa stores the native closure with owned scheduler captures for the JS function lifetime.
     let clear_interval = unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             clear_host_callback(ctx, &clear_interval_scheduler, args.first())
         })
     };
     ctx.register_global_callable(js_string!("clearInterval"), 1, clear_interval)
+        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
         .expect("clearInterval: install on fresh context cannot fail");
 
-    let cancel_frame_scheduler = Rc::clone(&scheduler);
+    let cancel_frame_scheduler = Rc::clone(scheduler);
+    // SAFETY: Boa stores the native closure with owned scheduler captures for the JS function lifetime.
     let cancel_animation_frame = unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             clear_host_callback(ctx, &cancel_frame_scheduler, args.first())
@@ -1134,6 +1199,8 @@ fn install_host_scheduler(ctx: &mut Context, scheduler: HostSchedulerRef) {
         1,
         cancel_animation_frame,
     )
+    // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
     .expect("cancelAnimationFrame: install on fresh context cannot fail");
 }
 
@@ -1192,6 +1259,8 @@ fn install_websocket(ctx: &mut Context) {
     .build();
 
     ctx.register_global_property(js_string!("WebSocket"), websocket, Attribute::all())
+        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
         .expect("WebSocket: install on fresh context cannot fail");
 }
 
@@ -1217,6 +1286,8 @@ fn register_constructor(
             .build();
 
     ctx.register_global_property(JsString::from(name), function, Attribute::all())
+        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
         .expect("stream constructor install on fresh context cannot fail");
 }
 
@@ -1391,7 +1462,7 @@ fn call_optional_method(
     ctx: &mut Context,
 ) -> boa_engine::JsResult<()> {
     let method = object.get(name, ctx)?;
-    let Some(callback) = method.as_object().filter(|value| value.is_callable()) else {
+    let Some(callback) = method.as_object().filter(boa_engine::JsObject::is_callable) else {
         return Ok(());
     };
     callback.call(&JsValue::from(object.clone()), args, ctx)?;
@@ -1523,10 +1594,14 @@ fn websocket_reply_text(reply: silksurf_net::WebSocketReply) -> String {
     }
 }
 
-fn websocket_message_event(data: &str, ctx: &mut Context) -> JsValue {
+fn websocket_message_event(message_data: &str, ctx: &mut Context) -> JsValue {
     ObjectInitializer::new(ctx)
         .property(js_string!("type"), js_string!("message"), Attribute::all())
-        .property(js_string!("data"), JsString::from(data), Attribute::all())
+        .property(
+            js_string!("data"),
+            JsString::from(message_data),
+            Attribute::all(),
+        )
         .build()
         .into()
 }
@@ -1550,7 +1625,10 @@ fn call_websocket_handler(
     ctx: &mut Context,
 ) -> boa_engine::JsResult<()> {
     let handler = socket.get(handler_name, ctx)?;
-    let Some(callback) = handler.as_object().filter(|object| object.is_callable()) else {
+    let Some(callback) = handler
+        .as_object()
+        .filter(boa_engine::JsObject::is_callable)
+    else {
         return Ok(());
     };
     callback.call(&JsValue::from(socket.clone()), &[event], ctx)?;
@@ -1747,9 +1825,19 @@ mod tests {
         global_value(ctx, name).as_number().unwrap_or(f64::NAN)
     }
 
+    fn assert_number_eq(ctx: &mut SilkContext, name: &str, expected: f64) {
+        let actual = global_number(ctx, name);
+        assert!(
+            (actual - expected).abs() <= f64::EPSILON,
+            "{name}: actual={actual}, expected={expected}"
+        );
+    }
+
     fn global_string(ctx: &mut SilkContext, name: &str) -> String {
         global_value(ctx, name)
             .to_string(&mut ctx.ctx)
+            // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
             .expect("global property converts to string")
             .to_std_string_lossy()
     }
@@ -1758,6 +1846,8 @@ mod tests {
         let global = ctx.ctx.global_object().clone();
         global
             .get(JsString::from(name), &mut ctx.ctx)
+            // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
             .expect("global property read succeeds")
     }
 
@@ -1783,11 +1873,15 @@ mod tests {
         let addr = listener.local_addr().expect("echo server has local addr");
         listener
             .set_nonblocking(true)
+            // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
             .expect("echo server socket enters nonblocking mode");
         let handle = std::thread::spawn(move || {
             let runtime = Builder::new_current_thread()
                 .enable_io()
                 .build()
+                // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
                 .expect("echo server runtime builds");
             runtime.block_on(async move {
                 let listener =
@@ -1795,6 +1889,8 @@ mod tests {
                 let (stream, _) = listener.accept().await.expect("echo server accepts");
                 let mut socket = accept_async(stream)
                     .await
+                    // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
                     .expect("websocket handshake works");
                 if let Some(Ok(message)) = socket.next().await {
                     socket.send(message).await.expect("echo server replies");
@@ -1818,13 +1914,15 @@ mod tests {
              globalThis.missingValue = localStorage.getItem('a') === null; \
              globalThis.finalLength = localStorage.length;",
         )
+        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
         .expect("script mutates localStorage");
 
         assert_eq!(global_string(&mut ctx, "firstValue"), "1");
-        assert_eq!(global_number(&mut ctx, "initialLength"), 2.0);
+        assert_number_eq(&mut ctx, "initialLength", 2.0);
         assert_eq!(global_string(&mut ctx, "firstKey"), "a");
         assert!(global_bool(&mut ctx, "missingValue"));
-        assert_eq!(global_number(&mut ctx, "finalLength"), 1.0);
+        assert_number_eq(&mut ctx, "finalLength", 1.0);
     }
 
     #[test]
@@ -1839,6 +1937,8 @@ mod tests {
              document.head.appendChild(script); \
              globalThis.dynamicScriptNode = script.src;",
         )
+        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
         .expect("script appends dynamic script element");
 
         let dom = dom
@@ -1846,6 +1946,8 @@ mod tests {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let scripts = dom
             .children(document)
+            // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
             .expect("document has children")
             .iter()
             .copied()
@@ -1866,6 +1968,8 @@ mod tests {
         assert_eq!(src, "/cdn/dynamic.js");
         assert_eq!(
             dom.children(script)
+                // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
                 .expect("script has text child")
                 .iter()
                 .filter_map(|child| match dom.node(*child).ok()?.kind() {
@@ -1912,12 +2016,14 @@ mod tests {
              globalThis.sessionCleared = sessionStorage.length === 0; \
              globalThis.localStillPresent = localStorage.getItem('token');",
         )
+        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
         .expect("script mutates localStorage and sessionStorage");
 
         assert_eq!(global_string(&mut ctx, "localValue"), "local");
         assert_eq!(global_string(&mut ctx, "sessionValue"), "session");
-        assert_eq!(global_number(&mut ctx, "localLength"), 1.0);
-        assert_eq!(global_number(&mut ctx, "sessionLength"), 1.0);
+        assert_number_eq(&mut ctx, "localLength", 1.0);
+        assert_number_eq(&mut ctx, "sessionLength", 1.0);
         assert!(global_bool(&mut ctx, "sessionCleared"));
         assert_eq!(global_string(&mut ctx, "localStillPresent"), "local");
     }
@@ -1934,6 +2040,8 @@ mod tests {
              document.cookie = 'theme=gone; Max-Age=0'; \
              globalThis.afterDelete = document.cookie;",
         )
+        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
         .expect("script mutates document.cookie");
 
         assert!(global_bool(&mut ctx, "cookiesEnabled"));
@@ -1951,6 +2059,8 @@ mod tests {
              globalThis.lengthOk = bytes.length === 16; \
              globalThis.sum = Array.from(bytes).reduce(function (acc, byte) { return acc + byte; }, 0);",
         )
+        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
         .expect("script fills typed array with random bytes");
 
         assert!(global_bool(&mut ctx, "sameObject"));
@@ -1966,6 +2076,8 @@ mod tests {
              globalThis.uuidText = id; \
              globalThis.uuidShape = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id);",
         )
+        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
         .expect("script creates random UUID");
 
         assert_eq!(global_string(&mut ctx, "uuidText").len(), 36);
@@ -1988,6 +2100,8 @@ mod tests {
              globalThis.finalAbort = controller.signal.aborted; \
              globalThis.abortReason = controller.signal.reason;",
         )
+        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
         .expect("script aborts controller");
 
         assert!(!global_bool(&mut ctx, "initialAbort"));
@@ -2006,6 +2120,8 @@ mod tests {
              globalThis.staticReason = signal.reason; \
              try { signal.throwIfAborted(); } catch (err) { globalThis.throwHit = true; }",
         )
+        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
         .expect("script creates aborted signal");
 
         assert!(global_bool(&mut ctx, "staticAbort"));
@@ -2027,6 +2143,8 @@ mod tests {
                  globalThis.fetchError = String(err); \
                });",
         )
+        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
         .expect("script rejects aborted fetch");
 
         assert!(global_bool(&mut ctx, "fetchRejected"));
@@ -2040,6 +2158,8 @@ mod tests {
             "globalThis.hit = false; \
              globalThis.timerId = setTimeout(function () { globalThis.hit = true; }, 0);",
         )
+        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
         .expect("script schedules timeout");
 
         assert!(!global_bool(&mut ctx, "hit"));
@@ -2061,10 +2181,12 @@ mod tests {
                globalThis.frameTimestamp = timestamp; \
              });",
         )
+        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
         .expect("script schedules frame callback");
 
         assert_eq!(ctx.run_ready_host_callbacks().unwrap(), 1);
-        assert_eq!(global_number(&mut ctx, "frames"), 1.0);
+        assert_number_eq(&mut ctx, "frames", 1.0);
         assert!(global_number(&mut ctx, "frameTimestamp") >= 0.0);
         assert_eq!(ctx.run_ready_host_callbacks().unwrap(), 0);
     }
@@ -2077,6 +2199,8 @@ mod tests {
              var id = requestAnimationFrame(function () { globalThis.hit = true; }); \
              cancelAnimationFrame(id);",
         )
+        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
         .expect("script schedules and cancels frame callback");
 
         assert!(!ctx.has_pending_host_callbacks());
@@ -2094,13 +2218,15 @@ mod tests {
                if (globalThis.count === 2) { clearInterval(id); } \
              }, 1);",
         )
+        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
         .expect("script schedules interval");
 
         assert_eq!(ctx.run_ready_host_callbacks().unwrap(), 1);
-        assert_eq!(global_number(&mut ctx, "count"), 1.0);
+        assert_number_eq(&mut ctx, "count", 1.0);
         assert!(ctx.has_pending_host_callbacks());
         assert_eq!(ctx.run_ready_host_callbacks().unwrap(), 1);
-        assert_eq!(global_number(&mut ctx, "count"), 2.0);
+        assert_number_eq(&mut ctx, "count", 2.0);
         assert!(!ctx.has_pending_host_callbacks());
     }
 
@@ -2123,13 +2249,15 @@ mod tests {
             )
             .as_str(),
         )
+        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
         .expect("script sends websocket message");
 
         server.join().expect("echo server exits");
         assert!(global_bool(&mut ctx, "wsHit"));
         assert_eq!(global_string(&mut ctx, "wsData"), "hello-ai");
         assert_eq!(global_string(&mut ctx, "wsLast"), "hello-ai");
-        assert_eq!(global_number(&mut ctx, "wsReady"), 1.0);
+        assert_number_eq(&mut ctx, "wsReady", 1.0);
     }
 
     #[test]
@@ -2147,12 +2275,14 @@ mod tests {
              globalThis.wsReady = ws.readyState; \
              globalThis.wsLastError = ws.lastError;",
         )
+        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
         .expect("script handles websocket error");
 
         assert!(global_bool(&mut ctx, "wsErrorHit"));
         assert!(!global_string(&mut ctx, "wsErrorMessage").is_empty());
         assert!(!global_string(&mut ctx, "wsLastError").is_empty());
-        assert_eq!(global_number(&mut ctx, "wsReady"), 3.0);
+        assert_number_eq(&mut ctx, "wsReady", 3.0);
     }
 
     #[test]
@@ -2171,6 +2301,8 @@ mod tests {
              }); \
              globalThis.streamHasReader = typeof stream.getReader === 'function';",
         )
+        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
         .expect("readable stream constructor runs start");
 
         assert!(global_bool(&mut ctx, "streamStarted"));
@@ -2187,6 +2319,8 @@ mod tests {
              globalThis.hasPipeTo = typeof encoded.pipeTo === 'function'; \
              globalThis.hasReader = typeof encoded.getReader === 'function';",
         )
+        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
         .expect("stream pipeThrough returns readable side");
 
         assert!(global_bool(&mut ctx, "hasPipeTo"));

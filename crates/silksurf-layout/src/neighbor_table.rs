@@ -69,6 +69,22 @@ impl LayoutNeighborTable {
      * Memory: O(N) for flat arrays + O(depth) for level_starts
      */
     pub fn build(dom: &Dom, root: NodeId) -> Self {
+        Self::build_filtered(dom, root, |_, _| false)
+    }
+
+    /*
+     * build_filtered -- construct a BFS table that excludes skipped subtrees.
+     *
+     * The root always stays in the table. A skipped child and its descendants
+     * do not enter bfs_order, parent_idx, child_start, child_count, or
+     * node_to_bfs_idx. Callers use this for DOM regions that cannot affect
+     * layout or paint.
+     */
+    pub fn build_filtered(
+        dom: &Dom,
+        root: NodeId,
+        skip_subtree: impl FnMut(&Dom, NodeId) -> bool,
+    ) -> Self {
         let mut table = Self {
             level_starts: Vec::new(),
             parent_idx: Vec::new(),
@@ -77,7 +93,7 @@ impl LayoutNeighborTable {
             child_count: Vec::new(),
             node_to_bfs_idx: rustc_hash::FxHashMap::default(),
         };
-        table.rebuild(dom, root);
+        table.rebuild_filtered(dom, root, skip_subtree);
         table
     }
 
@@ -101,6 +117,22 @@ impl LayoutNeighborTable {
      * Allocations: 0 after capacity reaches steady state
      */
     pub fn rebuild(&mut self, dom: &Dom, root: NodeId) {
+        self.rebuild_filtered(dom, root, |_, _| false);
+    }
+
+    /*
+     * rebuild_filtered -- refill the table while excluding skipped subtrees.
+     *
+     * Filtered child counts describe only the retained render tree. Descendant
+     * nodes under a skipped child are unreachable from the table and cannot
+     * influence layout traversal.
+     */
+    pub fn rebuild_filtered(
+        &mut self,
+        dom: &Dom,
+        root: NodeId,
+        mut skip_subtree: impl FnMut(&Dom, NodeId) -> bool,
+    ) {
         self.bfs_order.clear();
         self.parent_idx.clear();
         self.child_start.clear();
@@ -132,23 +164,28 @@ impl LayoutNeighborTable {
             for i in level_start..level_end {
                 let node = self.bfs_order[i];
                 let children = dom.children(node).unwrap_or(&[]);
-                self.child_start[i] = if children.is_empty() {
-                    u32::MAX
-                } else {
-                    self.bfs_order.len() as u32
-                };
-                // Set child count for this node (was placeholder 0).
-                self.child_count[i] = children.len().min(u16::MAX as usize) as u16;
+                let child_start = self.bfs_order.len();
+                let mut retained_children = 0usize;
 
                 let pidx = i as u32;
                 for &child in children {
+                    if skip_subtree(dom, child) {
+                        continue;
+                    }
                     let flat_idx = self.bfs_order.len() as u32;
                     self.node_to_bfs_idx.insert(child, flat_idx);
                     self.bfs_order.push(child);
                     self.parent_idx.push(pidx);
                     self.child_start.push(u32::MAX); // placeholder, filled next iteration
                     self.child_count.push(0); // placeholder, filled next iteration
+                    retained_children += 1;
                 }
+                self.child_start[i] = if retained_children == 0 {
+                    u32::MAX
+                } else {
+                    child_start as u32
+                };
+                self.child_count[i] = retained_children.min(u16::MAX as usize) as u16;
             }
 
             // Only record a new level start if children were added.
@@ -252,5 +289,31 @@ mod tests {
         assert_eq!(table.child_start[0], 1);
         assert_eq!(table.child_count[0], 1);
         assert_eq!(table.child_start[1], u32::MAX);
+    }
+
+    #[test]
+    fn filtered_rebuild_excludes_subtree_and_keeps_siblings_contiguous() {
+        let mut dom = Dom::new();
+        let root = dom.create_element("div");
+        let keep = dom.create_element("span");
+        let skip = dom.create_element("script");
+        let skipped_child = dom.create_text("hidden");
+        let after = dom.create_element("p");
+        dom.append_child(root, keep).unwrap();
+        dom.append_child(root, skip).unwrap();
+        dom.append_child(skip, skipped_child).unwrap();
+        dom.append_child(root, after).unwrap();
+
+        let mut table = LayoutNeighborTable::default();
+        table.rebuild_filtered(&dom, root, |_, node| node == skip);
+
+        assert_eq!(table.bfs_order, [root, keep, after]);
+        assert_eq!(table.level(1), &[keep, after]);
+        assert_eq!(table.child_start[0], 1);
+        assert_eq!(table.child_count[0], 2);
+        assert_eq!(table.parent_idx[1], 0);
+        assert_eq!(table.parent_idx[2], 0);
+        assert!(!table.node_to_bfs_idx.contains_key(&skip));
+        assert!(!table.node_to_bfs_idx.contains_key(&skipped_child));
     }
 }
