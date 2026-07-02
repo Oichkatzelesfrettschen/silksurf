@@ -182,7 +182,7 @@ impl TaffyLayout {
                 }
                 continue;
             }
-            let taffy_style = css_to_taffy_style(styles.get(i).and_then(Option::as_ref));
+            let taffy_style = css_to_taffy_style_for_index(table, styles, i);
             self.child_ids_scratch.clear();
             let first_child = table.child_start[i];
             if first_child != u32::MAX {
@@ -744,6 +744,103 @@ fn length_pct(l: Length) -> LengthPercentage {
 ///
 /// Width/height/min/max are converted from `LengthOrAuto` / `Option<Length>` to
 /// taffy Dimension values. AUTO passes through as `Dimension::auto()`.
+fn css_to_taffy_style_for_index(
+    table: &LayoutNeighborTable,
+    styles: &[Option<ComputedStyle>],
+    index: usize,
+) -> Style {
+    let style = styles.get(index).and_then(Option::as_ref);
+    let mut taffy_style = css_to_taffy_style(style);
+    if simple_fr_grid_container_columns(table, styles, index).is_some() {
+        taffy_style.display = TaffyDisplay::Flex;
+        taffy_style.flex_direction = FlexDirection::Row;
+        taffy_style.flex_wrap = FlexWrap::Wrap;
+    }
+    if let Some(columns) = parent_simple_fr_grid_columns(table, styles, index) {
+        taffy_style.flex_basis = Dimension::percent(1.0 / columns as f32);
+        taffy_style.flex_grow = 0.0;
+        taffy_style.flex_shrink = 1.0;
+    }
+    taffy_style
+}
+
+fn simple_fr_grid_container_columns(
+    table: &LayoutNeighborTable,
+    styles: &[Option<ComputedStyle>],
+    index: usize,
+) -> Option<usize> {
+    let style = styles.get(index).and_then(Option::as_ref)?;
+    if style.display != CssDisplay::Grid
+        || style.grid_container.auto_flow != CssGridAutoFlow::Row
+        || !style.grid_container.template_rows.is_empty()
+        || !style.grid_container.auto_columns.is_empty()
+        || !style.grid_container.auto_rows.is_empty()
+    {
+        return None;
+    }
+    let columns = equal_fr_track_count(&style.grid_container.template_columns)?;
+    children_have_auto_grid_placement(table, styles, index).then_some(columns)
+}
+
+fn parent_simple_fr_grid_columns(
+    table: &LayoutNeighborTable,
+    styles: &[Option<ComputedStyle>],
+    index: usize,
+) -> Option<usize> {
+    let parent = table.parent_idx.get(index).copied().unwrap_or(u32::MAX);
+    if parent == u32::MAX {
+        return None;
+    }
+    simple_fr_grid_container_columns(table, styles, parent as usize)
+}
+
+fn equal_fr_track_count(tracks: &[CssGridTrackSize]) -> Option<usize> {
+    let [first, rest @ ..] = tracks else {
+        return None;
+    };
+    let CssGridTrackSize::Fr(first_fr) = first else {
+        return None;
+    };
+    if !first_fr.is_finite() || *first_fr <= 0.0 {
+        return None;
+    }
+    rest.iter()
+        .all(
+            |track| matches!(track, CssGridTrackSize::Fr(fr) if fr.to_bits() == first_fr.to_bits()),
+        )
+        .then_some(tracks.len())
+}
+
+fn children_have_auto_grid_placement(
+    table: &LayoutNeighborTable,
+    styles: &[Option<ComputedStyle>],
+    index: usize,
+) -> bool {
+    let Some(first_child) = table.child_start.get(index).copied() else {
+        return false;
+    };
+    if first_child == u32::MAX {
+        return false;
+    }
+    let start = first_child as usize;
+    let end = start + usize::from(table.child_count[index]);
+    (start..end).all(|child| {
+        styles
+            .get(child)
+            .and_then(Option::as_ref)
+            .is_some_and(|style| {
+                style.display == CssDisplay::None || grid_item_uses_auto_placement(style)
+            })
+    })
+}
+
+fn grid_item_uses_auto_placement(style: &ComputedStyle) -> bool {
+    style.grid_item.column_start == CssGridLine::Auto
+        && style.grid_item.column_end == CssGridLine::Auto
+        && style.grid_item.row_start == CssGridLine::Auto
+        && style.grid_item.row_end == CssGridLine::Auto
+}
+
 fn css_to_taffy_style(style: Option<&ComputedStyle>) -> Style {
     let Some(style) = style else {
         // Return a block style that fills available space.
@@ -1253,5 +1350,83 @@ mod tests {
         assert!(tl.taffy_nodes[code_idx].is_none());
         assert!(tl.taffy_nodes[text_idx].is_none());
         assert_eq!(node_rects[code_idx], node_rects[text_idx]);
+    }
+
+    #[test]
+    fn simple_equal_fr_grid_uses_flex_lowering() {
+        let mut dom = Dom::new();
+        let root = dom.create_document();
+        let grid = dom.create_element("div");
+        let first = dom.create_element("article");
+        let second = dom.create_element("article");
+        dom.append_child(root, grid).unwrap();
+        dom.append_child(grid, first).unwrap();
+        dom.append_child(grid, second).unwrap();
+
+        let table = LayoutNeighborTable::build(&dom, root);
+        let mut styles: Vec<Option<ComputedStyle>> = vec![
+            Some(ComputedStyle {
+                display: CssDisplay::Block,
+                ..Default::default()
+            });
+            table.len()
+        ];
+        let grid_idx = table.node_to_bfs_idx[&grid] as usize;
+        let first_idx = table.node_to_bfs_idx[&first] as usize;
+        styles[grid_idx] = Some(ComputedStyle {
+            display: CssDisplay::Grid,
+            grid_container: silksurf_css::GridContainerStyle {
+                template_columns: vec![CssGridTrackSize::Fr(1.0), CssGridTrackSize::Fr(1.0)],
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+
+        let grid_style = css_to_taffy_style_for_index(&table, &styles, grid_idx);
+        let child_style = css_to_taffy_style_for_index(&table, &styles, first_idx);
+
+        assert_eq!(grid_style.display, TaffyDisplay::Flex);
+        assert_eq!(grid_style.flex_wrap, FlexWrap::Wrap);
+        assert_eq!(child_style.flex_basis, Dimension::percent(0.5));
+    }
+
+    #[test]
+    fn explicit_grid_child_placement_keeps_grid_solver() {
+        let mut dom = Dom::new();
+        let root = dom.create_document();
+        let grid = dom.create_element("div");
+        let child = dom.create_element("article");
+        dom.append_child(root, grid).unwrap();
+        dom.append_child(grid, child).unwrap();
+
+        let table = LayoutNeighborTable::build(&dom, root);
+        let mut styles: Vec<Option<ComputedStyle>> = vec![
+            Some(ComputedStyle {
+                display: CssDisplay::Block,
+                ..Default::default()
+            });
+            table.len()
+        ];
+        let grid_idx = table.node_to_bfs_idx[&grid] as usize;
+        let child_idx = table.node_to_bfs_idx[&child] as usize;
+        styles[grid_idx] = Some(ComputedStyle {
+            display: CssDisplay::Grid,
+            grid_container: silksurf_css::GridContainerStyle {
+                template_columns: vec![CssGridTrackSize::Fr(1.0), CssGridTrackSize::Fr(1.0)],
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        styles[child_idx] = Some(ComputedStyle {
+            grid_item: silksurf_css::GridItemStyle {
+                column_start: CssGridLine::Line(1),
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+
+        let grid_style = css_to_taffy_style_for_index(&table, &styles, grid_idx);
+
+        assert_eq!(grid_style.display, TaffyDisplay::Grid);
     }
 }
