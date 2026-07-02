@@ -640,6 +640,7 @@ fn run_winit_browser_page(
     let wake_state = Rc::clone(&browser_state);
     let wake_navigation_rx = Rc::clone(&navigation_rx);
     let wake_scroll = Rc::clone(&scroll_y);
+    let wake_last_height = Rc::clone(&last_render_height);
 
     window.run_with_input_wake_and_render_actions(
         move |width, height, buffer_age, pixels| {
@@ -704,7 +705,14 @@ fn run_winit_browser_page(
                 },
             )
         },
-        move || handle_browser_wake(&wake_state, &wake_navigation_rx, &wake_scroll),
+        move || {
+            handle_browser_wake(
+                &wake_state,
+                &wake_navigation_rx,
+                &wake_scroll,
+                wake_last_height.get(),
+            )
+        },
     );
 }
 
@@ -1212,6 +1220,14 @@ fn build_browser_page_with_buffers(
     payload: BrowserPagePayload,
     buffers: BrowserFrameBuffers,
 ) -> Result<BrowserPage, BrowserPageBuildError> {
+    build_browser_page_with_buffers_for_height(payload, buffers, None)
+}
+
+fn build_browser_page_with_buffers_for_height(
+    payload: BrowserPagePayload,
+    buffers: BrowserFrameBuffers,
+    live_window_height: Option<u32>,
+) -> Result<BrowserPage, BrowserPageBuildError> {
     let trace_build = std::env::var_os("SILKSURF_TRACE_APP_FRAME").is_some()
         || std::env::var_os("SILKSURF_TRACE_NAV_BUILD").is_some();
     let build_start = std::time::Instant::now();
@@ -1375,7 +1391,7 @@ fn build_browser_page_with_buffers(
     let phase_start = std::time::Instant::now();
     let document_height = browser_frame_height(&display_list.items, BROWSER_CHROME_HEIGHT as u32);
     display_list = tile_browser_document_display_list(display_list, document_height);
-    let bitmap_height = initial_browser_window_height(document_height);
+    let bitmap_height = browser_page_bitmap_height(document_height, live_window_height);
     trace_navigation_build_phase(trace_build, &payload.url, "tiles", phase_start.elapsed());
     let BrowserFrameBuffers { mut rgba, mut argb } = buffers;
     let phase_start = std::time::Instant::now();
@@ -1437,6 +1453,13 @@ fn build_browser_page_with_buffers(
             damage_scratch: silksurf_render::DamageScratch::default(),
         },
     })
+}
+
+fn browser_page_bitmap_height(document_height: u32, live_window_height: Option<u32>) -> u32 {
+    live_window_height.map_or_else(
+        || initial_browser_window_height(document_height),
+        |height| height.max(BROWSER_CHROME_HEIGHT as u32),
+    )
 }
 
 fn trace_navigation_build_phase(
@@ -2938,6 +2961,7 @@ fn handle_browser_wake(
     state_ref: &Rc<RefCell<BrowserState>>,
     navigation_rx: &Rc<RefCell<Option<mpsc::Receiver<NavigationMessage>>>>,
     scroll: &Cell<f32>,
+    live_window_height: u32,
 ) -> bool {
     let result = navigation_rx
         .borrow_mut()
@@ -2946,7 +2970,7 @@ fn handle_browser_wake(
     let mut state = state_ref.borrow_mut();
     if let Some(result) = result {
         *navigation_rx.borrow_mut() = None;
-        return apply_navigation_result(&mut state, result, scroll);
+        return apply_navigation_result(&mut state, result, scroll, live_window_height);
     }
     tick_browser_runtime(&mut state)
 }
@@ -2955,6 +2979,7 @@ fn apply_navigation_result(
     state: &mut BrowserState,
     result: NavigationMessage,
     scroll: &Cell<f32>,
+    live_window_height: u32,
 ) -> bool {
     let (generation, result) = result;
     if generation != state.navigation_generation {
@@ -2962,7 +2987,7 @@ fn apply_navigation_result(
     }
     state.navigation_pending = false;
     match result {
-        Ok(payload) => apply_navigation_payload(state, payload, scroll),
+        Ok(payload) => apply_navigation_payload(state, payload, scroll, live_window_height),
         Err(message) => {
             eprintln!("[SilkSurf] Navigation error: {message}");
             mark_navigation_error(state);
@@ -2975,10 +3000,12 @@ fn apply_navigation_payload(
     state: &mut BrowserState,
     payload: BrowserPagePayload,
     scroll: &Cell<f32>,
+    live_window_height: u32,
 ) -> bool {
     let render_config = payload.render_config.clone();
     let buffers = take_browser_frame_buffers(state);
-    match build_browser_page_with_buffers(payload, buffers) {
+    let live_window_height = (live_window_height > 0).then_some(live_window_height);
+    match build_browser_page_with_buffers_for_height(payload, buffers, live_window_height) {
         Ok(page) => {
             eprintln!("[SilkSurf] Navigation complete: {}", page.frame.url);
             let modulepreload_urls = runtime_module_warm_urls(&page.runtime, &page.frame.url);
@@ -8814,6 +8841,29 @@ mod tests {
     }
 
     #[test]
+    fn navigation_page_build_uses_live_window_height() {
+        let payload = BrowserPagePayload {
+            url: "https://example.com/results/".to_string(),
+            html: "<!doctype html><html><body><p>Result</p></body></html>".to_string(),
+            css_text: stylesheet_text_with_user_agent_defaults(""),
+            script_texts: Vec::new(),
+            module_texts: Vec::new(),
+            images: Vec::new(),
+            render_config: BrowserRenderConfig::default(),
+        };
+
+        let page = build_browser_page_with_buffers_for_height(
+            payload,
+            BrowserFrameBuffers::default(),
+            Some(FRAME_HEIGHT),
+        )
+        .expect("payload builds page");
+
+        assert_eq!(page.frame.bitmap_height, FRAME_HEIGHT);
+        assert_eq!(page.frame.argb.len(), (FRAME_WIDTH * FRAME_HEIGHT) as usize);
+    }
+
+    #[test]
     fn focused_input_typing_updates_value_with_damage_redraw() {
         let payload = BrowserPagePayload {
             url: "https://example.com/".to_string(),
@@ -9969,7 +10019,11 @@ mod tests {
 
         draw_browser_status(&mut pixels, 1100, 44, "loading");
 
-        assert_eq!(pixels[8 * 1100 + 1000], argb(243, 244, 246, 255));
+        let rect = browser_status_text_band_rect(1100, 44).expect("status rect exists");
+        assert_eq!(
+            pixels[rect.y as usize * 1100 + (rect.x + rect.width - 1) as usize],
+            argb(243, 244, 246, 255)
+        );
         assert!(
             pixels.iter().any(|pixel| *pixel == argb(75, 85, 99, 255)),
             "status glyph should write foreground pixels"
