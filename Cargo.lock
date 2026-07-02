@@ -3883,6 +3883,7 @@ dependencies = [
  "serde",
  "silksurf-core",
  "silksurf-dom",
+ "silksurf-html",
  "smallvec",
  "smol_str 0.3.6",
 ]
