@@ -6,7 +6,7 @@
 
 ## Last refresh
 
-  * Date: 2026-07-01 (synthetic WPT runner covers HTML, CSS cascade,
+  * Date: 2026-07-02 (synthetic WPT runner covers HTML, CSS cascade,
     layout rects, and paint-list invariants. test262 and h2spec rows remain
     at their prior baselines.)
   * Baseline date: 2026-07-01
@@ -19,7 +19,7 @@
 | **test262** (lexer-only) | scaffolded | 157 of ~53 040 vendored .js files (numeric-literals subset) | 104 / 157 = 66.24 % at lexer level (2026-05-14 baseline). See `test262-scorecard.json` |
 | **TLS loader sanity** (silksurf-tls) | functional | 4 unit tests covering empty PEM, malformed PEM, default-host loader, root-store diagnostics | 4 / 4 pass |
 | **HTTP/2 (h2spec)** | scaffolded | `scripts/run_h2spec.sh` driver + JSON scorecard schema; in-tree h2 server still pending | 0 / 0 (stub -- needs in-tree server or operator-supplied `SILKSURF_H2_HOST`). See `crates/silksurf-engine/conformance/h2spec-scorecard.json` |
-| **HTML / CSS / Layout / Paint WPT (synthetic)** | functional | 62 in-tree fixtures exercising HTML structure, CSS selectors and properties, inline style cascade, Taffy layout rects, and fused paint-list suppression | 62 / 0 / 0 (pass / fail / skip), 100.00 % @ 2026-07-01 baseline. See `crates/silksurf-engine/conformance/wpt-scorecard.json` |
+| **HTML / CSS / Layout / Paint WPT (synthetic)** | functional | 63 in-tree fixtures exercising HTML structure, CSS selectors and properties, inline style cascade, Taffy layout rects, and fused paint-list suppression | 63 / 0 / 0 (pass / fail / skip), 100.00 % @ 2026-07-02 refresh. See `crates/silksurf-engine/conformance/wpt-scorecard.json` |
 | **TLS 1.3 RFC 8446 vectors** | DELEGATED | rustls owns protocol-level conformance; silksurf-tls only owns the loader / config / extra-CA surface | NOT YET MEASURED in-tree; relies on upstream rustls test suite. A first-party vector harness is queued (P5.S4 follow-on) |
 | **OCSP stapling (RFC 6066)** | DEFERRED | not yet enforced in silksurf-net | NOT YET MEASURED (P5.S4) |
 | **HSTS (RFC 6797)** | DEFERRED | not yet enforced in silksurf-net | NOT YET MEASURED (P5.S4) |
@@ -39,14 +39,14 @@
 
 ### HTML / CSS / Layout / Paint WPT (synthetic)
 
-  * 62 pass / 0 fail / 0 skip = 100.00 % across 62 in-tree fixtures.
+  * 63 pass / 0 fail / 0 skip = 100.00 % across 63 in-tree fixtures.
   * Reproducer:
     ```sh
     cargo run -p silksurf-engine --bin wpt_runner -- --verbose
     ```
   * Source: `crates/silksurf-engine/conformance/wpt-scorecard.json`.
   * Fixture set: `crates/silksurf-engine/conformance/wpt/fixtures/`
-    (62 self-contained HTML files; each has a registered check inside
+    (63 self-contained HTML files; each has a registered check inside
     `wpt_runner.rs`).
   * Scope: synthetic WPT-style checks over the in-tree engine. The runner
     validates produced DOM, CSS selector/property behavior, inline style
