@@ -363,6 +363,21 @@ struct BrowserInputRuntime<'a> {
     image_cache: &'a Arc<Mutex<ImageResourceCache>>,
 }
 
+#[derive(Clone, Copy)]
+struct FocusedInputTextPaint {
+    rect: Rect,
+    font_size: f32,
+    color: silksurf_css::Color,
+}
+
+#[derive(Clone, Copy)]
+struct PixelRect {
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+}
+
 struct AppOptions {
     speculative: bool,
     window_mode: bool,
@@ -2234,27 +2249,44 @@ fn repaint_focused_input_value(
         .dom
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let text_item = runtime.display_list.items.iter_mut().find(|item| {
+    let Some(text_index) = runtime.display_list.items.iter().position(|item| {
         display_text_item_matches_input_node(&dom, item, node)
             || display_text_item_intersects_rect(item, control_damage)
-    })?;
+    }) else {
+        return None;
+    };
     drop(dom);
+    let text_item = &runtime.display_list.items[text_index];
     let damage = focused_input_text_damage_rect(text_item, value).unwrap_or(control_damage);
     trace_focused_input_damage(node, damage);
-    if let silksurf_render::DisplayItem::Text { text, text_len, .. } = text_item {
-        text.clear();
-        text.push_str(value);
-        *text_len = value.len() as u32;
+    let text_paint =
+        update_focused_input_text_item(&mut runtime.display_list.items[text_index], value)?;
+    if paint_focused_input_damage_argb(
+        &runtime.display_list.items,
+        text_index,
+        frame,
+        damage,
+        text_paint,
+        value,
+    ) {
+        return Some(BrowserRedrawMode::Damage(damage));
     }
-    rasterize_browser_document_damage_into(
+    rasterize_browser_document_damage_scratch(
         &runtime.display_list,
         frame.bitmap_scroll_y,
         frame.bitmap_height,
         damage,
-        &mut runtime.rgba,
         &mut runtime.damage_scratch,
     );
     if !sync_argb_damage_from_scratch(&runtime.damage_scratch, &mut frame.argb, FRAME_WIDTH) {
+        rasterize_browser_document_damage_into(
+            &runtime.display_list,
+            frame.bitmap_scroll_y,
+            frame.bitmap_height,
+            damage,
+            &mut runtime.rgba,
+            &mut runtime.damage_scratch,
+        );
         sync_argb_damage_from_rgba(
             &runtime.rgba,
             &mut frame.argb,
@@ -2264,6 +2296,128 @@ fn repaint_focused_input_value(
         );
     }
     Some(BrowserRedrawMode::Damage(damage))
+}
+
+fn update_focused_input_text_item(
+    item: &mut silksurf_render::DisplayItem,
+    value: &str,
+) -> Option<FocusedInputTextPaint> {
+    let silksurf_render::DisplayItem::Text {
+        rect,
+        text,
+        text_len,
+        font_size,
+        color,
+        ..
+    } = item
+    else {
+        return None;
+    };
+    text.clear();
+    text.push_str(value);
+    *text_len = value.len() as u32;
+    Some(FocusedInputTextPaint {
+        rect: *rect,
+        font_size: *font_size,
+        color: *color,
+    })
+}
+
+fn paint_focused_input_damage_argb(
+    items: &[silksurf_render::DisplayItem],
+    text_index: usize,
+    frame: &mut BrowserFrame,
+    damage: Rect,
+    text_paint: FocusedInputTextPaint,
+    value: &str,
+) -> bool {
+    if text_paint.color.a != 255 || !page_bitmap_text_supported(value, text_paint.font_size) {
+        return false;
+    }
+    let viewport_damage = viewport_damage_rect(damage, frame.bitmap_scroll_y);
+    let Some(pixel_rect) = pixel_rect_from_rect(viewport_damage, FRAME_WIDTH, frame.bitmap_height)
+    else {
+        return false;
+    };
+    let Some(background) = focused_input_damage_background_argb(items, text_index, damage) else {
+        return false;
+    };
+    let required = FRAME_WIDTH as usize * frame.bitmap_height as usize;
+    if frame.argb.len() < required {
+        return false;
+    }
+    fill_argb_rect(
+        &mut frame.argb,
+        FRAME_WIDTH,
+        frame.bitmap_height,
+        pixel_rect.x,
+        pixel_rect.y,
+        pixel_rect.width,
+        pixel_rect.height,
+        background,
+    );
+    draw_page_bitmap_text_clipped(
+        &mut frame.argb,
+        FRAME_WIDTH,
+        frame.bitmap_height,
+        text_paint.rect.x,
+        text_paint.rect.y - frame.bitmap_scroll_y as f32,
+        value,
+        text_paint.font_size,
+        css_color_to_argb(text_paint.color),
+        pixel_rect,
+    )
+}
+
+fn page_bitmap_text_supported(text: &str, font_size: f32) -> bool {
+    font_size.is_finite()
+        && font_size > 0.0
+        && text.chars().all(|ch| match ch {
+            '\n' | '\r' | '\t' | ' ' => true,
+            _ => ch.is_ascii() && chrome_glyph_byte(ch as u8).is_some(),
+        })
+}
+
+fn focused_input_damage_background_argb(
+    items: &[silksurf_render::DisplayItem],
+    text_index: usize,
+    damage: Rect,
+) -> Option<u32> {
+    for item in items.iter().take(text_index).rev() {
+        if !display_item_intersects_viewport(item, damage) {
+            continue;
+        }
+        match item {
+            silksurf_render::DisplayItem::SolidColor { color, .. }
+            | silksurf_render::DisplayItem::RoundedRect { color, .. } => {
+                if color.a != 255 {
+                    return None;
+                }
+                return Some(css_color_to_argb(*color));
+            }
+            silksurf_render::DisplayItem::LinearGradient { .. }
+            | silksurf_render::DisplayItem::Image { .. } => return None,
+            silksurf_render::DisplayItem::Text { .. }
+            | silksurf_render::DisplayItem::BoxShadow { .. } => {}
+        }
+    }
+    Some(argb(255, 255, 255, 255))
+}
+
+fn pixel_rect_from_rect(rect: Rect, width: u32, height: u32) -> Option<PixelRect> {
+    if width == 0 || height == 0 || rect.width <= 0.0 || rect.height <= 0.0 {
+        return None;
+    }
+    let x0 = rect.x.floor().max(0.0).min(width as f32) as u32;
+    let y0 = rect.y.floor().max(0.0).min(height as f32) as u32;
+    let x1 = (rect.x + rect.width).ceil().max(0.0).min(width as f32) as u32;
+    let y1 = (rect.y + rect.height).ceil().max(0.0).min(height as f32) as u32;
+    (x1 > x0 && y1 > y0).then_some(PixelRect {
+        x: x0,
+        y: y0,
+        width: x1 - x0,
+        height: y1 - y0,
+    })
 }
 
 fn trace_focused_input_damage(node: silksurf_dom::NodeId, damage: Rect) {
@@ -5891,6 +6045,24 @@ fn rasterize_browser_document_damage_into(
     );
 }
 
+fn rasterize_browser_document_damage_scratch(
+    display_list: &silksurf_render::DisplayList,
+    scroll_y: u32,
+    bitmap_height: u32,
+    damage: Rect,
+    scratch: &mut silksurf_render::DamageScratch,
+) {
+    silksurf_render::rasterize_skia_translated_damage_scratch(
+        display_list,
+        FRAME_WIDTH,
+        bitmap_height,
+        viewport_damage_rect(damage, scroll_y),
+        damage,
+        (0.0, -(scroll_y as f32)),
+        scratch,
+    );
+}
+
 fn trace_visible_document_raster(display_list: &silksurf_render::DisplayList, damage: Rect) {
     if std::env::var_os("SILKSURF_TRACE_APP_FRAME").is_none() {
         return;
@@ -7444,8 +7616,110 @@ fn draw_bitmap_byte(
     }
 }
 
+fn draw_page_bitmap_text_clipped(
+    pixels: &mut [u32],
+    width: u32,
+    height: u32,
+    x: f32,
+    y: f32,
+    text: &str,
+    font_size: f32,
+    color: u32,
+    clip: PixelRect,
+) -> bool {
+    let Some((scale, advance, line_height, space_advance)) = page_bitmap_text_metrics(font_size)
+    else {
+        return false;
+    };
+    let mut cursor_x = x.round() as i32;
+    let mut cursor_y = y.round() as i32;
+    let line_origin_x = cursor_x;
+    for ch in text.chars() {
+        match ch {
+            '\n' => {
+                cursor_x = line_origin_x;
+                cursor_y = cursor_y.saturating_add(line_height);
+            }
+            '\r' => {}
+            '\t' => {
+                cursor_x = cursor_x.saturating_add(space_advance.saturating_mul(4));
+            }
+            ' ' => {
+                cursor_x = cursor_x.saturating_add(space_advance);
+            }
+            _ => {
+                if !ch.is_ascii() {
+                    return false;
+                }
+                let Some(glyph) = chrome_glyph_byte(ch as u8) else {
+                    return false;
+                };
+                draw_page_bitmap_glyph_clipped(
+                    pixels, width, height, cursor_x, cursor_y, scale, glyph, color, clip,
+                );
+                cursor_x = cursor_x.saturating_add(advance);
+            }
+        }
+    }
+    true
+}
+
+fn page_bitmap_text_metrics(font_size: f32) -> Option<(i32, i32, i32, i32)> {
+    if !font_size.is_finite() || font_size <= 0.0 {
+        return None;
+    }
+    Some((
+        ((font_size / 12.0).round() as i32).max(1),
+        (font_size * 0.55).round().max(6.0) as i32,
+        (font_size * 1.2).round().max(8.0) as i32,
+        (font_size * 0.33).round().max(3.0) as i32,
+    ))
+}
+
+fn draw_page_bitmap_glyph_clipped(
+    pixels: &mut [u32],
+    width: u32,
+    height: u32,
+    x: i32,
+    y: i32,
+    scale: i32,
+    glyph: [u8; 7],
+    color: u32,
+    clip: PixelRect,
+) {
+    let clip_x1 = clip.x.saturating_add(clip.width);
+    let clip_y1 = clip.y.saturating_add(clip.height);
+    for (row, bits) in glyph.iter().enumerate() {
+        for col in 0..5 {
+            if (bits >> (4 - col)) & 1 == 0 {
+                continue;
+            }
+            for dy in 0..scale {
+                for dx in 0..scale {
+                    let pixel_x = x + col * scale + dx;
+                    let pixel_y = y + row as i32 * scale + dy;
+                    if pixel_x < clip.x as i32
+                        || pixel_y < clip.y as i32
+                        || pixel_x >= clip_x1 as i32
+                        || pixel_y >= clip_y1 as i32
+                    {
+                        continue;
+                    }
+                    put_argb_pixel(pixels, width, height, pixel_x as u32, pixel_y as u32, color);
+                }
+            }
+        }
+    }
+}
+
 const CHROME_GLYPHS: &[(u8, [u8; 7])] = &[
     (b' ', [0, 0, 0, 0, 0, 0, 0]),
+    (
+        b'!',
+        [
+            0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00000, 0b00100,
+        ],
+    ),
     (
         b'#',
         [
@@ -7594,6 +7868,12 @@ const CHROME_GLYPHS: &[(u8, [u8; 7])] = &[
         b'e',
         [
             0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b11111,
+        ],
+    ),
+    (
+        b'f',
+        [
+            0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b10000,
         ],
     ),
     (
@@ -7769,6 +8049,10 @@ fn put_argb_pixel(pixels: &mut [u32], width: u32, height: u32, x: u32, y: u32, c
 
 fn argb(r: u8, g: u8, b: u8, a: u8) -> u32 {
     (u32::from(a) << 24) | (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b)
+}
+
+fn css_color_to_argb(color: silksurf_css::Color) -> u32 {
+    argb(color.r, color.g, color.b, color.a)
 }
 
 #[cfg(test)]

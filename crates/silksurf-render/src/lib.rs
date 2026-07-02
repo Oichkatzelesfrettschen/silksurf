@@ -1021,12 +1021,74 @@ pub fn rasterize_skia_translated_damage_into(
 ) {
     let trace_damage = std::env::var_os("SILKSURF_TRACE_RENDER_DAMAGE").is_some();
     let total_start = std::time::Instant::now();
-    scratch.last_damage = None;
+    rasterize_skia_translated_damage_scratch_impl(
+        display_list,
+        width,
+        height,
+        buffer_damage,
+        item_damage,
+        paint_offset,
+        scratch,
+        trace_damage,
+    );
+    let Some(damage_pixels) = scratch.last_damage else {
+        return;
+    };
     let required = (width * height * 4) as usize;
     if buf.len() != required {
         buf.resize(required, 0xffu8);
     }
+    let copy_start = std::time::Instant::now();
+    copy_damage_scratch_to_buffer(buf, width, damage_pixels, &scratch.pixels);
+    trace_damage_phase(trace_damage, "translated-copy", copy_start.elapsed());
+    if trace_damage {
+        eprintln!(
+            "[SilkSurf] render damage: translated-total {:?}, damage={}x{} at ({}, {})",
+            total_start.elapsed(),
+            damage_pixels.width,
+            damage_pixels.height,
+            damage_pixels.x,
+            damage_pixels.y
+        );
+    }
+}
 
+/// Rasterize translated display-list damage into reusable scratch pixels.
+#[allow(clippy::too_many_arguments)]
+pub fn rasterize_skia_translated_damage_scratch(
+    display_list: &DisplayList,
+    width: u32,
+    height: u32,
+    buffer_damage: Rect,
+    item_damage: Rect,
+    paint_offset: (f32, f32),
+    scratch: &mut DamageScratch,
+) {
+    rasterize_skia_translated_damage_scratch_impl(
+        display_list,
+        width,
+        height,
+        buffer_damage,
+        item_damage,
+        paint_offset,
+        scratch,
+        std::env::var_os("SILKSURF_TRACE_RENDER_DAMAGE").is_some(),
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn rasterize_skia_translated_damage_scratch_impl(
+    display_list: &DisplayList,
+    width: u32,
+    height: u32,
+    buffer_damage: Rect,
+    item_damage: Rect,
+    paint_offset: (f32, f32),
+    scratch: &mut DamageScratch,
+    trace_damage: bool,
+) {
+    let total_start = std::time::Instant::now();
+    scratch.last_damage = None;
     let setup_start = std::time::Instant::now();
     let Some(damage_pixels) = damage_pixel_rect(buffer_damage, width, height) else {
         return;
@@ -1077,13 +1139,10 @@ pub fn rasterize_skia_translated_damage_into(
     }
     trace_damage_phase(trace_damage, "translated-paint", paint_start.elapsed());
 
-    let copy_start = std::time::Instant::now();
-    copy_damage_scratch_to_buffer(buf, width, damage_pixels, &scratch.pixels);
-    trace_damage_phase(trace_damage, "translated-copy", copy_start.elapsed());
     scratch.last_damage = Some(damage_pixels);
     if trace_damage {
         eprintln!(
-            "[SilkSurf] render damage: translated-total {:?}, damage={}x{} at ({}, {}), candidates={}, painted={painted_items}",
+            "[SilkSurf] render damage: translated-scratch {:?}, damage={}x{} at ({}, {}), candidates={}, painted={painted_items}",
             total_start.elapsed(),
             damage_pixels.width,
             damage_pixels.height,
