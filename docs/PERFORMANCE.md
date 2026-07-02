@@ -142,6 +142,18 @@ draw, and 4.00us total CPU work. `/home/eirikr/.local/bin/lizard -l rust -C 16
 crates/silksurf-app/src/main.rs crates/silksurf-gui/src/winit_backend.rs`
 reports zero threshold warnings for touched Rust functions.
 
+The ChatGPT page-input probe on 2026-07-02 exercises a real cached
+`https://chatgpt.com` payload with Wayland SHM. The retained presenter now
+marks a buffer as ready only after `write_released_retained_buffer` accepts the
+pixels, and the prebuilt focus viewport cache follows the same text-editable
+input order as Tab focus. This keeps the first page-focus frame on a retained
+buffer instead of re-rasterizing the viewport. The strict run
+`scripts/gui_probe.sh --release --backend auto --presenter auto --probe
+page-input --timeout-seconds 120 --max-total-ns 10000 --max-focus-total-ns
+20000 https://chatgpt.com` reports focus render 0ns, focus buffer 4.100us,
+focus total 4.420us, final typed-input render 780ns, final buffer 3.630us, and
+final total 4.580us.
+
 ## Address Input First Principles
 
 Address input latency decomposes into:

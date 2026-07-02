@@ -628,6 +628,7 @@ fn run_winit_browser_page(
     let action_last_width = Rc::clone(&last_render_width);
     let action_last_height = Rc::clone(&last_render_height);
     let retained_update_state = Rc::clone(&browser_state);
+    let retained_prepared_state = Rc::clone(&browser_state);
     let presented_state = Rc::clone(&browser_state);
     let presented_last_width = Rc::clone(&last_render_width);
     let presented_last_height = Rc::clone(&last_render_height);
@@ -678,6 +679,7 @@ fn run_winit_browser_page(
             )
         },
         move |width, height| browser_retained_buffer_update(&retained_update_state, width, height),
+        move |tag| handle_browser_retained_buffer_prepared(&retained_prepared_state, tag),
         move |frame| {
             handle_browser_presented_frame(
                 &presented_state,
@@ -1361,6 +1363,7 @@ fn build_browser_page_with_buffers(
     );
     let link_targets = collect_link_targets(&dom_guard, &display_list.items, &payload.url);
     let input_targets = collect_input_targets(&dom_guard, &fused);
+    let focus_target = first_prepared_focus_target(&dom_guard, &input_targets);
     drop(dom_guard);
     trace_navigation_build_phase(
         trace_build,
@@ -1388,7 +1391,7 @@ fn build_browser_page_with_buffers(
     let phase_start = std::time::Instant::now();
     let focus_viewport_cache = build_focus_viewport_cache(
         &display_list,
-        &input_targets,
+        focus_target.as_ref(),
         document_height,
         bitmap_height,
         BROWSER_CHROME_HEIGHT as u32,
@@ -2716,7 +2719,6 @@ fn take_focus_retained_buffer_update(
         return None;
     }
     let pixels = cache.argb.clone();
-    state.frame.focus_viewport_retained_sent = true;
     Some(silksurf_gui::WinitRetainedBufferUpdate {
         tag: FOCUS_VIEWPORT_RETAINED_TAG,
         width: window_width,
@@ -2740,7 +2742,6 @@ fn take_current_view_retained_buffer_update(
     if state.frame.argb.len() < pixel_count {
         return None;
     }
-    state.frame.current_view_retained_sent = true;
     Some(silksurf_gui::WinitRetainedBufferUpdate {
         tag: CURRENT_VIEW_RETAINED_TAG,
         width: window_width,
@@ -2766,7 +2767,6 @@ fn take_navigation_start_retained_buffer_update(
     }
     let mut pixels = state.frame.argb[..pixel_count].to_vec();
     draw_navigation_start_retained_chrome(&mut pixels, window_width, window_height);
-    state.frame.navigation_start_retained_sent = true;
     Some(silksurf_gui::WinitRetainedBufferUpdate {
         tag: NAVIGATION_START_RETAINED_TAG,
         width: window_width,
@@ -2835,7 +2835,6 @@ fn take_scroll_retained_buffer_update(
                 && cache.argb.len() >= pixel_count
         })?;
     let cache = &mut state.frame.scroll_viewport_caches[cache_index];
-    cache.retained_sent = true;
     Some(silksurf_gui::WinitRetainedBufferUpdate {
         tag: cache.tag,
         width: window_width,
@@ -2875,6 +2874,33 @@ fn scroll_retained_tag_for_scroll_y(scroll_y: u32) -> silksurf_gui::WinitRetaine
     silksurf_gui::WinitRetainedBufferTag::new(
         SCROLL_VIEWPORT_RETAINED_TAG_BASE + u64::from(scroll_y),
     )
+}
+
+fn handle_browser_retained_buffer_prepared(
+    state: &Rc<RefCell<BrowserState>>,
+    tag: silksurf_gui::WinitRetainedBufferTag,
+) {
+    let mut state = state.borrow_mut();
+    if tag == FOCUS_VIEWPORT_RETAINED_TAG {
+        state.frame.focus_viewport_retained_sent = true;
+        return;
+    }
+    if tag == CURRENT_VIEW_RETAINED_TAG {
+        state.frame.current_view_retained_sent = true;
+        return;
+    }
+    if tag == NAVIGATION_START_RETAINED_TAG {
+        state.frame.navigation_start_retained_sent = true;
+        return;
+    }
+    if let Some(cache) = state
+        .frame
+        .scroll_viewport_caches
+        .iter_mut()
+        .find(|cache| cache.tag == tag)
+    {
+        cache.retained_sent = true;
+    }
 }
 
 fn surface_pixel_count(width: u32, height: u32) -> Option<usize> {
@@ -5700,15 +5726,26 @@ fn rasterize_browser_viewport_into(
     fill_browser_toolbar_background_rgba(rgba, FRAME_WIDTH, bitmap_height);
 }
 
+fn first_prepared_focus_target(
+    dom: &silksurf_dom::Dom,
+    input_targets: &[InputTarget],
+) -> Option<InputTarget> {
+    input_targets
+        .iter()
+        .find(|target| is_text_editable_input_node(dom, target.node))
+        .or_else(|| input_targets.first())
+        .cloned()
+}
+
 fn build_focus_viewport_cache(
     display_list: &silksurf_render::DisplayList,
-    input_targets: &[InputTarget],
+    focus_target: Option<&InputTarget>,
     document_height: u32,
     bitmap_height: u32,
     chrome_height: u32,
 ) -> Option<FocusViewportCache> {
-    let target_scroll =
-        first_focus_target_scroll(input_targets, document_height, bitmap_height, chrome_height)?;
+    let target = focus_target?;
+    let target_scroll = focus_target_scroll(target, document_height, bitmap_height, chrome_height)?;
     let mut rgba = Vec::new();
     let mut argb = Vec::new();
     rasterize_browser_viewport_into(display_list, target_scroll, bitmap_height, &mut rgba);
@@ -5720,6 +5757,7 @@ fn build_focus_viewport_cache(
     })
 }
 
+#[cfg(test)]
 fn first_focus_target_scroll(
     input_targets: &[InputTarget],
     document_height: u32,
@@ -5727,6 +5765,15 @@ fn first_focus_target_scroll(
     chrome_height: u32,
 ) -> Option<u32> {
     let target = input_targets.first()?;
+    focus_target_scroll(target, document_height, bitmap_height, chrome_height)
+}
+
+fn focus_target_scroll(
+    target: &InputTarget,
+    document_height: u32,
+    bitmap_height: u32,
+    chrome_height: u32,
+) -> Option<u32> {
     let max_scroll = max_browser_scroll_offset(document_height, bitmap_height, chrome_height);
     let scroll =
         scroll_to_show_input_target(0.0, target.rect, max_scroll, chrome_height, bitmap_height);
@@ -9318,6 +9365,35 @@ mod tests {
     }
 
     #[test]
+    fn prepared_focus_target_matches_text_editable_focus_order() {
+        let payload = BrowserPagePayload {
+            url: "https://example.com/".to_string(),
+            html:
+                "<!doctype html><html><body><input type=\"checkbox\"><input id=\"q\"></body></html>"
+                    .to_string(),
+            css_text: stylesheet_text_with_user_agent_defaults(""),
+            script_texts: Vec::new(),
+            module_texts: Vec::new(),
+            images: Vec::new(),
+            render_config: BrowserRenderConfig::default(),
+        };
+        let page = build_browser_page(payload).expect("payload builds page");
+        let checkbox_node = page.frame.input_targets[0].node;
+        let text_node = page.frame.input_targets[1].node;
+        let dom = page
+            .runtime
+            .dom
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        let target =
+            first_prepared_focus_target(&dom, &page.frame.input_targets).expect("target exists");
+
+        assert_ne!(target.node, checkbox_node);
+        assert_eq!(target.node, text_node);
+    }
+
+    #[test]
     fn focus_next_visible_page_input_prefers_viewport_targets() {
         let hidden = silksurf_dom::NodeId::from_raw(10);
         let visible = silksurf_dom::NodeId::from_raw(11);
@@ -9464,6 +9540,9 @@ mod tests {
         assert_eq!(update.width, FRAME_WIDTH);
         assert_eq!(update.height, FRAME_HEIGHT);
         assert_eq!(update.pixels.len(), (FRAME_WIDTH * FRAME_HEIGHT) as usize);
+        assert!(!state.borrow().frame.focus_viewport_retained_sent);
+        handle_browser_retained_buffer_prepared(&state, update.tag);
+        assert!(state.borrow().frame.focus_viewport_retained_sent);
         assert!(browser_retained_buffer_update(&state, FRAME_WIDTH, FRAME_HEIGHT).is_none());
     }
 
@@ -9488,6 +9567,8 @@ mod tests {
             .expect("current view sends");
 
         assert_eq!(update.tag, CURRENT_VIEW_RETAINED_TAG);
+        assert!(!state.borrow().frame.current_view_retained_sent);
+        handle_browser_retained_buffer_prepared(&state, update.tag);
         assert!(state.borrow().frame.current_view_retained_sent);
 
         {
@@ -9519,6 +9600,8 @@ mod tests {
             .expect("navigation start sends");
 
         assert_eq!(update.tag, NAVIGATION_START_RETAINED_TAG);
+        assert!(!state.borrow().frame.navigation_start_retained_sent);
+        handle_browser_retained_buffer_prepared(&state, update.tag);
         assert!(state.borrow().frame.navigation_start_retained_sent);
         assert_ne!(
             update.pixels[NAV_BUTTON_Y as usize * FRAME_WIDTH as usize + RELOAD_BUTTON_X as usize],
@@ -9559,10 +9642,11 @@ mod tests {
         assert_eq!(update.width, FRAME_WIDTH);
         assert_eq!(update.height, FRAME_HEIGHT);
         assert_eq!(update.pixels.len(), (FRAME_WIDTH * FRAME_HEIGHT) as usize);
-        assert!(state.frame.scroll_viewport_caches[0].retained_sent);
-        assert!(
-            take_scroll_retained_buffer_update(&mut state, FRAME_WIDTH, FRAME_HEIGHT).is_none()
-        );
+        assert!(!state.frame.scroll_viewport_caches[0].retained_sent);
+        let state = Rc::new(RefCell::new(state));
+        handle_browser_retained_buffer_prepared(&state, update.tag);
+        assert!(state.borrow().frame.scroll_viewport_caches[0].retained_sent);
+        assert!(browser_retained_buffer_update(&state, FRAME_WIDTH, FRAME_HEIGHT).is_none());
     }
 
     #[test]

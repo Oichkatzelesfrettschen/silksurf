@@ -44,6 +44,7 @@ type RenderCallback = dyn FnMut(u32, u32, u8, &mut [u32]) -> WinitPresentDamage;
 type RenderReadyCallback = dyn FnMut(u32, u32) -> bool;
 type RenderActionCallback = dyn FnMut(u32, u32) -> WinitRenderAction;
 type RetainedUpdateCallback = dyn FnMut(u32, u32) -> Option<WinitRetainedBufferUpdate>;
+type RetainedPreparedCallback = dyn FnMut(WinitRetainedBufferTag);
 type PresentedCallback = dyn FnMut(WinitPresentedFrame);
 type InputCallback = dyn FnMut(WinitInput, u32, u32, &WinitWakeHandle) -> WinitInputResult;
 type WakeCallback = dyn FnMut() -> bool;
@@ -434,6 +435,7 @@ impl WinitWindow {
             render_ready_fn,
             |_width, _height| WinitRenderAction::Render,
             |_width, _height| None,
+            |_tag| {},
             |_frame| {},
             move |input, width, height, wake| input_fn(input, width, height, wake),
             wake_fn,
@@ -451,6 +453,7 @@ impl WinitWindow {
         render_ready_fn: impl FnMut(u32, u32) -> bool + 'static,
         render_action_fn: impl FnMut(u32, u32) -> WinitRenderAction + 'static,
         retained_update_fn: impl FnMut(u32, u32) -> Option<WinitRetainedBufferUpdate> + 'static,
+        retained_prepared_fn: impl FnMut(WinitRetainedBufferTag) + 'static,
         presented_fn: impl FnMut(WinitPresentedFrame) + 'static,
         mut input_fn: impl FnMut(WinitInput, u32, u32, &WinitWakeHandle) -> WinitInputResult + 'static,
         wake_fn: impl FnMut() -> bool + 'static,
@@ -509,6 +512,7 @@ impl WinitWindow {
             render_ready_fn: Box::new(render_ready_fn),
             render_action_fn: Box::new(render_action_fn),
             retained_update_fn: Box::new(retained_update_fn),
+            retained_prepared_fn: Box::new(retained_prepared_fn),
             presented_fn: Box::new(presented_fn),
             input_fn: Box::new(move |input, width, height, wake| {
                 input_fn(input, width, height, wake)
@@ -753,6 +757,7 @@ struct WinitApp {
     render_ready_fn: Box<RenderReadyCallback>,
     render_action_fn: Box<RenderActionCallback>,
     retained_update_fn: Box<RetainedUpdateCallback>,
+    retained_prepared_fn: Box<RetainedPreparedCallback>,
     presented_fn: Box<PresentedCallback>,
     input_fn: Box<InputCallback>,
     wake_fn: Box<WakeCallback>,
@@ -1010,6 +1015,7 @@ impl WinitApp {
             if !wrote {
                 return;
             }
+            (self.retained_prepared_fn)(update.tag);
         }
     }
 
