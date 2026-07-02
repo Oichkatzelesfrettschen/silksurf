@@ -168,6 +168,9 @@ fn build_layout_box<'a>(
     styles: &FxHashMap<NodeId, ComputedStyle>,
     node: NodeId,
 ) -> Option<&'a LayoutBox<'a>> {
+    if node_starts_non_rendered_subtree(dom, node) {
+        return None;
+    }
     let display = match dom.node(node).ok().map(silksurf_dom::Node::kind) {
         Some(NodeKind::Document) => Display::Block,
         Some(NodeKind::Text { .. }) => Display::Inline,
@@ -205,6 +208,26 @@ fn build_layout_box<'a>(
         dimensions: Cell::new(Dimensions::default()),
         children,
     }))
+}
+
+fn node_starts_non_rendered_subtree(dom: &Dom, node: NodeId) -> bool {
+    let Ok(dom_node) = dom.node(node) else {
+        return true;
+    };
+    match dom_node.kind() {
+        NodeKind::Doctype { .. } | NodeKind::Comment { .. } => true,
+        NodeKind::Element { name, .. } => matches!(
+            name,
+            TagName::Head
+                | TagName::Title
+                | TagName::Meta
+                | TagName::Link
+                | TagName::Script
+                | TagName::Style
+                | TagName::Option
+        ),
+        NodeKind::Document | NodeKind::Text { .. } => false,
+    }
 }
 impl LayoutBox<'_> {
     pub fn dimensions(&self) -> Dimensions {
