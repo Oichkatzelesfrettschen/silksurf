@@ -507,6 +507,8 @@ impl WinitWindow {
             ),
             last_present: None,
             busy_redraw_deadline: None,
+            busy_redraw_count: 0,
+            busy_redraw_started_at: None,
             redraw_pending: false,
             pending_input_latency_start: None,
             render_fn: Box::new(render_fn),
@@ -752,6 +754,8 @@ struct WinitApp {
     redraw_pace_interval: Duration,
     last_present: Option<Instant>,
     busy_redraw_deadline: Option<Instant>,
+    busy_redraw_count: u32,
+    busy_redraw_started_at: Option<Instant>,
     redraw_pending: bool,
     pending_input_latency_start: Option<Instant>,
     render_fn: Box<RenderCallback>,
@@ -1036,6 +1040,7 @@ impl WinitApp {
         self.observe_redraw_buffer_elapsed(buffer_elapsed, buffer_age);
         self.last_present = Some(Instant::now());
         self.busy_redraw_deadline = None;
+        self.trace_and_clear_busy_redraws();
         (self.presented_fn)(WinitPresentedFrame {
             width,
             height,
@@ -1046,13 +1051,37 @@ impl WinitApp {
     }
 
     fn handle_busy_surface(&mut self, event_loop: &ActiveEventLoop) {
-        let retry_deadline = Instant::now() + self.busy_redraw_retry_interval();
+        let now = Instant::now();
+        let retry_deadline = now + self.busy_redraw_retry_interval();
         self.redraw_pending = true;
         self.busy_redraw_deadline = Some(retry_deadline);
-        event_loop.set_control_flow(ControlFlow::WaitUntil(retry_deadline));
-        if self.trace_frame_timing {
-            eprintln!("[SilkSurf] frame: Wayland buffers busy until {retry_deadline:?}");
+        self.busy_redraw_count = self.busy_redraw_count.saturating_add(1);
+        if self.busy_redraw_started_at.is_none() {
+            self.busy_redraw_started_at = Some(now);
         }
+        event_loop.set_control_flow(ControlFlow::WaitUntil(retry_deadline));
+        if self.trace_frame_timing && self.busy_redraw_count == 1 {
+            eprintln!("[SilkSurf] frame: Wayland buffers busy; retry at {retry_deadline:?}");
+        }
+    }
+
+    fn trace_and_clear_busy_redraws(&mut self) {
+        let retry_count = self.busy_redraw_count;
+        if retry_count == 0 {
+            return;
+        }
+        if self.trace_frame_timing {
+            if let Some(started_at) = self.busy_redraw_started_at {
+                eprintln!(
+                    "[SilkSurf] frame: Wayland buffers released after {retry_count} retries over {:?}",
+                    started_at.elapsed()
+                );
+            } else {
+                eprintln!("[SilkSurf] frame: Wayland buffers released after {retry_count} retries");
+            }
+        }
+        self.busy_redraw_count = 0;
+        self.busy_redraw_started_at = None;
     }
 
     fn busy_redraw_retry_interval(&self) -> Duration {
