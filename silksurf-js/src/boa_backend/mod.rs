@@ -40,6 +40,7 @@ mod dom_bridge;
 
 const HOST_CALLBACKS_REGISTRY: &str = "__silksurfHostCallbacks";
 const DEFAULT_HOST_CALLBACK_BUDGET: usize = 256;
+const TRACE_HOST_CALLBACKS_ENV: &str = "SILKSURF_TRACE_HOST_CALLBACKS";
 
 type HostSchedulerRef = Rc<RefCell<HostScheduler>>;
 
@@ -50,10 +51,21 @@ enum HostCallbackQueue {
     AnimationFrame,
 }
 
+impl HostCallbackQueue {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Timeout => "timeout",
+            Self::Interval => "interval",
+            Self::AnimationFrame => "animation-frame",
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 struct ScheduledHostCallback {
     id: u32,
     repeat: bool,
+    queue: HostCallbackQueue,
 }
 
 #[derive(Default)]
@@ -105,7 +117,11 @@ impl HostScheduler {
             let Some(id) = self.timeout_callbacks.pop_front() else {
                 break;
             };
-            callbacks.push(ScheduledHostCallback { id, repeat: false });
+            callbacks.push(ScheduledHostCallback {
+                id,
+                repeat: false,
+                queue: HostCallbackQueue::Timeout,
+            });
         }
         let remaining = max_callbacks.saturating_sub(callbacks.len());
         callbacks.extend(
@@ -113,7 +129,11 @@ impl HostScheduler {
                 .iter()
                 .copied()
                 .take(remaining)
-                .map(|id| ScheduledHostCallback { id, repeat: true }),
+                .map(|id| ScheduledHostCallback {
+                    id,
+                    repeat: true,
+                    queue: HostCallbackQueue::Interval,
+                }),
         );
         callbacks
     }
@@ -121,7 +141,11 @@ impl HostScheduler {
     fn take_animation_frame_callbacks(&mut self) -> Vec<ScheduledHostCallback> {
         self.animation_frame_callbacks
             .drain(..)
-            .map(|id| ScheduledHostCallback { id, repeat: false })
+            .map(|id| ScheduledHostCallback {
+                id,
+                repeat: false,
+                queue: HostCallbackQueue::AnimationFrame,
+            })
             .collect()
     }
 
@@ -1030,22 +1054,29 @@ impl SilkContext {
     /// work per tick; rAF callbacks drain once per call.
     pub fn run_host_callbacks(&mut self, max_timer_callbacks: usize) -> Result<usize, String> {
         let budget = max_timer_callbacks.max(1);
+        let trace_callbacks = trace_host_callbacks_enabled();
         let mut ran = 0;
         let timer_callbacks = self.scheduler.borrow_mut().take_timer_callbacks(budget);
         for callback in timer_callbacks {
+            let callback_start = Instant::now();
             if self.call_registered_callback(callback, &[])? {
                 ran += 1;
             }
+            trace_host_callback(trace_callbacks, callback, callback_start.elapsed());
         }
 
         let frame_timestamp = JsValue::from(self.frame_timestamp_ms());
         let frame_callbacks = self.scheduler.borrow_mut().take_animation_frame_callbacks();
         for callback in frame_callbacks {
+            let callback_start = Instant::now();
             if self.call_registered_callback(callback, std::slice::from_ref(&frame_timestamp))? {
                 ran += 1;
             }
+            trace_host_callback(trace_callbacks, callback, callback_start.elapsed());
         }
+        let jobs_start = Instant::now();
         self.run_pending_jobs();
+        trace_host_callback_jobs(trace_callbacks, jobs_start.elapsed());
         Ok(ran)
     }
 
@@ -1246,6 +1277,32 @@ fn host_callback_registry(ctx: &mut Context) -> boa_engine::JsResult<JsObject> {
     let registry = ObjectInitializer::new(ctx).build();
     global.set(key, registry.clone(), false, ctx)?;
     Ok(registry)
+}
+
+fn trace_host_callbacks_enabled() -> bool {
+    std::env::var_os(TRACE_HOST_CALLBACKS_ENV).is_some()
+}
+
+fn trace_host_callback(
+    enabled: bool,
+    callback: ScheduledHostCallback,
+    elapsed: std::time::Duration,
+) {
+    if enabled {
+        eprintln!(
+            "[SilkSurf] Host callback {} id={} repeat={} elapsed={:?}",
+            callback.queue.label(),
+            callback.id,
+            callback.repeat,
+            elapsed
+        );
+    }
+}
+
+fn trace_host_callback_jobs(enabled: bool, elapsed: std::time::Duration) {
+    if enabled {
+        eprintln!("[SilkSurf] Host callback jobs elapsed={elapsed:?}");
+    }
 }
 
 fn install_websocket(ctx: &mut Context) {
