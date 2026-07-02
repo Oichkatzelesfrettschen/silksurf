@@ -1419,7 +1419,6 @@ fn build_browser_page_with_buffers_for_height(
     );
     let link_targets = collect_link_targets(&dom_guard, &display_list.items, &payload.url);
     let input_targets = collect_input_targets(&dom_guard, &fused);
-    let focus_target = first_prepared_focus_target(&dom_guard, &input_targets);
     drop(dom_guard);
     trace_navigation_build_phase(
         trace_build,
@@ -1462,13 +1461,6 @@ fn build_browser_page_with_buffers_for_height(
     }
     trace_navigation_build_buffer(trace_build, &payload.url, "argb", argb.len() * 4);
     let phase_start = std::time::Instant::now();
-    let focus_viewport_cache = build_focus_viewport_cache(
-        &display_list,
-        focus_target.as_ref(),
-        document_height,
-        bitmap_height,
-        BROWSER_CHROME_HEIGHT as u32,
-    );
     trace_navigation_build_phase(
         trace_build,
         &payload.url,
@@ -1489,7 +1481,7 @@ fn build_browser_page_with_buffers_for_height(
             raster_height: document_height,
             bitmap_height,
             bitmap_scroll_y: 0,
-            focus_viewport_cache,
+            focus_viewport_cache: None,
             focus_viewport_retained_sent: false,
             current_view_retained_sent: false,
             navigation_start_retained_sent: false,
@@ -4058,17 +4050,21 @@ fn focus_next_page_input_from_runtime(runtime: &BrowserInputRuntime<'_>) -> bool
         runtime.scroll.set(next_scroll);
         let bitmap_height = runtime.window_height.max(runtime.chrome_height);
         let scroll_y = next_scroll.round() as u32;
+        let focus_cache_retained = state.frame.focus_viewport_retained_sent;
+        prepare_focus_viewport_cache(&mut state, scroll_y, bitmap_height);
         if apply_focus_viewport_cache(&mut state, scroll_y, bitmap_height) {
             let redraw_mode = focus_viewport_cache_redraw_mode(scroll_y, bitmap_height);
             mark_redraw(&mut state, redraw_mode);
-            state.retained_present = focus_viewport_retained_present(
-                &state,
-                redraw_mode,
-                runtime.chrome_height,
-                scroll_y,
-                runtime.window_width,
-                runtime.window_height,
-            );
+            if focus_cache_retained {
+                state.retained_present = focus_viewport_retained_present(
+                    &state,
+                    redraw_mode,
+                    runtime.chrome_height,
+                    scroll_y,
+                    runtime.window_width,
+                    runtime.window_height,
+                );
+            }
         } else {
             mark_redraw(&mut state, BrowserRedrawMode::Scroll);
         }
@@ -4118,6 +4114,26 @@ fn apply_focus_viewport_cache(state: &mut BrowserState, scroll_y: u32, bitmap_he
     state.frame.bitmap_scroll_y = cache.scroll_y;
     state.frame.bitmap_height = cache.bitmap_height;
     true
+}
+
+fn prepare_focus_viewport_cache(state: &mut BrowserState, scroll_y: u32, bitmap_height: u32) {
+    if state
+        .frame
+        .focus_viewport_cache
+        .as_ref()
+        .is_some_and(|cache| cache.scroll_y == scroll_y && cache.bitmap_height == bitmap_height)
+    {
+        return;
+    }
+    let Some(runtime) = state.runtime.as_ref() else {
+        return;
+    };
+    state.frame.focus_viewport_cache = Some(render_focus_viewport_cache(
+        &runtime.display_list,
+        scroll_y,
+        bitmap_height,
+    ));
+    state.frame.focus_viewport_retained_sent = false;
 }
 
 fn scroll_viewport_cache_redraw_mode(scroll_y: u32, bitmap_height: u32) -> BrowserRedrawMode {
@@ -6278,6 +6294,7 @@ fn rasterize_browser_viewport_argb_preferred(
     false
 }
 
+#[cfg(test)]
 fn first_prepared_focus_target(
     dom: &silksurf_dom::Dom,
     input_targets: &[InputTarget],
@@ -6289,29 +6306,25 @@ fn first_prepared_focus_target(
         .cloned()
 }
 
-fn build_focus_viewport_cache(
+fn render_focus_viewport_cache(
     display_list: &silksurf_render::DisplayList,
-    focus_target: Option<&InputTarget>,
-    document_height: u32,
+    scroll_y: u32,
     bitmap_height: u32,
-    chrome_height: u32,
-) -> Option<FocusViewportCache> {
-    let target = focus_target?;
-    let target_scroll = focus_target_scroll(target, document_height, bitmap_height, chrome_height)?;
+) -> FocusViewportCache {
     let mut rgba = Vec::new();
     let mut argb = Vec::new();
     rasterize_browser_viewport_argb_preferred(
         display_list,
-        target_scroll,
+        scroll_y,
         bitmap_height,
         &mut rgba,
         &mut argb,
     );
-    Some(FocusViewportCache {
-        scroll_y: target_scroll,
+    FocusViewportCache {
+        scroll_y,
         bitmap_height,
         argb,
-    })
+    }
 }
 
 #[cfg(test)]
@@ -6325,6 +6338,7 @@ fn first_focus_target_scroll(
     focus_target_scroll(target, document_height, bitmap_height, chrome_height)
 }
 
+#[cfg(test)]
 fn focus_target_scroll(
     target: &InputTarget,
     document_height: u32,
@@ -11144,6 +11158,87 @@ mod tests {
             first_focus_target_scroll(&targets, 1500, 800, BROWSER_CHROME_HEIGHT as u32),
             Some(682)
         );
+    }
+
+    #[test]
+    fn navigation_build_defers_offscreen_focus_cache() {
+        let payload = BrowserPagePayload {
+            url: "https://example.com/".to_string(),
+            html: concat!(
+                "<!doctype html><html><body>",
+                "<div style=\"height:1200px\"></div>",
+                "<input id=\"q\">",
+                "</body></html>"
+            )
+            .to_string(),
+            css_text: stylesheet_text_with_user_agent_defaults(""),
+            script_texts: Vec::new(),
+            module_texts: Vec::new(),
+            images: Vec::new(),
+            render_config: BrowserRenderConfig::default(),
+        };
+
+        let page = build_browser_page(payload).expect("payload builds page");
+
+        assert!(!page.frame.input_targets.is_empty());
+        assert!(
+            first_focus_target_scroll(
+                &page.frame.input_targets,
+                page.frame.raster_height,
+                page.frame.bitmap_height,
+                BROWSER_CHROME_HEIGHT as u32,
+            )
+            .is_some()
+        );
+        assert!(page.frame.focus_viewport_cache.is_none());
+        assert!(!page.frame.focus_viewport_retained_sent);
+    }
+
+    #[test]
+    fn focus_viewport_cache_renders_on_demand() {
+        let payload = BrowserPagePayload {
+            url: "https://example.com/".to_string(),
+            html: concat!(
+                "<!doctype html><html><body>",
+                "<div style=\"height:1200px\"></div>",
+                "<input id=\"q\">",
+                "</body></html>"
+            )
+            .to_string(),
+            css_text: stylesheet_text_with_user_agent_defaults(""),
+            script_texts: Vec::new(),
+            module_texts: Vec::new(),
+            images: Vec::new(),
+            render_config: BrowserRenderConfig::default(),
+        };
+        let page = build_browser_page(payload).expect("payload builds page");
+        let scroll_y = first_focus_target_scroll(
+            &page.frame.input_targets,
+            page.frame.raster_height,
+            page.frame.bitmap_height,
+            BROWSER_CHROME_HEIGHT as u32,
+        )
+        .expect("offscreen input scroll exists");
+        let mut state = test_browser_state_from_page(page);
+
+        prepare_focus_viewport_cache(&mut state, scroll_y, FRAME_HEIGHT);
+
+        let cache = state
+            .frame
+            .focus_viewport_cache
+            .as_ref()
+            .expect("cache renders");
+        assert_eq!(cache.scroll_y, scroll_y);
+        assert_eq!(cache.bitmap_height, FRAME_HEIGHT);
+        assert_eq!(cache.argb.len(), (FRAME_WIDTH * FRAME_HEIGHT) as usize);
+        assert!(!state.frame.focus_viewport_retained_sent);
+        assert!(apply_focus_viewport_cache(
+            &mut state,
+            scroll_y,
+            FRAME_HEIGHT
+        ));
+        assert_eq!(state.frame.bitmap_scroll_y, scroll_y);
+        assert!(state.frame.focus_viewport_cache.is_none());
     }
 
     #[test]
