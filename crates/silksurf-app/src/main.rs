@@ -367,7 +367,7 @@ struct BrowserInputRuntime<'a> {
 }
 
 #[derive(Clone, Copy)]
-struct FocusedInputTextPaint {
+struct TextItemPaint {
     rect: Rect,
     font_size: f32,
     color: silksurf_css::Color,
@@ -2280,10 +2280,9 @@ fn repaint_runtime_text_only_dirty_nodes(
     for &node in dirty_nodes {
         let text = dirty_text_node_content(&dom, node)?;
         let item_index = dirty_text_display_item_index(&runtime.display_list.items, node)?;
-        let item_rect =
-            text_item_accepts_in_place_update(&runtime.display_list.items[item_index], text)?;
-        let fused_rect = fused_node_rect(&runtime.fused, node)?;
-        let item_damage = union_rect(item_rect, fused_rect)?;
+        let item_damage =
+            text_item_in_place_damage_rect(&runtime.display_list.items[item_index], text)?;
+        let _ = fused_node_rect(&runtime.fused, node)?;
         damage = Some(match damage {
             Some(current) => union_rect(current, item_damage)?,
             None => item_damage,
@@ -2294,8 +2293,26 @@ fn repaint_runtime_text_only_dirty_nodes(
 
     let damage = damage?;
     trace_runtime_text_repaint(dirty_nodes.len(), damage);
+    let direct_item = (updates.len() == 1).then_some(updates[0].0);
+    let mut direct_text = None;
     for (item_index, text) in updates {
-        update_text_display_item_content(&mut runtime.display_list.items[item_index], &text)?;
+        let text_paint =
+            update_text_display_item_content(&mut runtime.display_list.items[item_index], &text)?;
+        if Some(item_index) == direct_item {
+            direct_text = Some((item_index, text, text_paint));
+        }
+    }
+    if let Some((item_index, text, text_paint)) = direct_text
+        && paint_text_damage_argb(
+            &runtime.display_list.items,
+            item_index,
+            frame,
+            damage,
+            text_paint,
+            &text,
+        )
+    {
+        return Some(BrowserRedrawMode::Damage(damage));
     }
     rasterize_browser_document_damage_scratch(
         &runtime.display_list,
@@ -2356,7 +2373,7 @@ fn dirty_text_display_item_index(
     })
 }
 
-fn text_item_accepts_in_place_update(
+fn text_item_in_place_damage_rect(
     item: &silksurf_render::DisplayItem,
     value: &str,
 ) -> Option<Rect> {
@@ -2371,7 +2388,7 @@ fn text_item_accepts_in_place_update(
     }
     let (width, height) = silksurf_text::measure_text(value, *font_size, Some(rect.width));
     if width <= rect.width + 0.5 && height <= rect.height + 0.5 {
-        Some(*rect)
+        Some(focused_input_text_damage_rect(item, value).unwrap_or(*rect))
     } else {
         None
     }
@@ -2380,14 +2397,26 @@ fn text_item_accepts_in_place_update(
 fn update_text_display_item_content(
     item: &mut silksurf_render::DisplayItem,
     value: &str,
-) -> Option<()> {
-    let silksurf_render::DisplayItem::Text { text, text_len, .. } = item else {
+) -> Option<TextItemPaint> {
+    let silksurf_render::DisplayItem::Text {
+        rect,
+        text,
+        text_len,
+        font_size,
+        color,
+        ..
+    } = item
+    else {
         return None;
     };
     text.clear();
     text.push_str(value);
     *text_len = value.len() as u32;
-    Some(())
+    Some(TextItemPaint {
+        rect: *rect,
+        font_size: *font_size,
+        color: *color,
+    })
 }
 
 fn repaint_focused_input_value(
@@ -2415,7 +2444,7 @@ fn repaint_focused_input_value(
     trace_focused_input_damage(node, damage);
     let text_paint =
         update_focused_input_text_item(&mut runtime.display_list.items[text_index], value)?;
-    if paint_focused_input_damage_argb(
+    if paint_text_damage_argb(
         &runtime.display_list.items,
         text_index,
         frame,
@@ -2455,7 +2484,7 @@ fn repaint_focused_input_value(
 fn update_focused_input_text_item(
     item: &mut silksurf_render::DisplayItem,
     value: &str,
-) -> Option<FocusedInputTextPaint> {
+) -> Option<TextItemPaint> {
     let silksurf_render::DisplayItem::Text {
         rect,
         text,
@@ -2470,19 +2499,19 @@ fn update_focused_input_text_item(
     text.clear();
     text.push_str(value);
     *text_len = value.len() as u32;
-    Some(FocusedInputTextPaint {
+    Some(TextItemPaint {
         rect: *rect,
         font_size: *font_size,
         color: *color,
     })
 }
 
-fn paint_focused_input_damage_argb(
+fn paint_text_damage_argb(
     items: &[silksurf_render::DisplayItem],
     text_index: usize,
     frame: &mut BrowserFrame,
     damage: Rect,
-    text_paint: FocusedInputTextPaint,
+    text_paint: TextItemPaint,
     value: &str,
 ) -> bool {
     if text_paint.color.a != 255 || !page_bitmap_text_supported(value, text_paint.font_size) {
@@ -2493,7 +2522,7 @@ fn paint_focused_input_damage_argb(
     else {
         return false;
     };
-    let Some(background) = focused_input_damage_background_argb(items, text_index, damage) else {
+    let Some(background) = text_damage_background_argb(items, text_index, damage) else {
         return false;
     };
     let required = FRAME_WIDTH as usize * frame.bitmap_height as usize;
@@ -2532,7 +2561,7 @@ fn page_bitmap_text_supported(text: &str, font_size: f32) -> bool {
         })
 }
 
-fn focused_input_damage_background_argb(
+fn text_damage_background_argb(
     items: &[silksurf_render::DisplayItem],
     text_index: usize,
     damage: Rect,
@@ -10727,6 +10756,30 @@ mod tests {
     }
 
     #[test]
+    fn runtime_text_damage_tracks_changed_suffix() {
+        let item = silksurf_render::DisplayItem::Text {
+            rect: Rect {
+                x: 100.0,
+                y: 200.0,
+                width: 400.0,
+                height: 64.0,
+            },
+            node: silksurf_dom::NodeId::from_raw(1),
+            text_len: 6,
+            text: "stable".to_string(),
+            font_size: 16.0,
+            color: rgba(0, 0, 0, 255),
+        };
+
+        let damage =
+            text_item_in_place_damage_rect(&item, "staple").expect("text item gives damage");
+
+        assert!(damage.x > 125.0);
+        assert!(damage.width < 48.0);
+        assert!(damage.height < 32.0);
+    }
+
+    #[test]
     fn focused_empty_insert_damage_marks_first_text_cells() {
         let input_node = silksurf_dom::NodeId::from_raw(10);
         let mut state = test_browser_state("https://example.com/");
@@ -12382,14 +12435,15 @@ mod tests {
         };
 
         assert!(tick_browser_runtime(&mut state));
-        assert!(matches!(
-            state.redraw_mode,
-            BrowserRedrawMode::DamageWithChrome(_)
-        ));
+        let BrowserRedrawMode::DamageWithChrome(damage) = state.redraw_mode else {
+            panic!("runtime mutation produces damage with chrome");
+        };
+        assert!(damage.width < 80.0);
         assert_ne!(state.frame.argb, old_argb);
 
         let runtime = state.runtime.as_ref().expect("runtime remains installed");
         assert_eq!(runtime.fused_workspace.node_count(), 0);
+        assert!(runtime.damage_scratch.last_damage().is_none());
         assert!(
             runtime
                 .display_list
