@@ -15,6 +15,9 @@ members = [
   "crates/silksurf-net",
   "crates/silksurf-tls",
 ]
+exclude = [
+  "vendor/wayland-scanner-0.31.10",
+]
 resolver = "2"
 
 [workspace.package]
@@ -95,6 +98,12 @@ boa_engine = { version = "0.21", features = ["annex-b"] }
 boa_runtime = "0.21"
 # OS randomness for browser crypto host APIs.
 getrandom = "0.3"
+
+[patch.crates-io]
+# wayland-scanner 0.31.10 publishes quick-xml = "0.39". The local patch keeps
+# the scanner source intact and moves codegen XML parsing to the fixed
+# quick-xml line required by cargo-deny.
+wayland-scanner = { path = "vendor/wayland-scanner-0.31.10" }
 
 # ---------------------------------------------------------------------------
 # Workspace-wide lints.
