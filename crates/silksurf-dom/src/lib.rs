@@ -350,6 +350,12 @@ pub struct Dom {
     /// Different Dom instances always have different high bits, ensuring
     /// `FusedWorkspace` detects DOM replacement even when mutation counts match.
     generation: u64,
+    /// Tree-shape generation. Text edits do not change this counter.
+    structure_generation: u64,
+    /// Selector-input generation. Text edits do not change this counter.
+    style_generation: u64,
+    pending_structure_change: bool,
+    pending_style_change: bool,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -379,6 +385,10 @@ impl Dom {
             dirty_batch: Vec::new(),
             batch_depth: 0,
             generation: (instance_id as u64) << 32,
+            structure_generation: (instance_id as u64) << 32,
+            style_generation: (instance_id as u64) << 32,
+            pending_structure_change: false,
+            pending_style_change: false,
         }
     }
 
@@ -388,6 +398,20 @@ impl Dom {
     #[inline]
     pub fn generation(&self) -> u64 {
         self.generation
+    }
+
+    /// Current tree-shape generation. Child insertion, removal, and reparenting
+    /// advance this counter; text-only edits leave it stable.
+    #[inline]
+    pub fn structure_generation(&self) -> u64 {
+        self.structure_generation
+    }
+
+    /// Current selector-input generation. Attribute and tree-shape changes
+    /// advance this counter; text-only edits leave it stable.
+    #[inline]
+    pub fn style_generation(&self) -> u64 {
+        self.style_generation
     }
 
     /*
@@ -402,13 +426,16 @@ impl Dom {
      * After steady state (no new interning), this is a no-op.
      */
     pub fn materialize_resolve_table(&mut self) {
-        // UNWRAP-OK: RwLock poison only on prior-holder panic; propagating preserves the crash invariant.
-        let interner = self.interner.read().unwrap();
-        let values = interner.values_slice();
-        if values.len() > self.resolve_table.len() {
-            self.resolve_table
-                .extend_from_slice(&values[self.resolve_table.len()..]);
+        {
+            // UNWRAP-OK: RwLock poison only on prior-holder panic; propagating preserves the crash invariant.
+            let interner = self.interner.read().unwrap();
+            let values = interner.values_slice();
+            if values.len() > self.resolve_table.len() {
+                self.resolve_table
+                    .extend_from_slice(&values[self.resolve_table.len()..]);
+            }
         }
+        self.commit_pending_generations();
         self.generation = self.generation.wrapping_add(1);
     }
 
@@ -476,6 +503,7 @@ impl Dom {
 
         self.nodes[child_index].parent = Some(parent);
         self.nodes[parent_index].children.push(child);
+        self.record_structure_change();
         self.mark_dirty(parent);
         self.mark_dirty(child);
         Ok(())
@@ -487,6 +515,7 @@ impl Dom {
         let child_index = self.node_index(child)?;
         self.nodes[parent_index].children.retain(|id| *id != child);
         self.nodes[child_index].parent = None;
+        self.record_structure_change();
         self.mark_dirty(parent);
         Ok(())
     }
@@ -519,6 +548,7 @@ impl Dom {
             Some(idx) => self.nodes[parent_index].children.insert(idx, new_child),
             None => self.nodes[parent_index].children.push(new_child),
         }
+        self.record_structure_change();
         self.mark_dirty(parent);
         self.mark_dirty(new_child);
         Ok(())
@@ -538,6 +568,7 @@ impl Dom {
             let last_index = self.node_index(last)?;
             if let NodeKind::Text { text: existing } = &mut self.nodes[last_index].kind {
                 existing.push_str(&text);
+                self.record_text_change();
                 self.mark_dirty(parent);
                 self.mark_dirty(last);
                 return Ok(last);
@@ -563,6 +594,7 @@ impl Dom {
                     && *existing != text
                 {
                     *existing = text;
+                    self.record_text_change();
                     self.mark_dirty(id);
                 }
                 Ok(())
@@ -571,7 +603,7 @@ impl Dom {
                 let old_children: Vec<NodeId> =
                     self.nodes[index].children.iter().copied().collect();
                 self.nodes[index].children.clear();
-                for child in old_children {
+                for &child in &old_children {
                     if let Ok(child_index) = self.node_index(child) {
                         self.nodes[child_index].parent = None;
                     }
@@ -581,7 +613,10 @@ impl Dom {
                     let text_index = self.node_index(text_node)?;
                     self.nodes[text_index].parent = Some(id);
                     self.nodes[index].children.push(text_node);
+                    self.record_structure_change();
                     self.mark_dirty(text_node);
+                } else if !old_children.is_empty() {
+                    self.record_structure_change();
                 }
                 self.mark_dirty(id);
                 Ok(())
@@ -649,6 +684,7 @@ impl Dom {
                         class_strings,
                     });
                 }
+                self.record_style_change();
                 self.mark_dirty(id);
                 Ok(())
             }
@@ -670,6 +706,7 @@ impl Dom {
                     return Ok(false);
                 };
                 attributes.remove(position);
+                self.record_style_change();
                 self.mark_dirty(id);
                 Ok(true)
             }
@@ -725,6 +762,39 @@ impl Dom {
         self.dirty_nodes.append(&mut self.dirty_batch);
         self.dirty_nodes.sort_unstable_by_key(|id| id.0);
         self.dirty_nodes.dedup_by_key(|id| id.0);
+    }
+
+    fn record_structure_change(&mut self) {
+        self.pending_structure_change = true;
+        self.pending_style_change = true;
+        self.commit_unbatched_generations();
+    }
+
+    fn record_style_change(&mut self) {
+        self.pending_style_change = true;
+        self.commit_unbatched_generations();
+    }
+
+    fn record_text_change(&mut self) {
+        self.commit_unbatched_generations();
+    }
+
+    fn commit_unbatched_generations(&mut self) {
+        if self.batch_depth == 0 {
+            self.commit_pending_generations();
+            self.generation = self.generation.wrapping_add(1);
+        }
+    }
+
+    fn commit_pending_generations(&mut self) {
+        if self.pending_structure_change {
+            self.structure_generation = self.structure_generation.wrapping_add(1);
+        }
+        if self.pending_style_change {
+            self.style_generation = self.style_generation.wrapping_add(1);
+        }
+        self.pending_structure_change = false;
+        self.pending_style_change = false;
     }
 
     pub fn attributes(&self, id: NodeId) -> Result<&[Attribute], DomError> {
