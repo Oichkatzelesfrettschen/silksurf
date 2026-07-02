@@ -1647,8 +1647,10 @@ mod tests {
         for node in [
             document, html, head, title, head_style, script, body, paragraph, body_style,
         ] {
-            let mut style = ComputedStyle::default();
-            style.display = Display::Block;
+            let style = ComputedStyle {
+                display: Display::Block,
+                ..Default::default()
+            };
             styles.insert(node, style);
         }
         for node in [
