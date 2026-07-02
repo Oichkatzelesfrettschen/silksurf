@@ -11,7 +11,6 @@ silksurf-net = { path = "../silksurf-net" }
 silksurf-dom = { path = "../silksurf-dom" }
 silksurf-css = { path = "../silksurf-css" }
 silksurf-layout = { path = "../silksurf-layout" }
-silksurf-text = { path = "../silksurf-text" }
 silksurf-render = { path = "../silksurf-render" }
 silksurf-image = { path = "../silksurf-image" }
 silksurf-gui = { path = "../silksurf-gui", default-features = false, features = ["winit-backend"] }
