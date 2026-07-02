@@ -250,6 +250,19 @@ bytes`, and `total: 70.790538ms`. The previous same-day O0 path reported
 The remaining O0 first-navigation budget is dominated by fused
 style/layout/paint and the one required ARGB viewport write.
 
+The same ARGB path now covers focus viewport caches, retained scroll viewport
+caches, runtime full repaint, and scroll exposed-strip repaint when the visible
+items stay inside the supported subset. Scroll reuse still shifts retained
+content rows, but the exposed strip paints directly into the retained ARGB
+frame and reports the exact exposed damage rectangle. An O0 Wayland scroll
+probe on the AI-chat fixture reports the retained scroll frame at
+`render 0ns` and `total 35.690us`; the reverse scroll-reuse frame reports
+`bitmap refresh: 363.181us`, `Damage(Rect { x: 0.0, y: 92.0, width: 1280.0,
+height: 48.0 })`, `blit 7.970us`, `render 392.771us`, and `total
+423.131us`. The prior same-turn scroll-reuse frame repainted the full content
+band through tiny-skia translated damage and reported `bitmap refresh:
+18.155403ms`, `render 18.482354ms`, and `total 18.527935ms`.
+
 The viewport-backed path is the first tile-cache step. The retained bitmap now
 has an origin (`bitmap_scroll_y`) and a bounded height (`bitmap_height`), while
 `raster_height` remains the scrollable document height. The next renderer step

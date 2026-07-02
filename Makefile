@@ -107,9 +107,11 @@ fmt:
 # Dependency policy check.
 deny:
 	@echo "==> cargo deny"
-	@command -v cargo-deny >/dev/null 2>&1 \
-	    && cargo deny check advisories bans licenses sources \
-	    || echo "    (cargo-deny not installed; skipping. Install: cargo install cargo-deny)"
+	@if command -v cargo-deny >/dev/null 2>&1; then \
+	    cargo deny check advisories bans licenses sources; \
+	else \
+	    echo "    (cargo-deny not installed; skipping. Install: cargo install cargo-deny)"; \
+	fi
 
 # Build rustdoc. RUSTDOCFLAGS='-D warnings' promotes all rustdoc warnings to errors.
 doc:

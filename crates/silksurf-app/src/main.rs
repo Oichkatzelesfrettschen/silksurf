@@ -2236,13 +2236,13 @@ fn repaint_runtime_dirty_nodes(
         }
         BrowserRedrawMode::Damage(damage)
     } else {
-        rasterize_browser_viewport_into(
+        rasterize_browser_viewport_argb_preferred(
             &display_list,
             frame.bitmap_scroll_y,
             frame.bitmap_height,
             &mut runtime.rgba,
+            &mut frame.argb,
         );
-        rgba_bytes_to_argb_words_into(&runtime.rgba, &mut frame.argb);
         BrowserRedrawMode::Full
     };
     runtime.display_list = display_list;
@@ -2266,12 +2266,10 @@ fn repaint_focused_input_value(
         .dom
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let Some(text_index) = runtime.display_list.items.iter().position(|item| {
+    let text_index = runtime.display_list.items.iter().position(|item| {
         display_text_item_matches_input_node(&dom, item, node)
             || display_text_item_intersects_rect(item, control_damage)
-    }) else {
-        return None;
-    };
+    })?;
     drop(dom);
     let text_item = &runtime.display_list.items[text_index];
     let damage = focused_input_text_damage_rect(text_item, value).unwrap_or(control_damage);
@@ -2429,6 +2427,21 @@ fn pixel_rect_from_rect(rect: Rect, width: u32, height: u32) -> Option<PixelRect
     let y0 = rect.y.floor().max(0.0).min(height as f32) as u32;
     let x1 = (rect.x + rect.width).ceil().max(0.0).min(width as f32) as u32;
     let y1 = (rect.y + rect.height).ceil().max(0.0).min(height as f32) as u32;
+    (x1 > x0 && y1 > y0).then_some(PixelRect {
+        x: x0,
+        y: y0,
+        width: x1 - x0,
+        height: y1 - y0,
+    })
+}
+
+fn pixel_rect_intersection(a: PixelRect, b: PixelRect) -> Option<PixelRect> {
+    let x0 = a.x.max(b.x);
+    let y0 = a.y.max(b.y);
+    let x1 = a.x.saturating_add(a.width).min(b.x.saturating_add(b.width));
+    let y1 =
+        a.y.saturating_add(a.height)
+            .min(b.y.saturating_add(b.height));
     (x1 > x0 && y1 > y0).then_some(PixelRect {
         x: x0,
         y: y0,
@@ -3019,8 +3032,13 @@ fn prepare_scroll_viewport_caches(state: &mut BrowserState, window_width: u32, w
     for scroll_y in targets {
         let mut rgba = Vec::new();
         let mut argb = Vec::new();
-        rasterize_browser_viewport_into(&runtime.display_list, scroll_y, window_height, &mut rgba);
-        rgba_bytes_to_argb_words_into(&rgba, &mut argb);
+        rasterize_browser_viewport_argb_preferred(
+            &runtime.display_list,
+            scroll_y,
+            window_height,
+            &mut rgba,
+            &mut argb,
+        );
         caches.push(ScrollViewportCache {
             scroll_y,
             bitmap_height: window_height,
@@ -5987,6 +6005,21 @@ fn rasterize_browser_viewport_into(
     fill_browser_toolbar_background_rgba(rgba, FRAME_WIDTH, bitmap_height);
 }
 
+fn rasterize_browser_viewport_argb_preferred(
+    display_list: &silksurf_render::DisplayList,
+    scroll_y: u32,
+    bitmap_height: u32,
+    rgba: &mut Vec<u8>,
+    argb: &mut Vec<u32>,
+) -> bool {
+    if rasterize_browser_viewport_argb_direct(display_list, scroll_y, bitmap_height, argb) {
+        return true;
+    }
+    rasterize_browser_viewport_into(display_list, scroll_y, bitmap_height, rgba);
+    rgba_bytes_to_argb_words_into(rgba, argb);
+    false
+}
+
 fn first_prepared_focus_target(
     dom: &silksurf_dom::Dom,
     input_targets: &[InputTarget],
@@ -6009,8 +6042,13 @@ fn build_focus_viewport_cache(
     let target_scroll = focus_target_scroll(target, document_height, bitmap_height, chrome_height)?;
     let mut rgba = Vec::new();
     let mut argb = Vec::new();
-    rasterize_browser_viewport_into(display_list, target_scroll, bitmap_height, &mut rgba);
-    rgba_bytes_to_argb_words_into(&rgba, &mut argb);
+    rasterize_browser_viewport_argb_preferred(
+        display_list,
+        target_scroll,
+        bitmap_height,
+        &mut rgba,
+        &mut argb,
+    );
     Some(FocusViewportCache {
         scroll_y: target_scroll,
         bitmap_height,
@@ -6178,6 +6216,42 @@ fn rasterize_browser_viewport_argb_direct(
     true
 }
 
+fn rasterize_browser_document_damage_argb_direct(
+    display_list: &silksurf_render::DisplayList,
+    scroll_y: u32,
+    bitmap_height: u32,
+    damage: Rect,
+    pixels: &mut [u32],
+) -> bool {
+    let viewport_damage = viewport_damage_rect(damage, scroll_y);
+    let Some(clip) = pixel_rect_from_rect(viewport_damage, FRAME_WIDTH, bitmap_height) else {
+        return true;
+    };
+    let items = browser_viewport_source_items(display_list, damage);
+    if !viewport_argb_direct_items_supported(&items, damage) {
+        trace_viewport_argb_direct_miss(&items, damage);
+        return false;
+    }
+    if viewport_argb_direct_needs_default_fill(&items, damage) {
+        fill_argb_rect(
+            pixels,
+            FRAME_WIDTH,
+            bitmap_height,
+            clip.x,
+            clip.y,
+            clip.width,
+            clip.height,
+            argb(255, 255, 255, 255),
+        );
+    }
+    for item in items {
+        if display_item_intersects_viewport(item, damage) {
+            paint_viewport_argb_direct_item_clipped(pixels, bitmap_height, item, scroll_y, clip);
+        }
+    }
+    true
+}
+
 fn viewport_argb_direct_needs_default_fill(
     items: &[&silksurf_render::DisplayItem],
     viewport: Rect,
@@ -6336,6 +6410,51 @@ fn paint_viewport_argb_direct_item(
     }
 }
 
+fn paint_viewport_argb_direct_item_clipped(
+    pixels: &mut [u32],
+    bitmap_height: u32,
+    item: &silksurf_render::DisplayItem,
+    scroll_y: u32,
+    clip: PixelRect,
+) {
+    match item {
+        silksurf_render::DisplayItem::SolidColor { rect, color }
+        | silksurf_render::DisplayItem::RoundedRect { rect, color, .. } => {
+            fill_shifted_argb_rect_clipped(
+                pixels,
+                bitmap_height,
+                *rect,
+                scroll_y,
+                css_color_to_argb(*color),
+                clip,
+            );
+        }
+        silksurf_render::DisplayItem::Text {
+            rect,
+            text,
+            font_size,
+            color,
+            ..
+        } => {
+            draw_shifted_argb_text_clipped(
+                pixels,
+                bitmap_height,
+                *rect,
+                scroll_y,
+                text,
+                *font_size,
+                *color,
+                clip,
+            );
+        }
+        silksurf_render::DisplayItem::Image { rect, image } => {
+            blit_shifted_argb_image_clipped(pixels, bitmap_height, *rect, scroll_y, image, clip);
+        }
+        silksurf_render::DisplayItem::BoxShadow { .. }
+        | silksurf_render::DisplayItem::LinearGradient { .. } => {}
+    }
+}
+
 fn fill_shifted_argb_rect(
     pixels: &mut [u32],
     bitmap_height: u32,
@@ -6356,6 +6475,33 @@ fn fill_shifted_argb_rect(
             color,
         );
     }
+}
+
+fn fill_shifted_argb_rect_clipped(
+    pixels: &mut [u32],
+    bitmap_height: u32,
+    rect: Rect,
+    scroll_y: u32,
+    color: u32,
+    clip: PixelRect,
+) {
+    let shifted = viewport_damage_rect(rect, scroll_y);
+    let Some(pixel_rect) = pixel_rect_from_rect(shifted, FRAME_WIDTH, bitmap_height) else {
+        return;
+    };
+    let Some(pixel_rect) = pixel_rect_intersection(pixel_rect, clip) else {
+        return;
+    };
+    fill_argb_rect(
+        pixels,
+        FRAME_WIDTH,
+        bitmap_height,
+        pixel_rect.x,
+        pixel_rect.y,
+        pixel_rect.width,
+        pixel_rect.height,
+        color,
+    );
 }
 
 fn draw_shifted_argb_text(
@@ -6383,6 +6529,30 @@ fn draw_shifted_argb_text(
     }
 }
 
+fn draw_shifted_argb_text_clipped(
+    pixels: &mut [u32],
+    bitmap_height: u32,
+    rect: Rect,
+    scroll_y: u32,
+    text: &str,
+    font_size: f32,
+    color: silksurf_css::Color,
+    clip: PixelRect,
+) {
+    let shifted = viewport_damage_rect(rect, scroll_y);
+    let _ = draw_page_bitmap_text_clipped(
+        pixels,
+        FRAME_WIDTH,
+        bitmap_height,
+        shifted.x,
+        shifted.y,
+        text,
+        font_size,
+        css_color_to_argb(color),
+        clip,
+    );
+}
+
 fn blit_shifted_argb_image(
     pixels: &mut [u32],
     bitmap_height: u32,
@@ -6394,6 +6564,33 @@ fn blit_shifted_argb_image(
     let Some(dst) = pixel_rect_from_rect(shifted, FRAME_WIDTH, bitmap_height) else {
         return;
     };
+    blit_argb_image_rect(pixels, shifted, image, dst);
+}
+
+fn blit_shifted_argb_image_clipped(
+    pixels: &mut [u32],
+    bitmap_height: u32,
+    rect: Rect,
+    scroll_y: u32,
+    image: &silksurf_render::ImageSurface,
+    clip: PixelRect,
+) {
+    let shifted = viewport_damage_rect(rect, scroll_y);
+    let Some(dst) = pixel_rect_from_rect(shifted, FRAME_WIDTH, bitmap_height) else {
+        return;
+    };
+    let Some(dst) = pixel_rect_intersection(dst, clip) else {
+        return;
+    };
+    blit_argb_image_rect(pixels, shifted, image, dst);
+}
+
+fn blit_argb_image_rect(
+    pixels: &mut [u32],
+    shifted: Rect,
+    image: &silksurf_render::ImageSurface,
+    dst: PixelRect,
+) {
     let dst_width = shifted.width.max(1.0);
     let dst_height = shifted.height.max(1.0);
     let surface_width = image.width as usize;
@@ -6461,11 +6658,8 @@ fn refresh_browser_frame_bitmap(
     if state.frame.bitmap_scroll_y == scroll_y && state.frame.bitmap_height == bitmap_height {
         return BrowserBitmapRefresh::Clean;
     }
-    if scroll_browser_frame_bitmap(state, scroll_y, bitmap_height) {
-        return BrowserBitmapRefresh::ScrollReuse(scroll_visible_document_rect(
-            scroll_y,
-            bitmap_height,
-        ));
+    if let Some(damage) = scroll_browser_frame_bitmap(state, scroll_y, bitmap_height) {
+        return BrowserBitmapRefresh::ScrollReuse(damage);
     }
     let Some(runtime) = state.runtime.as_mut() else {
         return BrowserBitmapRefresh::Clean;
@@ -6474,13 +6668,13 @@ fn refresh_browser_frame_bitmap(
         &runtime.display_list,
         scroll_visible_document_rect(scroll_y, bitmap_height),
     );
-    rasterize_browser_viewport_into(
+    rasterize_browser_viewport_argb_preferred(
         &runtime.display_list,
         scroll_y,
         bitmap_height,
         &mut runtime.rgba,
+        &mut state.frame.argb,
     );
-    rgba_bytes_to_argb_words_into(&runtime.rgba, &mut state.frame.argb);
     state.frame.bitmap_height = bitmap_height;
     state.frame.bitmap_scroll_y = scroll_y;
     BrowserBitmapRefresh::Full
@@ -6490,25 +6684,23 @@ fn scroll_browser_frame_bitmap(
     state: &mut BrowserState,
     scroll_y: u32,
     bitmap_height: u32,
-) -> bool {
+) -> Option<Rect> {
     if state.frame.bitmap_height != bitmap_height || state.runtime.is_none() {
-        return false;
+        return None;
     }
     let old_scroll_y = state.frame.bitmap_scroll_y;
     if old_scroll_y == scroll_y {
-        return false;
+        return None;
     }
     let chrome_rows = BROWSER_CHROME_HEIGHT as u32;
     let content_rows = bitmap_height.saturating_sub(chrome_rows);
     let scroll_delta = i64::from(scroll_y) - i64::from(old_scroll_y);
     let delta_rows = scroll_delta.unsigned_abs() as u32;
     if !scroll_reuse_is_profitable(content_rows, delta_rows) {
-        return false;
+        return None;
     }
 
-    let Some(runtime) = state.runtime.as_mut() else {
-        return false;
-    };
+    let runtime = state.runtime.as_mut()?;
     if !shift_browser_argb_content_rows(
         &mut state.frame.argb,
         FRAME_WIDTH,
@@ -6516,28 +6708,40 @@ fn scroll_browser_frame_bitmap(
         content_rows,
         scroll_delta,
     ) {
-        return false;
+        return None;
     }
     let exposed_damage = scroll_exposed_document_rect(scroll_y, bitmap_height, scroll_delta);
-    rasterize_browser_document_damage_into(
+    if !rasterize_browser_document_damage_argb_direct(
         &runtime.display_list,
         scroll_y,
         bitmap_height,
         exposed_damage,
-        &mut runtime.rgba,
-        &mut runtime.damage_scratch,
-    );
-    if !sync_argb_damage_from_scratch(&runtime.damage_scratch, &mut state.frame.argb, FRAME_WIDTH) {
-        sync_argb_damage_from_rgba(
-            &runtime.rgba,
+        &mut state.frame.argb,
+    ) {
+        rasterize_browser_document_damage_into(
+            &runtime.display_list,
+            scroll_y,
+            bitmap_height,
+            exposed_damage,
+            &mut runtime.rgba,
+            &mut runtime.damage_scratch,
+        );
+        if !sync_argb_damage_from_scratch(
+            &runtime.damage_scratch,
             &mut state.frame.argb,
             FRAME_WIDTH,
-            bitmap_height,
-            viewport_damage_rect(exposed_damage, scroll_y),
-        );
+        ) {
+            sync_argb_damage_from_rgba(
+                &runtime.rgba,
+                &mut state.frame.argb,
+                FRAME_WIDTH,
+                bitmap_height,
+                viewport_damage_rect(exposed_damage, scroll_y),
+            );
+        }
     }
     state.frame.bitmap_scroll_y = scroll_y;
-    true
+    Some(exposed_damage)
 }
 
 fn scroll_reuse_is_profitable(content_rows: u32, delta_rows: u32) -> bool {
@@ -8625,6 +8829,139 @@ mod tests {
             &mut pixels
         ));
         assert_eq!(pixels, vec![0x12345678]);
+    }
+
+    #[test]
+    fn viewport_argb_preferred_keeps_rgba_empty_on_direct_hit() {
+        let display_list = silksurf_render::DisplayList {
+            items: vec![DisplayItem::SolidColor {
+                rect: Rect {
+                    x: 0.0,
+                    y: BROWSER_CHROME_HEIGHT,
+                    width: FRAME_WIDTH as f32,
+                    height: 52.0,
+                },
+                color: rgba(7, 8, 9, 255),
+            }],
+            tiles: None,
+        };
+        let mut rgba = Vec::new();
+        let mut argb = Vec::new();
+
+        assert!(rasterize_browser_viewport_argb_preferred(
+            &display_list,
+            0,
+            96,
+            &mut rgba,
+            &mut argb
+        ));
+        assert!(rgba.is_empty());
+        assert_eq!(argb.len(), FRAME_WIDTH as usize * 96);
+    }
+
+    #[test]
+    fn viewport_argb_preferred_falls_back_for_gradient() {
+        let display_list = silksurf_render::DisplayList {
+            items: vec![DisplayItem::LinearGradient {
+                rect: Rect {
+                    x: 0.0,
+                    y: BROWSER_CHROME_HEIGHT,
+                    width: 32.0,
+                    height: 32.0,
+                },
+                angle: 90.0,
+                stops: vec![(0.0, rgba(0, 0, 0, 255)), (1.0, rgba(255, 255, 255, 255))],
+            }],
+            tiles: None,
+        };
+        let mut rgba = Vec::new();
+        let mut argb = Vec::new();
+
+        assert!(!rasterize_browser_viewport_argb_preferred(
+            &display_list,
+            0,
+            96,
+            &mut rgba,
+            &mut argb
+        ));
+        assert_eq!(rgba.len(), FRAME_WIDTH as usize * 96 * 4);
+        assert_eq!(argb.len(), FRAME_WIDTH as usize * 96);
+    }
+
+    #[test]
+    fn document_damage_argb_direct_paints_clipped_strip() {
+        let display_list = silksurf_render::DisplayList {
+            items: vec![DisplayItem::SolidColor {
+                rect: Rect {
+                    x: 0.0,
+                    y: BROWSER_CHROME_HEIGHT,
+                    width: FRAME_WIDTH as f32,
+                    height: 96.0,
+                },
+                color: rgba(11, 12, 13, 255),
+            }],
+            tiles: None,
+        };
+        let mut pixels = vec![0; FRAME_WIDTH as usize * 96];
+        let damage = Rect {
+            x: 0.0,
+            y: BROWSER_CHROME_HEIGHT + 12.0,
+            width: FRAME_WIDTH as f32,
+            height: 4.0,
+        };
+
+        assert!(rasterize_browser_document_damage_argb_direct(
+            &display_list,
+            0,
+            96,
+            damage,
+            &mut pixels
+        ));
+        assert_eq!(
+            pixels[(BROWSER_CHROME_HEIGHT as usize + 11) * FRAME_WIDTH as usize],
+            0
+        );
+        assert_eq!(
+            pixels[(BROWSER_CHROME_HEIGHT as usize + 12) * FRAME_WIDTH as usize],
+            argb(11, 12, 13, 255)
+        );
+        assert_eq!(
+            pixels[(BROWSER_CHROME_HEIGHT as usize + 16) * FRAME_WIDTH as usize],
+            0
+        );
+    }
+
+    #[test]
+    fn document_damage_argb_direct_rejects_gradient() {
+        let display_list = silksurf_render::DisplayList {
+            items: vec![DisplayItem::LinearGradient {
+                rect: Rect {
+                    x: 0.0,
+                    y: BROWSER_CHROME_HEIGHT,
+                    width: 32.0,
+                    height: 32.0,
+                },
+                angle: 90.0,
+                stops: vec![(0.0, rgba(0, 0, 0, 255)), (1.0, rgba(255, 255, 255, 255))],
+            }],
+            tiles: None,
+        };
+        let mut pixels = vec![0x12345678; FRAME_WIDTH as usize * 96];
+        let damage = Rect {
+            x: 0.0,
+            y: BROWSER_CHROME_HEIGHT,
+            width: 32.0,
+            height: 32.0,
+        };
+
+        assert!(!rasterize_browser_document_damage_argb_direct(
+            &display_list,
+            0,
+            96,
+            damage,
+            &mut pixels
+        ));
+        assert!(pixels.iter().all(|pixel| *pixel == 0x12345678));
     }
 
     #[test]
