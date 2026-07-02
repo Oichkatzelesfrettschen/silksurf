@@ -1601,3 +1601,84 @@ fn gradient_endpoints(rect: Rect, angle_deg: f32) -> (Point, Point) {
     let end = Point::from_xy(cx + dx * half_len, cy + dy * half_len);
     (start, end)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rustc_hash::FxHashMap;
+    use silksurf_core::SilkArena;
+    use silksurf_css::{ComputedStyle, Display};
+    use silksurf_dom::Dom;
+    use silksurf_layout::build_layout_tree;
+
+    #[test]
+    fn display_list_excludes_metadata_subtree_text() {
+        let mut dom = Dom::new();
+        let document = dom.create_document();
+        let html = dom.create_element("html");
+        let head = dom.create_element("head");
+        let title = dom.create_element("title");
+        let title_text = dom.create_text("Hidden title");
+        let head_style = dom.create_element("style");
+        let head_style_text = dom.create_text("body{color:red}");
+        let script = dom.create_element("script");
+        let script_text = dom.create_text("hidden-script-text");
+        let body = dom.create_element("body");
+        let paragraph = dom.create_element("p");
+        let visible_text = dom.create_text("Visible body");
+        let body_style = dom.create_element("style");
+        let body_style_text = dom.create_text(".metadata{color:red}");
+
+        dom.append_child(document, html).unwrap();
+        dom.append_child(html, head).unwrap();
+        dom.append_child(head, title).unwrap();
+        dom.append_child(title, title_text).unwrap();
+        dom.append_child(head, head_style).unwrap();
+        dom.append_child(head_style, head_style_text).unwrap();
+        dom.append_child(head, script).unwrap();
+        dom.append_child(script, script_text).unwrap();
+        dom.append_child(html, body).unwrap();
+        dom.append_child(body, paragraph).unwrap();
+        dom.append_child(paragraph, visible_text).unwrap();
+        dom.append_child(body, body_style).unwrap();
+        dom.append_child(body_style, body_style_text).unwrap();
+
+        let mut styles = FxHashMap::default();
+        for node in [
+            document, html, head, title, head_style, script, body, paragraph, body_style,
+        ] {
+            let mut style = ComputedStyle::default();
+            style.display = Display::Block;
+            styles.insert(node, style);
+        }
+        for node in [
+            title_text,
+            head_style_text,
+            script_text,
+            visible_text,
+            body_style_text,
+        ] {
+            styles.insert(node, ComputedStyle::default());
+        }
+
+        let arena = SilkArena::new();
+        let viewport = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 800.0,
+            height: 600.0,
+        };
+        let layout = build_layout_tree(&arena, &dom, &styles, document, viewport).unwrap();
+        let display_list = build_display_list(&dom, &styles, &layout);
+        let text_items: Vec<&str> = display_list
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                DisplayItem::Text { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(text_items, vec!["Visible body"]);
+    }
+}
