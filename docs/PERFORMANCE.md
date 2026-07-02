@@ -278,6 +278,26 @@ reports focus damage at `total 33.140us`, typed input damage at
 `render 16.620us` and `total 48.420us`, and typed input-to-present at
 `283.190us`.
 
+Runtime same-box text mutations update the existing `DisplayItem::Text`,
+measure the replacement string against the retained text rect, and repaint the
+dirty document damage without running `FusedWorkspace`. The full fused repaint
+still handles text that changes layout, element dirtiness, input controls, and
+missing display-list coverage. The warnings-denied regression test
+`retained_runtime_text_mutation_skips_layout_when_text_fits` proves that a
+same-size `requestAnimationFrame` text mutation leaves
+`fused_workspace.node_count()` at zero after repaint. A refreshed O0 Wayland
+AI-chat page-input probe reports first-navigation fused layout at
+`33.433734ms`, with `taffy-rebuild 3.176016ms` and `taffy-compute
+21.747731ms`; the same probe reports focused input damage at `total 33.140us`
+and typed input damage at `render 16.521us`, `total 48.791us`, and
+`288.791us` input-to-present. The retained HTML/CSS source bundle verifies
+unchanged checksums after `make fetch-conformance-sources`, and the WPT
+scorecard stays at `62 pass / 0 fail / 0 skip / 62 total`. A live O0 Wayland
+ChatGPT page-input probe over cached navigation reports first presentation
+after a `66.984688ms` navigation build, focus damage at `total 21.680us`, and
+typed input damage at `render 17.660us`, `total 41.470us`, and `117.500us`
+input-to-present.
+
 The viewport-backed path is the first tile-cache step. The retained bitmap now
 has an origin (`bitmap_scroll_y`) and a bounded height (`bitmap_height`), while
 `raster_height` remains the scrollable document height. The next renderer step

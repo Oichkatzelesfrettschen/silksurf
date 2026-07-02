@@ -2193,6 +2193,10 @@ fn repaint_runtime_dirty_nodes(
         return None;
     }
 
+    if let Some(redraw_mode) = repaint_runtime_text_only_dirty_nodes(runtime, frame, dirty_nodes) {
+        return Some(redraw_mode);
+    }
+
     let dom = runtime
         .dom
         .lock()
@@ -2260,6 +2264,119 @@ fn repaint_runtime_dirty_nodes(
 
     runtime.fused = new_fused;
     Some(redraw_mode)
+}
+
+fn repaint_runtime_text_only_dirty_nodes(
+    runtime: &mut BrowserPageRuntime,
+    frame: &mut BrowserFrame,
+    dirty_nodes: &[silksurf_dom::NodeId],
+) -> Option<BrowserRedrawMode> {
+    let dom = runtime
+        .dom
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut updates = Vec::with_capacity(dirty_nodes.len());
+    let mut damage = None;
+    for &node in dirty_nodes {
+        let text = dirty_text_node_content(&dom, node)?;
+        let item_index = dirty_text_display_item_index(&runtime.display_list.items, node)?;
+        let item_rect =
+            text_item_accepts_in_place_update(&runtime.display_list.items[item_index], text)?;
+        let fused_rect = fused_node_rect(&runtime.fused, node)?;
+        let item_damage = union_rect(item_rect, fused_rect)?;
+        damage = Some(match damage {
+            Some(current) => union_rect(current, item_damage)?,
+            None => item_damage,
+        });
+        updates.push((item_index, text.to_string()));
+    }
+    drop(dom);
+
+    let damage = damage?;
+    for (item_index, text) in updates {
+        update_text_display_item_content(&mut runtime.display_list.items[item_index], &text)?;
+    }
+    rasterize_browser_document_damage_scratch(
+        &runtime.display_list,
+        frame.bitmap_scroll_y,
+        frame.bitmap_height,
+        damage,
+        &mut runtime.damage_scratch,
+    );
+    if !sync_argb_damage_from_scratch(&runtime.damage_scratch, &mut frame.argb, FRAME_WIDTH) {
+        rasterize_browser_document_damage_into(
+            &runtime.display_list,
+            frame.bitmap_scroll_y,
+            frame.bitmap_height,
+            damage,
+            &mut runtime.rgba,
+            &mut runtime.damage_scratch,
+        );
+        sync_argb_damage_from_rgba(
+            &runtime.rgba,
+            &mut frame.argb,
+            FRAME_WIDTH,
+            frame.bitmap_height,
+            viewport_damage_rect(damage, frame.bitmap_scroll_y),
+        );
+    }
+    Some(BrowserRedrawMode::Damage(damage))
+}
+
+fn dirty_text_node_content(dom: &silksurf_dom::Dom, node: silksurf_dom::NodeId) -> Option<&str> {
+    match dom.node(node).ok()?.kind() {
+        silksurf_dom::NodeKind::Text { text } => Some(text.as_str()),
+        _ => None,
+    }
+}
+
+fn dirty_text_display_item_index(
+    items: &[silksurf_render::DisplayItem],
+    node: silksurf_dom::NodeId,
+) -> Option<usize> {
+    items.iter().position(|item| {
+        matches!(
+            item,
+            silksurf_render::DisplayItem::Text {
+                node: item_node,
+                ..
+            } if *item_node == node
+        )
+    })
+}
+
+fn text_item_accepts_in_place_update(
+    item: &silksurf_render::DisplayItem,
+    value: &str,
+) -> Option<Rect> {
+    let silksurf_render::DisplayItem::Text {
+        rect, font_size, ..
+    } = item
+    else {
+        return None;
+    };
+    if rect.width <= 0.0 || rect.height <= 0.0 || *font_size <= 0.0 || !font_size.is_finite() {
+        return None;
+    }
+    let (width, height) = silksurf_text::measure_text(value, *font_size, Some(rect.width));
+    if width <= rect.width + 0.5 && height <= rect.height + 0.5 {
+        Some(*rect)
+    } else {
+        None
+    }
+}
+
+fn update_text_display_item_content(
+    item: &mut silksurf_render::DisplayItem,
+    value: &str,
+) -> Option<()> {
+    let silksurf_render::DisplayItem::Text { text, text_len, .. } = item else {
+        return None;
+    };
+    text.clear();
+    text.push_str(value);
+    *text_len = value.len() as u32;
+    Some(())
 }
 
 fn repaint_focused_input_value(
@@ -12159,6 +12276,120 @@ mod tests {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         assert!(find_text_node(&dom, document.document, "Runtime").is_some());
+    }
+
+    #[test]
+    fn retained_runtime_text_mutation_skips_layout_when_text_fits() {
+        let document =
+            parse_html("<!doctype html><html><body><p id=\"msg\">Hello</p></body></html>")
+                .expect("html parses");
+        let stylesheet = test_stylesheet(&document.dom);
+        let viewport = Rect {
+            x: 0.0,
+            y: BROWSER_CHROME_HEIGHT,
+            width: FRAME_WIDTH as f32,
+            height: FRAME_HEIGHT as f32 - BROWSER_CHROME_HEIGHT,
+        };
+        let dom_arc = Arc::new(Mutex::new(document.dom));
+        let mut js_ctx = SilkContext::with_dom(&dom_arc);
+        let style_index = StyleIndex::for_viewport(&stylesheet, viewport.width, viewport.height);
+        let mut fused = {
+            let dom = dom_arc
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            fused_style_layout_paint(&dom, &stylesheet, document.document, viewport)
+        };
+        let display_list = silksurf_render::DisplayList {
+            items: std::mem::take(&mut fused.display_items),
+            tiles: None,
+        };
+        let raster_height = browser_frame_height(&display_list.items, BROWSER_CHROME_HEIGHT as u32);
+        let bitmap_height = initial_browser_window_height(raster_height);
+        let mut rgba = Vec::new();
+        rasterize_browser_viewport_into(&display_list, 0, bitmap_height, &mut rgba);
+        let mut argb = Vec::new();
+        rgba_bytes_to_argb_words_into(&rgba, &mut argb);
+        let old_argb = argb.clone();
+        let runtime_display_list = display_list.clone();
+
+        {
+            let mut dom = dom_arc
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let _ = dom.take_dirty_nodes();
+        }
+        js_ctx
+            .eval(
+                "var el = document.getElementById('msg'); \
+                 requestAnimationFrame(function () { el.firstChild.textContent = 'Jello'; });",
+            )
+            .expect("script schedules frame mutation");
+
+        let mut state = BrowserState {
+            frame: BrowserFrame {
+                url: "https://example.com/".to_string(),
+                argb,
+                raster_height,
+                bitmap_height,
+                bitmap_scroll_y: 0,
+                focus_viewport_cache: None,
+                focus_viewport_retained_sent: false,
+                current_view_retained_sent: false,
+                navigation_start_retained_sent: false,
+                scroll_viewport_caches: Vec::new(),
+                link_targets: Vec::new(),
+                input_targets: Vec::new(),
+            },
+            runtime: Some(BrowserPageRuntime {
+                dom: Arc::clone(&dom_arc),
+                document: document.document,
+                stylesheet,
+                style_index,
+                viewport,
+                js_ctx,
+                fused,
+                fused_workspace: FusedWorkspace::new(),
+                display_list: runtime_display_list,
+                images: Vec::new(),
+                rgba,
+                damage_scratch: silksurf_render::DamageScratch::default(),
+            }),
+            navigation_pending: false,
+            status_text: "ready".to_string(),
+            hover_status_text: None,
+            history: vec!["https://example.com/".to_string()],
+            history_index: 0,
+            pending_history: None,
+            navigation_generation: 0,
+            address_editing: false,
+            address_select_all: false,
+            address_text: "https://example.com/".to_string(),
+            address_cursor: 0,
+            focused_input: None,
+            redraw_mode: BrowserRedrawMode::Chrome,
+            retained_present: None,
+        };
+
+        assert!(tick_browser_runtime(&mut state));
+        assert!(matches!(
+            state.redraw_mode,
+            BrowserRedrawMode::DamageWithChrome(_)
+        ));
+        assert_ne!(state.frame.argb, old_argb);
+
+        let runtime = state.runtime.as_ref().expect("runtime remains installed");
+        assert_eq!(runtime.fused_workspace.node_count(), 0);
+        assert!(
+            runtime
+                .display_list
+                .items
+                .iter()
+                .any(|item| matches!(item, silksurf_render::DisplayItem::Text { text, .. } if text == "Jello"))
+        );
+        let dom = dom_arc
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert!(find_text_node(&dom, document.document, "Jello").is_some());
     }
 
     #[test]
