@@ -11,8 +11,8 @@ positioned `Rect`s consumed by `silksurf-render`.
   * `LayoutNeighborTable` -- pre-computed BFS-level decomposition for
     parallel layout. Owns `level_starts: Vec<u32>` (flat offsets,
     no inner-Vec allocations), `parent_idx: Vec<u32>`, `bfs_order:
-    Vec<NodeId>`, `child_count: Vec<u16>`, `node_to_bfs_idx`. See
-    GLOSSARY -> generation-gated rebuild.
+    Vec<NodeId>`, `child_start: Vec<u32>`, `child_count: Vec<u16>`,
+    `node_to_bfs_idx`. See GLOSSARY -> generation-gated rebuild.
 
 ## Layout passes
 

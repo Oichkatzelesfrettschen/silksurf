@@ -11,6 +11,14 @@
 scripts/install-git-hooks.sh        # one-time: symlink .git/hooks/{pre-commit,pre-push}
 scripts/local_gate.sh fast          # ~30s -- pre-commit equivalent
 scripts/local_gate.sh full          # several minutes -- pre-push equivalent
+make gui-probe                     # live GUI probe; requires Wayland or X11
+make gui-probe GUI_PROBE_ARGS="--release --backend x11 --max-input-ns 20000"
+make gui-probe GUI_PROBE_ARGS="--release --backend x11 --max-any-input-ns 20000"
+make gui-probe GUI_PROBE_ARGS="--release --backend x11 --max-buffer-ns 10000"
+make gui-probe GUI_PROBE_ARGS="--release --backend x11 --max-any-buffer-ns 10000"
+make gui-probe GUI_PROBE_ARGS="--release --backend x11 --max-render-ns 10000"
+make gui-probe GUI_PROBE_ARGS="--release --backend x11 --runs 5"
+make gui-probe GUI_PROBE_ARGS="--release --backend x11 --runs 5 --max-overhead-ns 10000"
 MIRI=1 scripts/local_gate.sh full   # add miri smoke (~3-5 min)
 FUZZ=1 scripts/local_gate.sh full   # add fuzz smoke (30s/target * 5 targets)
 ```
@@ -90,6 +98,47 @@ unsafe code or the resolve table.
 Fuzz smoke (30s/target) is also opt-in via `FUZZ=1`. The point isn't to find
 new crashes (that requires hours per target); it's to catch fuzzer build
 breakage. Run it whenever you touch parser surface.
+
+## Live GUI probe
+
+`make gui-probe` runs `scripts/gui_probe.sh --release --backend auto`. The
+probe opens the winit browser window, renders the default page, feeds address
+input through the native event loop, waits for the final input frame to present,
+and exits from inside the app. It is opt-in because it requires a live Wayland
+or X11 session. Backend `auto` checks for a live `WAYLAND_DISPLAY` socket first
+and uses X11 only when Wayland is absent. Explicit `--backend wayland` requires
+the Wayland socket. Explicit `--backend x11` requires `DISPLAY`; `xvfb-run`
+therefore acts as an X11 provider when no live desktop session exists. On
+Wayland, presenter `auto` selects the SHM presenter.
+
+`GUI_PROBE_ARGS` replaces the default argument list when a run needs a specific
+backend, URL, presenter, or latency threshold.
+
+Useful direct forms:
+
+```sh
+scripts/gui_probe.sh --release --backend auto --fixture ai-chat --probe page-input
+scripts/gui_probe.sh --debug --backend wayland
+scripts/gui_probe.sh --release --backend x11 https://example.com
+scripts/gui_probe.sh --release --backend wayland --presenter shm
+scripts/gui_probe.sh --release --backend wayland --presenter softbuffer
+SILKSURF_TRACE_SHM_PHASES=1 scripts/gui_probe.sh --release --backend wayland --presenter shm
+scripts/gui_probe.sh --release --backend auto --fixture ai-chat --probe page-input --runs 3 --max-total-ns 10000
+scripts/gui_probe.sh --release --backend x11 --max-input-ns 20000
+scripts/gui_probe.sh --release --backend x11 --max-any-input-ns 20000
+scripts/gui_probe.sh --release --backend x11 --max-buffer-ns 10000
+scripts/gui_probe.sh --release --backend x11 --max-any-buffer-ns 10000
+scripts/gui_probe.sh --release --backend x11 --max-render-ns 10000
+scripts/gui_probe.sh --release --backend x11 --runs 5
+scripts/gui_probe.sh --release --backend x11 --runs 5 --max-overhead-ns 10000
+```
+
+`SILKSURF_TRACE_SHM_PHASES=1` adds Wayland SHM pump, buffer, seed, render,
+attach/damage, flush, and preseed timings to the frame trace. Use it for
+diagnosis only; the extra `Instant` calls perturb sub-0.01ms totals.
+`--trace-app-frame` adds app-frame blit and chrome logs inside the measured
+render callback. Use it for diagnosis only; the stderr write perturbs
+sub-0.01ms totals.
 
 ## Pre-commit/pre-push hook semantics
 

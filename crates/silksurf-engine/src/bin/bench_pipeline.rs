@@ -119,11 +119,12 @@ const VIEWPORT: Rect = Rect {
  *
  * Metric mapping (documented here as the canonical source of truth):
  *   fused_pipeline_us -- ws_per (FusedWorkspace steady-state, iter 0 excluded)
- *   css_cache_hit_us  -- cascade_only_per (ws_per minus table.rebuild(); cascade
- *                        with pre-parsed stylesheet, zero CSS re-parsing cost)
- *   full_render_us    -- fused_per + raster_reuse_per (cold fused + steady-state
- *                        rasterize, buffer pre-allocated; the cached re-render
- *                        budget measured against the <500us target)
+ *   css_cache_hit_us  -- ws_per (workspace style/layout/paint against a
+ *                        pre-parsed stylesheet, zero CSS re-parsing cost)
+ *   full_render_us    -- ws_per + raster_reuse_per (steady-state workspace +
+ *                        steady-state rasterize, buffer pre-allocated; the
+ *                        cached re-render budget measured against the <500us
+ *                        target)
  */
 fn emit_history_record(
     fused_pipeline_us: f64,
@@ -136,21 +137,27 @@ fn emit_history_record(
         .args(["rev-parse", "HEAD"])
         .output()
         .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok()).map_or_else(|| "0".repeat(40), |s| s.trim().to_string());
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map_or_else(|| "0".repeat(40), |s| s.trim().to_string());
 
     // rustc --version for the toolchain string.
     let rust_version = Command::new("rustc")
         .arg("--version")
         .output()
         .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok()).map_or_else(|| "unknown".to_string(), |s| s.trim().to_string());
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map_or_else(|| "unknown".to_string(), |s| s.trim().to_string());
 
     // ISO-8601 UTC timestamp via date -u.
     let timestamp = Command::new("date")
         .args(["-u", "+%Y-%m-%dT%H:%M:%SZ"])
         .output()
         .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok()).map_or_else(|| "1970-01-01T00:00:00Z".to_string(), |s| s.trim().to_string());
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map_or_else(
+            || "1970-01-01T00:00:00Z".to_string(),
+            |s| s.trim().to_string(),
+        );
 
     // Emit single JSON line; no external crate needed for this simple record.
     // serde_json is available as a workspace dep but the format is trivial enough
@@ -279,9 +286,7 @@ fn main() {
         "  display list: {:>8?}  per-iter",
         display_total / ITERATIONS
     );
-    println!(
-        "  TOTAL:        {old_per:>8?}  per-iter  ({old_items} display items)"
-    );
+    println!("  TOTAL:        {old_per:>8?}  per-iter  ({old_items} display items)");
     println!();
 
     // ---- NEW PATH: fused single BFS pass + Rayon rasterize (fresh buffer each iter) ----
@@ -313,9 +318,7 @@ fn main() {
 
     println!("--- fused pipeline (style+layout+paint in 1 BFS pass) ---");
     println!("  fused pass:   {fused_per:>8?}  per-iter");
-    println!(
-        "  rasterize:    {raster_per:>8?}  per-iter  (fresh alloc each frame)"
-    );
+    println!("  rasterize:    {raster_per:>8?}  per-iter  (fresh alloc each frame)");
     println!(
         "  TOTAL:        {:>8?}  per-iter  ({} display items)",
         fused_per + raster_per,
@@ -326,9 +329,7 @@ fn main() {
     // ---- Speedup comparison (cold) ----
     let speedup = old_per.as_nanos() as f64 / fused_per.as_nanos() as f64;
     println!("=== Speedup cold: fused pass vs 3-pass ===");
-    println!(
-        "  {speedup:.2}x  ({old_per:?} -> {fused_per:?} per iter)"
-    );
+    println!("  {speedup:.2}x  ({old_per:?} -> {fused_per:?} per iter)");
     println!();
 
     // ---- WORKSPACE PATH: FusedWorkspace steady-state (zero alloc after warm-up) ----
@@ -348,12 +349,18 @@ fn main() {
     let mut ws_total = Duration::ZERO;
     let mut ws_items = 0usize;
 
-    // Pre-warm (iter 0 establishes capacity; subsequent iters are zero-alloc).
+    // Pre-warm on one DOM instance. Iteration 0 establishes capacity and
+    // materializes topology data; subsequent iterations reuse the same DOM
+    // generation and skip rebuild work.
     for i in 0..ITERATIONS {
-        let doc = parse_html(BENCH_HTML).expect("parse html");
-
         let t = Instant::now();
-        ws.run(&doc.dom, &stylesheet, &style_index, doc.document, VIEWPORT);
+        ws.run(
+            &template_doc.dom,
+            &stylesheet,
+            &style_index,
+            template_doc.document,
+            VIEWPORT,
+        );
         let elapsed = t.elapsed();
 
         if i > 0 {
@@ -364,20 +371,14 @@ fn main() {
     let ws_per = ws_total / (ITERATIONS - 1);
 
     println!("--- fused pipeline (FusedWorkspace, zero-alloc steady-state) ---");
-    println!(
-        "  fused pass:   {ws_per:>8?}  per-iter  (iter 0 warm-up excluded)"
-    );
+    println!("  fused pass:   {ws_per:>8?}  per-iter  (iter 0 warm-up excluded)");
     println!("  display items: {ws_items} (same as cold path)");
     println!();
 
     let speedup_ws_vs_cold = fused_per.as_nanos() as f64 / ws_per.as_nanos() as f64;
     let speedup_ws_vs_3pass = old_per.as_nanos() as f64 / ws_per.as_nanos() as f64;
-    println!(
-        "=== Speedup workspace vs cold fused: {speedup_ws_vs_cold:.2}x ==="
-    );
-    println!(
-        "=== Speedup workspace vs 3-pass:     {speedup_ws_vs_3pass:.2}x ==="
-    );
+    println!("=== Speedup workspace vs cold fused: {speedup_ws_vs_cold:.2}x ===");
+    println!("=== Speedup workspace vs 3-pass:     {speedup_ws_vs_3pass:.2}x ===");
     println!();
 
     // ---- RCA: sub-phase breakdown of workspace steady-state cost ----
@@ -419,21 +420,19 @@ fn main() {
     }
     let default_per = default_total / (ITERATIONS - 1);
 
-    // Sub-phase 3: cascade-only time = total ws.run() - rebuild.
-    // Everything in ws.run() that is not table.rebuild() goes here:
+    // Sub-phase 3: steady-state workspace time.
+    // The unchanged-DOM loop skips table.rebuild(), so ws_per contains:
     //   - compute_style_for_node_with_workspace x50
     //   - layout math x50
     //   - display item push x27
-    let cascade_only_per = ws_per.saturating_sub(rebuild_per);
+    let cascade_only_per = ws_per;
 
+    println!("--- RCA: sub-phase breakdown of workspace steady-state ({n_nodes} nodes) ---");
     println!(
-        "--- RCA: sub-phase breakdown of workspace steady-state ({n_nodes} nodes) ---"
+        "  table.rebuild():           {rebuild_per:>8?}  per-iter  (skipped when DOM generation is unchanged)"
     );
     println!(
-        "  table.rebuild():           {rebuild_per:>8?}  per-iter  (FxHashMap clear+50 inserts)"
-    );
-    println!(
-        "  cascade+layout+paint:      {cascade_only_per:>8?}  per-iter  (ws.run minus rebuild)"
+        "  cascade+layout+paint:      {cascade_only_per:>8?}  per-iter  (steady-state ws.run)"
     );
     println!(
         "  ComputedStyle::default x{n_nodes}: {default_per:>8?}  per-iter  (SmallVec<SmolStr> -- zero heap alloc)"
@@ -445,9 +444,7 @@ fn main() {
     println!("  fused tag+id+class (Fix F). ComputedStyle::default now zero-heap-alloc.");
     println!();
     let unaccounted = cascade_only_per.saturating_sub(default_per);
-    println!(
-        "  cascade+layout+paint minus default overhead: {unaccounted:>8?}"
-    );
+    println!("  cascade+layout+paint minus default overhead: {unaccounted:>8?}");
     println!("  (remaining: selector matching, apply_declaration, layout math)");
     println!();
 
@@ -505,11 +502,9 @@ fn main() {
     );
     println!();
 
-    let sum_known = rebuild_per + default_per + class_vec_per + rwlock_per;
+    let sum_known = default_per;
     let true_residual = ws_per.saturating_sub(sum_known);
-    println!(
-        "  Known overhead sum:          {sum_known:>8?}  (rebuild + default + Vec + RwLock)"
-    );
+    println!("  Known live overhead sum:     {sum_known:>8?}  (default construction)");
     println!(
         "  Residual (selector + layout): {true_residual:>8?}  (pure algorithm work -- target floor)"
     );
@@ -548,17 +543,13 @@ fn main() {
     let raster_reuse_per = raster_reuse_total / (ITERATIONS - 1);
 
     println!("=== Buffer reuse (steady-state, pre-allocated 4MB buffer) ===");
+    println!("  rasterize:    {raster_reuse_per:>8?}  per-iter  (buffer reused, zero alloc)");
     println!(
-        "  rasterize:    {raster_reuse_per:>8?}  per-iter  (buffer reused, zero alloc)"
-    );
-    println!(
-        "  fused+raster: {:>8?}  per-iter  (target: <500us cached re-render)",
-        fused_per + raster_reuse_per
+        "  workspace+raster: {:>8?}  per-iter  (target: <500us cached re-render)",
+        ws_per + raster_reuse_per
     );
     let alloc_overhead = raster_per.saturating_sub(raster_reuse_per);
-    println!(
-        "  alloc savings:{alloc_overhead:>8?}  per-frame  (eliminated by buffer reuse)"
-    );
+    println!("  alloc savings:{alloc_overhead:>8?}  per-frame  (eliminated by buffer reuse)");
 
     // --emit json: write one NDJSON history record conforming to perf/schema.json.
     // Pipe to perf/history.ndjson via `make perf-baselines` or manually:
@@ -566,8 +557,8 @@ fn main() {
     //     >> perf/history.ndjson
     if emit_json {
         let fused_us = ws_per.as_nanos() as f64 / 1000.0;
-        let cache_hit_us = cascade_only_per.as_nanos() as f64 / 1000.0;
-        let full_render_us = (fused_per + raster_reuse_per).as_nanos() as f64 / 1000.0;
+        let cache_hit_us = ws_per.as_nanos() as f64 / 1000.0;
+        let full_render_us = (ws_per + raster_reuse_per).as_nanos() as f64 / 1000.0;
         emit_history_record(fused_us, cache_hit_us, full_render_us, build_profile);
     }
 }

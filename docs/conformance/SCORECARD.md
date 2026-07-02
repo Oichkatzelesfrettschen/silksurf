@@ -6,10 +6,11 @@
 
 ## Last refresh
 
-  * Date: 2026-05-15 (P5.S2 + P5.S3 wave; WPT synthetic harness +
-    h2spec scaffold landed. test262 numbers unchanged from 2026-05-14.)
-  * Baseline date: 2026-05-15
-  * Reproducer: `scripts/conformance_run.sh`
+  * Date: 2026-07-01 (synthetic WPT runner covers HTML, CSS cascade,
+    layout rects, and paint-list invariants. test262 and h2spec rows remain
+    at their prior baselines.)
+  * Baseline date: 2026-07-01
+  * Reproducer: `cargo run -p silksurf-engine --bin wpt_runner -- --verbose`
 
 ## Harness summary
 
@@ -18,7 +19,7 @@
 | **test262** (lexer-only) | scaffolded | 157 of ~53 040 vendored .js files (numeric-literals subset) | 104 / 157 = 66.24 % at lexer level (2026-05-14 baseline). See `test262-scorecard.json` |
 | **TLS loader sanity** (silksurf-tls) | functional | 4 unit tests covering empty PEM, malformed PEM, default-host loader, root-store diagnostics | 4 / 4 pass |
 | **HTTP/2 (h2spec)** | scaffolded | `scripts/run_h2spec.sh` driver + JSON scorecard schema; in-tree h2 server still pending | 0 / 0 (stub -- needs in-tree server or operator-supplied `SILKSURF_H2_HOST`). See `crates/silksurf-engine/conformance/h2spec-scorecard.json` |
-| **HTML / CSS WPT (synthetic)** | scaffolded | 16 in-tree fixtures exercising HTML structure, attributes, void elements, lists, tables, forms, scripts, anchors, entities, CSS class / id / type selectors | 9 / 7 / 0 (pass / fail / skip), 56.25 % @ 2026-05-15 baseline. See `crates/silksurf-engine/conformance/wpt-scorecard.json` |
+| **HTML / CSS / Layout / Paint WPT (synthetic)** | functional | 62 in-tree fixtures exercising HTML structure, CSS selectors and properties, inline style cascade, Taffy layout rects, and fused paint-list suppression | 62 / 0 / 0 (pass / fail / skip), 100.00 % @ 2026-07-01 baseline. See `crates/silksurf-engine/conformance/wpt-scorecard.json` |
 | **TLS 1.3 RFC 8446 vectors** | DELEGATED | rustls owns protocol-level conformance; silksurf-tls only owns the loader / config / extra-CA surface | NOT YET MEASURED in-tree; relies on upstream rustls test suite. A first-party vector harness is queued (P5.S4 follow-on) |
 | **OCSP stapling (RFC 6066)** | DEFERRED | not yet enforced in silksurf-net | NOT YET MEASURED (P5.S4) |
 | **HSTS (RFC 6797)** | DEFERRED | not yet enforced in silksurf-net | NOT YET MEASURED (P5.S4) |
@@ -36,30 +37,27 @@
   * Runner kind: `lexer` (does NOT parse, compile, or evaluate).
   * Upgrade path: VM-based evaluation, queued as P5 + P7.
 
-### HTML / CSS WPT (synthetic)
+### HTML / CSS / Layout / Paint WPT (synthetic)
 
-  * 9 pass / 7 fail / 0 skip = 56.25 % across 16 in-tree fixtures.
+  * 62 pass / 0 fail / 0 skip = 100.00 % across 62 in-tree fixtures.
   * Reproducer:
     ```sh
     cargo run -p silksurf-engine --bin wpt_runner -- --verbose
     ```
   * Source: `crates/silksurf-engine/conformance/wpt-scorecard.json`.
   * Fixture set: `crates/silksurf-engine/conformance/wpt/fixtures/`
-    (15+ self-contained HTML files; each has a hard-coded structural
-    check inside `wpt_runner.rs`).
-  * Scope: parser-only -- the runner does not lay out, paint, or run
-    JavaScript. It validates the produced DOM and (for three CSS
-    fixtures) selector matching against the parsed DOM.
-  * Known failures expose real silksurf-html gaps tracked in
-    `silksurf-specification/SILKSURF-RUST-MIGRATION.md`:
-    void-element handling (`<br>`, `<hr>`, `<img>` open scope they
-    should not), implicit body insertion when text appears inside
-    `<title>`, and subsequent `</body>` misclosure. These are baseline
-    failures, not test-runner bugs; they motivate the upgrade path
-    toward a spec-fidelity tree builder.
-  * Upgrade path: vendor a real WPT subset (URL + Fetch + Encoding
-    first) once the engine boots through the rendering pipeline end-to-
-    end; track in `silksurf-specification/SILKSURF-RUST-MIGRATION.md`.
+    (62 self-contained HTML files; each has a registered check inside
+    `wpt_runner.rs`).
+  * Scope: synthetic WPT-style checks over the in-tree engine. The runner
+    validates produced DOM, CSS selector/property behavior, inline style
+    cascade ordering, flex layout rects, and fused display-list output. It does
+    not execute JavaScript or vendor the upstream WPT corpus.
+  * Paint coverage: `paint_visible_text_and_hidden_metadata.html` requires
+    visible body text and background color to reach `DisplayItem` output while
+    script, style, head metadata, and `display:none` body text stay out of the
+    paint list.
+  * Upgrade path: vendor a real WPT subset after the fixture runner grows URL,
+    Fetch, Encoding, DOM mutation, and JavaScript execution hooks.
 
 ### h2spec
 

@@ -87,7 +87,7 @@ pub struct CascadeView {
 }
 
 impl CascadeView {
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self {
             entries: Vec::new(),
@@ -122,18 +122,14 @@ impl CascadeView {
             let id = NodeId::from_raw(idx);
             // Compute parent_id for combinator tree walking.
             // u16 supports DOMs up to 65534 nodes; larger -> NO_PARENT (fallback).
-            let parent_id = dom
-                .parent(id)
-                .ok()
-                .flatten()
-                .map_or(NO_PARENT, |p| {
-                    let raw = p.raw();
-                    if raw < u16::MAX as usize {
-                        raw as u16
-                    } else {
-                        NO_PARENT
-                    }
-                });
+            let parent_id = dom.parent(id).ok().flatten().map_or(NO_PARENT, |p| {
+                let raw = p.raw();
+                if raw < u16::MAX as usize {
+                    raw as u16
+                } else {
+                    NO_PARENT
+                }
+            });
 
             let Ok(node) = dom.node(id) else {
                 self.entries.push(CascadeEntry {
@@ -215,20 +211,20 @@ impl CascadeView {
     }
 
     /// Number of entries (= number of nodes in the DOM).
-    #[must_use] 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
     /// Check if empty.
-    #[must_use] 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
     /// Class idents slice for a given entry.
     #[inline]
-    #[must_use] 
+    #[must_use]
     pub fn class_idents(&self, entry: &CascadeEntry) -> &[SelectorIdent] {
         let start = entry.class_start as usize;
         let end = start + entry.class_count as usize;
@@ -237,7 +233,7 @@ impl CascadeView {
 
     /// Id ident for a given entry, if present.
     #[inline]
-    #[must_use] 
+    #[must_use]
     pub fn id_ident(&self, entry: &CascadeEntry) -> Option<&SelectorIdent> {
         if entry.id_index == NO_ID {
             None
@@ -249,7 +245,7 @@ impl CascadeView {
     /// Parent `NodeId` for a given entry, if present and within u16 range.
     /// Returns None for root nodes or nodes with `parent_id` > `u16::MAX-1`.
     #[inline]
-    #[must_use] 
+    #[must_use]
     pub fn parent_of(&self, entry: &CascadeEntry) -> Option<NodeId> {
         if entry.parent_id == NO_PARENT {
             None

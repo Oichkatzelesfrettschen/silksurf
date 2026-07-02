@@ -23,8 +23,9 @@ pub(crate) mod style_soa;
 
 pub use matching::{Specificity, matches_selector, matches_selector_list, selector_specificity};
 pub use parser::{
-    AtRule, AtRuleBlock, CssParser, Declaration, Rule, StyleRule, Stylesheet, parse_stylesheet,
-    parse_stylesheet_bytes, parse_stylesheet_with_interner,
+    AtRule, AtRuleBlock, CssParser, Declaration, Rule, StyleRule, Stylesheet,
+    parse_declaration_list, parse_stylesheet, parse_stylesheet_bytes,
+    parse_stylesheet_with_interner,
 };
 
 /*
@@ -137,7 +138,7 @@ impl Default for CssTokenizer {
 }
 
 impl CssTokenizer {
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self {
             buffer: String::with_capacity(4096),

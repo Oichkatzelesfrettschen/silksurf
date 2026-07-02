@@ -42,7 +42,7 @@ pub struct SilkDomBuilder {
 }
 
 impl SilkDomBuilder {
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         let mut dom = Dom::new();
         dom.create_document(); // NodeId(0) = document root

@@ -1,21 +1,15 @@
 /*
  * taffy_layout.rs -- CSS Flexbox + Grid layout via the taffy crate.
  *
- * WHY: The hand-written flex.rs algorithm covers flex-direction, flex-grow,
- * flex-shrink, flex-basis, and justify-content, but has no CSS Grid support
- * and does not handle the taffy measure protocol needed for correct text
- * intrinsic sizing.  taffy is a production layout engine (used by Bevy, Dioxus,
- * Slint) that covers Block, Flexbox, and Grid with a stable, audited API.
+ * TaffyLayout holds a cached TaffyTree<()> plus a mapping from taffy NodeId to
+ * BFS index.  rebuild() reconstructs the tree from the DOM, BFS traversal
+ * table, and per-node ComputedStyles.  Single direct text children merge into
+ * their parent taffy leaf.  compute() runs layout with a measure function that
+ * calls silksurf_text::measure_text for text leaves.  write_rects() extracts
+ * absolute positions into node_rects[].
  *
- * WHAT: TaffyLayout holds a cached TaffyTree<()> plus a mapping from taffy
- * NodeId to BFS index.  rebuild() reconstructs the tree from the BFS traversal
- * table and the per-node ComputedStyles.  compute() runs the layout algorithm
- * with a measure function that calls silksurf_text::measure_text for text leaf
- * nodes.  write_rects() extracts absolute positions into node_rects[].
- *
- * HOW:
  *   let mut tl = TaffyLayout::new();
- *   tl.rebuild(&table, &styles);
+ *   tl.rebuild(dom, &table, &styles);
  *   tl.compute(dom, &styles, &table.bfs_order, viewport);
  *   tl.write_rects(&table.parent_idx, &mut node_rects, viewport);
  *
@@ -27,19 +21,21 @@ use rustc_hash::FxHashMap;
 use silksurf_css::{
     AlignItems as CssAlignItems, AlignSelf as CssAlignSelf, ComputedStyle, Display as CssDisplay,
     FlexBasis, FlexDirection as CssFlexDirection, FlexWrap as CssFlexWrap,
-    GridAutoFlow as CssGridAutoFlow, GridLine as CssGridLine,
-    GridTrackMax as CssGridTrackMax, GridTrackMin as CssGridTrackMin,
-    GridTrackSize as CssGridTrackSize, JustifyContent as CssJustifyContent, Length, LengthOrAuto,
+    GridAutoFlow as CssGridAutoFlow, GridLine as CssGridLine, GridTrackMax as CssGridTrackMax,
+    GridTrackMin as CssGridTrackMin, GridTrackSize as CssGridTrackSize,
+    JustifyContent as CssJustifyContent, Length, LengthOrAuto,
 };
 use silksurf_dom::{Dom, NodeId as DomNodeId, NodeKind};
 use taffy::{
     AlignItems, AlignSelf, AvailableSpace, Dimension, Display as TaffyDisplay, FlexDirection,
     FlexWrap, GridAutoFlow, GridPlacement, GridTemplateComponent, JustifyContent, LengthPercentage,
     LengthPercentageAuto, Line, MaxTrackSizingFunction, MinTrackSizingFunction, NodeId as TaffyId,
-    Size, Style, TaffyTree, TrackSizingFunction, geometry::Rect as TaffyRect,
-    style_helpers::{TaffyAuto as _, TaffyFitContent as _, TaffyMaxContent as _,
-                   TaffyMinContent as _, fr, length, minmax, percent, line as taffy_line,
-                   span as taffy_span},
+    Size, Style, TaffyTree, TrackSizingFunction,
+    geometry::Rect as TaffyRect,
+    style_helpers::{
+        TaffyAuto as _, TaffyFitContent as _, TaffyMaxContent as _, TaffyMinContent as _, fr,
+        length, line as taffy_line, minmax, percent, span as taffy_span,
+    },
 };
 
 use crate::{Rect, neighbor_table::LayoutNeighborTable};
@@ -55,50 +51,99 @@ pub struct TaffyLayout {
     taffy_nodes: Vec<Option<TaffyId>>,
     /// Reverse map: taffy id -> BFS index (for the measure-function lookup).
     taffy_to_bfs: FxHashMap<TaffyId, usize>,
+    /// Reused child-id list for parent node construction.
+    child_ids_scratch: Vec<TaffyId>,
+    /// Per-compute text measurement cache keyed by BFS index.
+    text_measure_cache: Vec<CachedTextMeasures>,
+}
+
+#[derive(Clone, Copy)]
+struct CachedTextMeasure {
+    font_size: f32,
+    max_width: Option<f32>,
+    width: f32,
+    height: f32,
+    text_len: usize,
+}
+
+impl CachedTextMeasure {
+    fn matches(self, font_size: f32, max_width: Option<f32>) -> bool {
+        self.font_size == font_size && self.max_width == max_width
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+struct CachedTextMeasures {
+    entries: [Option<CachedTextMeasure>; 4],
+    next_replace: usize,
+}
+
+impl CachedTextMeasures {
+    fn get(self, font_size: f32, max_width: Option<f32>) -> Option<CachedTextMeasure> {
+        self.entries
+            .into_iter()
+            .flatten()
+            .find(|cached| cached.matches(font_size, max_width))
+    }
+
+    fn insert(&mut self, measure: CachedTextMeasure) {
+        if let Some(slot) = self.entries.iter_mut().find(|entry| entry.is_none()) {
+            *slot = Some(measure);
+            return;
+        }
+        self.entries[self.next_replace] = Some(measure);
+        self.next_replace = (self.next_replace + 1) % self.entries.len();
+    }
 }
 
 impl TaffyLayout {
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self {
             tree: TaffyTree::new(),
             taffy_nodes: Vec::new(),
             taffy_to_bfs: FxHashMap::default(),
+            child_ids_scratch: Vec::new(),
+            text_measure_cache: Vec::new(),
         }
     }
 
     /// Reconstruct the taffy tree from BFS table + computed styles.
     ///
     /// Must be called before `compute()` whenever the DOM or styles have changed.
-    pub fn rebuild(&mut self, table: &LayoutNeighborTable, styles: &[Option<ComputedStyle>]) {
-        self.tree = TaffyTree::new();
+    pub fn rebuild(
+        &mut self,
+        dom: &Dom,
+        table: &LayoutNeighborTable,
+        styles: &[Option<ComputedStyle>],
+    ) {
+        self.tree.clear();
         let n = table.len();
         self.taffy_nodes.clear();
         self.taffy_nodes.resize(n, None);
         self.taffy_to_bfs.clear();
 
-        // For each BFS node, collect its taffy children so we can build
-        // taffy parent nodes after their children are created.
-        let mut children_of: Vec<Vec<usize>> = vec![vec![]; n];
-        for i in 1..n {
-            let pidx = table.parent_idx[i] as usize;
-            children_of[pidx].push(i);
-        }
-
         // Process in reverse BFS order: children before parents so
         // taffy node IDs are available when we build the parent node.
         for i in (0..n).rev() {
+            if taffy_node_merges_into_parent(dom, table, styles, i) {
+                continue;
+            }
             let taffy_style = css_to_taffy_style(styles.get(i).and_then(Option::as_ref));
+            self.child_ids_scratch.clear();
+            let first_child = table.child_start[i];
+            if first_child != u32::MAX {
+                let start = first_child as usize;
+                let end = start + usize::from(table.child_count[i]);
+                self.child_ids_scratch
+                    .extend((start..end).filter_map(|child_idx| self.taffy_nodes[child_idx]));
+            }
 
-            let child_ids: Vec<TaffyId> = children_of[i]
-                .iter()
-                .filter_map(|&c| self.taffy_nodes[c])
-                .collect();
-
-            let result = if child_ids.is_empty() {
+            let result = if self.child_ids_scratch.is_empty() {
                 self.tree.new_leaf(taffy_style)
             } else {
-                self.tree.new_with_children(taffy_style, &child_ids)
+                self.tree
+                    .new_with_children(taffy_style, &self.child_ids_scratch)
             };
 
             if let Ok(tn) = result {
@@ -118,21 +163,37 @@ impl TaffyLayout {
         bfs_order: &[DomNodeId],
         viewport: Rect,
     ) -> bool {
-        let Some(root) = self.taffy_nodes.first().and_then(|n| *n) else { return false; };
+        let trace_taffy = std::env::var_os("SILKSURF_TRACE_TAFFY").is_some();
+        let mut measure_calls = 0usize;
+        let mut text_measure_calls = 0usize;
+        let mut text_measure_bytes = 0usize;
+        let mut max_text_measure_bytes = 0usize;
+        let mut text_measure_elapsed = std::time::Duration::ZERO;
+        let mut text_cache_hits = 0usize;
+        let Some(root) = self.taffy_nodes.first().and_then(|n| *n) else {
+            return false;
+        };
         let available = Size {
             width: AvailableSpace::Definite(viewport.width),
             height: AvailableSpace::Definite(viewport.height),
         };
+        self.text_measure_cache.clear();
+        self.text_measure_cache
+            .resize(self.taffy_nodes.len(), CachedTextMeasures::default());
 
         // Split borrow: tree needs &mut, taffy_to_bfs needs &.
         let TaffyLayout {
-            tree, taffy_to_bfs, ..
+            tree,
+            taffy_to_bfs,
+            text_measure_cache,
+            ..
         } = self;
 
-        tree.compute_layout_with_measure(
+        let result = tree.compute_layout_with_measure(
             root,
             available,
             |known, avail, taffy_node_id, _ctx, _style| {
+                measure_calls += 1;
                 let Some(&bfs_idx) = taffy_to_bfs.get(&taffy_node_id) else {
                     return Size::ZERO;
                 };
@@ -150,36 +211,54 @@ impl TaffyLayout {
                     _ => None,
                 };
 
-                let Some(&dom_node_id) = bfs_order.get(bfs_idx) else {
-                    return Size::ZERO;
-                };
+                if let Some((size, text_len, elapsed, cache_hit)) = measure_taffy_text_node(
+                    dom,
+                    bfs_order,
+                    bfs_idx,
+                    font_size,
+                    max_w,
+                    text_measure_cache,
+                ) {
+                    if cache_hit {
+                        text_cache_hits += 1;
+                    } else {
+                        text_measure_elapsed += elapsed;
+                    }
+                    text_measure_calls += 1;
+                    text_measure_bytes += text_len;
+                    max_text_measure_bytes = max_text_measure_bytes.max(text_len);
+                    return size;
+                }
 
-                if let Ok(node) = dom.node(dom_node_id)
-                    && let NodeKind::Text { text } = node.kind()
+                if bfs_order.get(bfs_idx).is_none() {
+                    return Size::ZERO;
+                }
+
+                if let Some(line_h) = styles.get(bfs_idx).and_then(Option::as_ref).map(|s| match s
+                    .line_height
                 {
-                    let (w, h) = silksurf_text::measure_text(text, font_size, max_w);
+                    Length::Px(px) => px,
+                    _ => 16.0,
+                }) {
                     return Size {
-                        width: w,
-                        height: h,
+                        width: known.width.unwrap_or(0.0),
+                        height: known.height.unwrap_or(line_h),
                     };
                 }
 
                 // Element leaf node with no text: use line_height as minimum height.
-                let line_h = styles
-                    .get(bfs_idx)
-                    .and_then(Option::as_ref)
-                    .map_or(16.0, |s| match s.line_height {
-                        Length::Px(px) => px,
-                        _ => 16.0,
-                    });
-
                 Size {
                     width: known.width.unwrap_or(0.0),
-                    height: known.height.unwrap_or(line_h),
+                    height: known.height.unwrap_or(16.0),
                 }
             },
-        )
-        .is_ok()
+        );
+        if trace_taffy {
+            eprintln!(
+                "[SilkSurf] taffy measure: calls={measure_calls}, text_calls={text_measure_calls}, text_cache_hits={text_cache_hits}, text_bytes={text_measure_bytes}, max_text_bytes={max_text_measure_bytes}, text_time={text_measure_elapsed:?}"
+            );
+        }
+        result.is_ok()
     }
 
     /// Write absolute positions from taffy layout results into `node_rects`.
@@ -190,8 +269,18 @@ impl TaffyLayout {
     pub fn write_rects(&self, parent_idx: &[u32], node_rects: &mut [Rect], viewport: Rect) {
         let n = self.taffy_nodes.len().min(node_rects.len());
         for i in 0..n {
-            let Some(tn) = self.taffy_nodes[i] else { continue; };
-            let Ok(layout) = self.tree.layout(tn) else { continue; };
+            let Some(tn) = self.taffy_nodes[i] else {
+                if parent_idx[i] != u32::MAX {
+                    let parent = parent_idx[i] as usize;
+                    if parent < node_rects.len() {
+                        node_rects[i] = node_rects[parent];
+                    }
+                }
+                continue;
+            };
+            let Ok(layout) = self.tree.layout(tn) else {
+                continue;
+            };
 
             let (parent_x, parent_y) = if parent_idx[i] == u32::MAX {
                 (viewport.x, viewport.y)
@@ -223,6 +312,129 @@ impl Default for TaffyLayout {
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
+
+fn measure_taffy_text_node(
+    dom: &Dom,
+    bfs_order: &[DomNodeId],
+    bfs_idx: usize,
+    font_size: f32,
+    max_width: Option<f32>,
+    cache: &mut [CachedTextMeasures],
+) -> Option<(Size<f32>, usize, std::time::Duration, bool)> {
+    if let Some(cached) = cache
+        .get(bfs_idx)
+        .and_then(|entries| entries.get(font_size, max_width))
+    {
+        return Some((
+            Size {
+                width: cached.width,
+                height: cached.height,
+            },
+            cached.text_len,
+            std::time::Duration::ZERO,
+            true,
+        ));
+    }
+
+    let dom_node_id = *bfs_order.get(bfs_idx)?;
+    let text = taffy_measure_text(dom, dom_node_id)?;
+    let measure_start = std::time::Instant::now();
+    let (width, height) = silksurf_text::measure_text(text, font_size, max_width);
+    let elapsed = measure_start.elapsed();
+    let text_len = text.len();
+    if let Some(slot) = cache.get_mut(bfs_idx) {
+        slot.insert(CachedTextMeasure {
+            font_size,
+            max_width,
+            width,
+            height,
+            text_len,
+        });
+    }
+    Some((Size { width, height }, text_len, elapsed, false))
+}
+
+fn taffy_measure_text(dom: &Dom, node_id: DomNodeId) -> Option<&str> {
+    let node = dom.node(node_id).ok()?;
+    if let NodeKind::Text { text } = node.kind() {
+        return Some(text);
+    }
+    single_direct_text_child(dom, node_id)
+}
+
+fn single_direct_text_child(dom: &Dom, node_id: DomNodeId) -> Option<&str> {
+    let children = dom.children(node_id).ok()?;
+    let mut text = None;
+    for &child in children {
+        let child_node = dom.node(child).ok()?;
+        match child_node.kind() {
+            NodeKind::Text { text: child_text } => {
+                if text.replace(child_text.as_str()).is_some() {
+                    return None;
+                }
+            }
+            _ => return None,
+        }
+    }
+    text
+}
+
+fn taffy_node_merges_into_parent(
+    dom: &Dom,
+    table: &LayoutNeighborTable,
+    styles: &[Option<ComputedStyle>],
+    index: usize,
+) -> bool {
+    if styles
+        .get(index)
+        .and_then(Option::as_ref)
+        .is_none_or(|style| style.display == CssDisplay::None)
+    {
+        return index != 0;
+    }
+    let Some(node_id) = table.bfs_order.get(index).copied() else {
+        return false;
+    };
+    let Ok(node) = dom.node(node_id) else {
+        return false;
+    };
+    matches!(node.kind(), NodeKind::Text { .. })
+        && text_node_parent_is_text_leaf(dom, table, styles, index)
+}
+
+fn text_node_parent_is_text_leaf(
+    dom: &Dom,
+    table: &LayoutNeighborTable,
+    styles: &[Option<ComputedStyle>],
+    index: usize,
+) -> bool {
+    let parent = table.parent_idx.get(index).copied().unwrap_or(u32::MAX);
+    if parent == u32::MAX {
+        return false;
+    }
+    let parent = parent as usize;
+    let Some(parent_node) = table.bfs_order.get(parent).copied() else {
+        return false;
+    };
+    if single_direct_text_child(dom, parent_node).is_none() {
+        return false;
+    }
+    let Some(first_child) = table.child_start.get(parent).copied() else {
+        return false;
+    };
+    if first_child == u32::MAX {
+        return false;
+    }
+    let start = first_child as usize;
+    let end = start + usize::from(table.child_count[parent]);
+    (start..end).all(|child| {
+        child == index
+            || styles
+                .get(child)
+                .and_then(Option::as_ref)
+                .is_some_and(|style| style.display == CssDisplay::None)
+    })
+}
 
 fn length_auto(l: Length) -> LengthPercentageAuto {
     match l {
@@ -550,12 +762,12 @@ mod tests {
     }
 
     #[test]
-    fn rebuild_produces_nodes_for_each_bfs_entry() {
+    fn rebuild_produces_slots_for_each_bfs_entry() {
         let (dom, root) = make_dom_with_text();
         let table = LayoutNeighborTable::build(&dom, root);
         let styles: Vec<Option<ComputedStyle>> = vec![None; table.len()];
         let mut tl = TaffyLayout::new();
-        tl.rebuild(&table, &styles);
+        tl.rebuild(&dom, &table, &styles);
         assert_eq!(tl.taffy_nodes.len(), table.len());
         assert!(tl.taffy_nodes[0].is_some(), "root must have a taffy node");
     }
@@ -572,7 +784,7 @@ mod tests {
             height: 600.0,
         };
         let mut tl = TaffyLayout::new();
-        tl.rebuild(&table, &styles);
+        tl.rebuild(&dom, &table, &styles);
         let ok = tl.compute(&dom, &styles, &table.bfs_order, viewport);
         assert!(ok);
     }
@@ -589,7 +801,7 @@ mod tests {
             height: 600.0,
         };
         let mut tl = TaffyLayout::new();
-        tl.rebuild(&table, &styles);
+        tl.rebuild(&dom, &table, &styles);
         tl.compute(&dom, &styles, &table.bfs_order, viewport);
         let mut node_rects = vec![Rect::default(); table.len()];
         tl.write_rects(&table.parent_idx, &mut node_rects, viewport);
@@ -644,7 +856,7 @@ mod tests {
             height: 100.0,
         };
         let mut tl = TaffyLayout::new();
-        tl.rebuild(&table, &styles);
+        tl.rebuild(&dom, &table, &styles);
         tl.compute(&dom, &styles, &table.bfs_order, viewport);
         let mut node_rects = vec![Rect::default(); n];
         tl.write_rects(&table.parent_idx, &mut node_rects, viewport);

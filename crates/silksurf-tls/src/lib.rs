@@ -110,7 +110,7 @@ pub struct TlsConfig {
 
 impl TlsConfig {
     /// Create TLS config with Mozilla + system root certificates.
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         let (roots, _) = build_root_store();
 
@@ -128,7 +128,7 @@ impl TlsConfig {
     /// This variant advertises h2 support; servers that support HTTP/2 will negotiate it.
     /// Used only by the h2 parallel-fetch path in silksurf-net; single-URL fetches
     /// via `BasicClient::fetch` continue to use the default (HTTP/1.1) config.
-    #[must_use] 
+    #[must_use]
     pub fn new_h2() -> Self {
         let (roots, _) = build_root_store();
         let mut config = ClientConfig::builder()
@@ -236,7 +236,7 @@ impl TlsConfig {
     }
 
     /// Create TLS config that accepts any certificate (INSECURE -- for debugging only).
-    #[must_use] 
+    #[must_use]
     pub fn new_insecure() -> Self {
         let config = ClientConfig::builder()
             .dangerous()
@@ -248,7 +248,7 @@ impl TlsConfig {
     }
 
     /// Create insecure TLS config with ALPN `["h2", "http/1.1"]`.
-    #[must_use] 
+    #[must_use]
     pub fn new_insecure_h2() -> Self {
         let mut config = ClientConfig::builder()
             .dangerous()
@@ -260,7 +260,7 @@ impl TlsConfig {
         }
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn inner(&self) -> Arc<ClientConfig> {
         self.inner.clone()
     }
@@ -272,7 +272,7 @@ impl Default for TlsConfig {
     }
 }
 
-#[must_use] 
+#[must_use]
 pub fn root_store_diagnostics() -> RootStoreDiagnostics {
     build_root_store().1
 }
@@ -344,7 +344,7 @@ pub struct RustlsProvider {
 }
 
 impl RustlsProvider {
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self {
             config: TlsConfig::new(),
@@ -353,7 +353,7 @@ impl RustlsProvider {
     }
 
     /// Create a provider that skips certificate verification (INSECURE).
-    #[must_use] 
+    #[must_use]
     pub fn new_insecure() -> Self {
         Self {
             config: TlsConfig::new_insecure(),

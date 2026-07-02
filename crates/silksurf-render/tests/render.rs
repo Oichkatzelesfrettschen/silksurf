@@ -2,7 +2,8 @@ use silksurf_core::SilkArena;
 use silksurf_css::{Color, compute_styles, parse_stylesheet};
 use silksurf_dom::{Dom, NodeKind};
 use silksurf_layout::{Rect, build_layout_tree};
-use silksurf_render::{DisplayItem, DisplayList, build_display_list};
+use silksurf_render::{DisplayItem, DisplayList, ImageSurface, build_display_list};
+use std::sync::Arc;
 
 #[test]
 fn builds_display_list_for_backgrounds() {
@@ -108,6 +109,31 @@ fn rasterizes_solid_color_rect() {
     assert_eq!(buffer[idx + 1], 20);
     assert_eq!(buffer[idx + 2], 30);
     assert_eq!(buffer[idx + 3], 255);
+}
+
+#[test]
+fn rasterizes_image_surface() {
+    let list = DisplayList {
+        items: vec![DisplayItem::Image {
+            rect: Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 2.0,
+                height: 1.0,
+            },
+            image: ImageSurface {
+                width: 2,
+                height: 1,
+                rgba: Arc::<[u8]>::from(vec![255, 0, 0, 255, 0, 255, 0, 255]),
+            },
+        }],
+        tiles: None,
+    };
+
+    let buffer = silksurf_render::rasterize(&list, 2, 1);
+
+    assert_eq!(&buffer[0..4], &[255, 0, 0, 255]);
+    assert_eq!(&buffer[4..8], &[0, 255, 0, 255]);
 }
 
 #[test]

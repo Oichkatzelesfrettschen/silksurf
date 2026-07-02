@@ -1,14 +1,17 @@
 # silksurf-net
 
-HTTP/1.1 + HTTP/2 client, persistent on-disk response cache, conditional
-GET (ETag / Last-Modified) revalidation. Built on `tokio` + `rustls` +
-`h2` + `hickory-resolver`.
+HTTP/1.1 + HTTP/2 client, WebSocket probe transport, content-encoding
+decode, persistent on-disk response cache, and conditional GET
+(ETag / Last-Modified) revalidation. Built on `tokio` + `rustls` + `h2` +
+`tokio-tungstenite` + `hickory-resolver`.
 
 ## Public API
 
   * `BasicClient` -- synchronous-style client (`fetch(&request) ->
     Result<Response, NetError>`).
   * `H2Client` -- HTTP/2 multiplexed client (`tokio_rustls` + `h2`).
+  * `websocket_text_roundtrip` -- blocking WebSocket text exchange backed
+    by a current-thread Tokio runtime.
   * `HttpRequest`, `HttpResponse`, `HttpMethod`, `HttpHeaders`.
   * `ResponseCache`, `CachedResponse`, `CachedResponseDisk` --
     in-memory cache + on-disk JSON persistence at
@@ -18,6 +21,9 @@ GET (ETag / Last-Modified) revalidation. Built on `tokio` + `rustls` +
     surfaced through speculative rendering.
   * `NetError` -- crate-local error; `From<NetError> for
     silksurf_core::SilkError` at the bottom of `lib.rs`.
+  * `content-encoding` -- default feature that advertises and decodes
+    `br`, `gzip`, and `deflate`. Disable default features for a smaller
+    identity-only embedded build.
 
 ## Cache semantics
 
@@ -29,9 +35,11 @@ GET (ETag / Last-Modified) revalidation. Built on `tokio` + `rustls` +
 
 ## Status
 
-Functional for HTTP/1.1, HTTP/2, persistent cache, conditional GET.
-HTTP/3, OCSP stapling, HSTS enforcement, max-body-size cap, and CORS
-are tracked in roadmap (P5 conformance, P8.S8 DoS bounds).
+Functional for HTTP/1.1, HTTP/2, WebSocket text roundtrip, Brotli/gzip/deflate
+response decode, persistent cache, conditional GET, and response-size bounds.
+The Boa host exposes the text roundtrip through a minimal browser
+`WebSocket` object. HTTP/3, persistent async browser sockets, OCSP stapling,
+HSTS enforcement, and CORS are tracked in roadmap.
 
 ## See Also
 

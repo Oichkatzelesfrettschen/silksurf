@@ -16,9 +16,17 @@ rustls = { workspace = true }
 rustc-hash = { workspace = true }
 tokio = { workspace = true }
 tokio-rustls = { workspace = true }
+tokio-tungstenite = { workspace = true }
+futures-util = { workspace = true }
 h2 = { workspace = true }
 bytes = { workspace = true }
 http = { workspace = true }
+flate2 = { workspace = true, optional = true }
+brotli-decompressor = { workspace = true, optional = true }
+
+[features]
+default = ["content-encoding"]
+content-encoding = ["dep:flate2", "dep:brotli-decompressor"]
 
 [lints]
 workspace = true

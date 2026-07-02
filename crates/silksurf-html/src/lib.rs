@@ -99,7 +99,7 @@ pub struct Tokenizer {
 }
 
 impl Tokenizer {
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self {
             buffer: String::new(),
@@ -232,11 +232,7 @@ impl Tokenizer {
         ))
     }
 
-    fn parse_doctype(
-        &mut self,
-        tokens: &mut Vec<Token>,
-        start: usize,
-    ) -> bool {
+    fn parse_doctype(&mut self, tokens: &mut Vec<Token>, start: usize) -> bool {
         let bytes = self.buffer.as_bytes();
         let mut cursor = start + 2 + "doctype".len();
         cursor = self.skip_whitespace(cursor);
@@ -450,7 +446,9 @@ impl Tokenizer {
     }
 
     fn parse_raw_text(&mut self, tokens: &mut Vec<Token>) -> bool {
-        let Some(tag) = self.raw_text_tag.clone() else { return true; };
+        let Some(tag) = self.raw_text_tag.clone() else {
+            return true;
+        };
         let bytes = self.buffer.as_bytes();
         let mut cursor = self.cursor;
         while cursor < bytes.len() {
@@ -524,7 +522,9 @@ impl Tokenizer {
                 cursor += 1;
                 let value_start = cursor;
                 let rest = &bytes[cursor..];
-                let Some(rel) = memchr(quote, rest) else { return Ok(AttributeParse::Incomplete); };
+                let Some(rel) = memchr(quote, rest) else {
+                    return Ok(AttributeParse::Incomplete);
+                };
                 let value_end = cursor + rel;
                 value = decode_character_references(&self.buffer[value_start..value_end]);
                 cursor = value_end + 1;
@@ -634,7 +634,9 @@ impl Tokenizer {
             return QuotedParse::MissingQuote;
         }
         let rest = &bytes[cursor + 1..];
-        let Some(rel) = memchr(quote, rest) else { return QuotedParse::Incomplete; };
+        let Some(rel) = memchr(quote, rest) else {
+            return QuotedParse::Incomplete;
+        };
         let end = cursor + 1 + rel;
         let value = self.buffer[cursor + 1..end].to_string();
         QuotedParse::Parsed(value, end + 1)

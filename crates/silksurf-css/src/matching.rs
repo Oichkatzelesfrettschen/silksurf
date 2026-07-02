@@ -41,7 +41,7 @@ pub struct Specificity {
 }
 
 impl Specificity {
-    #[must_use] 
+    #[must_use]
     pub fn zero() -> Self {
         Self {
             ids: 0,
@@ -156,7 +156,9 @@ fn matches_steps_rev(
     if from == 0 {
         return true;
     }
-    let Some(combinator) = steps[from].combinator else { return false; };
+    let Some(combinator) = steps[from].combinator else {
+        return false;
+    };
     // Helper: get parent via CascadeView (flat array) or dom.parent() (168-byte Node).
     let get_parent = |n: NodeId| -> Option<NodeId> {
         if let Some(v) = view {
@@ -293,9 +295,15 @@ fn matches_modifier(dom: &Dom, node: NodeId, modifier: &SelectorModifier) -> boo
 }
 
 fn matches_attribute(dom: &Dom, node: NodeId, attribute: &AttributeSelector) -> bool {
-    let Some(attr) = attribute_record(dom, node, &attribute.name) else { return false; };
-    let Some(operator) = attribute.operator else { return true; };
-    let Some(expected) = attribute.value.as_ref() else { return false; };
+    let Some(attr) = attribute_record(dom, node, &attribute.name) else {
+        return false;
+    };
+    let Some(operator) = attribute.operator else {
+        return true;
+    };
+    let Some(expected) = attribute.value.as_ref() else {
+        return false;
+    };
     if let (Some(atom), Some(value_atom)) = (expected.atom(), attr.value_atom) {
         if atom == value_atom {
             return true;
@@ -321,7 +329,9 @@ fn attribute_record<'a>(dom: &'a Dom, node: NodeId, name: &AttributeName) -> Opt
 }
 
 fn matches_id(dom: &Dom, node: NodeId, name: &SelectorIdent) -> bool {
-    let Ok(attrs) = dom.attributes(node) else { return false; };
+    let Ok(attrs) = dom.attributes(node) else {
+        return false;
+    };
     let Some(attr) = attrs.iter().find(|attr| attr.name == AttributeName::Id) else {
         return false;
     };
@@ -334,7 +344,9 @@ fn matches_id(dom: &Dom, node: NodeId, name: &SelectorIdent) -> bool {
 }
 
 fn matches_class(dom: &Dom, node: NodeId, name: &SelectorIdent) -> bool {
-    let Ok(attrs) = dom.attributes(node) else { return false; };
+    let Ok(attrs) = dom.attributes(node) else {
+        return false;
+    };
     let Some(attr) = attrs.iter().find(|attr| attr.name == AttributeName::Class) else {
         return false;
     };
@@ -377,9 +389,13 @@ fn matches_pseudo_class(dom: &Dom, node: NodeId, name: &SelectorIdent) -> bool {
         // :any-link / :link: true when the element is an anchor, area, or link
         // element with an href attribute present.
         "any-link" | "link" => {
-            let tag = dom.element_name(node).ok().flatten().unwrap_or("").to_ascii_lowercase();
-            matches!(tag.as_str(), "a" | "area" | "link")
-                && has_attr(dom, node, "href")
+            let tag = dom
+                .element_name(node)
+                .ok()
+                .flatten()
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            matches!(tag.as_str(), "a" | "area" | "link") && has_attr(dom, node, "href")
         }
         // :disabled / :enabled: reflect the disabled attribute on form elements.
         "disabled" => has_attr(dom, node, "disabled"),
@@ -387,7 +403,12 @@ fn matches_pseudo_class(dom: &Dom, node: NodeId, name: &SelectorIdent) -> bool {
         // :checked: true when input[type=checkbox|radio] has the checked attr,
         // or <option> has the selected attribute.
         "checked" => {
-            let tag = dom.element_name(node).ok().flatten().unwrap_or("").to_ascii_lowercase();
+            let tag = dom
+                .element_name(node)
+                .ok()
+                .flatten()
+                .unwrap_or("")
+                .to_ascii_lowercase();
             match tag.as_str() {
                 "input" => has_attr(dom, node, "checked"),
                 "option" => has_attr(dom, node, "selected"),
@@ -400,18 +421,33 @@ fn matches_pseudo_class(dom: &Dom, node: NodeId, name: &SelectorIdent) -> bool {
         // :required / :optional: reflect the required attribute.
         "required" => has_attr(dom, node, "required"),
         "optional" => {
-            let tag = dom.element_name(node).ok().flatten().unwrap_or("").to_ascii_lowercase();
+            let tag = dom
+                .element_name(node)
+                .ok()
+                .flatten()
+                .unwrap_or("")
+                .to_ascii_lowercase();
             matches!(tag.as_str(), "input" | "select" | "textarea")
                 && !has_attr(dom, node, "required")
         }
         // :read-only / :read-write: reflect the readonly attribute.
         // Elements without a relevant tag are read-only by default in CSS.
         "read-write" => {
-            let tag = dom.element_name(node).ok().flatten().unwrap_or("").to_ascii_lowercase();
+            let tag = dom
+                .element_name(node)
+                .ok()
+                .flatten()
+                .unwrap_or("")
+                .to_ascii_lowercase();
             matches!(tag.as_str(), "input" | "textarea") && !has_attr(dom, node, "readonly")
         }
         "read-only" => {
-            let tag = dom.element_name(node).ok().flatten().unwrap_or("").to_ascii_lowercase();
+            let tag = dom
+                .element_name(node)
+                .ok()
+                .flatten()
+                .unwrap_or("")
+                .to_ascii_lowercase();
             !matches!(tag.as_str(), "input" | "textarea") || has_attr(dom, node, "readonly")
         }
         // :placeholder-shown: true when a form element displays its placeholder.
@@ -425,8 +461,7 @@ fn matches_pseudo_class(dom: &Dom, node: NodeId, name: &SelectorIdent) -> bool {
         "defined" => true,
         // Form-validation pseudo-classes: no constraint validation in a static
         // renderer; default to false so validation styles don't appear.
-        "valid" | "invalid" | "in-range" | "out-of-range" | "user-valid"
-        | "user-invalid" => false,
+        "valid" | "invalid" | "in-range" | "out-of-range" | "user-valid" | "user-invalid" => false,
         // :playing / :paused: media element playback; false in static render.
         "playing" | "paused" => false,
         _ => false,
@@ -479,7 +514,9 @@ fn matches_functional_pseudo_class(
 
 // :has() -- true when any descendant of node matches the selector list.
 fn matches_has(dom: &Dom, node: NodeId, list: &SelectorList) -> bool {
-    let Some(children) = dom.children(node).ok() else { return false; };
+    let Some(children) = dom.children(node).ok() else {
+        return false;
+    };
     for child in children {
         if matches_selector_list(dom, *child, list) {
             return true;
@@ -493,8 +530,12 @@ fn matches_has(dom: &Dom, node: NodeId, list: &SelectorList) -> bool {
 
 // Returns 1-based position of node among element siblings from the start.
 fn element_child_index(dom: &Dom, node: NodeId) -> usize {
-    let Some(parent) = dom.parent(node).ok().flatten() else { return 0; };
-    let Some(siblings) = dom.children(parent).ok() else { return 0; };
+    let Some(parent) = dom.parent(node).ok().flatten() else {
+        return 0;
+    };
+    let Some(siblings) = dom.children(parent).ok() else {
+        return 0;
+    };
     let mut index = 0usize;
     for sibling in siblings {
         if dom.element_name(*sibling).ok().flatten().is_some() {
@@ -509,8 +550,12 @@ fn element_child_index(dom: &Dom, node: NodeId) -> usize {
 
 // Returns 1-based position of node among element siblings from the end.
 fn element_child_index_from_end(dom: &Dom, node: NodeId) -> usize {
-    let Some(parent) = dom.parent(node).ok().flatten() else { return 0; };
-    let Some(siblings) = dom.children(parent).ok() else { return 0; };
+    let Some(parent) = dom.parent(node).ok().flatten() else {
+        return 0;
+    };
+    let Some(siblings) = dom.children(parent).ok() else {
+        return 0;
+    };
     let mut index = 0usize;
     for sibling in siblings.iter().rev() {
         if dom.element_name(*sibling).ok().flatten().is_some() {
@@ -529,8 +574,12 @@ fn element_child_index_of_type(dom: &Dom, node: NodeId) -> usize {
         Some(t) => t.to_owned(),
         None => return 0,
     };
-    let Some(parent) = dom.parent(node).ok().flatten() else { return 0; };
-    let Some(siblings) = dom.children(parent).ok() else { return 0; };
+    let Some(parent) = dom.parent(node).ok().flatten() else {
+        return 0;
+    };
+    let Some(siblings) = dom.children(parent).ok() else {
+        return 0;
+    };
     let mut index = 0usize;
     for sibling in siblings {
         let same_tag = dom
@@ -554,8 +603,12 @@ fn element_child_index_of_type_from_end(dom: &Dom, node: NodeId) -> usize {
         Some(t) => t.to_owned(),
         None => return 0,
     };
-    let Some(parent) = dom.parent(node).ok().flatten() else { return 0; };
-    let Some(siblings) = dom.children(parent).ok() else { return 0; };
+    let Some(parent) = dom.parent(node).ok().flatten() else {
+        return 0;
+    };
+    let Some(siblings) = dom.children(parent).ok() else {
+        return 0;
+    };
     let mut index = 0usize;
     for sibling in siblings.iter().rev() {
         let same_tag = dom
@@ -582,7 +635,9 @@ fn is_last_of_type(dom: &Dom, node: NodeId) -> bool {
 }
 
 fn is_root(dom: &Dom, node: NodeId) -> bool {
-    let Some(parent) = dom.parent(node).ok().flatten() else { return false; };
+    let Some(parent) = dom.parent(node).ok().flatten() else {
+        return false;
+    };
     dom.node(parent)
         .map(|node| matches!(node.kind(), NodeKind::Document))
         .unwrap_or(false)

@@ -28,7 +28,7 @@ pub struct Clock {
 
 impl Clock {
     /// Create a clock at `start_nanos` since an arbitrary epoch.
-    #[must_use] 
+    #[must_use]
     pub fn new(start_nanos: u64) -> Self {
         Self {
             now_nanos: start_nanos,
@@ -36,7 +36,7 @@ impl Clock {
     }
 
     /// Read the current virtual time, in nanoseconds.
-    #[must_use] 
+    #[must_use]
     pub fn now_nanos(&self) -> u64 {
         self.now_nanos
     }
@@ -72,7 +72,7 @@ impl Rng {
     /// to the all-zero stream forever, so we substitute a fixed sentinel
     /// (the golden-ratio constant 0x9E3779B97F4A7C15) instead of
     /// silently producing garbage.
-    #[must_use] 
+    #[must_use]
     pub fn new(seed: u64) -> Self {
         let state = if seed == 0 {
             0x9E37_79B9_7F4A_7C15
