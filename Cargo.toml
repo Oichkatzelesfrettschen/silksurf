@@ -84,7 +84,7 @@ cosmic-text = "0.19"
 taffy = "0.10"
 # Cross-platform windowing and event loop (Bevy/Alacritty/wgpu lineage).
 # Used by silksurf-gui winit-backend to replace the XCB-only event loop.
-winit = "0.30"
+winit = { version = "0.30", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen"] }
 # Cross-platform software pixel buffer; surface.buffer_mut() -> &mut [u32].
 # silksurf-gui selects the exact platform features it presents through.
 softbuffer = { version = "0.4", default-features = false }
