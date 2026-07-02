@@ -131,6 +131,7 @@ scripts/gui_probe.sh --release --backend x11 --max-any-buffer-ns 10000
 scripts/gui_probe.sh --release --backend x11 --max-render-ns 10000
 scripts/gui_probe.sh --release --backend x11 --runs 5
 scripts/gui_probe.sh --release --backend x11 --runs 5 --max-overhead-ns 10000
+make gui-probe-o0-ai-chat
 ```
 
 `SILKSURF_TRACE_SHM_PHASES=1` adds Wayland SHM pump, buffer, seed, render,
@@ -139,6 +140,17 @@ diagnosis only; the extra `Instant` calls perturb sub-0.01ms totals.
 `--trace-app-frame` adds app-frame blit and chrome logs inside the measured
 render callback. Use it for diagnosis only; the stderr write perturbs
 sub-0.01ms totals.
+
+## HTML/CSS source and conformance lanes
+
+`make verify-conformance-sources` verifies the retained W3C and WHATWG source
+bundle without network access. `make fetch-conformance-sources` refreshes the
+same bundle with the recorded Mozilla user agent and rewrites `SHA256SUMS`.
+
+`make conformance-html-css` runs the HTML tokenizer harness, CSS corpus harness,
+and synthetic WPT-style engine runner. The lane exercises the embedded
+`html5ever` tree builder, the local CSS parser and cascade, Taffy-backed
+layout, and fused paint-list checks.
 
 ## Pre-commit/pre-push hook semantics
 
