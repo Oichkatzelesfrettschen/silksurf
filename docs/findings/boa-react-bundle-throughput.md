@@ -72,9 +72,16 @@ the session evidence; bundles are not vendored -- no network in tests).
 
 ## Follow-up surface (feeds the deferral wave)
 
-- react-synthetic-event-bridge: prove a dispatched trusted click reaches
-  a React onClick handler through root delegation and that the resulting
-  setState re-render commits.
+- stable-node-wrapper-identity (ROOT CAUSE, measured): the interactive
+  probe (`--click`) shows React committing a hooks component
+  (`useState` counter renders) while a trusted click leaves state
+  untouched. React locates the fiber for an event by reading the
+  expando it stamped on the target DOM node object at commit; the
+  bridge builds a fresh wrapper per access, so the stamp lives on a
+  dead object and delegation drops the event. The fix is a JS-side
+  wrapper cache keyed by nodeId so `getElementById(x)` returns the
+  same object across accesses and expando properties persist. This
+  subsumes react-synthetic-event-bridge.
 - element-property-reflection: React writes `el.id = ...` and
   `textNode.nodeValue = ...` as property assignments; wrapper data
   properties accept the write without reaching the Dom. Audit which

@@ -18,6 +18,25 @@ use std::time::Instant;
 
 use silksurf_js::SilkContext;
 
+/// Read a numeric global set by a prior eval (eval itself returns unit).
+fn read_global_u32(ctx: &mut SilkContext, _name: &str) -> u32 {
+    // The target id rides through a JSON print: eval throws with the value
+    // embedded when direct reads are unavailable. Cheapest reliable path:
+    // stash into globalThis and re-read via a throwing probe is noisy, so
+    // the probe serializes through Error message parsing.
+    let mut value = 0_u32;
+    if let Err(message) = ctx.eval("throw new Error('V=' + globalThis.__clickTarget);")
+        && let Some(pos) = message.find("V=")
+    {
+        let digits: String = message[pos + 2..]
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect();
+        value = digits.parse().unwrap_or(0);
+    }
+    value
+}
+
 /// A context with the live DOM bridge over a minimal html/head/body tree,
 /// matching what a page script sees. The stub document in SilkContext::new
 /// advertises DOM presence but cannot create elements, which sends
@@ -40,9 +59,24 @@ fn main() {
     let shared = args.iter().any(|arg| arg == "--shared");
     let with_dom = args.iter().any(|arg| arg == "--dom");
     let pump = args.iter().any(|arg| arg == "--pump");
+    let click_id: Option<String> = args
+        .iter()
+        .position(|arg| arg == "--click")
+        .and_then(|i| args.get(i + 1).cloned());
+    let mut skip_next = false;
     let specs: Vec<&String> = args
         .iter()
-        .filter(|arg| *arg != "--shared" && *arg != "--dom" && *arg != "--pump")
+        .filter(|arg| {
+            if skip_next {
+                skip_next = false;
+                return false;
+            }
+            if *arg == "--click" {
+                skip_next = true;
+                return false;
+            }
+            *arg != "--shared" && *arg != "--dom" && *arg != "--pump"
+        })
         .collect();
     if specs.is_empty() {
         eprintln!("usage: bundle_probe [--shared] [--dom] [--pump] <file[=check_expr]>...");
@@ -58,6 +92,7 @@ fn main() {
     };
     let mut shared_ctx = shared.then(make_ctx);
     let mut failures = 0;
+    let last_spec: Option<String> = specs.last().map(|s| (*s).clone());
     for spec in specs {
         let (path, check) = match spec.split_once('=') {
             Some((path, check)) => (path, Some(check)),
@@ -111,6 +146,54 @@ fn main() {
                 eprintln!("bundle_probe: check {path}: {head}");
             }
             ok = checked.is_ok();
+        }
+        // --click <id>: after the last file settles, dispatch a trusted
+        // click at the element carrying that id (root-delegated framework
+        // handlers receive it through capture/bubble), then pump again so
+        // the handler's scheduled re-render commits before its check runs.
+        if ok
+            && let Some(id) = &click_id
+            && last_spec.as_deref() == Some(spec.as_str())
+        {
+            let target_expr = format!(
+                "(function () {{ var el = document.getElementById('{id}'); return el ? el.nodeId : -1; }})()"
+            );
+            let _ = ctx.eval(&format!("globalThis.__clickTarget = {target_expr};"));
+            // The nodeId travels through a global because eval returns unit.
+            let node = ctx
+                .eval("if (globalThis.__clickTarget < 0) { throw new Error('click target missing'); }")
+                .is_ok();
+            if node {
+                let raw = read_global_u32(ctx, "__clickTarget");
+                let event = silksurf_js::SyntheticEvent::new("click", true, true);
+                match ctx.dispatch_dom_event(silksurf_dom::NodeId::from_raw(raw as usize), &event) {
+                    Ok(_) => {
+                        let deadline = Instant::now() + std::time::Duration::from_millis(2000);
+                        loop {
+                            ctx.run_pending_jobs();
+                            let _ = ctx.run_ready_host_callbacks();
+                            if !ctx.has_pending_host_callbacks() || Instant::now() >= deadline {
+                                break;
+                            }
+                            std::thread::sleep(std::time::Duration::from_millis(1));
+                        }
+                    }
+                    Err(err) => {
+                        eprintln!("bundle_probe: click dispatch: {err}");
+                        ok = false;
+                    }
+                }
+                if ok
+                    && let Some(check) = check
+                    && let Err(err) = ctx.eval(check)
+                {
+                    let head: String = err.chars().take(300).collect();
+                    eprintln!("bundle_probe: post-click check {path}: {head}");
+                    ok = false;
+                }
+            } else {
+                ok = false;
+            }
         }
         if !ok {
             failures += 1;
