@@ -33,7 +33,7 @@ use silksurf_css::{
 };
 use silksurf_dom::{Dom, NodeId, NodeKind};
 
-use crate::{Rect, length_or_auto_to_px, length_to_px};
+use crate::{Rect, length_or_auto_to_px, length_to_px, unresolved_font_relative_px};
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 use std::hash::BuildHasher;
@@ -170,9 +170,7 @@ pub fn layout_flex_container<S: BuildHasher>(
                     containing.height * pct / 100.0
                 }
             }
-            FlexBasis::Length(Length::Em(_) | Length::Rem(_)) => {
-                unreachable!("em/rem units must be resolved at cascade time before layout")
-            }
+            FlexBasis::Length(Length::Em(_) | Length::Rem(_)) => unresolved_font_relative_px(),
             FlexBasis::Auto => {
                 if is_row {
                     content_width

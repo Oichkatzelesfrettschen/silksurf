@@ -19,7 +19,6 @@
  * Children stored in ArenaVec (bump-allocated Vec). Zero heap allocation
  * during layout computation -- all temp storage in arena.
  *
- * TODO(perf): SoA conversion for Dimensions (Phase 4.4)
  * DONE(perf): Fused style-layout-paint pass (Phase 4.5) -- see fused_pipeline.rs
  * DONE(perf): NeighborTable for BFS-level parallel layout (Phase 4.7) -- neighbor_table.rs
  *
@@ -31,14 +30,6 @@
 pub mod flex;
 pub mod neighbor_table;
 pub mod taffy_layout;
-
-// dim-soa: SoA layout for Dimensions -- cache-friendly reflow support.
-// Exposed as pub so integration tests can reach it via the full path
-// silksurf_layout::dimensions_soa::DimensionsSoA.  Not re-exported at the
-// crate root, so it remains invisible to callers using glob imports or the
-// top-level crate API.
-#[cfg(feature = "dim-soa")]
-pub mod dimensions_soa;
 
 // unicode-bidi (UAX #9) and unicode-linebreak (UAX #14) are consumed by
 // bidi_level() and linebreak_opportunities() below.  Full integration into
@@ -523,13 +514,29 @@ impl LayoutBox<'_> {
     }
 }
 
+/*
+ * The cascade (silksurf-css resolve()) converts em/rem to px before any
+ * Length reaches layout.  A font-relative unit surviving to this point is
+ * a cascade regression, not a layout condition.  Layout answers with a
+ * deterministic 0 px instead of aborting the frame: release builds still
+ * paint the page, while the debug_assert! fails loudly in debug and test
+ * builds so the gate catches the regression.  Every em/rem match arm in
+ * this crate funnels through here; do not reintroduce per-site panics.
+ */
+#[cold]
+pub(crate) fn unresolved_font_relative_px() -> f32 {
+    debug_assert!(
+        false,
+        "em/rem units must be resolved at cascade time before layout"
+    );
+    0.0
+}
+
 pub(crate) fn length_to_px(length: Length) -> f32 {
     match length {
         Length::Px(value) => value,
         Length::Percent(_) => 0.0,
-        Length::Em(_) | Length::Rem(_) => {
-            unreachable!("em/rem units must be resolved at cascade time before layout")
-        }
+        Length::Em(_) | Length::Rem(_) => unresolved_font_relative_px(),
     }
 }
 
@@ -640,4 +647,30 @@ pub fn linebreak_opportunities(text: &str) -> Vec<usize> {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod unresolved_font_relative_length_tests {
+    use super::*;
+
+    /*
+     * The funnel keeps two contracts: debug and test builds fail loudly on
+     * an unresolved em/rem (the gate catches cascade regressions), and
+     * release builds degrade the value to 0 px instead of aborting the
+     * frame.  One test per profile; cargo compiles exactly one of them
+     * into any given build.
+     */
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "resolved at cascade time")]
+    fn debug_build_asserts_on_unresolved_em() {
+        let _ = length_to_px(Length::Em(1.5));
+    }
+
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn release_build_degrades_unresolved_em_to_zero_px() {
+        assert_eq!(length_to_px(Length::Em(1.5)), 0.0);
+        assert_eq!(length_to_px(Length::Rem(2.0)), 0.0);
+    }
 }

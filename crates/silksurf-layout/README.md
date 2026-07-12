@@ -28,8 +28,6 @@ positioned `Rect`s consumed by `silksurf-render`.
   * `LayoutNeighborTable::rebuild(dom)` is in-place; reuses capacity
     across calls. Replaces the prior `Vec<Vec<NodeId>>` `levels` field
     that allocated O(depth) inner Vecs per call.
-  * The Phase-4.4 `Dimensions` SoA TODO at `lib.rs` is queued in
-    roadmap P4; expected to further reduce per-node fetch cost.
 
 ## Status
 
