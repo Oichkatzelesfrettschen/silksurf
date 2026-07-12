@@ -75,6 +75,10 @@ name = "test262_boa"
 path = "src/bin/test262_boa.rs"
 
 [[bin]]
+name = "bundle_probe"
+path = "src/bin/bundle_probe.rs"
+
+[[bin]]
 name = "silksurf"
 path = "src/bin/main.rs"
 required-features = ["cli"]

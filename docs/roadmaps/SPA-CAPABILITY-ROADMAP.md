@@ -212,10 +212,20 @@ share files with the workstreams above and should land opportunistically:
 
 ## Named deferrals (not in this execution; each needs its own landing)
 
-- **boa-bundle-throughput-spike** -- FIRST item of the follow-on wave:
-  feed boa a production Next.js bundle standalone; measure parse and
-  execute time and correctness. This gates the chatgpt-com rung; if
-  boa chokes, the fix is upstream boa contribution, not a workaround.
+- **boa-bundle-throughput-spike** -- RUN 2026-07-12; verdict and numbers
+  in docs/findings/boa-react-bundle-throughput.md. React 18 mounts and
+  commits into the silksurf DOM (after ownerDocument and DOM-interface
+  constructor stubs landed); boa evaluates minified framework code at
+  roughly 6-16x V8 time (~1.3-1.9 MB/s), so a multi-megabyte payload
+  costs seconds of initial eval. Correctness does not gate the rung;
+  interaction latency remains unmeasured.
+- react-synthetic-event-bridge -- prove a trusted dispatched click
+  reaches a React onClick through root delegation and the setState
+  re-render commits (finding follow-up).
+- element-property-reflection -- frameworks assign el.id and
+  textNode.nodeValue as properties; wrapper data properties absorb the
+  write without reaching the Dom. Back reflected properties with
+  accessors (finding follow-up).
 - **cdn-challenge-reality-spike** -- TLS fingerprint (JA3/JA4) and
   challenge-JS survival against a Cloudflare-fronted test property;
   rustls default fingerprints may be challenged regardless of engine
