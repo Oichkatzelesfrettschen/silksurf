@@ -22,6 +22,10 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 silksurf-net = { path = "../silksurf-net", optional = true }
 silksurf-tls = { path = "../silksurf-tls", optional = true }
+# JS-executing conformance fixtures only (wpt_runner js_* checks). Optional so
+# the default engine dependency graph stays free of the JS runtime; the app
+# owns script execution in production.
+silksurf-js = { path = "../../silksurf-js", optional = true }
 
 [features]
 default = []
@@ -29,6 +33,7 @@ full = ["net"]
 net = ["dep:silksurf-net", "dep:silksurf-tls"]
 platform-verifier = ["net", "silksurf-tls/platform-verifier"]
 parallel-render = ["silksurf-render/parallel"]
+js-conformance = ["dep:silksurf-js"]
 
 # =============================================================================
 # Binaries

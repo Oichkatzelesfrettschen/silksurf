@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html>
+<head><title>js click preventDefault</title></head>
+<body>
+<a id="link" href="https://example.org/">follow</a>
+<script>
+document.getElementById('link').addEventListener('click', function (e) {
+  e.preventDefault();
+});
+</script>
+</body>
+</html>

@@ -310,7 +310,251 @@ fn run_one(path: &Path) -> Outcome {
         "css_media_width" => check_css_media_width(&parsed.dom, parsed.document, &source),
         // State pseudo-classes
         "css_pseudo_state" => check_css_pseudo_state(&parsed.dom, parsed.document, &source),
+        // JS event dispatch (requires the js-conformance feature)
+        #[cfg(feature = "js-conformance")]
+        "js_event_bubbling" => js_checks::check_js_event_bubbling(parsed),
+        #[cfg(feature = "js-conformance")]
+        "js_click_prevent_default" => js_checks::check_js_click_prevent_default(parsed),
+        #[cfg(feature = "js-conformance")]
+        "js_query_selector_complex" => {
+            js_checks::check_marker_after_scripts(parsed, "selector-marker")
+        }
+        #[cfg(feature = "js-conformance")]
+        "js_innerhtml_reparse" => js_checks::check_marker_after_scripts(parsed, "innerhtml-marker"),
+        #[cfg(feature = "js-conformance")]
+        "js_style_write_repaint" => js_checks::check_js_style_write_repaint(parsed),
+        #[cfg(feature = "js-conformance")]
+        "js_match_media" => js_checks::check_marker_after_scripts(parsed, "match-media-marker"),
+        #[cfg(feature = "js-conformance")]
+        "js_get_computed_style" => js_checks::check_js_get_computed_style(parsed),
+        #[cfg(not(feature = "js-conformance"))]
+        "js_event_bubbling"
+        | "js_click_prevent_default"
+        | "js_query_selector_complex"
+        | "js_innerhtml_reparse"
+        | "js_style_write_repaint"
+        | "js_match_media"
+        | "js_get_computed_style" => {
+            Outcome::Skip("built without the js-conformance feature".to_string())
+        }
         other => Outcome::Skip(format!("no check registered for fixture stem '{other}'")),
+    }
+}
+
+// -------------------------------------------------------------------------
+// JS-executing checks: parse the fixture, run its inline scripts through
+// SilkContext, dispatch a synthetic trusted event, verify the DOM outcome.
+// -------------------------------------------------------------------------
+
+#[cfg(feature = "js-conformance")]
+mod js_checks {
+    use super::{Outcome, find_element_by_id};
+    use silksurf_dom::{Dom, NodeId, NodeKind};
+    use silksurf_engine::ParsedDocument;
+    use silksurf_js::{SilkContext, SyntheticEvent};
+    use std::sync::{Arc, Mutex};
+
+    /// Collect the text of every <script> element in document order.
+    fn inline_scripts(dom: &Dom, node: NodeId, out: &mut Vec<String>) {
+        if let Ok(n) = dom.node(node)
+            && let NodeKind::Element { .. } = n.kind()
+            && matches!(dom.element_name(node), Ok(Some(tag)) if tag.eq_ignore_ascii_case("script"))
+        {
+            let mut text = String::new();
+            if let Ok(children) = dom.children(node) {
+                for child in children.to_vec() {
+                    if let Ok(c) = dom.node(child)
+                        && let NodeKind::Text { text: t } = c.kind()
+                    {
+                        text.push_str(t);
+                    }
+                }
+            }
+            out.push(text);
+            return;
+        }
+        if let Ok(children) = dom.children(node) {
+            for child in children.to_vec() {
+                inline_scripts(dom, child, out);
+            }
+        }
+    }
+
+    /// Shared setup: wrap the parsed Dom, run inline scripts, return context.
+    fn context_with_scripts(
+        parsed: ParsedDocument,
+    ) -> Result<(Arc<Mutex<Dom>>, SilkContext), String> {
+        let document = parsed.document;
+        let dom_arc = Arc::new(Mutex::new(parsed.dom));
+        let scripts = {
+            let dom = dom_arc
+                .lock()
+                .map_err(|_| "dom lock poisoned".to_string())?;
+            let mut scripts = Vec::new();
+            inline_scripts(&dom, document, &mut scripts);
+            scripts
+        };
+        let mut ctx = SilkContext::with_dom(&dom_arc);
+        for script in scripts {
+            ctx.eval(&script)
+                .map_err(|e| format!("script error: {e}"))?;
+        }
+        Ok((dom_arc, ctx))
+    }
+
+    /// getComputedStyle fixture: install a provider that computes style
+    /// through silksurf-css (the same mechanism the app installs), then let
+    /// the script assert values and append its marker.
+    pub(super) fn check_js_get_computed_style(parsed: ParsedDocument) -> Outcome {
+        use silksurf_css::{Length, LengthOrAuto, compute_style_for_node, parse_stylesheet};
+        let document = parsed.document;
+        let dom_arc = Arc::new(Mutex::new(parsed.dom));
+        let scripts = {
+            let dom = match dom_arc.lock() {
+                Ok(dom) => dom,
+                Err(_) => return Outcome::Fail("dom lock poisoned".to_string()),
+            };
+            let mut scripts = Vec::new();
+            inline_scripts(&dom, document, &mut scripts);
+            scripts
+        };
+        let mut ctx = SilkContext::with_dom(&dom_arc);
+        let provider_dom = Arc::clone(&dom_arc);
+        let Ok(stylesheet) = parse_stylesheet("") else {
+            return Outcome::Fail("empty stylesheet parse failed".to_string());
+        };
+        ctx.set_computed_style_provider(std::rc::Rc::new(move |node, property| {
+            let dom = provider_dom
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let style = compute_style_for_node(&dom, node, &stylesheet, None);
+            match property {
+                "width" => Some(match style.width {
+                    LengthOrAuto::Auto => "auto".to_string(),
+                    LengthOrAuto::Length(Length::Px(px)) => format!("{px}px"),
+                    LengthOrAuto::Length(other) => format!("{other:?}"),
+                }),
+                _ => None,
+            }
+        }));
+        for script in scripts {
+            if let Err(e) = ctx.eval(&script) {
+                return Outcome::Fail(format!("script error: {e}"));
+            }
+        }
+        let dom = match dom_arc.lock() {
+            Ok(dom) => dom,
+            Err(_) => return Outcome::Fail("dom lock poisoned".to_string()),
+        };
+        if find_element_by_id(&dom, NodeId::from_raw(0), "computed-style-marker").is_some() {
+            Outcome::Pass
+        } else {
+            Outcome::Fail("getComputedStyle did not reflect the live style write".to_string())
+        }
+    }
+
+    /// Generic shape for script-only fixtures: the inline script performs its
+    /// own assertions and appends a marker element on success.
+    pub(super) fn check_marker_after_scripts(parsed: ParsedDocument, marker_id: &str) -> Outcome {
+        let (dom_arc, _ctx) = match context_with_scripts(parsed) {
+            Ok(pair) => pair,
+            Err(e) => return Outcome::Fail(e),
+        };
+        let dom = match dom_arc.lock() {
+            Ok(dom) => dom,
+            Err(_) => return Outcome::Fail("dom lock poisoned".to_string()),
+        };
+        if find_element_by_id(&dom, NodeId::from_raw(0), marker_id).is_some() {
+            Outcome::Pass
+        } else {
+            Outcome::Fail(format!("script did not append #{marker_id}"))
+        }
+    }
+
+    /// The script writes element.style; the CASCADE (not just the attribute)
+    /// must observe it: computed width becomes 50px and background red.
+    pub(super) fn check_js_style_write_repaint(parsed: ParsedDocument) -> Outcome {
+        use silksurf_css::{Color, Length, LengthOrAuto, compute_style_for_node, parse_stylesheet};
+        let (dom_arc, _ctx) = match context_with_scripts(parsed) {
+            Ok(pair) => pair,
+            Err(e) => return Outcome::Fail(e),
+        };
+        let dom = match dom_arc.lock() {
+            Ok(dom) => dom,
+            Err(_) => return Outcome::Fail("dom lock poisoned".to_string()),
+        };
+        let Some(target) = find_element_by_id(&dom, NodeId::from_raw(0), "target") else {
+            return Outcome::Fail("#target not found".to_string());
+        };
+        let stylesheet = match parse_stylesheet("") {
+            Ok(s) => s,
+            Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
+        };
+        let style = compute_style_for_node(&dom, target, &stylesheet, None);
+        let red = Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255,
+        };
+        if style.width != LengthOrAuto::Length(Length::Px(50.0)) {
+            return Outcome::Fail(format!("computed width {:?}", style.width));
+        }
+        if style.background_color != red {
+            return Outcome::Fail(format!("computed background {:?}", style.background_color));
+        }
+        Outcome::Pass
+    }
+
+    pub(super) fn check_js_event_bubbling(parsed: ParsedDocument) -> Outcome {
+        let (dom_arc, mut ctx) = match context_with_scripts(parsed) {
+            Ok(pair) => pair,
+            Err(e) => return Outcome::Fail(e),
+        };
+        let inner = {
+            let dom = match dom_arc.lock() {
+                Ok(dom) => dom,
+                Err(_) => return Outcome::Fail("dom lock poisoned".to_string()),
+            };
+            find_element_by_id(&dom, NodeId::from_raw(0), "inner")
+        };
+        let Some(inner) = inner else {
+            return Outcome::Fail("#inner not found".to_string());
+        };
+        if let Err(e) = ctx.dispatch_dom_event(inner, &SyntheticEvent::new("click", true, true)) {
+            return Outcome::Fail(format!("dispatch error: {e}"));
+        }
+        let dom = match dom_arc.lock() {
+            Ok(dom) => dom,
+            Err(_) => return Outcome::Fail("dom lock poisoned".to_string()),
+        };
+        if find_element_by_id(&dom, NodeId::from_raw(0), "delegated-marker").is_some() {
+            Outcome::Pass
+        } else {
+            Outcome::Fail("delegated document-level click listener did not run".to_string())
+        }
+    }
+
+    pub(super) fn check_js_click_prevent_default(parsed: ParsedDocument) -> Outcome {
+        let (dom_arc, mut ctx) = match context_with_scripts(parsed) {
+            Ok(pair) => pair,
+            Err(e) => return Outcome::Fail(e),
+        };
+        let link = {
+            let dom = match dom_arc.lock() {
+                Ok(dom) => dom,
+                Err(_) => return Outcome::Fail("dom lock poisoned".to_string()),
+            };
+            find_element_by_id(&dom, NodeId::from_raw(0), "link")
+        };
+        let Some(link) = link else {
+            return Outcome::Fail("#link not found".to_string());
+        };
+        match ctx.dispatch_dom_event(link, &SyntheticEvent::new("click", true, true)) {
+            Ok(outcome) if outcome.default_prevented => Outcome::Pass,
+            Ok(_) => Outcome::Fail("preventDefault did not mark the event".to_string()),
+            Err(e) => Outcome::Fail(format!("dispatch error: {e}")),
+        }
     }
 }
 
@@ -400,6 +644,18 @@ fn has_no_comment_in_dom(dom: &Dom, root: NodeId) -> bool {
         }
     }
     true
+}
+
+/// Depth-first search for the element carrying id="wanted".
+#[cfg(feature = "js-conformance")]
+fn find_element_by_id(dom: &Dom, node: NodeId, wanted: &str) -> Option<NodeId> {
+    if attribute_value(dom, node, "id").as_deref() == Some(wanted) {
+        return Some(node);
+    }
+    let children: Vec<NodeId> = dom.children(node).ok()?.to_vec();
+    children
+        .into_iter()
+        .find_map(|child| find_element_by_id(dom, child, wanted))
 }
 
 fn attribute_value(dom: &Dom, node: NodeId, name: &str) -> Option<String> {

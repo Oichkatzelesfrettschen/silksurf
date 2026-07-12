@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head><title>js matchMedia evaluates viewport queries</title></head>
+<body>
+<div id="host">responsive</div>
+<script>
+var wide = matchMedia('(min-width: 700px)');
+var narrow = matchMedia('(min-width: 5000px)');
+if (wide.matches === true && narrow.matches === false &&
+    wide.media === '(min-width: 700px)') {
+  var marker = document.createElement('em');
+  marker.setAttribute('id', 'match-media-marker');
+  document.getElementById('host').appendChild(marker);
+}
+</script>
+</body>
+</html>

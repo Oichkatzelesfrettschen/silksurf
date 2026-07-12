@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<head><title>js querySelector complex selectors</title></head>
+<body>
+<div class="wrap"><ul id="list"><li class="item first">a</li><li class="item">b</li></ul></div>
+<script>
+var hit = document.querySelector('div.wrap > ul#list li.item.first');
+if (hit !== null && document.querySelectorAll('ul#list > li[class~=item]').length === 2) {
+  var marker = document.createElement('em');
+  marker.setAttribute('id', 'selector-marker');
+  document.getElementById('list').appendChild(marker);
+}
+</script>
+</body>
+</html>

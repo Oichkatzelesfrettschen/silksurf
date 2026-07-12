@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head><title>js getComputedStyle reads live style</title></head>
+<body>
+<div id="target">measure me</div>
+<script>
+var el = document.getElementById('target');
+el.style.width = '120px';
+var width = getComputedStyle(el).width;
+var viaFn = getComputedStyle(el).getPropertyValue('width');
+if (width === '120px' && viaFn === '120px') {
+  var marker = document.createElement('em');
+  marker.setAttribute('id', 'computed-style-marker');
+  el.appendChild(marker);
+}
+</script>
+</body>
+</html>
