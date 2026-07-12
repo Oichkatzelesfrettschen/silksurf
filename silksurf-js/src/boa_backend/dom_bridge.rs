@@ -472,6 +472,12 @@ pub(super) fn node_to_js_object(
         .property(js_string!("nodeId"), node_id.raw() as u32, Attribute::all())
         // -- live accessor properties --
         .accessor(
+            js_string!("ownerDocument"),
+            Some(accessors.owner_document),
+            None,
+            Attribute::CONFIGURABLE | Attribute::ENUMERABLE,
+        )
+        .accessor(
             js_string!("parentNode"),
             Some(accessors.parent_node),
             None,
@@ -572,6 +578,7 @@ pub(super) fn node_to_js_object(
 }
 
 struct NodeAccessors {
+    owner_document: JsFunction,
     parent_node: JsFunction,
     child_nodes: JsFunction,
     children: JsFunction,
@@ -606,8 +613,24 @@ fn node_snapshot(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NodeSnapshot {
     snapshot_node(&dom, node_id)
 }
 
+/// Element wrappers report the global `document` object as their
+/// ownerDocument; framework mount paths (react-dom's listener install walks
+/// `container.ownerDocument`) read it before touching any other node API.
+fn owner_document_native() -> NativeFunction {
+    NativeFunction::from_fn_ptr(|_this, _args, ctx| {
+        let global = ctx.global_object().clone();
+        let document = global.get(js_string!("document"), ctx)?;
+        if document.is_object() {
+            Ok(document)
+        } else {
+            Ok(JsValue::null())
+        }
+    })
+}
+
 fn node_accessors(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId, ctx: &mut Context) -> NodeAccessors {
     NodeAccessors {
+        owner_document: make_getter(ctx, owner_document_native()),
         parent_node: make_getter(ctx, related_node_native(dom_arc, node_id, Dom::parent)),
         child_nodes: make_getter(ctx, child_nodes_native(dom_arc, node_id, false)),
         children: make_getter(ctx, child_nodes_native(dom_arc, node_id, true)),
@@ -1035,6 +1058,27 @@ pub(super) fn install_document(
 ) {
     let root = NodeId::from_raw(0);
     super::css_object::install_style_dataset_natives(dom_arc, ctx);
+    // DOM interface constructors: frameworks probe them with instanceof and
+    // typeof (react-dom evaluates `node instanceof win.HTMLIFrameElement`
+    // during selection restore). Bridge wrappers are plain objects, so
+    // instanceof correctly reports false; the constructors exist so the
+    // expression evaluates instead of throwing on undefined.
+    let interface_bootstrap = r"
+        (function () {
+            var names = ['Node', 'Element', 'Document', 'HTMLElement',
+                'HTMLIFrameElement', 'HTMLInputElement', 'HTMLTextAreaElement',
+                'HTMLSelectElement', 'HTMLAnchorElement', 'CharacterData',
+                'Text', 'Comment', 'DocumentFragment', 'SVGElement'];
+            for (var i = 0; i < names.length; i++) {
+                if (typeof globalThis[names[i]] === 'undefined') {
+                    globalThis[names[i]] = function () {};
+                }
+            }
+        })();
+    ";
+    if let Err(err) = ctx.eval(boa_engine::Source::from_bytes(interface_bootstrap.as_bytes())) {
+        eprintln!("silksurf-js: DOM interface bootstrap failed: {err}");
+    }
     let methods = document_methods(dom_arc, root);
     let accessors = document_accessors(dom_arc, root, ctx);
     let cookie_getter =
@@ -2247,6 +2291,32 @@ mod tests {
             "var el = document.getElementById('greeting'); \
              var pn = el ? el.parentNode : null; \
              globalThis._has_parent = pn !== null;",
+        )
+        .expect("eval should succeed");
+    }
+
+    #[test]
+    fn owner_document_resolves_to_the_global_document() {
+        let (arc, _root) = simple_dom();
+        let mut ctx = SilkContext::with_dom(&arc);
+        ctx.eval(
+            "var el = document.getElementById('greeting'); \
+             if (el.ownerDocument !== document) { throw new Error('ownerDocument'); } \
+             var fresh = document.createElement('div'); \
+             if (fresh.ownerDocument !== document) { throw new Error('created node'); }",
+        )
+        .expect("eval should succeed");
+    }
+
+    #[test]
+    fn dom_interface_constructors_support_instanceof_probes() {
+        let (arc, _root) = simple_dom();
+        let mut ctx = SilkContext::with_dom(&arc);
+        ctx.eval(
+            "var el = document.getElementById('greeting'); \
+             if (el instanceof HTMLIFrameElement) { throw new Error('iframe'); } \
+             if (typeof HTMLElement !== 'function') { throw new Error('HTMLElement'); } \
+             if (typeof Node !== 'function') { throw new Error('Node'); }",
         )
         .expect("eval should succeed");
     }
