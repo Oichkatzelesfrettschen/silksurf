@@ -219,9 +219,13 @@ share files with the workstreams above and should land opportunistically:
   roughly 6-16x V8 time (~1.3-1.9 MB/s), so a multi-megabyte payload
   costs seconds of initial eval. Correctness does not gate the rung;
   interaction latency remains unmeasured.
-- react-synthetic-event-bridge -- prove a trusted dispatched click
-  reaches a React onClick through root delegation and the setState
-  re-render commits (finding follow-up).
+- stable-node-wrapper-identity -- React stamps fiber expandos on DOM
+  node objects at commit and reads them back at event dispatch; the
+  bridge builds a fresh wrapper per access, so delegation drops the
+  event (measured: hooks counter renders, trusted click leaves state
+  at 0). Cache wrappers JS-side keyed by nodeId so object identity and
+  expandos persist. Subsumes react-synthetic-event-bridge; details in
+  docs/findings/boa-react-bundle-throughput.md.
 - element-property-reflection -- frameworks assign el.id and
   textNode.nodeValue as properties; wrapper data properties absorb the
   write without reaching the Dom. Back reflected properties with
