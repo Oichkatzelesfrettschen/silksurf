@@ -762,7 +762,7 @@ PART 4: LAYOUT ENGINE (BOX MODEL)
 ### 4.1 Layout Algorithm
 
 The layout engine computes position and size for each element based on the
-CSS box model: margin → border → padding → content.
+CSS box model: margin -> border -> padding -> content.
 
 ```c
 // silksurf-core/layout/engine.h

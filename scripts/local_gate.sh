@@ -19,7 +19,7 @@ usage() {
     cat <<EOF
 Usage: $0 [fast|full]
 
-  fast  -- pre-commit gate: make check (fmt + clippy -D warnings + lint_unwrap + lint_unsafe)
+  fast  -- pre-commit gate: make check (fmt + clippy -D warnings + lint_unwrap + lint_unsafe + lint_glossary + lint_doc_links)
   full  -- pre-push gate:   make full  (fast + tests + deny + doc + opt-in miri/fuzz)
 
 Environment (passed through to make):

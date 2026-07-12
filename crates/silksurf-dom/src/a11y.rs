@@ -1,4 +1,10 @@
-//! Accessibility tree (skeleton).
+//! Accessibility tree (skeleton -- page-content tree deferred per AD-026).
+//!
+//! This module stays a data-only skeleton: the page-content
+//! `build_a11y_tree` walker is deferred (AD-026, 2026-07-11). Browser
+//! *chrome* accessibility already ships via AccessKit in
+//! `crates/silksurf-app/src/accessibility.rs`; what is deferred is the
+//! accessibility tree derived from rendered page content.
 //!
 //! WHY: a real browser must expose an accessibility tree so assistive
 //! technologies (screen readers, switch devices, voice control) can

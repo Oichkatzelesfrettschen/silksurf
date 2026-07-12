@@ -40,7 +40,7 @@ use taffy::{
     },
 };
 
-use crate::{Rect, neighbor_table::LayoutNeighborTable};
+use crate::{Rect, neighbor_table::LayoutNeighborTable, unresolved_font_relative_px};
 
 pub type SilkTaffy = TaffyTree<()>;
 
@@ -776,7 +776,7 @@ fn length_auto(l: Length) -> LengthPercentageAuto {
         Length::Px(px) => LengthPercentageAuto::length(px),
         Length::Percent(p) => LengthPercentageAuto::percent(p / 100.0),
         Length::Em(_) | Length::Rem(_) => {
-            unreachable!("em/rem units must be resolved at cascade time before layout")
+            LengthPercentageAuto::length(unresolved_font_relative_px())
         }
     }
 }
@@ -792,9 +792,7 @@ fn length_pct(l: Length) -> LengthPercentage {
     match l {
         Length::Px(px) => LengthPercentage::length(px),
         Length::Percent(p) => LengthPercentage::percent(p / 100.0),
-        Length::Em(_) | Length::Rem(_) => {
-            unreachable!("em/rem units must be resolved at cascade time before layout")
-        }
+        Length::Em(_) | Length::Rem(_) => LengthPercentage::length(unresolved_font_relative_px()),
     }
 }
 
@@ -974,7 +972,7 @@ fn css_to_taffy_style(style: Option<&ComputedStyle>) -> Style {
         FlexBasis::Length(Length::Px(px)) => Dimension::length(px),
         FlexBasis::Length(Length::Percent(p)) => Dimension::percent(p / 100.0),
         FlexBasis::Length(Length::Em(_) | Length::Rem(_)) => {
-            unreachable!("em/rem units must be resolved at cascade time before layout")
+            Dimension::length(unresolved_font_relative_px())
         }
     };
 
@@ -1098,7 +1096,7 @@ fn track_size_to_taffy(track: &CssGridTrackSize) -> TrackSizingFunction {
         CssGridTrackSize::Length(Length::Px(px)) => length(*px),
         CssGridTrackSize::Length(Length::Percent(p)) => percent(*p / 100.0),
         CssGridTrackSize::Length(Length::Em(_) | Length::Rem(_)) => {
-            unreachable!("em/rem units must be resolved at cascade time before layout")
+            length(unresolved_font_relative_px())
         }
         CssGridTrackSize::Fr(fr_val) => fr(*fr_val),
         CssGridTrackSize::Minmax(min, max) => {
@@ -1111,7 +1109,9 @@ fn track_size_to_taffy(track: &CssGridTrackSize) -> TrackSizingFunction {
             TrackSizingFunction::fit_content(LengthPercentage::percent(*p / 100.0))
         }
         CssGridTrackSize::FitContent(Length::Em(_) | Length::Rem(_)) => {
-            unreachable!("em/rem units must be resolved at cascade time before layout")
+            TrackSizingFunction::fit_content(
+                LengthPercentage::length(unresolved_font_relative_px()),
+            )
         }
     }
 }
@@ -1124,7 +1124,7 @@ fn grid_track_min_to_taffy(min: CssGridTrackMin) -> MinTrackSizingFunction {
         CssGridTrackMin::Length(Length::Px(px)) => MinTrackSizingFunction::length(px),
         CssGridTrackMin::Length(Length::Percent(p)) => MinTrackSizingFunction::percent(p / 100.0),
         CssGridTrackMin::Length(Length::Em(_) | Length::Rem(_)) => {
-            unreachable!("em/rem units must be resolved at cascade time before layout")
+            MinTrackSizingFunction::length(unresolved_font_relative_px())
         }
     }
 }
@@ -1137,7 +1137,7 @@ fn grid_track_max_to_taffy(max: CssGridTrackMax) -> MaxTrackSizingFunction {
         CssGridTrackMax::Length(Length::Px(px)) => MaxTrackSizingFunction::length(px),
         CssGridTrackMax::Length(Length::Percent(p)) => MaxTrackSizingFunction::percent(p / 100.0),
         CssGridTrackMax::Length(Length::Em(_) | Length::Rem(_)) => {
-            unreachable!("em/rem units must be resolved at cascade time before layout")
+            MaxTrackSizingFunction::length(unresolved_font_relative_px())
         }
         CssGridTrackMax::Fr(fr_val) => MaxTrackSizingFunction::fr(fr_val),
     }
@@ -1157,7 +1157,7 @@ fn length_or_auto_dim(v: LengthOrAuto) -> Dimension {
         LengthOrAuto::Length(Length::Px(px)) => Dimension::length(px),
         LengthOrAuto::Length(Length::Percent(p)) => Dimension::percent(p / 100.0),
         LengthOrAuto::Length(Length::Em(_) | Length::Rem(_)) => {
-            unreachable!("em/rem units must be resolved at cascade time before layout")
+            Dimension::length(unresolved_font_relative_px())
         }
     }
 }
@@ -1166,9 +1166,7 @@ fn length_dim(v: Length) -> Dimension {
     match v {
         Length::Px(px) => Dimension::length(px),
         Length::Percent(p) => Dimension::percent(p / 100.0),
-        Length::Em(_) | Length::Rem(_) => {
-            unreachable!("em/rem units must be resolved at cascade time before layout")
-        }
+        Length::Em(_) | Length::Rem(_) => Dimension::length(unresolved_font_relative_px()),
     }
 }
 
@@ -1177,9 +1175,7 @@ fn opt_length_dim(v: Option<Length>) -> Dimension {
         None => Dimension::auto(),
         Some(Length::Px(px)) => Dimension::length(px),
         Some(Length::Percent(p)) => Dimension::percent(p / 100.0),
-        Some(Length::Em(_) | Length::Rem(_)) => {
-            unreachable!("em/rem units must be resolved at cascade time before layout")
-        }
+        Some(Length::Em(_) | Length::Rem(_)) => Dimension::length(unresolved_font_relative_px()),
     }
 }
 

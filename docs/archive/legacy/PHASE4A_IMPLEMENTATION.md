@@ -59,11 +59,11 @@ silk_dom_node_t {
 
 ```
 16 callback handlers:
-  - create_comment() → allocate comment node
-  - create_element() → allocate element, store tag/namespace
-  - create_text() → allocate text node, store content
-  - append_child() → link parent-child
-  - insert_before() → insert between siblings
+  - create_comment() -> allocate comment node
+  - create_element() -> allocate element, store tag/namespace
+  - create_text() -> allocate text node, store content
+  - append_child() -> link parent-child
+  - insert_before() -> insert between siblings
   - etc.
 ```
 
@@ -100,13 +100,13 @@ silk_document_layout() {
 
 ```
 DOM nodes allocated in arena:
-  ├── Element nodes (~200 bytes each: tag, attrs, children ptrs)
-  ├── Text nodes (~100 bytes each: content string)
-  └── Attribute arrays (variable size)
+  +-- Element nodes (~200 bytes each: tag, attrs, children ptrs)
+  +-- Text nodes (~100 bytes each: content string)
+  +-- Attribute arrays (variable size)
 
 Layout nodes allocated in arena:
-  ├── Parallel to DOM (1:1 mapping)
-  └── Contains computed box model + style data
+  +-- Parallel to DOM (1:1 mapping)
+  +-- Contains computed box model + style data
 
 Total: Arena constrains total document size
   - 64 MB arena = ~300k elements maximum
@@ -228,10 +228,10 @@ static hubbub_error append_child(void *ctx, void *parent, void *child) {
 
 ```
 hubbub_parser_parse_chunk() returns:
-  HUBBUB_OK               → Continue parsing
-  HUBBUB_NOMEM            → Arena full (fail parse)
-  HUBBUB_INVALID          → Malformed HTML (warn, continue)
-  HUBBUB_NEEDDATA         → Normal (more chunks coming)
+  HUBBUB_OK               -> Continue parsing
+  HUBBUB_NOMEM            -> Arena full (fail parse)
+  HUBBUB_INVALID          -> Malformed HTML (warn, continue)
+  HUBBUB_NEEDDATA         -> Normal (more chunks coming)
 
 Action: Check return code, log, continue gracefully
 ```
@@ -414,14 +414,14 @@ static void *alloc_node(void *arena, int type) {
 ### With Phase 3 Renderer
 
 ```
-Document parsing → DOM tree
-       ↓
-Layout algorithm → layout_nodes array
-       ↓
-Render tree → silk_renderer_fill_rect() calls
-       ↓
-Damage tracking → Only redraw changed elements
-       ↓
+Document parsing -> DOM tree
+       v
+Layout algorithm -> layout_nodes array
+       v
+Render tree -> silk_renderer_fill_rect() calls
+       v
+Damage tracking -> Only redraw changed elements
+       v
 X11 presentation
 ```
 
@@ -429,9 +429,9 @@ X11 presentation
 
 ```
 silk_arena_t (64 MB)
-├── DOM nodes (variable size)
-├── layout_nodes (fixed: 4KB per node)
-└── Attributes (variable)
++-- DOM nodes (variable size)
++-- layout_nodes (fixed: 4KB per node)
++-- Attributes (variable)
 ```
 
 ---

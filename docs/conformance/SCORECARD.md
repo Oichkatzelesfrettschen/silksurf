@@ -16,7 +16,8 @@
 
 | Harness | Status | Coverage | Last result |
 |---------|--------|----------|-------------|
-| **test262** (lexer-only) | scaffolded | 157 of ~53 040 vendored .js files (numeric-literals subset) | 104 / 157 = 66.24 % at lexer level (2026-05-14 baseline). See `test262-scorecard.json` |
+| **test262** (boa runner, full eval) | functional | 47 703 tests, scope language+built-ins+annexB; skips at that baseline: Intl (no ICU data, AD-021), ESM modules, $DONE async, FinalizationRegistry -- async and static ESM now execute (2026-07-11/12), pending a corpus re-run | 33 098 pass / 62 fail / 14 543 skip = **99.81 % of executed**, **69.38 % of total** (2026-05-17 baseline). Both denominators are load-bearing: the executed rate excludes 30.5 % of the suite. See `silksurf-js/conformance/test262-boa-scorecard.json` |
+| **test262** (lexer-only, legacy VM) | runner removed (AD-025) | 157 of ~53 040 .js files (numeric-literals subset) | 104 / 157 = 66.24 % at lexer level (2026-05-14 baseline, historical). JSON retained: `test262-scorecard.json` |
 | **TLS loader sanity** (silksurf-tls) | functional | 4 unit tests covering empty PEM, malformed PEM, default-host loader, root-store diagnostics | 4 / 4 pass |
 | **HTTP/2 (h2spec)** | scaffolded | `scripts/run_h2spec.sh` driver + JSON scorecard schema; in-tree h2 server still pending | 0 / 0 (stub -- needs in-tree server or operator-supplied `SILKSURF_H2_HOST`). See `crates/silksurf-engine/conformance/h2spec-scorecard.json` |
 | **HTML / CSS / Layout / Paint WPT (synthetic)** | functional | 63 in-tree fixtures exercising HTML structure, CSS selectors and properties, inline style cascade, Taffy layout rects, and fused paint-list suppression | 63 / 0 / 0 (pass / fail / skip), 100.00 % @ 2026-07-02 refresh. See `crates/silksurf-engine/conformance/wpt-scorecard.json` |
@@ -26,16 +27,48 @@
 
 ## Per-harness baseline (2026-05-15)
 
-### test262 (JS tokeniser)
+### test262 (boa runner, full evaluation)
 
-  * Source: `docs/conformance/test262-scorecard.json` (mirrored from
-    `silksurf-js/conformance/test262-scorecard.json` after each run).
-  * Subset: `language/literals/numeric` (157 files of ~53 040 in the
-    vendored corpus).
+  * Source: `silksurf-js/conformance/test262-boa-scorecard.json`
+    (2026-05-17 run, retained verbatim as evidence).
+  * Scope: language + built-ins + annexB; 47 703 tests total,
+    33 160 executed (pass + fail), 14 543 skipped.
+  * Result, two denominators, both always quoted together:
+    - executed: 33 098 / 33 160 = 99.81 %
+    - total (incl. skips): 33 098 / 47 703 = 69.38 %
+  * Skip classes: all `Intl.*` (no ICU data bundled, AD-021),
+    FinalizationRegistry, and stale generated Unicode-property suites.
+    NOTE (2026-07-11): the `$DONE` async lane now EXECUTES (state-recording
+    `$DONE` + run_jobs microtask drain). NOTE (2026-07-12): static ESM
+    module tests now EXECUTE too -- the harness runs as a script and the
+    test as a module through a `SimpleModuleLoader` rooted at the test's
+    directory (only dynamic-import/import.meta/top-level-await/JSON-modules
+    stay skipped by feature flag); and a per-test loop-iteration budget adds
+    a distinct `limit_exceeded` tally (a probable infinite loop is neither a
+    hang nor a silent FAIL). The 2026-05-17 totals above PREDATE all three
+    and still count async + ESM as skipped. A --full re-run (which moves
+    async + static-ESM tests from skip to executed, expanding coverage and
+    lowering `rate_executed` as newly-run tests fail) is reported NOT RUN:
+    the test262 corpus is absent locally. Local evidence for the async lane:
+    built-ins/Promise runs 633 pass / 0 fail / 6 skip (358 async-flagged,
+    all formerly skipped); for ESM + budget: a minimal test262-shaped
+    fixture runs 5 pass / 0 fail / 2 limit (script + module infinite loops).
+  * The runner (`silksurf-js/src/bin/test262_boa.rs`) emits
+    `rate_executed`/`pass_pct_executed` and `rate_total`/`pass_pct_total`
+    in the scorecard JSON; runs predating the dual-denominator fields
+    carry a single ambiguous `rate` field computed over executed tests
+    only.
+  * Regeneration requires the tc39/test262 corpus at
+    `silksurf-js/test262/` (not vendored; fetch before running).
+
+### test262 (JS tokeniser, legacy VM -- runner removed)
+
+  * Source: `docs/conformance/test262-scorecard.json` (historical
+    artifact; the lexer-only runner and the hand-written VM are removed
+    per AD-025 and live in git history).
+  * Subset: `language/literals/numeric` (157 files of ~53 040).
   * Result: 104 passed / 53 failed / 0 skipped = 66.24 %.
-  * Wall time: 0.031 s.
-  * Runner kind: `lexer` (does NOT parse, compile, or evaluate).
-  * Upgrade path: VM-based evaluation, queued as P5 + P7.
+  * Runner kind: `lexer` (did NOT parse, compile, or evaluate).
 
 ### HTML / CSS / Layout / Paint WPT (synthetic)
 
@@ -85,14 +118,16 @@
 
 ## test262 scope
 
-The current runner is **lexer-only**. It validates that each test262
-file lexes without a tokeniser error. It does NOT parse, compile, or
-evaluate -- so the pass/fail counts reflect tokeniser conformance, not
-language conformance.
+One runner exists: `test262_boa` (default build) parses, evaluates, and
+checks negative expectations against boa_engine -- its numbers are real
+language conformance, quoted with both denominators above.
+`scripts/conformance_run.sh test262` drives it (TEST262_FULL=1 widens
+scope; TEST262_PATH selects a corpus subdirectory). The former
+lexer-only runner is removed with the hand-written VM (AD-025); its
+2026-05-14 scorecard JSON remains as a historical artifact.
 
-Realistic numbers will only appear once the runner upgrades to full
-VM-based evaluation (queued in SNAZZY-WAFFLE roadmap P7 + P5.S1
-evaluation work). Until then, this baseline tracks tokeniser regressions.
+Any quoted test262 percentage names its denominator. "99.81 %" without
+"of executed" is a misquote; the all-tests figure is 69.38 %.
 
 Running a wider subset:
 

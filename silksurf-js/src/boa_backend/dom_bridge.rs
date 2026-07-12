@@ -521,6 +521,8 @@ pub(super) fn node_to_js_object(
             2,
         )
         .function(methods.dispatch_event, js_string!("dispatchEvent"), 1)
+        // -- canvas 2D context (returns null for non-canvas elements) --
+        .function(getcontext_native(dom_arc, node_id), js_string!("getContext"), 1)
         .build()
         .into()
 }
@@ -945,13 +947,20 @@ fn detach_from_parent(dom: &mut Dom, node_id: NodeId) {
 // ---- document object builder ------------------------------------------------
 
 /// Replace the stub document object in `ctx` with one that queries `dom_arc`.
-pub(super) fn install_document(dom_arc: &Arc<Mutex<Dom>>, ctx: &mut Context) {
+pub(super) fn install_document(
+    dom_arc: &Arc<Mutex<Dom>>,
+    ctx: &mut Context,
+    cookie_jar: &super::CookieJar,
+    cookie_top_level_site: &str,
+    cookie_host: &str,
+) {
     let root = NodeId::from_raw(0);
     let methods = document_methods(dom_arc, root);
     let accessors = document_accessors(dom_arc, root, ctx);
-    let cookie_jar = super::new_cookie_jar();
-    let cookie_getter = super::document_cookie_getter(ctx, &cookie_jar);
-    let cookie_setter = super::document_cookie_setter(ctx, &cookie_jar);
+    let cookie_getter =
+        super::document_cookie_getter(ctx, cookie_jar, cookie_top_level_site, cookie_host);
+    let cookie_setter =
+        super::document_cookie_setter(ctx, cookie_jar, cookie_top_level_site, cookie_host);
 
     let document = ObjectInitializer::new(ctx)
         .function(methods.get_element_by_id, js_string!("getElementById"), 1)
@@ -1205,6 +1214,628 @@ fn document_create_text_node_native(dom_arc: &Arc<Mutex<Dom>>) -> NativeFunction
             Ok(node_to_js_object(&arc, node_id, ctx))
         })
     }
+}
+
+// ---- canvas 2D context -----------------------------------------------------
+
+/// Read a JS argument as an f32, defaulting to 0.0 (canvas coerces missing or
+/// non-finite coordinates toward 0).
+fn arg_f32(args: &[JsValue], index: usize, ctx: &mut Context) -> f32 {
+    args.get(index)
+        .and_then(|value| value.to_number(ctx).ok())
+        .map_or(0.0, |n| n as f32)
+}
+
+/// Read the canvas element's `width`/`height` content attributes, defaulting to
+/// the HTML canvas intrinsic size (300 x 150) when absent or unparseable.
+fn canvas_dimensions(dom: &Dom, node_id: NodeId) -> (u32, u32) {
+    let mut width = 300u32;
+    let mut height = 150u32;
+    if let Ok(attrs) = dom.attributes(node_id) {
+        for attr in attrs {
+            match attr.name.as_str() {
+                "width" => {
+                    if let Ok(value) = attr.value.to_string().trim().parse::<u32>() {
+                        width = value.max(1);
+                    }
+                }
+                "height" => {
+                    if let Ok(value) = attr.value.to_string().trim().parse::<u32>() {
+                        height = value.max(1);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    (width, height)
+}
+
+/// `element.getContext(type)` -- returns a 2D context for canvas elements
+/// requesting "2d", else null (unsupported context types and non-canvas
+/// elements both yield null, matching the HTML spec).
+fn getcontext_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    // SAFETY: the closure captures an Arc<Mutex<Dom>> and a NodeId, neither of
+    // which is a Boa GC pointer, so it needs no trace hook.
+    unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let context_type = args
+                .first()
+                .map(|value| value.to_string(ctx).map(|s| s.to_std_string_lossy()))
+                .transpose()?
+                .unwrap_or_default();
+            if context_type != "2d" {
+                return Ok(JsValue::null());
+            }
+            {
+                let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+                let is_canvas = matches!(
+                    dom.element_name(node_id),
+                    Ok(Some(name)) if name.eq_ignore_ascii_case("canvas")
+                );
+                if !is_canvas {
+                    return Ok(JsValue::null());
+                }
+                let (width, height) = canvas_dimensions(&dom, node_id);
+                dom.ensure_canvas_surface(node_id, width, height);
+            }
+            Ok(canvas_context_object(&arc, node_id, ctx))
+        })
+    }
+}
+
+/// A geometric context op taking N pre-parsed f32 arguments and mutating the
+/// backing surface. Covers fillRect, moveTo, translate, transform, and the
+/// zero-argument state ops (fill, stroke, save, restore, beginPath...).
+fn canvas_geom_native<const N: usize>(
+    dom_arc: &Arc<Mutex<Dom>>,
+    node_id: NodeId,
+    op: fn(&mut silksurf_dom::CanvasSurface, [f32; N]),
+) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    // SAFETY: captures Arc<Mutex<Dom>>, NodeId, and a fn pointer -- no GC state.
+    unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let mut nums = [0.0f32; N];
+            for (index, slot) in nums.iter_mut().enumerate() {
+                *slot = arg_f32(args, index, ctx);
+            }
+            let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Some(surface) = dom.canvas_surface_mut(node_id) {
+                op(surface, nums);
+            }
+            Ok(JsValue::undefined())
+        })
+    }
+}
+
+/// A context op that sets a `[u8; 4]` color parsed from a CSS color string.
+fn canvas_color_native(
+    dom_arc: &Arc<Mutex<Dom>>,
+    node_id: NodeId,
+    set: fn(&mut silksurf_dom::CanvasSurface, [u8; 4]),
+) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    // SAFETY: captures Arc<Mutex<Dom>>, NodeId, and a fn pointer -- no GC state.
+    unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let text = args
+                .first()
+                .map(|value| value.to_string(ctx).map(|s| s.to_std_string_lossy()))
+                .transpose()?
+                .unwrap_or_default();
+            let rgba = parse_css_color(&text);
+            let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Some(surface) = dom.canvas_surface_mut(node_id) {
+                set(surface, rgba);
+            }
+            Ok(JsValue::undefined())
+        })
+    }
+}
+
+/// Getter native returning a color state value formatted as `rgba(r, g, b, a)`.
+fn canvas_color_getter_native(
+    dom_arc: &Arc<Mutex<Dom>>,
+    node_id: NodeId,
+    get: fn(&silksurf_dom::CanvasSurface) -> [u8; 4],
+) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    // SAFETY: captures Arc<Mutex<Dom>>, NodeId, and a fn pointer -- no GC state.
+    unsafe {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
+            let dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+            let rgba = dom.canvas_surface(node_id).map_or([0, 0, 0, 255], get);
+            let alpha = f32::from(rgba[3]) / 255.0;
+            let text = format!("rgba({}, {}, {}, {})", rgba[0], rgba[1], rgba[2], alpha);
+            Ok(JsValue::from(JsString::from(text.as_str())))
+        })
+    }
+}
+
+/// Setter native for a scalar f32 context property (lineWidth, globalAlpha).
+fn canvas_scalar_setter_native(
+    dom_arc: &Arc<Mutex<Dom>>,
+    node_id: NodeId,
+    set: fn(&mut silksurf_dom::CanvasSurface, f32),
+) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    // SAFETY: captures Arc<Mutex<Dom>>, NodeId, and a fn pointer -- no GC state.
+    unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let value = arg_f32(args, 0, ctx);
+            let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Some(surface) = dom.canvas_surface_mut(node_id) {
+                set(surface, value);
+            }
+            Ok(JsValue::undefined())
+        })
+    }
+}
+
+/// Getter native returning a scalar f32 context property.
+fn canvas_scalar_getter_native(
+    dom_arc: &Arc<Mutex<Dom>>,
+    node_id: NodeId,
+    get: fn(&silksurf_dom::CanvasSurface) -> f32,
+) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    // SAFETY: captures Arc<Mutex<Dom>>, NodeId, and a fn pointer -- no GC state.
+    unsafe {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
+            let dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+            let value = dom.canvas_surface(node_id).map_or(0.0, get);
+            Ok(JsValue::from(f64::from(value)))
+        })
+    }
+}
+
+/// `ctx.arc(cx, cy, r, start, end, anticlockwise)`.
+fn canvas_arc_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    // SAFETY: captures Arc<Mutex<Dom>> and NodeId -- no GC state.
+    unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let cx = arg_f32(args, 0, ctx);
+            let cy = arg_f32(args, 1, ctx);
+            let radius = arg_f32(args, 2, ctx);
+            let start = arg_f32(args, 3, ctx);
+            let end = arg_f32(args, 4, ctx);
+            let anticlockwise = args.get(5).is_some_and(boa_engine::JsValue::to_boolean);
+            let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Some(surface) = dom.canvas_surface_mut(node_id) {
+                surface.arc(cx, cy, radius, start, end, anticlockwise);
+            }
+            Ok(JsValue::undefined())
+        })
+    }
+}
+
+/// `ctx.getImageData(x, y, w, h)` -> `{ width, height, data: [u8; w*h*4] }`.
+/// The data is a plain JS array (not a `Uint8ClampedArray`), which reads and
+/// round-trips through `putImageData` correctly.
+fn canvas_get_image_data_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    // SAFETY: captures Arc<Mutex<Dom>> and NodeId -- no GC state.
+    unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let x = arg_f32(args, 0, ctx) as i32;
+            let y = arg_f32(args, 1, ctx) as i32;
+            let w = arg_f32(args, 2, ctx).max(0.0) as u32;
+            let h = arg_f32(args, 3, ctx).max(0.0) as u32;
+            let pixels = {
+                let dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+                dom.canvas_surface(node_id)
+                    .map(|surface| surface.get_image_data(x, y, w, h))
+                    .unwrap_or_default()
+            };
+            let pixel_array = JsArray::new(ctx);
+            for byte in &pixels {
+                pixel_array.push(JsValue::from(u32::from(*byte)), ctx)?;
+            }
+            let image_data = ObjectInitializer::new(ctx)
+                .property(js_string!("width"), w, Attribute::all())
+                .property(js_string!("height"), h, Attribute::all())
+                .property(js_string!("data"), pixel_array, Attribute::all())
+                .build();
+            Ok(image_data.into())
+        })
+    }
+}
+
+/// `ctx.putImageData(imageData, dx, dy)`.
+fn canvas_put_image_data_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    // SAFETY: captures Arc<Mutex<Dom>> and NodeId -- no GC state.
+    unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let Some(image_data) = args.first().and_then(JsValue::as_object) else {
+                return Ok(JsValue::undefined());
+            };
+            let width = image_data.get(js_string!("width"), ctx)?.to_number(ctx)? as u32;
+            let height = image_data.get(js_string!("height"), ctx)?.to_number(ctx)? as u32;
+            let data_value = image_data.get(js_string!("data"), ctx)?;
+            let Some(data_object) = data_value.as_object() else {
+                return Ok(JsValue::undefined());
+            };
+            let data_array = JsArray::from_object(data_object.clone())?;
+            let length = data_array.length(ctx)? as usize;
+            let mut bytes = Vec::with_capacity(length);
+            for index in 0..length {
+                let value = data_array.get(index as u64, ctx)?.to_number(ctx)?;
+                bytes.push(value.clamp(0.0, 255.0) as u8);
+            }
+            let dx = arg_f32(args, 1, ctx) as i32;
+            let dy = arg_f32(args, 2, ctx) as i32;
+            let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Some(surface) = dom.canvas_surface_mut(node_id) {
+                surface.put_image_data(&bytes, dx, dy, width, height);
+            }
+            Ok(JsValue::undefined())
+        })
+    }
+}
+
+/// `ctx.drawImage(source, ...)` where `source` is another canvas element. The
+/// 3-, 5-, and 9-argument forms are supported. Non-canvas sources (e.g. `<img>`
+/// whose pixels live in the URL-keyed resource cache, not the DOM) draw
+/// nothing -- image sources are a follow-on once decoded pixels reach the DOM.
+// Canvas dimensions are small integers; u32 -> f32 loses no meaningful
+// precision when resolving the src/dst rectangles.
+#[allow(clippy::cast_precision_loss)]
+fn canvas_draw_image_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    // SAFETY: captures Arc<Mutex<Dom>> and NodeId -- no GC state.
+    unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let Some(source) = args.first().and_then(JsValue::as_object) else {
+                return Ok(JsValue::undefined());
+            };
+            let Ok(source_id) = extract_node_id(Some(&JsValue::from(source.clone())), ctx) else {
+                return Ok(JsValue::undefined());
+            };
+            let numeric: Vec<f32> = (1..args.len()).map(|i| arg_f32(args, i, ctx)).collect();
+            let (src_pixels, src_w, src_h) = {
+                let dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+                match dom.canvas_surface(source_id) {
+                    Some(surface) => (surface.pixels().to_vec(), surface.width(), surface.height()),
+                    None => return Ok(JsValue::undefined()),
+                }
+            };
+            // Resolve the argument form into src/dst rectangles.
+            let (sx, sy, sw, sh, dx, dy, dw, dh) = match numeric.len() {
+                2 => (
+                    0.0,
+                    0.0,
+                    src_w as f32,
+                    src_h as f32,
+                    numeric[0],
+                    numeric[1],
+                    src_w as f32,
+                    src_h as f32,
+                ),
+                4 => (
+                    0.0,
+                    0.0,
+                    src_w as f32,
+                    src_h as f32,
+                    numeric[0],
+                    numeric[1],
+                    numeric[2],
+                    numeric[3],
+                ),
+                8 => (
+                    numeric[0], numeric[1], numeric[2], numeric[3], numeric[4], numeric[5],
+                    numeric[6], numeric[7],
+                ),
+                _ => return Ok(JsValue::undefined()),
+            };
+            let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Some(surface) = dom.canvas_surface_mut(node_id) {
+                surface.draw_image(&src_pixels, src_w, src_h, sx, sy, sw, sh, dx, dy, dw, dh);
+            }
+            Ok(JsValue::undefined())
+        })
+    }
+}
+
+/// Build the `CanvasRenderingContext2D` JS object bound to `node_id`'s surface.
+fn canvas_context_object(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId, ctx: &mut Context) -> JsValue {
+    use silksurf_dom::CanvasSurface;
+
+    let (canvas_width, canvas_height) = {
+        let dom = dom_arc.lock().unwrap_or_else(PoisonError::into_inner);
+        dom.canvas_surface(node_id)
+            .map_or((300, 150), |surface| (surface.width(), surface.height()))
+    };
+    let canvas_ref = ObjectInitializer::new(ctx)
+        .property(js_string!("width"), canvas_width, Attribute::all())
+        .property(js_string!("height"), canvas_height, Attribute::all())
+        .property(js_string!("nodeId"), node_id.raw() as u32, Attribute::all())
+        .build();
+
+    let fill_get = make_getter(
+        ctx,
+        canvas_color_getter_native(dom_arc, node_id, CanvasSurface::fill_style),
+    );
+    let fill_set = make_getter(
+        ctx,
+        canvas_color_native(dom_arc, node_id, CanvasSurface::set_fill_style),
+    );
+    let stroke_get = make_getter(
+        ctx,
+        canvas_color_getter_native(dom_arc, node_id, CanvasSurface::stroke_style),
+    );
+    let stroke_set = make_getter(
+        ctx,
+        canvas_color_native(dom_arc, node_id, CanvasSurface::set_stroke_style),
+    );
+    let line_get = make_getter(
+        ctx,
+        canvas_scalar_getter_native(dom_arc, node_id, CanvasSurface::line_width),
+    );
+    let line_set = make_getter(
+        ctx,
+        canvas_scalar_setter_native(dom_arc, node_id, CanvasSurface::set_line_width),
+    );
+    let alpha_get = make_getter(
+        ctx,
+        canvas_scalar_getter_native(dom_arc, node_id, CanvasSurface::global_alpha),
+    );
+    let alpha_set = make_getter(
+        ctx,
+        canvas_scalar_setter_native(dom_arc, node_id, CanvasSurface::set_global_alpha),
+    );
+
+    ObjectInitializer::new(ctx)
+        .property(js_string!("canvas"), canvas_ref, Attribute::all())
+        .accessor(
+            js_string!("fillStyle"),
+            Some(fill_get),
+            Some(fill_set),
+            Attribute::CONFIGURABLE | Attribute::ENUMERABLE,
+        )
+        .accessor(
+            js_string!("strokeStyle"),
+            Some(stroke_get),
+            Some(stroke_set),
+            Attribute::CONFIGURABLE | Attribute::ENUMERABLE,
+        )
+        .accessor(
+            js_string!("lineWidth"),
+            Some(line_get),
+            Some(line_set),
+            Attribute::CONFIGURABLE | Attribute::ENUMERABLE,
+        )
+        .accessor(
+            js_string!("globalAlpha"),
+            Some(alpha_get),
+            Some(alpha_set),
+            Attribute::CONFIGURABLE | Attribute::ENUMERABLE,
+        )
+        .function(
+            canvas_geom_native(dom_arc, node_id, |s, [x, y, w, h]| s.fill_rect(x, y, w, h)),
+            js_string!("fillRect"),
+            4,
+        )
+        .function(
+            canvas_geom_native(dom_arc, node_id, |s, [x, y, w, h]| s.clear_rect(x, y, w, h)),
+            js_string!("clearRect"),
+            4,
+        )
+        .function(
+            canvas_geom_native(dom_arc, node_id, |s, [x, y, w, h]| {
+                s.stroke_rect(x, y, w, h);
+            }),
+            js_string!("strokeRect"),
+            4,
+        )
+        .function(
+            canvas_geom_native(dom_arc, node_id, |s, []| s.begin_path()),
+            js_string!("beginPath"),
+            0,
+        )
+        .function(
+            canvas_geom_native(dom_arc, node_id, |s, [x, y]| s.move_to(x, y)),
+            js_string!("moveTo"),
+            2,
+        )
+        .function(
+            canvas_geom_native(dom_arc, node_id, |s, [x, y]| s.line_to(x, y)),
+            js_string!("lineTo"),
+            2,
+        )
+        .function(
+            canvas_geom_native(dom_arc, node_id, |s, [x, y, w, h]| s.rect(x, y, w, h)),
+            js_string!("rect"),
+            4,
+        )
+        .function(
+            canvas_geom_native(dom_arc, node_id, |s, [cx, cy, x, y]| {
+                s.quadratic_curve_to(cx, cy, x, y);
+            }),
+            js_string!("quadraticCurveTo"),
+            4,
+        )
+        .function(
+            canvas_geom_native(dom_arc, node_id, |s, [a, b, c, d, x, y]| {
+                s.bezier_curve_to(a, b, c, d, x, y);
+            }),
+            js_string!("bezierCurveTo"),
+            6,
+        )
+        .function(canvas_arc_native(dom_arc, node_id), js_string!("arc"), 5)
+        .function(
+            canvas_geom_native(dom_arc, node_id, |s, []| s.close_path()),
+            js_string!("closePath"),
+            0,
+        )
+        .function(
+            canvas_geom_native(dom_arc, node_id, |s, []| s.fill()),
+            js_string!("fill"),
+            0,
+        )
+        .function(
+            canvas_geom_native(dom_arc, node_id, |s, []| s.stroke()),
+            js_string!("stroke"),
+            0,
+        )
+        .function(
+            canvas_geom_native(dom_arc, node_id, |s, []| s.save()),
+            js_string!("save"),
+            0,
+        )
+        .function(
+            canvas_geom_native(dom_arc, node_id, |s, []| s.restore()),
+            js_string!("restore"),
+            0,
+        )
+        .function(
+            canvas_geom_native(dom_arc, node_id, |s, [x, y]| s.translate(x, y)),
+            js_string!("translate"),
+            2,
+        )
+        .function(
+            canvas_geom_native(dom_arc, node_id, |s, [x, y]| s.scale(x, y)),
+            js_string!("scale"),
+            2,
+        )
+        .function(
+            canvas_geom_native(dom_arc, node_id, |s, [angle]| s.rotate(angle)),
+            js_string!("rotate"),
+            1,
+        )
+        .function(
+            canvas_geom_native(dom_arc, node_id, |s, [a, b, c, d, e, f]| {
+                s.transform(a, b, c, d, e, f);
+            }),
+            js_string!("transform"),
+            6,
+        )
+        .function(
+            canvas_geom_native(dom_arc, node_id, |s, [a, b, c, d, e, f]| {
+                s.set_transform(a, b, c, d, e, f);
+            }),
+            js_string!("setTransform"),
+            6,
+        )
+        .function(
+            canvas_geom_native(dom_arc, node_id, |s, []| s.reset_transform()),
+            js_string!("resetTransform"),
+            0,
+        )
+        .function(
+            canvas_get_image_data_native(dom_arc, node_id),
+            js_string!("getImageData"),
+            4,
+        )
+        .function(
+            canvas_put_image_data_native(dom_arc, node_id),
+            js_string!("putImageData"),
+            3,
+        )
+        .function(
+            canvas_draw_image_native(dom_arc, node_id),
+            js_string!("drawImage"),
+            3,
+        )
+        .build()
+        .into()
+}
+
+/// Parse a CSS color string into straight-alpha RGBA bytes. Supports `#rgb`,
+/// `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb()`/`rgba()`, and a small set of named colors;
+/// unrecognized input falls back to opaque black (canvas ignores invalid
+/// assignments, but a substrate that draws *something* is more useful here).
+// Named colors are listed individually for readability even where two share
+// a byte value (e.g. black and the fallback).
+#[allow(clippy::match_same_arms)]
+fn parse_css_color(input: &str) -> [u8; 4] {
+    let text = input.trim();
+    if let Some(hex) = text.strip_prefix('#') {
+        return parse_hex_color(hex).unwrap_or([0, 0, 0, 255]);
+    }
+    if let Some(inner) = text
+        .strip_prefix("rgba(")
+        .or_else(|| text.strip_prefix("rgb("))
+        .and_then(|rest| rest.strip_suffix(')'))
+    {
+        return parse_rgb_function(inner).unwrap_or([0, 0, 0, 255]);
+    }
+    match text.to_ascii_lowercase().as_str() {
+        "transparent" => [0, 0, 0, 0],
+        "black" => [0, 0, 0, 255],
+        "white" => [255, 255, 255, 255],
+        "red" => [255, 0, 0, 255],
+        "green" => [0, 128, 0, 255],
+        "lime" => [0, 255, 0, 255],
+        "blue" => [0, 0, 255, 255],
+        "yellow" => [255, 255, 0, 255],
+        "cyan" | "aqua" => [0, 255, 255, 255],
+        "magenta" | "fuchsia" => [255, 0, 255, 255],
+        "gray" | "grey" => [128, 128, 128, 255],
+        "orange" => [255, 165, 0, 255],
+        _ => [0, 0, 0, 255],
+    }
+}
+
+fn parse_hex_color(hex: &str) -> Option<[u8; 4]> {
+    let expand = |c: char| {
+        let d = c.to_digit(16)? as u8;
+        Some(d << 4 | d)
+    };
+    match hex.len() {
+        3 => {
+            let mut chars = hex.chars();
+            Some([
+                expand(chars.next()?)?,
+                expand(chars.next()?)?,
+                expand(chars.next()?)?,
+                255,
+            ])
+        }
+        4 => {
+            let mut chars = hex.chars();
+            Some([
+                expand(chars.next()?)?,
+                expand(chars.next()?)?,
+                expand(chars.next()?)?,
+                expand(chars.next()?)?,
+            ])
+        }
+        6 => Some([
+            u8::from_str_radix(&hex[0..2], 16).ok()?,
+            u8::from_str_radix(&hex[2..4], 16).ok()?,
+            u8::from_str_radix(&hex[4..6], 16).ok()?,
+            255,
+        ]),
+        8 => Some([
+            u8::from_str_radix(&hex[0..2], 16).ok()?,
+            u8::from_str_radix(&hex[2..4], 16).ok()?,
+            u8::from_str_radix(&hex[4..6], 16).ok()?,
+            u8::from_str_radix(&hex[6..8], 16).ok()?,
+        ]),
+        _ => None,
+    }
+}
+
+fn parse_rgb_function(inner: &str) -> Option<[u8; 4]> {
+    let parts: Vec<&str> = inner.split(',').map(str::trim).collect();
+    if parts.len() < 3 {
+        return None;
+    }
+    let channel =
+        |text: &str| -> Option<u8> { Some(text.parse::<f32>().ok()?.clamp(0.0, 255.0) as u8) };
+    let red = channel(parts[0])?;
+    let green = channel(parts[1])?;
+    let blue = channel(parts[2])?;
+    let alpha = if parts.len() >= 4 {
+        (parts[3].parse::<f32>().ok()?.clamp(0.0, 1.0) * 255.0).round() as u8
+    } else {
+        255
+    };
+    Some([red, green, blue, alpha])
 }
 
 // ---- tests ------------------------------------------------------------------

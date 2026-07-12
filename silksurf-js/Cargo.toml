@@ -4,90 +4,26 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.94.1"
 authors = ["SilkSurf Project"]
-description = "Pure Rust JavaScript engine - cleanroom implementation with zero-copy lexer, arena GC, and bytecode VM"
+description = "SilkSurf JavaScript runtime: boa_engine host integration with DOM bridge, storage, crypto, and fetch host objects"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/silksurf/silksurf"
-keywords = ["javascript", "js", "ecmascript", "vm", "interpreter"]
-categories = ["compilers", "parsing", "wasm"]
+keywords = ["javascript", "js", "ecmascript", "browser", "runtime"]
+categories = ["web-programming"]
 readme = "../README.md"
 
-# CLEANROOM NOTICE (UPDATED): The hand-written VM remains in src/vm/ and is
-# preserved behind the legacy-vm feature for reference and future optimization.
-# Production JS execution now delegates to boa_engine (public crate API only).
-# Using a crate via its public API is categorically different from copying its
-# internals; the cleanroom constraint was a design-phase process safeguard and
-# is lifted here for the production runtime dependency only.
+# The hand-written VM (lexer, parser, bytecode compiler, GC, JIT) is removed
+# per AD-025; git history preserves it. Production JS execution delegates to
+# boa_engine through SilkContext (boa_backend). Using a crate via its public
+# API is categorically different from copying its internals; the cleanroom
+# constraint was a design-phase process safeguard and is lifted for the
+# production runtime dependency only.
 
 [lib]
-crate-type = ["lib", "staticlib", "cdylib"]
-
-# =============================================================================
-# Core Dependencies (Always Included)
-# =============================================================================
+crate-type = ["lib"]
 
 [dependencies]
-# -----------------------------------------------------------------------------
-# Memory & Allocation
-# -----------------------------------------------------------------------------
-# Arena allocation (zero-copy, bump allocation)
-bumpalo = { version = "3.20", features = ["collections"] }
-
-# Fast memory allocator (optional global allocator)
-mimalloc = { version = "0.1", optional = true }
-
-# Memory-mapped I/O for bytecode caching (optional)
-memmap2 = { version = "0.9", optional = true }
-
-# -----------------------------------------------------------------------------
-# Zero-Copy & Serialization
-# -----------------------------------------------------------------------------
-# Safe transmutes for NaN-boxed values
-bytemuck = { version = "1.25", features = ["derive"] }
-
-# Zero-copy byte conversion
-zerocopy = { version = "0.8", features = ["derive"] }
-
-# Zero-copy serialization for bytecode caching
-rkyv = "0.8"
-
-# -----------------------------------------------------------------------------
-# String & Text Processing
-# -----------------------------------------------------------------------------
-# Unicode support for JS identifiers
-unicode-xid = "0.2"
-
-# SIMD-accelerated byte searching (3-6x faster lexer scanning)
-memchr = "2.8"
-
-# ECMAScript-compatible regex engine (Unicode property escapes, lookahead,
-# named captures). Used by String.prototype.match/search/replace and RegExp.
-regress = "0.11"
-
-# -----------------------------------------------------------------------------
-# Compile-Time Utilities
-# -----------------------------------------------------------------------------
-# Perfect hash functions for O(1) keyword lookup
-phf = { version = "0.13", features = ["macros"] }
-
-# Compile-time size assertions
-static_assertions = "1.1"
-
-# -----------------------------------------------------------------------------
-# Bit Manipulation
-# -----------------------------------------------------------------------------
-# Efficient bit vectors for GC marking
-bitvec = "1.0"
-
-# -----------------------------------------------------------------------------
-# Runtime Built-ins
-# -----------------------------------------------------------------------------
-# JSON parsing/serialization (serde ecosystem, battle-tested)
-serde = { workspace = true }
-serde_json = { workspace = true }
-
 # DOM bridge and networking (for JS-DOM and fetch() integration)
 silksurf-dom = { path = "../crates/silksurf-dom" }
-silksurf-css = { path = "../crates/silksurf-css" }
 silksurf-net = { path = "../crates/silksurf-net" }
 
 # Production JS engine: ECMA-262 2024+ compliant (register VM, ICs, Promises).
@@ -95,133 +31,42 @@ silksurf-net = { path = "../crates/silksurf-net" }
 boa_engine = { workspace = true }
 boa_runtime = { workspace = true }
 
+# JSON host objects (JSON.parse/stringify bridging, scorecard emission)
+serde_json = { workspace = true }
+
 # Browser crypto host APIs use OS randomness directly.
 getrandom = { workspace = true }
 
-# Tracing subscriber configuration
+# Fast global allocator (optional)
+mimalloc = { version = "0.1", optional = true }
+
+# Structured logging/tracing (optional)
+tracing = { version = "0.1", optional = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
 
-# Structured logging/tracing
-tracing = { version = "0.1", optional = true }
-
-# Command-line argument parsing
+# Command-line argument parsing (CLI binary only)
 clap = { version = "4.6", features = ["derive"], optional = true }
 
-# =============================================================================
-# WebAssembly Dependencies (Optional)
-# =============================================================================
-
-wasm-bindgen = { version = "0.2", optional = true }
-console_error_panic_hook = { version = "0.1", optional = true }
-
-# =============================================================================
-# Node.js Bindings (Optional)
-# =============================================================================
-
-napi = { version = "3.8", optional = true, features = ["napi4"] }
-napi-derive = { version = "3.5", optional = true }
-
-# =============================================================================
-# JIT Compiler Dependencies (Optional)
-# =============================================================================
-
-cranelift-codegen = { version = "0.130", optional = true }
-cranelift-frontend = { version = "0.130", optional = true }
-cranelift-jit = { version = "0.130", optional = true }
-cranelift-module = { version = "0.130", optional = true }
-cranelift-native = { version = "0.130.0", optional = true }
-
-# =============================================================================
-# Development Dependencies
-# =============================================================================
-
 [dev-dependencies]
-# Benchmarking
-criterion = { version = "0.8", features = ["html_reports"] }
+# WebSocket host-object tests spin a local tokio server.
 futures-util = { workspace = true }
 tokio = { workspace = true }
 tokio-tungstenite = { workspace = true }
 
-# =============================================================================
-# Feature Flags
-# =============================================================================
-
 [features]
 default = []
-
-# Preserve the hand-written bytecode VM for reference and reverse-engineering.
-# NOT built by default. Enable only for research, benchmarking, or comparison
-# against boa_engine. The VM is NOT MAINTAINED going forward; expect bitrot.
-legacy-vm = []
-
-# Full feature set for development
-full = [
-    "jit",
-    "fast-alloc",
-    "mmap",
-    "cli",
-    "tracing-full",
-    "wasm",
-    "napi",
-]
-
-# -----------------------------------------------------------------------------
-# Core Features
-# -----------------------------------------------------------------------------
-
-# JIT compilation via Cranelift
-jit = [
-    "cranelift-codegen",
-    "cranelift-frontend",
-    "cranelift-jit",
-    "cranelift-module",
-    "cranelift-native",
-]
 
 # Fast global allocator
 fast-alloc = ["mimalloc"]
 
-# Memory-mapped bytecode cache
-mmap = ["memmap2"]
-
 # CLI tools
 cli = ["clap"]
-
-# -----------------------------------------------------------------------------
-# Tracing Features
-# -----------------------------------------------------------------------------
 
 # Full tracing with subscriber
 tracing-full = ["tracing", "tracing-subscriber"]
 
-# -----------------------------------------------------------------------------
-# Platform Bindings
-# -----------------------------------------------------------------------------
-
-# WebAssembly target with wasm-bindgen
-wasm = ["wasm-bindgen", "console_error_panic_hook"]
-
-# Node.js native module via napi-rs
-napi = ["dep:napi", "napi-derive"]
-
-# -----------------------------------------------------------------------------
-# Experimental Features
-# -----------------------------------------------------------------------------
-
-# Neural BPE prediction (Phase 3+)
-neural = []
-
-# Constrained memory mode (embedded)
-constrained = []
-
-# =============================================================================
-# Binaries
-# =============================================================================
-
-[[bin]]
-name = "test262"
-path = "src/bin/test262.rs"
-required-features = ["legacy-vm"]
+# Full feature set for development
+full = ["fast-alloc", "cli", "tracing-full"]
 
 [[bin]]
 name = "test262_boa"
@@ -231,27 +76,6 @@ path = "src/bin/test262_boa.rs"
 name = "silksurf"
 path = "src/bin/main.rs"
 required-features = ["cli"]
-
-# =============================================================================
-# Benchmarks
-# =============================================================================
-
-[[bench]]
-name = "lexer_throughput"
-harness = false
-
-[[bench]]
-name = "vm_throughput"
-harness = false
-required-features = ["legacy-vm"]
-
-[[bench]]
-name = "interner"
-harness = false
-
-# =============================================================================
-# Lints
-# =============================================================================
 
 [lints]
 # Workspace policy (see ../Cargo.toml [workspace.lints]) already encodes

@@ -364,11 +364,12 @@ impl FusedWorkspace {
  * constant -- no hashing, no collision chains, contiguous cache lines.
  * For 50 nodes this is ~3x faster in the parent lookup hot path.
  *
- * WHY no StyleSoA field: building StyleSoA unconditionally costs ~4us for
- * 50 nodes (FxHashMap insertions + 25 Vec pushes) and eliminates the fused
- * pipeline's speedup advantage over the 3-pass baseline.  Instead, callers
- * that need column-oriented access call StyleSoA::from_bfs on demand.
- * See: silksurf_css::style_soa::StyleSoA::from_bfs
+ * WHY row-oriented styles: a column-oriented StyleSoA view was measured at
+ * ~4us of construction cost for 50 nodes (FxHashMap insertions + 25 Vec
+ * pushes), which eliminates the fused pipeline's speedup advantage over
+ * the 3-pass baseline. The speculative StyleSoA surface is removed on that
+ * evidence; the SoA idea lives where it pays -- CascadeView materializes a
+ * compact column view for the cascade hot path (silksurf_css cascade_view).
  */
 pub struct FusedResult {
     /// Style per node in BFS order. None for display:none or skipped nodes.
@@ -614,10 +615,12 @@ fn image_replaced_height(node: NodeId, replaced_sizes: &[ReplacedSize]) -> Optio
 }
 
 fn is_image_element(dom: &Dom, node: NodeId) -> bool {
+    // Canvas is a replaced element too: its intrinsic size comes from the
+    // width/height attributes, substituted the same way as an image's.
     dom.element_name(node)
         .ok()
         .flatten()
-        .is_some_and(|name| TagName::from_str(name) == TagName::Img)
+        .is_some_and(|name| matches!(TagName::from_str(name), TagName::Img | TagName::Canvas))
 }
 
 fn emit_workspace_paint(

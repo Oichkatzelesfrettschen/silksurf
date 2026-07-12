@@ -17,7 +17,6 @@ silksurf-text = { path = "../silksurf-text" }
 [features]
 default = []
 parallel = ["rayon"]
-batched-raster = []
 [dev-dependencies]
 silksurf-core = { path = "../silksurf-core" }
 

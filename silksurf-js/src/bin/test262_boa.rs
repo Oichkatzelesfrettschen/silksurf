@@ -18,22 +18,40 @@
  *   cargo run --bin test262_boa -- --scorecard out.json
  *
  * LIMITATIONS (first pass):
- *   - No per-test wall-clock timeout; test262 tests are expected to terminate.
- *   - Module (ESM) tests are skipped; boa_engine module evaluation requires
- *     a custom ModuleLoader implementation (future work).
- *   - async tests that require $DONE and a Promise-settling event loop are
- *     skipped; the $DONE pattern relies on host async infrastructure.
+ *   - Per-test bound is a deterministic loop-iteration budget (boa
+ *     `set_loop_iteration_limit`, default 1e8, `--loop-limit`), not a
+ *     wall-clock timeout. It converts an infinite JS loop into a catchable
+ *     error so a runaway test cannot hang the whole run (the collector waits on
+ *     every worker's result); recursion is bounded by boa's default 512-frame
+ *     limit. A hang inside a single native call (no JS loop opcode) is not
+ *     caught -- wall-clock was rejected as nondeterministic across machines.
+ *     Budget hits are tallied separately (LIMIT), never folded into FAIL, so a
+ *     too-low limit is visible instead of silently depressing the pass rate.
+ *   - Static ESM (import/export) tests RUN: the harness is evaluated as a
+ *     script (installing globals) and the test as a module via a
+ *     `SimpleModuleLoader` rooted at the test's directory (so `_FIXTURE.js`
+ *     imports resolve). Tests needing dynamic import, import.meta,
+ *     top-level-await, or JSON modules stay skipped by feature flag.
+ *   - async tests run: $DONE records completion (falsy/absent argument passes,
+ *     truthy fails, double-call fails) and run_jobs drains the microtask queue
+ *     the test enqueues. test262 async is microtask-based, so no host timer
+ *     loop is needed here.
  *   - Strict-mode variants (onlyStrict flag) run as normal scripts.
  */
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use boa_engine::{
-    Context, JsNativeError, JsValue, NativeFunction, Source, js_string,
+    Context, JsError, JsNativeError, JsValue, Module, NativeFunction, Source,
+    builtins::promise::PromiseState,
+    js_string,
+    module::SimpleModuleLoader,
     object::{ObjectInitializer, builtins::JsArrayBuffer},
     property::Attribute,
 };
@@ -48,7 +66,15 @@ struct Config {
     verbose: bool,
     threads: usize,
     scorecard: PathBuf,
+    /// Per-test loop-iteration budget: an infinite JS loop hits this and throws
+    /// a catchable error rather than hanging the run. Not a wall-clock timeout.
+    loop_limit: u64,
 }
+
+/// Default loop-iteration budget. Far above any legitimate test262 loop (which
+/// rarely exceeds ~1e5), yet finite so a runaway loop terminates in bounded
+/// time. Sized for termination, not to tune the pass count.
+const DEFAULT_LOOP_LIMIT: u64 = 100_000_000;
 
 fn parse_args() -> Config {
     let args: Vec<String> = env::args().collect();
@@ -57,11 +83,18 @@ fn parse_args() -> Config {
     let mut verbose = false;
     let mut threads = 4usize;
     let mut scorecard = PathBuf::from("silksurf-js/conformance/test262-boa-scorecard.json");
+    let mut loop_limit = DEFAULT_LOOP_LIMIT;
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
             "-v" | "--verbose" => verbose = true,
             "--full" => full = true,
+            "--loop-limit" => {
+                i += 1;
+                if i < args.len() {
+                    loop_limit = args[i].parse().unwrap_or(DEFAULT_LOOP_LIMIT);
+                }
+            }
             "--dir" => {
                 i += 1;
                 if i < args.len() {
@@ -100,6 +133,7 @@ fn parse_args() -> Config {
         verbose,
         threads,
         scorecard,
+        loop_limit,
     }
 }
 
@@ -113,6 +147,7 @@ fn print_help() {
     println!("      --full            Include built-ins/ and annexB/ in addition to language/");
     println!("      --dir <path>      Test directory (default: test262/test/language)");
     println!("  -j, --jobs <n>        Parallel worker threads (default: 4)");
+    println!("      --loop-limit <n>  Per-test loop-iteration budget (default: 1e8)");
     println!("      --scorecard <p>   JSON scorecard output path");
     println!("  -h, --help            Print help");
 }
@@ -321,7 +356,9 @@ const SKIP_FEATURES: &[&str] = &[
     "SharedArrayBuffer",
     "Atomics.waitAsync",
     "Atomics.pause",
-    // Dynamic import and import.meta -- need module loader
+    // Dynamic/async module features beyond static ESM: dynamic import()
+    // resolution, import.meta host wiring, top-level-await settling, and JSON
+    // modules each need more than the SimpleModuleLoader static-import path.
     "import.meta",
     "dynamic-import",
     "top-level-await",
@@ -431,7 +468,39 @@ impl HarnessCache {
 // Test262 host object ($262, print, $DONE)
 // ---------------------------------------------------------------------------
 
-fn install_test262_host(ctx: &mut Context) {
+/// Async-test completion recorded by `$DONE`. `$DONE()` (or a falsy argument)
+/// passes; a truthy argument fails; a second call is a failure.
+#[derive(Default)]
+struct DoneCell {
+    called: bool,
+    result: Option<Result<(), String>>,
+}
+
+fn done_message(value: &JsValue, ctx: &mut Context) -> String {
+    if let Some(object) = value.as_object() {
+        let name = object
+            .get(js_string!("name"), ctx)
+            .ok()
+            .filter(|v| !v.is_undefined())
+            .and_then(|v| v.to_string(ctx).ok())
+            .map(|s| s.to_std_string_lossy());
+        let message = object
+            .get(js_string!("message"), ctx)
+            .ok()
+            .filter(|v| !v.is_undefined())
+            .and_then(|v| v.to_string(ctx).ok())
+            .map(|s| s.to_std_string_lossy());
+        if let (Some(name), Some(message)) = (&name, &message) {
+            return format!("{name}: {message}");
+        }
+    }
+    value.to_string(ctx).map_or_else(
+        |_| "async test signaled failure".to_string(),
+        |s| s.to_std_string_lossy(),
+    )
+}
+
+fn install_test262_host(ctx: &mut Context, done: &Rc<RefCell<DoneCell>>) {
     // print() -- used by some harness files for debugging
     ctx.register_global_callable(
         js_string!("print"),
@@ -440,14 +509,29 @@ fn install_test262_host(ctx: &mut Context) {
     )
     .expect("print install cannot fail");
 
-    // $DONE() -- signals async test completion; we skip async tests but
-    // harness files may define it so we need the global to not throw.
-    ctx.register_global_callable(
-        js_string!("$DONE"),
-        1,
-        NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined())),
-    )
-    .expect("$DONE install cannot fail");
+    // $DONE(error) -- records async-test completion. test262 async tests are
+    // microtask-based (no host timers), so run_jobs after eval settles them.
+    let cell = Rc::clone(done);
+    // SAFETY: the closure captures an Rc<RefCell<DoneCell>>, which holds no Boa
+    // GC pointers, so the native function needs no trace hook.
+    let done_fn = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let outcome = match args.first() {
+                Some(value) if value.to_boolean() => Err(done_message(value, ctx)),
+                _ => Ok(()),
+            };
+            let mut cell = cell.borrow_mut();
+            if cell.called {
+                cell.result = Some(Err("$DONE called more than once".to_string()));
+            } else {
+                cell.called = true;
+                cell.result = Some(outcome);
+            }
+            Ok(JsValue::undefined())
+        })
+    };
+    ctx.register_global_callable(js_string!("$DONE"), 1, done_fn)
+        .expect("$DONE install cannot fail");
 
     // $262 object -- test262 host environment interface
     let is_htmldda = ObjectInitializer::new(ctx).build();
@@ -577,18 +661,20 @@ enum Outcome {
     Pass,
     Fail(String),
     Skip,
+    /// The test hit the deterministic loop-iteration budget (a probable
+    /// infinite loop). Tallied separately from Fail so a spuriously-low limit
+    /// is visible rather than silently depressing the pass rate.
+    LimitExceeded,
 }
 
-fn run_test(meta: &TestMeta, harness: &HarnessCache, source: &str) -> Outcome {
-    // Skip: module tests require ESM ModuleLoader (future work)
-    if meta.flags.iter().any(|f| f == "module") {
-        return Outcome::Skip;
-    }
-    // Skip: async tests require a host event loop and $DONE callback
-    if meta.flags.iter().any(|f| f == "async") {
-        return Outcome::Skip;
-    }
-    // Skip: any unsupported feature listed in frontmatter
+fn run_test(
+    meta: &TestMeta,
+    harness: &HarnessCache,
+    source: &str,
+    path: &Path,
+    loop_limit: u64,
+) -> Outcome {
+    // Skip: any unsupported feature listed in frontmatter.
     let skip_set: HashSet<&str> = SKIP_FEATURES.iter().copied().collect();
     for feat in &meta.features {
         if skip_set.contains(feat.as_str()) {
@@ -596,33 +682,175 @@ fn run_test(meta: &TestMeta, harness: &HarnessCache, source: &str) -> Outcome {
         }
     }
 
-    // Build script: harness preamble + test source
     let raw = meta.flags.iter().any(|f| f == "raw");
+    let async_test = meta.flags.iter().any(|f| f == "async");
+    let module_test = meta.flags.iter().any(|f| f == "module");
+
+    let done = Rc::new(RefCell::new(DoneCell::default()));
+
+    // Evaluate inside catch_unwind so no single test can crash the worker (and
+    // thereby lose its result and stall the collector). One case is
+    // load-bearing: a module whose loop hits the budget throws boa's
+    // RuntimeLimit error, and boa PANICS converting that to a promise-rejection
+    // value (it "cannot be converted to an opaque type"). Modules evaluate
+    // through a loader rooted at the test's directory (so `./x_FIXTURE.js`
+    // imports resolve) and see globals the harness installs as a script;
+    // scripts concatenate the harness preamble and run directly.
+    let eval = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if module_test {
+            run_module_test(meta, harness, source, path, loop_limit, &done, raw)
+        } else {
+            run_script_test(meta, harness, source, loop_limit, &done, raw)
+        }
+    }));
+    let eval_result = match eval {
+        Ok(result) => result,
+        Err(payload) => {
+            let message = panic_message(payload.as_ref());
+            // The known RuntimeLimit panic is a budget hit; any other panic is
+            // an engine failure on this test -- both stay visible, neither
+            // crashes the run.
+            if message.contains("RuntimeLimit") {
+                return Outcome::LimitExceeded;
+            }
+            return Outcome::Fail(format!("engine panicked: {message}"));
+        }
+    };
+
+    // A hit on the loop-iteration budget is a probable infinite loop, not a
+    // conformance failure -- surface it distinctly.
+    if let Err(err) = &eval_result
+        && is_runtime_limit(err)
+    {
+        return Outcome::LimitExceeded;
+    }
+
+    decide_outcome(eval_result, meta, async_test, &done)
+}
+
+/// Extract a human-readable message from a caught panic payload.
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic".to_string()
+    }
+}
+
+/// Evaluate a non-module test: harness preamble + source in one script.
+fn run_script_test(
+    meta: &TestMeta,
+    harness: &HarnessCache,
+    source: &str,
+    loop_limit: u64,
+    done: &Rc<RefCell<DoneCell>>,
+    raw: bool,
+) -> Result<(), JsError> {
     let preamble = if raw {
         harness.preamble_raw(&meta.includes)
     } else {
         harness.preamble(&meta.includes)
     };
-
     let mut script = preamble;
-    // onlyStrict: prepend "use strict" so the test runs in strict mode
+    // onlyStrict: prepend "use strict" so the test runs in strict mode.
     if meta.flags.iter().any(|f| f == "onlyStrict") {
         script.insert_str(0, "\"use strict\";\n");
     }
     script.push_str(source);
 
     let mut ctx = Context::default();
-    install_test262_host(&mut ctx);
+    ctx.runtime_limits_mut()
+        .set_loop_iteration_limit(loop_limit);
+    install_test262_host(&mut ctx, done);
 
-    let eval_result = ctx.eval(Source::from_bytes(script.as_bytes()));
+    let eval_result = ctx.eval(Source::from_bytes(script.as_bytes())).map(|_| ());
     let _ = ctx.run_jobs();
+    eval_result
+}
+
+/// Evaluate a module test: the harness runs as a script (installing globals),
+/// then the test source is parsed and evaluated as an ES module through a
+/// `SimpleModuleLoader` rooted at the test file's directory. A module reports a
+/// runtime throw by rejecting its evaluation promise, which is mapped back to an
+/// `Err` so the shared negative/positive logic treats it like a script throw.
+fn run_module_test(
+    meta: &TestMeta,
+    harness: &HarnessCache,
+    source: &str,
+    path: &Path,
+    loop_limit: u64,
+    done: &Rc<RefCell<DoneCell>>,
+    raw: bool,
+) -> Result<(), JsError> {
+    let root = path.parent().unwrap_or_else(|| Path::new("."));
+    let loader = Rc::new(SimpleModuleLoader::new(root)?);
+    let mut ctx = Context::builder()
+        .module_loader(loader)
+        .build()
+        .expect("context builder with module loader cannot fail");
+    ctx.runtime_limits_mut()
+        .set_loop_iteration_limit(loop_limit);
+    install_test262_host(&mut ctx, done);
+
+    // Harness as a script: its globals (assert, $DONE, ...) become visible to
+    // the module, matching how a browser runs the harness before the module.
+    if !raw {
+        let preamble = harness.preamble(&meta.includes);
+        ctx.eval(Source::from_bytes(preamble.as_bytes()))?;
+    }
+
+    // Parse-phase errors surface here directly (Module::parse returns Result),
+    // mapping cleanly to a negative test's Parse phase. The entry module is
+    // parsed with its own path so a relative `./x_FIXTURE.js` import has a
+    // referrer to resolve against (via the loader's root).
+    let entry = Source::from_bytes(source.as_bytes()).with_path(path);
+    let module = Module::parse(entry, None, &mut ctx)?;
+
+    let promise = module.load_link_evaluate(&mut ctx);
+    let _ = ctx.run_jobs();
+
+    match promise.state() {
+        PromiseState::Fulfilled(_) => Ok(()),
+        // A rejected evaluation promise carries the thrown value; wrap it as a
+        // JsError so error_matches/error_type_name work as for a script throw.
+        PromiseState::Rejected(value) => Err(JsError::from_opaque(value)),
+        PromiseState::Pending => Err(JsError::from_opaque(
+            js_string!("module evaluation did not settle").into(),
+        )),
+    }
+}
+
+/// Decide the outcome from an evaluation result, shared by the script and
+/// module paths. Async tests report through `$DONE`; everything else is judged
+/// against the frontmatter's negative expectation.
+fn decide_outcome(
+    eval_result: Result<(), JsError>,
+    meta: &TestMeta,
+    async_test: bool,
+    done: &Rc<RefCell<DoneCell>>,
+) -> Outcome {
+    // Async tests report their outcome through $DONE. The test262 harness has
+    // no host timers, so draining the microtask queue settles every promise
+    // reaction the test enqueues.
+    if async_test {
+        if let Err(err) = eval_result {
+            return Outcome::Fail(format!("async setup threw: {err}"));
+        }
+        return match &done.borrow().result {
+            Some(Ok(())) => Outcome::Pass,
+            Some(Err(message)) => Outcome::Fail(message.clone()),
+            None => Outcome::Fail("async test did not call $DONE".to_string()),
+        };
+    }
 
     match (eval_result, &meta.negative) {
         // Pass: no error, no negative expectation
-        (Ok(_), None) => Outcome::Pass,
+        (Ok(()), None) => Outcome::Pass,
 
         // Fail: script passed but we expected an error
-        (Ok(_), Some(neg)) => Outcome::Fail(format!(
+        (Ok(()), Some(neg)) => Outcome::Fail(format!(
             "expected {} ({:?} phase) but script passed",
             neg.ntype,
             neg.phase == Phase::Parse
@@ -659,6 +887,15 @@ fn run_test(meta: &TestMeta, harness: &HarnessCache, source: &str) -> Outcome {
 
         // Fallthrough (satisfies exhaustiveness)
         _ => Outcome::Fail("unexpected combination of result and negative spec".to_string()),
+    }
+}
+
+/// Whether a JsError is a boa runtime-limit error (loop-iteration budget hit).
+fn is_runtime_limit(e: &JsError) -> bool {
+    if let Some(native) = e.as_native() {
+        matches!(native.kind, boa_engine::JsNativeErrorKind::RuntimeLimit)
+    } else {
+        format!("{e}").starts_with("RuntimeLimit")
     }
 }
 
@@ -746,18 +983,38 @@ struct Totals {
     pass: usize,
     fail: usize,
     skip: usize,
+    /// Tests that hit the loop-iteration budget (probable infinite loops).
+    /// Counted as executed-but-not-passed and reported distinctly so a
+    /// too-low limit is visible rather than silently depressing the pass rate.
+    limit: usize,
 }
 
 impl Totals {
     fn total(&self) -> usize {
-        self.pass + self.fail + self.skip
+        self.pass + self.fail + self.skip + self.limit
     }
-    fn rate(&self) -> f64 {
-        let run = self.pass + self.fail;
-        if run == 0 {
+    fn executed(&self) -> usize {
+        self.pass + self.fail + self.limit
+    }
+    /*
+     * Two denominators, both always reported.  rate_executed divides by the
+     * tests actually run; rate_total divides by the full suite including
+     * skips (Intl, modules, async, FinalizationRegistry).  Quoting only the
+     * executed rate overstates conformance -- a 99.8% executed rate over a
+     * suite with 30% skips is a ~69% total rate.
+     */
+    fn rate_executed(&self) -> f64 {
+        if self.executed() == 0 {
             0.0
         } else {
-            self.pass as f64 / run as f64
+            self.pass as f64 / self.executed() as f64
+        }
+    }
+    fn rate_total(&self) -> f64 {
+        if self.total() == 0 {
+            0.0
+        } else {
+            self.pass as f64 / self.total() as f64
         }
     }
 }
@@ -821,11 +1078,18 @@ fn main() {
     // Result channel
     let (result_tx, result_rx) = std::sync::mpsc::channel::<(PathBuf, Outcome)>();
 
+    // Suppress the default panic hook: per-test evaluation runs inside
+    // catch_unwind and reports a panic as an outcome (LimitExceeded or Fail), so
+    // the default stderr backtrace would only be noise on tests that are already
+    // accounted for.
+    std::panic::set_hook(Box::new(|_| {}));
+
     // Spawn worker threads
     for _ in 0..cfg.threads {
         let work_rx = Arc::clone(&work_rx);
         let result_tx = result_tx.clone();
         let harness = Arc::clone(&harness);
+        let loop_limit = cfg.loop_limit;
         std::thread::spawn(move || {
             loop {
                 let item = {
@@ -842,7 +1106,7 @@ fn main() {
                             continue;
                         }
                         let meta = parse_meta(&source);
-                        let outcome = run_test(&meta, &harness, &source);
+                        let outcome = run_test(&meta, &harness, &source, &path, loop_limit);
                         let _ = result_tx.send((path, outcome));
                     }
                     Err(_) => break,
@@ -885,6 +1149,12 @@ fn main() {
         match outcome {
             Outcome::Pass => totals.pass += 1,
             Outcome::Skip => totals.skip += 1,
+            Outcome::LimitExceeded => {
+                totals.limit += 1;
+                if cfg.verbose {
+                    println!("LIMIT {}  -- loop-iteration budget hit", path.display());
+                }
+            }
             Outcome::Fail(reason) => {
                 totals.fail += 1;
                 fail_list.push((path.clone(), reason.clone()));
@@ -896,8 +1166,8 @@ fn main() {
         if done.is_multiple_of(report_every) || done == total_files {
             let pct = done as f64 / total_files as f64 * 100.0;
             eprint!(
-                "\r  {done}/{total_files} ({pct:.0}%)  pass={} fail={} skip={}   ",
-                totals.pass, totals.fail, totals.skip
+                "\r  {done}/{total_files} ({pct:.0}%)  pass={} fail={} skip={} limit={}   ",
+                totals.pass, totals.fail, totals.skip, totals.limit
             );
         }
     }
@@ -926,15 +1196,17 @@ fn main() {
     println!();
     println!("------------------------------------------------------------");
     println!(
-        "PASS: {}  FAIL: {}  SKIP: {}  TOTAL: {}",
+        "PASS: {}  FAIL: {}  SKIP: {}  LIMIT: {}  TOTAL: {}",
         totals.pass,
         totals.fail,
         totals.skip,
+        totals.limit,
         totals.total()
     );
     println!(
-        "Rate: {:.2}%  ({:.1}s)",
-        totals.rate() * 100.0,
+        "Rate (executed): {:.2}%  Rate (total incl. skips): {:.2}%  ({:.1}s)",
+        totals.rate_executed() * 100.0,
+        totals.rate_total() * 100.0,
         duration.as_secs_f64()
     );
 
@@ -949,9 +1221,10 @@ fn main() {
         println!("Scorecard: {}", cfg.scorecard.display());
     }
 
-    // Exit 0 iff pass rate > 50% (lower gate than the real suite's 80%+ expectation
-    // since module/async tests are skipped, inflating the denominator).
-    if totals.rate() >= 0.5 {
+    // Exit 0 iff executed pass rate > 50% (lower gate than the real suite's
+    // 80%+ expectation since module/async tests are skipped; rate_total in
+    // the scorecard carries the honest all-tests denominator).
+    if totals.rate_executed() >= 0.5 {
         std::process::exit(0);
     } else {
         std::process::exit(1);
@@ -996,11 +1269,23 @@ fn emit_scorecard(
     writeln!(f, "  \"runner\": \"test262_boa\",")?;
     writeln!(f, "  \"engine\": \"boa_engine 0.21\",")?;
     writeln!(f, "  \"total\": {},", totals.total())?;
+    writeln!(f, "  \"executed\": {},", totals.executed())?;
     writeln!(f, "  \"pass\": {},", totals.pass)?;
     writeln!(f, "  \"fail\": {},", totals.fail)?;
     writeln!(f, "  \"skip\": {},", totals.skip)?;
-    writeln!(f, "  \"rate\": {:.4},", totals.rate())?;
-    writeln!(f, "  \"pass_pct\": {:.2},", totals.rate() * 100.0)?;
+    writeln!(f, "  \"limit_exceeded\": {},", totals.limit)?;
+    writeln!(f, "  \"rate_executed\": {:.4},", totals.rate_executed())?;
+    writeln!(
+        f,
+        "  \"pass_pct_executed\": {:.2},",
+        totals.rate_executed() * 100.0
+    )?;
+    writeln!(f, "  \"rate_total\": {:.4},", totals.rate_total())?;
+    writeln!(
+        f,
+        "  \"pass_pct_total\": {:.2},",
+        totals.rate_total() * 100.0
+    )?;
     writeln!(f, "  \"timestamp\": \"{timestamp}\",")?;
     writeln!(f, "  \"scope\": \"{scope}\",")?;
     writeln!(f, "  \"duration_secs\": {:.2}", duration.as_secs_f64())?;

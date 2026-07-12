@@ -15,7 +15,7 @@ Phase 3 completes the native CSS pipeline by implementing a CSS parser that:
 - Removes LibCSS dependency from critical path
 - Achieves full control over CSS processing
 
-**Outcome**: Complete native CSS engine (parse → match → cascade → compute)
+**Outcome**: Complete native CSS engine (parse -> match -> cascade -> compute)
 
 ---
 
@@ -23,17 +23,17 @@ Phase 3 completes the native CSS pipeline by implementing a CSS parser that:
 
 ### Current State (Phase 2)
 ```
-CSS Text → LibCSS Parser → [Opaque rules] → css_select_style() → Computed Style
-                                                   ↓
+CSS Text -> LibCSS Parser -> [Opaque rules] -> css_select_style() -> Computed Style
+                                                   v
                             (Our selector handler callbacks)
-                                                   ↓
+                                                   v
                             (Our cascade engine - not used yet)
 ```
 
 ### After Phase 3
 ```
-CSS Text → Native Parser → Rule Array → Selector Matching → Native Cascade → Computed Style
-                                              ↓                     ↓
+CSS Text -> Native Parser -> Rule Array -> Selector Matching -> Native Cascade -> Computed Style
+                                              v                     v
                          (Our css_selector_match.c)   (Our css_cascade.c)
 ```
 
@@ -70,9 +70,9 @@ typedef struct {
 
 ### 3.2: Tokenizer vs Direct Parser
 
-**Decision**: Two-stage approach (Tokenizer → Parser)
-- **Stage 1**: Tokenizer converts CSS text → tokens (IDENT, NUMBER, STRING, symbols)
-- **Stage 2**: Recursive descent parser consumes tokens → rules
+**Decision**: Two-stage approach (Tokenizer -> Parser)
+- **Stage 1**: Tokenizer converts CSS text -> tokens (IDENT, NUMBER, STRING, symbols)
+- **Stage 2**: Recursive descent parser consumes tokens -> rules
 
 **Rationale**:
 - Separation of concerns
@@ -83,9 +83,9 @@ typedef struct {
 ### 3.3: Selector Complexity
 
 **Scope for Phase 3**:
-- Simple selectors: `div`, `.class`, `#id`, `[attr]`, `*` ✓
-- Combinators: `div > p`, `div p`, `div + p` ✓
-- Compound selectors: `div.class#id` ✓
+- Simple selectors: `div`, `.class`, `#id`, `[attr]`, `*` [x]
+- Combinators: `div > p`, `div p`, `div + p` [x]
+- Compound selectors: `div.class#id` [x]
 - Pseudo-classes: `:hover`, `:focus` (parse, defer matching to Phase 4)
 - **NOT in scope**: Pseudo-elements (::before), complex attribute selectors ([attr^="val"])
 
@@ -146,9 +146,9 @@ typedef enum {
 ```
 
 **Key Functions**:
-- `css_tokenize(const char *input)` → `css_token_t *tokens`
-- `css_token_next()` → returns next non-whitespace token
-- `css_token_peek()` → returns next without consuming
+- `css_tokenize(const char *input)` -> `css_token_t *tokens`
+- `css_token_next()` -> returns next non-whitespace token
+- `css_token_peek()` -> returns next without consuming
 - Error reporting with line:column position
 
 **Tests**:
@@ -165,14 +165,14 @@ typedef enum {
 **File**: `src/css/css_selector_parser.c` (new)
 
 **Functionality**:
-- Parse selector string → `css_selector_t` chain (linked list)
+- Parse selector string -> `css_selector_t` chain (linked list)
 - Support all combinator types
 - Calculate specificity
 
 **Example Parsing**:
 ```
 Input:  "div.class#id > p:hover"
-Output: [div] → [.class] → [#id] → CHILD_COMBINATOR → [p] → [:hover]
+Output: [div] -> [.class] -> [#id] -> CHILD_COMBINATOR -> [p] -> [:hover]
 ```
 
 **Algorithm**:
@@ -293,9 +293,9 @@ parse_style_rule():
 
 parse_at_rule():
   if @import:
-    parse_import_rule() → add to imports
+    parse_import_rule() -> add to imports
   if @media:
-    parse_media_rule() → parse rules inside media block
+    parse_media_rule() -> parse rules inside media block
   if @font-face:
     parse_font_face_rule()
   else:
@@ -352,7 +352,7 @@ typedef struct {
 
 **Functionality**:
 - Public API: `css_stylesheet_t *css_parse_stylesheet(const char *text)`
-- Integrate tokenizer → selector → declaration → rule parsing
+- Integrate tokenizer -> selector -> declaration -> rule parsing
 - Error handling and recovery
 - Line/column tracking for diagnostics
 
@@ -457,12 +457,12 @@ void compute_element_styles_native(
 
 **File**: `src/css/css_selector_index.c` (new)
 
-**Problem**: Iterating all rules for every element is O(rules × elements)
+**Problem**: Iterating all rules for every element is O(rules x elements)
 
 **Solution**: Selector indexing
-- Index by tag name: `div { ... }` → indexed under "div"
-- Index by class: `.header { ... }` → indexed under ".header"
-- Index by ID: `#main { ... }` → indexed under "#main"
+- Index by tag name: `div { ... }` -> indexed under "div"
+- Index by class: `.header { ... }` -> indexed under ".header"
+- Index by ID: `#main { ... }` -> indexed under "#main"
 - Fallback: Universal rules `*` or complex selectors
 
 **Lookup Algorithm**:
@@ -502,9 +502,9 @@ css_rule_t **find_matching_rules(
 ```c
 typedef struct {
     /* Hash tables for fast lookup */
-    hash_table_t *by_id;        /* ID → rules */
-    hash_table_t *by_class;     /* Class → rules */
-    hash_table_t *by_tag;       /* Tag name → rules */
+    hash_table_t *by_id;        /* ID -> rules */
+    hash_table_t *by_class;     /* Class -> rules */
+    hash_table_t *by_tag;       /* Tag name -> rules */
     css_rule_t *universal;      /* Rules with * or complex selectors */
     uint32_t universal_count;
 } css_selector_index_t;
@@ -547,7 +547,7 @@ typedef enum {
 ```
 Input:  "div { color: red; } xxx invalid rule { } p { font-size: 20px; }"
 
-Parse: [✓ div rule] [✗ skip "xxx invalid"] [✓ p rule]
+Parse: [[x] div rule] [[FAIL] skip "xxx invalid"] [[x] p rule]
 
 Output: 2 rules successfully parsed, 1 error reported
 ```
@@ -593,7 +593,7 @@ Output: 2 rules successfully parsed, 1 error reported
 - Update `tests/test_e2e_rendering.c`
 
 **Integration Scenarios**:
-1. Parse stylesheet → Match selectors → Cascade → Compute styles
+1. Parse stylesheet -> Match selectors -> Cascade -> Compute styles
 2. Real HTML + CSS (from test.html)
 3. Performance: full page CSS pipeline
 4. Memory usage: track allocations
@@ -655,7 +655,7 @@ Output: 2 rules successfully parsed, 1 error reported
 - [ ] Support selectors: type, class, ID, attribute, combinators, pseudo-classes
 - [ ] Graceful error recovery (malformed CSS continues parsing)
 - [ ] Selector indexing working (100x performance vs. linear scan)
-- [ ] Full native pipeline: Parse → Match → Cascade → Compute
+- [ ] Full native pipeline: Parse -> Match -> Cascade -> Compute
 
 ### Performance
 - [ ] Parse 10KB CSS in <1ms

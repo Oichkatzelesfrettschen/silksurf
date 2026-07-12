@@ -40,8 +40,8 @@ use silksurf_net::cache::ResponseCache;
 use silksurf_net::{BasicClient, HttpMethod, HttpRequest, HttpResponse, NetClient, NetError};
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 /*
@@ -261,6 +261,19 @@ impl SpeculativeRenderer {
         }
     }
 
+    /// Attach a partitioned cookie jar and the navigation's top-level site to
+    /// the underlying HTTP client, enabling the cookie round-trip with
+    /// partitioning and SameSite enforcement. The client is rebuilt with the
+    /// same TLS configuration plus the cookie context.
+    pub fn attach_cookie_context(
+        &mut self,
+        jar: Arc<Mutex<silksurf_net::cookie::PartitionedCookieStore>>,
+        top_level_site: impl Into<String>,
+    ) {
+        let tls = self.client.tls_provider();
+        self.client = Arc::new(BasicClient::with_tls(tls).with_cookie_context(jar, top_level_site));
+    }
+
     #[must_use]
     pub fn new_ephemeral() -> Self {
         Self {
@@ -465,6 +478,7 @@ impl SpeculativeRenderer {
         &mut self,
         url: &str,
         extra_headers: &[(String, String)],
+        initiator_site: Option<&str>,
     ) -> Result<(HttpResponse, FetchOrigin, std::time::Duration), NetError> {
         let t0 = Instant::now();
 
@@ -493,7 +507,10 @@ impl SpeculativeRenderer {
             body: Vec::new(),
         };
 
-        let response = self.client.fetch(&request)?;
+        // This is the top-level navigation document: SameSite is enforced from
+        // the initiator site (`None` = browser-initiated), not the subresource
+        // rule.
+        let response = self.client.fetch_navigation(&request, initiator_site)?;
         self.cache.put(url.to_string(), &response);
         Ok((response, FetchOrigin::Fresh, t0.elapsed()))
     }
@@ -501,9 +518,10 @@ impl SpeculativeRenderer {
     pub fn fetch_uncached_request(
         &mut self,
         request: &HttpRequest,
+        initiator_site: Option<&str>,
     ) -> Result<(HttpResponse, FetchOrigin, std::time::Duration), NetError> {
         let t0 = Instant::now();
-        let response = self.client.fetch(request)?;
+        let response = self.client.fetch_navigation(request, initiator_site)?;
         Ok((response, FetchOrigin::Fresh, t0.elapsed()))
     }
 

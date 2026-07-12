@@ -3,32 +3,32 @@
 ## Legacy System Overview (C baseline)
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                   SilkSurf Browser                   │
-├─────────────────────────────────────────────────────┤
-│ GUI Layer (XCB)                                     │
-│ ├─ Window management (XCB)                          │
-│ ├─ Event handling (keyboard, mouse)                 │
-│ └─ Widget rendering (buttons, scrollbars)           │
-├─────────────────────────────────────────────────────┤
-│ Rendering Engine                                    │
-│ ├─ Damage tracking (XDamage)                       │
-│ ├─ Pixmap caching (pool + LRU)                     │
-│ ├─ SIMD pixel ops (SSE2/AVX2)                      │
-│ └─ XShm zero-copy upload                           │
-├─────────────────────────────────────────────────────┤
-│ Web Engine (from NeoSurf)                           │
-│ ├─ HTML5 parser (libhubbub reference)             │
-│ ├─ CSS engine (libcss reference)                   │
-│ ├─ DOM tree (libdom reference)                     │
-│ ├─ JavaScript (Duktape)                            │
-│ └─ Fetch (HTTP, file, about)                       │
-├─────────────────────────────────────────────────────┤
-│ Memory Management                                   │
-│ ├─ Arena allocator (20 MB pool)                    │
-│ ├─ Object pooling (DOM nodes, styles)              │
-│ └─ Reference counting                              │
-└─────────────────────────────────────────────────────┘
++-----------------------------------------------------+
+|                   SilkSurf Browser                   |
++-----------------------------------------------------+
+| GUI Layer (XCB)                                     |
+| +- Window management (XCB)                          |
+| +- Event handling (keyboard, mouse)                 |
+| +- Widget rendering (buttons, scrollbars)           |
++-----------------------------------------------------+
+| Rendering Engine                                    |
+| +- Damage tracking (XDamage)                       |
+| +- Pixmap caching (pool + LRU)                     |
+| +- SIMD pixel ops (SSE2/AVX2)                      |
+| +- XShm zero-copy upload                           |
++-----------------------------------------------------+
+| Web Engine (from NeoSurf)                           |
+| +- HTML5 parser (libhubbub reference)             |
+| +- CSS engine (libcss reference)                   |
+| +- DOM tree (libdom reference)                     |
+| +- JavaScript (Duktape)                            |
+| +- Fetch (HTTP, file, about)                       |
++-----------------------------------------------------+
+| Memory Management                                   |
+| +- Arena allocator (20 MB pool)                    |
+| +- Object pooling (DOM nodes, styles)              |
+| +- Reference counting                              |
++-----------------------------------------------------+
 ```
 
 ---
@@ -37,54 +37,54 @@
 
 ```
 silksurf/
-├── CMakeLists.txt                    # Build config
-├── docs/
-│   ├── MASTER_PLAN.md               # Project vision
-│   ├── XCB_GUIDE.md                 # XCB reference
-│   ├── OPTIMIZATION_STRATEGY.md      # Perf targets
-│   ├── ARCHITECTURE.md               # This file
-│   ├── PROFILING.md                 # Measurement
-│   └── DESIGN_DECISIONS.md           # Trade-offs
-├── include/silksurf/
-│   ├── config.h                      # Configuration
-│   ├── gui.h                         # XCB GUI API
-│   ├── browser.h                     # Browser API
-│   ├── renderer.h                    # Rendering API
-│   ├── allocator.h                   # Memory management
-│   └── util.h                        # Utilities
-├── src/
-│   ├── main.c                        # Entry point
-│   ├── gui/
-│   │   ├── xcb_wrapper.c             # XCB binding
-│   │   ├── window.c                  # Window mgmt
-│   │   ├── event.c                   # Event loop
-│   │   └── widgets.c                 # Buttons, scrollbars
-│   ├── rendering/
-│   │   ├── renderer.c                # Main renderer
-│   │   ├── damage_tracker.c          # Damage tracking
-│   │   ├── pixmap_cache.c            # Pixmap LRU
-│   │   ├── pixel_ops.c               # SIMD ops
-│   │   └── buffer_pool.c             # Memory pools
-│   ├── core/
-│   │   ├── html_parser.c             # HTML5 (from NeoSurf)
-│   │   ├── css_engine.c              # CSS (from NeoSurf)
-│   │   ├── dom_tree.c                # DOM (from NeoSurf)
-│   │   ├── js_engine.c               # Duktape binding
-│   │   └── fetcher.c                 # HTTP/file/about
-│   ├── memory/
-│   │   ├── arena.c                   # Arena allocator
-│   │   ├── pool.c                    # Object pools
-│   │   └── refcount.c                # Reference counting
-│   └── util/
-│       ├── hash.c                    # Hash tables
-│       ├── string.c                  # String interning
-│       └── perf.c                    # Profiling
-├── perf/
-│   ├── benchmarks.c                  # Performance tests
-│   ├── memory_trace.c                # Memory profiling
-│   └── profile.sh                    # Profiling scripts
-└── diff-analysis/                    # NetSurf vs NeoSurf
-    └── COMPREHENSIVE_DIFF_REPORT.md
++-- CMakeLists.txt                    # Build config
++-- docs/
+|   +-- MASTER_PLAN.md               # Project vision
+|   +-- XCB_GUIDE.md                 # XCB reference
+|   +-- OPTIMIZATION_STRATEGY.md      # Perf targets
+|   +-- ARCHITECTURE.md               # This file
+|   +-- PROFILING.md                 # Measurement
+|   +-- DESIGN_DECISIONS.md           # Trade-offs
++-- include/silksurf/
+|   +-- config.h                      # Configuration
+|   +-- gui.h                         # XCB GUI API
+|   +-- browser.h                     # Browser API
+|   +-- renderer.h                    # Rendering API
+|   +-- allocator.h                   # Memory management
+|   +-- util.h                        # Utilities
++-- src/
+|   +-- main.c                        # Entry point
+|   +-- gui/
+|   |   +-- xcb_wrapper.c             # XCB binding
+|   |   +-- window.c                  # Window mgmt
+|   |   +-- event.c                   # Event loop
+|   |   +-- widgets.c                 # Buttons, scrollbars
+|   +-- rendering/
+|   |   +-- renderer.c                # Main renderer
+|   |   +-- damage_tracker.c          # Damage tracking
+|   |   +-- pixmap_cache.c            # Pixmap LRU
+|   |   +-- pixel_ops.c               # SIMD ops
+|   |   +-- buffer_pool.c             # Memory pools
+|   +-- core/
+|   |   +-- html_parser.c             # HTML5 (from NeoSurf)
+|   |   +-- css_engine.c              # CSS (from NeoSurf)
+|   |   +-- dom_tree.c                # DOM (from NeoSurf)
+|   |   +-- js_engine.c               # Duktape binding
+|   |   +-- fetcher.c                 # HTTP/file/about
+|   +-- memory/
+|   |   +-- arena.c                   # Arena allocator
+|   |   +-- pool.c                    # Object pools
+|   |   +-- refcount.c                # Reference counting
+|   +-- util/
+|       +-- hash.c                    # Hash tables
+|       +-- string.c                  # String interning
+|       +-- perf.c                    # Profiling
++-- perf/
+|   +-- benchmarks.c                  # Performance tests
+|   +-- memory_trace.c                # Memory profiling
+|   +-- profile.sh                    # Profiling scripts
++-- diff-analysis/                    # NetSurf vs NeoSurf
+    +-- COMPREHENSIVE_DIFF_REPORT.md
 ```
 
 ---
@@ -120,17 +120,17 @@ silksurf/
 
 ### Allocation Strategy
 ```
-┌─────────────────────────────────┐
-│  20 MB Arena Allocator          │
-├─────────────────────────────────┤
-│  DOM Tree (reused)              │  ~1 MB
-│  Style cache                    │  ~0.5 MB
-│  Rendering buffers              │  ~2 MB
-│  String pool (interned)         │  ~0.3 MB
-│  Object pools                   │  ~1 MB
-│  Pixmap cache                   │  ~5 MB
-│  Free space (fragmentation)     │  ~9.7 MB
-└─────────────────────────────────┘
++---------------------------------+
+|  20 MB Arena Allocator          |
++---------------------------------+
+|  DOM Tree (reused)              |  ~1 MB
+|  Style cache                    |  ~0.5 MB
+|  Rendering buffers              |  ~2 MB
+|  String pool (interned)         |  ~0.3 MB
+|  Object pools                   |  ~1 MB
+|  Pixmap cache                   |  ~5 MB
+|  Free space (fragmentation)     |  ~9.7 MB
++---------------------------------+
 ```
 
 ### Key Optimization: String Interning
@@ -147,26 +147,26 @@ After:  "hello" allocated once, 6 pointers = 6 bytes + 6 * 8 = 54 bytes
 ### Frame Rendering Flow
 ```
 1. User input (click, scroll, key)
-   ↓
+   v
 2. Update DOM/layout
-   ↓
+   v
 3. Collect damaged regions (XDamage)
-   ↓
+   v
 4. Check pixmap cache (hit = skip rendering)
-   ↓
+   v
 5. SIMD render to shared memory (XShm)
-   ↓
+   v
 6. Batch X requests (minimize round-trips)
-   ↓
+   v
 7. Upload via XCB (single flush)
-   ↓
+   v
 8. Present to screen (Composite if available)
 ```
 
 ### Damage Tracking Benefit
 ```
-Before: Scroll 100px → redraw entire 1024x768 = 786,432 pixels
-After:  Scroll 100px → redraw 1024x100 = 102,400 pixels
+Before: Scroll 100px -> redraw entire 1024x768 = 786,432 pixels
+After:  Scroll 100px -> redraw 1024x100 = 102,400 pixels
 Savings: 87%
 ```
 

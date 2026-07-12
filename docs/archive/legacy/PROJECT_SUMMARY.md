@@ -17,9 +17,9 @@ SilkSurf is a lightweight, high-performance web browser built from scratch for X
 
 **Current Architecture:**
 ```
-Phase 1: Design & Research ✓
-Phase 2: Core Systems (Memory, GUI, Events) ✓
-Phase 3: Rendering Pipeline (Damage, Cache, SIMD) ✓
+Phase 1: Design & Research [x]
+Phase 2: Core Systems (Memory, GUI, Events) [x]
+Phase 3: Rendering Pipeline (Damage, Cache, SIMD) [x]
 Phase 4: Web Engine (HTML/CSS/DOM/JS) - DESIGN COMPLETE, IMPLEMENTATION QUEUED
 ```
 
@@ -85,7 +85,7 @@ Cache hit rate: 30-40% on typical web pages
 - **Libraries:** libhubbub (HTML5), libcss (CSS), libdom (DOM)
 
 **Design Deliverables:**
-- Complete data flow diagram (HTML → DOM → CSS → Layout → Render)
+- Complete data flow diagram (HTML -> DOM -> CSS -> Layout -> Render)
 - Memory model for document representation
 - API design for document, element, style objects
 - Implementation phases (4a-4e) with LOC estimates
@@ -132,43 +132,43 @@ Cache lookup:          ~0.01 ms (L1 hit)
 
 ### Layered Design
 ```
-┌─────────────────────────────────────────┐
-│  Application Layer (main.c)             │
-├─────────────────────────────────────────┤
-│  Document Model (Phase 4: HTML/CSS/DOM) │
-├─────────────────────────────────────────┤
-│  Renderer (Phase 3: Damage/Cache/SIMD)  │
-├─────────────────────────────────────────┤
-│  GUI System (Phase 2: Windows/Events)   │
-├─────────────────────────────────────────┤
-│  Core (Phase 2: Memory, XCB wrapper)    │
-├─────────────────────────────────────────┤
-│  External Libraries                     │
-│  - XCB/X11       (GUI framework)        │
-│  - libhubbub     (HTML5 parser)         │
-│  - libcss        (CSS engine)           │
-│  - libdom        (DOM tree)             │
-│  - Duktape       (JavaScript VM)        │
-└─────────────────────────────────────────┘
++-----------------------------------------+
+|  Application Layer (main.c)             |
++-----------------------------------------+
+|  Document Model (Phase 4: HTML/CSS/DOM) |
++-----------------------------------------+
+|  Renderer (Phase 3: Damage/Cache/SIMD)  |
++-----------------------------------------+
+|  GUI System (Phase 2: Windows/Events)   |
++-----------------------------------------+
+|  Core (Phase 2: Memory, XCB wrapper)    |
++-----------------------------------------+
+|  External Libraries                     |
+|  - XCB/X11       (GUI framework)        |
+|  - libhubbub     (HTML5 parser)         |
+|  - libcss        (CSS engine)           |
+|  - libdom        (DOM tree)             |
+|  - Duktape       (JavaScript VM)        |
++-----------------------------------------+
 ```
 
 ### Component Dependencies
 ```
 main.c
-├── renderer.c (Phase 3)
-│   ├── damage_tracker.c
-│   ├── pixmap_cache.c
-│   ├── pixel_ops.c
-│   └── window.c (Phase 2)
-├── document.c (Phase 4 - scaffolding)
-├── window.c (Phase 2)
-├── event_loop.c (Phase 2)
-├── events.c (Phase 2)
-├── xcb_wrapper.c (Phase 2)
-└── memory/* (Phase 2)
-    ├── arena.c
-    ├── pool.c
-    └── refcount.c
++-- renderer.c (Phase 3)
+|   +-- damage_tracker.c
+|   +-- pixmap_cache.c
+|   +-- pixel_ops.c
+|   +-- window.c (Phase 2)
++-- document.c (Phase 4 - scaffolding)
++-- window.c (Phase 2)
++-- event_loop.c (Phase 2)
++-- events.c (Phase 2)
++-- xcb_wrapper.c (Phase 2)
++-- memory/* (Phase 2)
+    +-- arena.c
+    +-- pool.c
+    +-- refcount.c
 ```
 
 ---
@@ -178,43 +178,43 @@ main.c
 ### Directory Structure
 ```
 silksurf/
-├── include/silksurf/          # Public API headers
-│   ├── allocator.h
-│   ├── events.h
-│   ├── event_loop.h
-│   ├── window.h
-│   ├── xcb_wrapper.h
-│   ├── damage_tracker.h
-│   ├── pixmap_cache.h
-│   ├── pixel_ops.h
-│   ├── renderer.h
-│   └── document.h
-├── src/
-│   ├── main.c                 # Entry point (Phase 3)
-│   ├── memory/                # Phase 2
-│   │   ├── arena.c
-│   │   ├── pool.c
-│   │   └── refcount.c
-│   ├── gui/                   # Phase 2
-│   │   ├── xcb_wrapper.c
-│   │   ├── window.c
-│   │   ├── events.c
-│   │   └── event_loop.c
-│   ├── rendering/             # Phase 3
-│   │   ├── damage_tracker.c
-│   │   ├── pixmap_cache.c
-│   │   ├── pixel_ops.c
-│   │   └── renderer.c
-│   └── document/              # Phase 4 (scaffolding)
-│       └── document.c
-├── docs/
-│   ├── PHASE2_COMPLETION.md   # Phase 2 report
-│   ├── PHASE3_COMPLETION.md   # Phase 3 report
-│   ├── PHASE4_DESIGN.md       # Phase 4 architecture
-│   └── PROJECT_SUMMARY.md     # This file
-├── CMakeLists.txt             # Build configuration
-└── build/
-    └── silksurf               # Final executable
++-- include/silksurf/          # Public API headers
+|   +-- allocator.h
+|   +-- events.h
+|   +-- event_loop.h
+|   +-- window.h
+|   +-- xcb_wrapper.h
+|   +-- damage_tracker.h
+|   +-- pixmap_cache.h
+|   +-- pixel_ops.h
+|   +-- renderer.h
+|   +-- document.h
++-- src/
+|   +-- main.c                 # Entry point (Phase 3)
+|   +-- memory/                # Phase 2
+|   |   +-- arena.c
+|   |   +-- pool.c
+|   |   +-- refcount.c
+|   +-- gui/                   # Phase 2
+|   |   +-- xcb_wrapper.c
+|   |   +-- window.c
+|   |   +-- events.c
+|   |   +-- event_loop.c
+|   +-- rendering/             # Phase 3
+|   |   +-- damage_tracker.c
+|   |   +-- pixmap_cache.c
+|   |   +-- pixel_ops.c
+|   |   +-- renderer.c
+|   +-- document/              # Phase 4 (scaffolding)
+|       +-- document.c
++-- docs/
+|   +-- PHASE2_COMPLETION.md   # Phase 2 report
+|   +-- PHASE3_COMPLETION.md   # Phase 3 report
+|   +-- PHASE4_DESIGN.md       # Phase 4 architecture
+|   +-- PROJECT_SUMMARY.md     # This file
++-- CMakeLists.txt             # Build configuration
++-- build/
+    +-- silksurf               # Final executable
 ```
 
 ---
@@ -271,7 +271,7 @@ cmake .. && make
 
 ### Innovation 5: Modular Architecture
 - **Problem:** Monolithic browser codebases are hard to understand
-- **Solution:** Clean layering (Memory → GUI → Rendering → Document)
+- **Solution:** Clean layering (Memory -> GUI -> Rendering -> Document)
 - **Benefit:** Each layer is independent, testable, replaceable
 
 ---
@@ -325,11 +325,11 @@ cmake .. && make
 ### Memory Usage Profile
 ```
 Arena allocator:     64 MB base
-├── DOM tree:        ~25 MB (large documents)
-├── Layout nodes:    ~10 MB (parallel to DOM)
-├── CSS cache:       ~15 MB (computed styles)
-├── String pool:     ~6 MB (element names, text)
-└── JavaScript:      ~8 MB (Duktape VM)
++-- DOM tree:        ~25 MB (large documents)
++-- Layout nodes:    ~10 MB (parallel to DOM)
++-- CSS cache:       ~15 MB (computed styles)
++-- String pool:     ~6 MB (element names, text)
++-- JavaScript:      ~8 MB (Duktape VM)
 ```
 
 ### Rendering Pipeline Performance
@@ -342,7 +342,7 @@ Frame @ 1024x768, 60 FPS:
   Damage tracking:      0.1 ms (region merge)
   Pixmap cache:         0.2 ms (LRU lookup)
   X11 presentation:     1.0 ms (XCB protocol)
-  ─────────────────────────────
+  -----------------------------
   Total per frame:      ~7.0 ms (well under 16.6 ms budget)
 ```
 
@@ -359,22 +359,22 @@ Document size      Parse time    Layout time    Memory
 ## Known Limitations
 
 ### Phase 3 (Current)
-- ✗ No text rendering (Phase 4d)
-- ✗ No HTML parsing (Phase 4a)
-- ✗ No CSS cascade (Phase 4b)
-- ✗ No layout algorithm (Phase 4c)
-- ✗ No JavaScript (Phase 4e)
-- ✗ Damage regions capped at 256 (configurable)
-- ✗ Linear pixmap cache search O(1024) (upgrade to hash table post-Phase 4)
-- ✗ No XDamage extension integration (only full-screen updates)
+- [FAIL] No text rendering (Phase 4d)
+- [FAIL] No HTML parsing (Phase 4a)
+- [FAIL] No CSS cascade (Phase 4b)
+- [FAIL] No layout algorithm (Phase 4c)
+- [FAIL] No JavaScript (Phase 4e)
+- [FAIL] Damage regions capped at 256 (configurable)
+- [FAIL] Linear pixmap cache search O(1024) (upgrade to hash table post-Phase 4)
+- [FAIL] No XDamage extension integration (only full-screen updates)
 
 ### Acceptable Tradeoffs
-- ✓ C11 only (no C99 legacy support needed)
-- ✓ Linux/X11 only (no Windows/macOS ports planned)
-- ✓ No network stack (assume local files for MVP)
-- ✓ Single-threaded (simplifies synchronization)
-- ✓ Basic CSS only (no @media, @keyframes initially)
-- ✓ ECMA5 JavaScript (no ES6 initially)
+- [x] C11 only (no C99 legacy support needed)
+- [x] Linux/X11 only (no Windows/macOS ports planned)
+- [x] No network stack (assume local files for MVP)
+- [x] Single-threaded (simplifies synchronization)
+- [x] Basic CSS only (no @media, @keyframes initially)
+- [x] ECMA5 JavaScript (no ES6 initially)
 
 ---
 
@@ -383,16 +383,16 @@ Document size      Parse time    Layout time    Memory
 ### Unit Tests (Per-Phase)
 ```
 Phase 2:
-  ✓ Arena allocator (alloc, free, alignment)
-  ✓ Object pooling (acquire, release, reuse)
-  ✓ Event queue (push, pop, circular buffer)
-  ✓ Window creation (display, window, backbuffer)
+  [x] Arena allocator (alloc, free, alignment)
+  [x] Object pooling (acquire, release, reuse)
+  [x] Event queue (push, pop, circular buffer)
+  [x] Window creation (display, window, backbuffer)
 
 Phase 3:
-  ✓ Damage tracking (add rect, overlap, coverage)
-  ✓ Pixmap cache (insert, lookup, eviction)
-  ✓ Pixel operations (fill, copy, blend, SIMD detection)
-  ✓ Renderer (begin/end frame, damage accumulation)
+  [x] Damage tracking (add rect, overlap, coverage)
+  [x] Pixmap cache (insert, lookup, eviction)
+  [x] Pixel operations (fill, copy, blend, SIMD detection)
+  [x] Renderer (begin/end frame, damage accumulation)
 
 Phase 4:
   [ ] HTML parsing (DOM construction)
@@ -404,10 +404,10 @@ Phase 4:
 
 ### Integration Tests
 ```
-[ ] Full page render (simple HTML → on-screen)
-[ ] Event handling (click, key input → DOM mutation)
-[ ] Damage efficiency (scroll → minimal redraw)
-[ ] Cache effectiveness (repeated renders → cache hits)
+[ ] Full page render (simple HTML -> on-screen)
+[ ] Event handling (click, key input -> DOM mutation)
+[ ] Damage efficiency (scroll -> minimal redraw)
+[ ] Cache effectiveness (repeated renders -> cache hits)
 [ ] Performance benchmarks (frame latency, memory)
 ```
 
@@ -417,43 +417,43 @@ Phase 4:
 
 | Aspect | Status | Notes |
 |--------|--------|-------|
-| Compilation | ✓ Pass | Zero errors, <10 warnings |
-| Memory Safety | ✓ Safe | NULL checks, bounds validation |
-| Encapsulation | ✓ Clean | Opaque types, accessor functions |
-| SIMD Fallback | ✓ Portable | C implementations on all platforms |
-| Error Handling | ✓ Defensive | All failures checked and logged |
-| Documentation | ✓ Complete | Inline comments, header docs |
-| Architecture | ✓ Sound | Clean layering, minimal coupling |
-| Performance | ✓ Optimized | Damage tracking, caching, SIMD |
+| Compilation | [x] Pass | Zero errors, <10 warnings |
+| Memory Safety | [x] Safe | NULL checks, bounds validation |
+| Encapsulation | [x] Clean | Opaque types, accessor functions |
+| SIMD Fallback | [x] Portable | C implementations on all platforms |
+| Error Handling | [x] Defensive | All failures checked and logged |
+| Documentation | [x] Complete | Inline comments, header docs |
+| Architecture | [x] Sound | Clean layering, minimal coupling |
+| Performance | [x] Optimized | Damage tracking, caching, SIMD |
 
 ---
 
 ## Success Criteria (Achieved)
 
 Phase 1:
-- ✓ Comprehensive browser architecture analysis
-- ✓ Technology selection rationale
-- ✓ Design document complete
+- [x] Comprehensive browser architecture analysis
+- [x] Technology selection rationale
+- [x] Design document complete
 
 Phase 2:
-- ✓ Arena allocator working
-- ✓ Event loop functional at 60 FPS
-- ✓ XCB window creation and display
-- ✓ 29 KB binary compiled
+- [x] Arena allocator working
+- [x] Event loop functional at 60 FPS
+- [x] XCB window creation and display
+- [x] 29 KB binary compiled
 
 Phase 3:
-- ✓ Damage tracking algorithm
-- ✓ LRU pixmap cache
-- ✓ SIMD pixel operations with fallback
-- ✓ Unified renderer interface
-- ✓ 43 KB binary with all components
+- [x] Damage tracking algorithm
+- [x] LRU pixmap cache
+- [x] SIMD pixel operations with fallback
+- [x] Unified renderer interface
+- [x] 43 KB binary with all components
 
 Phase 4 (Ready):
-- ✓ Architecture designed (100 pages of specs)
-- ✓ API contracts defined
-- ✓ Library dependencies configured
-- ✓ Scaffolding created
-- ✓ Performance targets set
+- [x] Architecture designed (100 pages of specs)
+- [x] API contracts defined
+- [x] Library dependencies configured
+- [x] Scaffolding created
+- [x] Performance targets set
 - Ready for implementation
 
 ---

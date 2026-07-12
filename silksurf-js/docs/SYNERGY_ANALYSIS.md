@@ -158,18 +158,18 @@ File --> memmap2 --> &[u8] --> zerocopy slice_from_bytes --> &[Instruction]
 
 ```
 Need to read structured type from bytes?
-├── Type has invalid bit patterns?
-│   ├── Yes: Use zerocopy TryFromBytes
-│   └── No: Use bytemuck Pod
-│
-├── Need to persist to disk?
-│   └── Add rkyv Archive
-│
-├── Need memory-mapped access?
-│   └── Add memmap2 + zerocopy slice_from_bytes
-│
-└── Need compile-time size check?
-    └── Add static_assertions
++-- Type has invalid bit patterns?
+|   +-- Yes: Use zerocopy TryFromBytes
+|   +-- No: Use bytemuck Pod
+|
++-- Need to persist to disk?
+|   +-- Add rkyv Archive
+|
++-- Need memory-mapped access?
+|   +-- Add memmap2 + zerocopy slice_from_bytes
+|
++-- Need compile-time size check?
+    +-- Add static_assertions
 ```
 
 ## High-Priority Integration Points

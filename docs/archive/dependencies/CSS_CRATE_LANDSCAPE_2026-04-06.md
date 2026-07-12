@@ -1,4 +1,4 @@
-# CSS Crate Landscape Analysis (Pure Rust) — 2026-04-06
+# CSS Crate Landscape Analysis (Pure Rust) -- 2026-04-06
 
 ## Goal and scope
 - Surveyed a broad Rust crate landscape for CSS engine-adjacent needs in SilkSurf: parser/tokenizer, selector matching, style/cascade representation, interning/small-string, perf helpers, serialization/cache, and compliance tooling.
@@ -20,11 +20,11 @@
    - `wpt css`
    - `fuzz css`
 2. **Ecosystem discovery** via dependency expansion from key CSS crates:
-   - `lightningcss@1.0.0-alpha.71` → `cssparser`, `cssparser-color`, `parcel_selectors`, `smallvec`, `indexmap`
-   - `selectors@0.36.1` → `cssparser`, `phf`, `precomputed-hash`, `servo_arc`, `smallvec`, `rustc-hash`
-   - `swc_css_parser@21.0.0` → `swc_css_ast`, `swc_css_visit`, `serde`
-   - `parcel_selectors@0.28.2` → `cssparser`, `phf`, `precomputed-hash`, `smallvec`
-   - `biome_css_parser@0.5.8` → `biome_parser`, `biome_rowan`, `insta`
+   - `lightningcss@1.0.0-alpha.71` -> `cssparser`, `cssparser-color`, `parcel_selectors`, `smallvec`, `indexmap`
+   - `selectors@0.36.1` -> `cssparser`, `phf`, `precomputed-hash`, `servo_arc`, `smallvec`, `rustc-hash`
+   - `swc_css_parser@21.0.0` -> `swc_css_ast`, `swc_css_visit`, `serde`
+   - `parcel_selectors@0.28.2` -> `cssparser`, `phf`, `precomputed-hash`, `smallvec`
+   - `biome_css_parser@0.5.8` -> `biome_parser`, `biome_rowan`, `insta`
 3. **Per-candidate metadata pull** from crates.io API (version, update recency, download signals).
 4. **Quick-fit scoring** for each candidate: maintenance, API fit, performance potential, overlap risk, cleanroom compatibility.
 

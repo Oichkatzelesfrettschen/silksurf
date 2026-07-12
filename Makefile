@@ -3,11 +3,13 @@
 # The Makefile presents the public build, lint, test, conformance, and release
 # interface. Scripts under scripts/ carry target implementation details.
 #
-#   make check   -- fast gate: fmt + clippy -D warnings + lint_unwrap + lint_unsafe
+#   make check   -- fast gate: fmt + clippy -D warnings + lint_unwrap
+#                   + lint_unsafe + lint_glossary + lint_doc_links
+#                   + lint_cleanroom
 #   make test    -- workspace tests with -D warnings
 #   make full    -- check + test + cargo deny + cargo doc
 #   make fmt     -- auto-format all Rust and C sources
-#   make clean   -- remove build artifacts (Rust + CMake)
+#   make clean   -- remove build artifacts (Rust + historical harness dirs)
 #   make doc     -- build rustdoc
 #   make hooks   -- install git pre-commit/pre-push hooks
 #   make cross   -- cross-compile to aarch64
@@ -43,16 +45,12 @@ CLIPPY_DENY := \
 # Read MSRV from workspace; single source of truth.
 MSRV := $(shell awk -F'"' '/^rust-version =/ {print $$2; exit}' Cargo.toml)
 
-# CMake / C legacy variables (Phase C tree, ADR-007)
-BUILD_DIR      = build
+# Build-tree hygiene. The build/ and build-* directories, infer-out, and
+# fuzz_out* trees are historical C-harness outputs (AD-024, harness removed);
+# clean keeps removing them so stale checkouts converge.
 CARGO_TARGET_DIRS = target silksurf-js/target
-BUILD_ARTIFACT_DIRS = $(BUILD_DIR) build-* infer-out perf/results \
+BUILD_ARTIFACT_DIRS = build build-* infer-out perf/results \
                       fuzz_out fuzz_out_css fuzz/artifacts logs/cores
-RICING_FLAGS   = -march=x86-64-v3 -O3 -flto -fomit-frame-pointer \
-                 -fno-strict-aliasing -ftree-vectorize -D_SILK_NO_THREADS
-GUI_LIBS       = $(shell pkg-config --cflags --libs xcb xcb-damage xcb-composite \
-                     libcss libdom libhubbub libparserutils 2>/dev/null)
-CMAKE_FLAGS    = -DCMAKE_EXPORT_COMPILE_COMMANDS=1 -DCMAKE_C_FLAGS="$(RICING_FLAGS)"
 BIN           ?= bench_pipeline
 CRATE         ?= silksurf-engine
 PERF_OPTS     ?= -e cycles:u -j any,u
@@ -82,6 +80,8 @@ check:
 	@if [ -x scripts/lint_unwrap.sh ]; then scripts/lint_unwrap.sh; fi
 	@if [ -x scripts/lint_unsafe.sh ]; then scripts/lint_unsafe.sh; fi
 	@if [ -x scripts/lint_glossary.sh ]; then scripts/lint_glossary.sh; fi
+	@if [ -x scripts/lint_doc_links.sh ]; then scripts/lint_doc_links.sh; fi
+	@if [ -x scripts/lint_cleanroom.sh ]; then scripts/lint_cleanroom.sh; fi
 
 # Workspace tests with -D warnings.
 # Wired into full gate (pre-push hook) via the full target.
@@ -209,25 +209,12 @@ release:
 	VERSION=$(VERSION) scripts/release.sh
 
 # ---------------------------------------------------------------------------
-# Legacy CMake / C tree (ADR-007: deprecate or integrate decision pending)
+# Optimized-build and perf targets (Rust)
 # ---------------------------------------------------------------------------
 
-.PHONY: cmake-build cmake-clean gui bpe-bench \
-        infer infer-diff infer-explore layout-test \
-        fuzz-build fuzz-run css-fuzz-run \
-        riced-build pgo-train bolt-opt \
+.PHONY: riced-build pgo-train bolt-opt \
         perf-guardrails perf-baselines perf-all \
         local-gate-fast local-gate-full local-gate core-dumps
-
-$(BUILD_DIR)/Makefile:
-	mkdir -p $(BUILD_DIR)
-	cd $(BUILD_DIR) && cmake $(CMAKE_FLAGS) ..
-
-cmake-build: $(BUILD_DIR)/Makefile
-	$(MAKE) -C $(BUILD_DIR)
-
-cmake-clean: clean-build-artifacts
-	mkdir -p logs/cores
 
 core-dumps:
 	mkdir -p logs/cores
@@ -256,67 +243,3 @@ perf-all: perf-guardrails perf-baselines
 local-gate-fast: check
 local-gate-full: full
 local-gate: full
-
-gui:
-	@echo "Building Silksurf GUI (C/XCB legacy)..."
-	mkdir -p $(BUILD_DIR)
-	gcc -Iinclude -Isrc $(RICING_FLAGS) -g \
-	    src/gui/main_gui.c src/gui/window.c src/gui/xcb_wrapper.c \
-	    src/rendering/paint.c src/css/cascade.c \
-	    src/document/css_engine.c src/document/css_select_handler.c \
-	    src/css/selector.c src/document/document.c src/document/dom_node.c \
-	    src/memory/arena.c \
-	    -o $(BUILD_DIR)/silksurf_gui -lm $(GUI_LIBS)
-
-bpe-bench:
-	@echo "Building Neural BPE Benchmark..."
-	mkdir -p $(BUILD_DIR)
-	gcc -Iinclude -Isrc $(RICING_FLAGS) -g \
-	    src/neural/bpe_bench.c src/neural/bpe.c src/memory/arena.c \
-	    -o $(BUILD_DIR)/bpe_bench -lm
-	./$(BUILD_DIR)/bpe_bench
-
-infer:
-	mkdir -p $(BUILD_DIR)
-	cd $(BUILD_DIR) && cmake $(CMAKE_FLAGS) ..
-	infer run --report-console-limit 10 \
-	    --compilation-database $(BUILD_DIR)/compile_commands.json
-
-infer-diff: $(BUILD_DIR)/Makefile
-	infer run --reactive \
-	    --compilation-database $(BUILD_DIR)/compile_commands.json
-
-infer-explore:
-	infer explore --html
-
-layout-test:
-	mkdir -p $(BUILD_DIR)
-	gcc -fsanitize=undefined -g -O2 src/layout/box_model.c -o $(BUILD_DIR)/layout_test
-	./$(BUILD_DIR)/layout_test
-
-FUZZ_IN  = fuzz_in
-FUZZ_OUT = fuzz_out
-
-fuzz-build:
-	mkdir -p $(BUILD_DIR)
-	AFL_USE_ASAN=1 AFL_LLVM_INSTRUMENT=NATIVE afl-cc -Iinclude -Isrc $(RICING_FLAGS) -g \
-	    src/fuzz_harness.c src/document/html_tokenizer.c src/memory/arena.c \
-	    -o $(BUILD_DIR)/silksurf_fuzz -lm
-	AFL_USE_ASAN=1 AFL_LLVM_INSTRUMENT=NATIVE afl-cc -Iinclude -Isrc $(RICING_FLAGS) -g \
-	    src/css/fuzz_css.c src/css/css_tokenizer.c src/document/css_engine.c \
-	    src/document/css_select_handler.c src/css/selector.c \
-	    src/document/dom_node.c src/document/document.c src/memory/arena.c \
-	    -o $(BUILD_DIR)/silksurf_css_fuzz -lm $(GUI_LIBS)
-
-fuzz-run:
-	mkdir -p $(FUZZ_IN)
-	echo "<!DOCTYPE html><html><body>Test</body></html>" > $(FUZZ_IN)/basic.html
-	echo "<div class='test'></div>" > $(FUZZ_IN)/div.html
-	AFL_NO_UI=1 afl-fuzz -i $(FUZZ_IN) -o $(FUZZ_OUT) -- ./$(BUILD_DIR)/silksurf_fuzz
-
-css-fuzz-run:
-	mkdir -p fuzz_in_css
-	echo "body { color: red; }" > fuzz_in_css/basic.css
-	echo ".test > #id { width: 100px; padding: 10px; }" > fuzz_in_css/complex.css
-	AFL_NO_UI=1 afl-fuzz -i fuzz_in_css -o fuzz_out_css \
-	    -x fuzz_in/css.dict -- ./$(BUILD_DIR)/silksurf_css_fuzz

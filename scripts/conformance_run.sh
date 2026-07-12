@@ -56,17 +56,25 @@ run_css() {
 }
 
 run_test262() {
-    local subset="${TEST262_PATH:-language/literals/numeric}"
-    echo "==> test262 [subset: $subset]"
+    # test262_boa parses, evaluates, and checks negative expectations
+    # against boa_engine; the scorecard carries both denominators
+    # (rate_executed and rate_total). TEST262_PATH selects a subdirectory
+    # of the corpus; TEST262_FULL=1 widens scope to built-ins + annexB.
+    local subset="${TEST262_PATH:-}"
+    echo "==> test262 (boa runner)"
     if [ ! -d "silksurf-js/test262/test" ]; then
         echo "    test262 corpus not present at silksurf-js/test262/test; skipping."
         return 0
     fi
-    cargo build --release -p silksurf-js --bin test262 --quiet
-    ./target/release/test262 \
-        --test262 silksurf-js/test262 \
-        --scorecard "$SCORECARD_DIR/test262-scorecard.json" \
-        "$subset" || true
+    cargo build --release -p silksurf-js --bin test262_boa --quiet
+    set -- --scorecard "$SCORECARD_DIR/test262-boa-scorecard.json"
+    if [ "${TEST262_FULL:-0}" = "1" ]; then
+        set -- "$@" --full
+    fi
+    if [ -n "$subset" ]; then
+        set -- "$@" --dir "silksurf-js/test262/test/$subset"
+    fi
+    ./target/release/test262_boa "$@" || true
 }
 
 run_tls() {
