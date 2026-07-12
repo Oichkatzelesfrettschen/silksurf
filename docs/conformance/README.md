@@ -9,9 +9,12 @@ This directory holds the aggregated conformance dashboard
 docs/conformance/
   README.md                        # this file
   SCORECARD.md                     # human-readable dashboard
-  test262-scorecard.json           # silksurf-js test262 result
-  (future) wpt-scorecard.json      # web-platform-tests subset
-  (future) h2spec-scorecard.json   # HTTP/2 conformance
+  (archived) ../archive/conformance/test262-lexer-scorecard.json
+                                   # historical lexer-only result (AD-025)
+  (live) ../../silksurf-js/conformance/test262-boa-scorecard.json
+                                   # latest test262 boa-runner run
+  (live) ../../crates/silksurf-engine/conformance/wpt-scorecard.json
+  (live) ../../crates/silksurf-engine/conformance/h2spec-scorecard.json
 ```
 
 ## Running

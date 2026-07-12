@@ -1,7 +1,7 @@
 > **SUPERSEDED (archived 2026-07-09).** This document describes the
 > pre-Rust-pivot C/CMake plan. The product is the Rust workspace; see
 > docs/roadmaps/DEBT-RECONCILIATION-ROADMAP.md and
-> docs/roadmaps/SNAZZY-WAFFLE-COMPLETION.md for current state.
+> docs/archive/roadmaps/SNAZZY-WAFFLE-COMPLETION.md (itself archived) for history.
 
 ================================================================================
 PHASE 2 COMPLETION SUMMARY & ARCHITECTURE FREEZE DECLARATION
