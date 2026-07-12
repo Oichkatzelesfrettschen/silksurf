@@ -18,7 +18,9 @@
  *   Total: O(nodes * avg_matching_rules) -- ~8000 operations
  *
  * DONE(perf): Property ID interning (Phase 4.2) -- see property_id.rs
- * TODO(perf): SoA conversion for 16x cache reuse (Phase 4.4)
+ * The column-oriented ComputedStyle view (StyleSoA) is removed: measured
+ * construction cost erased the fused-pipeline win, and CascadeView
+ * (cascade_view.rs) already provides the column layout where it pays.
  *
  * See: matching.rs for selector matching, selector.rs for parsing
  * See: custom_properties.rs for CSS var() resolution

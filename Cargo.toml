@@ -48,6 +48,10 @@ mimalloc = { version = "0.1", default-features = false }
 tracing = { version = "0.1" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2.5"
+# IDNA (Punycode) used to normalize Public Suffix List U-label rules to the
+# A-label (ASCII) form that `url::host_str` yields, so IDN eTLD+1 sites are not
+# silently over-grouped. Already in the tree via `url`.
+idna = "1.1"
 rustls = "0.23"
 arboard = { version = "3.6", default-features = false, features = ["wayland-data-control"] }
 # Accessibility tree infrastructure. Browser semantic snapshots use this

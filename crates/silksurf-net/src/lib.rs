@@ -35,6 +35,7 @@
 #![allow(clippy::collapsible_if)]
 
 pub mod cache;
+pub mod cookie;
 pub mod h2_client;
 pub mod websocket;
 
@@ -46,7 +47,7 @@ use silksurf_tls::{RustlsProvider, TlsProvider};
 use std::io::Cursor;
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 /*
  * MAX_RESPONSE_BODY_BYTES -- DoS bound on a single HTTP response body.
@@ -142,9 +143,22 @@ pub trait NetClient {
     fn fetch(&self, request: &HttpRequest) -> Result<HttpResponse, NetError>;
 }
 
+/// A shared partitioned cookie jar plus the top-level site of the current
+/// navigation. The site drives the per-request partition key and SameSite
+/// enforcement; an empty site degrades to the unpartitioned store with no
+/// enforcement (the graceful fallback when a fetch path lacks the top-level
+/// site). The `Arc<Mutex<PartitionedCookieStore>>` is also shared with the JS
+/// `document.cookie` bridge so cookies round-trip between HTTP and script.
+#[derive(Clone)]
+pub struct CookieContext {
+    pub jar: Arc<Mutex<cookie::PartitionedCookieStore>>,
+    pub top_level_site: String,
+}
+
 pub struct BasicClient {
     tls: Arc<dyn TlsProvider + Send + Sync>,
     max_redirects: usize,
+    cookie_context: Option<CookieContext>,
 }
 
 impl BasicClient {
@@ -153,13 +167,96 @@ impl BasicClient {
         Self {
             tls: shared_default_tls_provider(),
             max_redirects: 5,
+            cookie_context: None,
         }
     }
 
+    #[must_use]
     pub fn with_tls(tls: Arc<dyn TlsProvider + Send + Sync>) -> Self {
         Self {
             tls,
             max_redirects: 5,
+            cookie_context: None,
+        }
+    }
+
+    /// Attach a partitioned cookie jar and the navigation's top-level site,
+    /// enabling the HTTP cookie round-trip with partitioning and SameSite
+    /// enforcement. An empty `top_level_site` sends cookies unpartitioned and
+    /// unenforced (batch-11 behavior) rather than dropping them.
+    #[must_use]
+    pub fn with_cookie_context(
+        mut self,
+        jar: Arc<Mutex<cookie::PartitionedCookieStore>>,
+        top_level_site: impl Into<String>,
+    ) -> Self {
+        self.cookie_context = Some(CookieContext {
+            jar,
+            top_level_site: top_level_site.into(),
+        });
+        self
+    }
+
+    /// The TLS provider backing this client, so a caller can rebuild the client
+    /// with the same TLS configuration plus a cookie context.
+    #[must_use]
+    pub fn tls_provider(&self) -> Arc<dyn TlsProvider + Send + Sync> {
+        Arc::clone(&self.tls)
+    }
+
+    /// Compute the `Cookie` request header for a target from the partition the
+    /// request belongs to (keyed by top-level site + resource site), or `None`
+    /// when no context is attached, the partition is empty, or the caller
+    /// already set a `Cookie` header (an explicit header wins).
+    ///
+    /// `nav_context` is `Some` for a top-level navigation (the SameSite posture
+    /// classified from its initiator) and `None` for a subresource, where the
+    /// posture is derived from the destination-vs-top-level-site comparison. An
+    /// empty top-level site is not enforced.
+    fn request_cookie_header(
+        &self,
+        request: &HttpRequest,
+        target: &RequestTarget,
+        nav_context: Option<cookie::SameSiteContext>,
+    ) -> Option<String> {
+        if has_header(&request.headers, "cookie") {
+            return None;
+        }
+        let context = self.cookie_context.as_ref()?;
+        let resource_site = cookie::site_of_url(&target.parsed);
+        let partition = cookie::partition_key(&context.top_level_site, &resource_site);
+        let same_site = nav_context.unwrap_or_else(|| {
+            cookie::subresource_same_site_context(&context.top_level_site, &resource_site)
+        });
+        let jar = context.jar.lock().unwrap_or_else(PoisonError::into_inner);
+        let header = jar.store(&partition).map_or_else(String::new, |store| {
+            store.cookie_header(
+                &target.host,
+                target.parsed.path(),
+                target.is_https,
+                true,
+                same_site,
+                cookie::now_unix(),
+            )
+        });
+        (!header.is_empty()).then_some(header)
+    }
+
+    /// Store every `Set-Cookie` header from a response into the request's
+    /// partition.
+    fn store_response_cookies(&self, response: &HttpResponse, target: &RequestTarget) {
+        let Some(context) = self.cookie_context.as_ref() else {
+            return;
+        };
+        let resource_site = cookie::site_of_url(&target.parsed);
+        let partition = cookie::partition_key(&context.top_level_site, &resource_site);
+        let mut jar = context.jar.lock().unwrap_or_else(PoisonError::into_inner);
+        let store = jar.store_mut(&partition);
+        let now = cookie::now_unix();
+        for (name, value) in &response.headers {
+            if name.eq_ignore_ascii_case("set-cookie") {
+                store.set_from_set_cookie(value, &target.host, now);
+            }
         }
     }
 }
@@ -178,11 +275,49 @@ impl Default for BasicClient {
 
 impl NetClient for BasicClient {
     fn fetch(&self, request: &HttpRequest) -> Result<HttpResponse, NetError> {
+        // No nav_context: cookies are classified as a subresource (destination
+        // vs top-level site). Top-level navigations use `fetch_navigation`.
+        self.fetch_with_context(request, None)
+    }
+}
+
+impl BasicClient {
+    /// Fetch a top-level navigation, enforcing SameSite from the initiator site.
+    ///
+    /// `initiator_site` is the site that initiated the navigation (`None` for a
+    /// browser-initiated one -- address bar, bookmark, history, initial load).
+    /// The SameSite posture is computed once from the initiator, the
+    /// destination site, and whether the method is safe, then applied across the
+    /// redirect chain (redirect-hop reclassification is out of scope: a
+    /// cross-site redirect reached from a same-site navigation is not
+    /// re-flagged).
+    pub fn fetch_navigation(
+        &self,
+        request: &HttpRequest,
+        initiator_site: Option<&str>,
+    ) -> Result<HttpResponse, NetError> {
+        let destination_site = url::Url::parse(&request.url)
+            .as_ref()
+            .map(cookie::site_of_url)
+            .unwrap_or_default();
+        let nav_context = cookie::navigation_same_site_context(
+            initiator_site,
+            &destination_site,
+            cookie::is_safe_method(request.method.as_str()),
+        );
+        self.fetch_with_context(request, Some(nav_context))
+    }
+
+    fn fetch_with_context(
+        &self,
+        request: &HttpRequest,
+        nav_context: Option<cookie::SameSiteContext>,
+    ) -> Result<HttpResponse, NetError> {
         let mut current_url = request.url.clone();
         let mut redirects = 0;
 
         loop {
-            let (parsed, response) = self.fetch_http1_once(request, &current_url)?;
+            let (parsed, response) = self.fetch_http1_once(request, &current_url, nav_context)?;
             if let Some(next_url) =
                 redirect_target(&parsed, &response, redirects, self.max_redirects)
             {
@@ -193,18 +328,19 @@ impl NetClient for BasicClient {
             return Ok(response);
         }
     }
-}
 
-impl BasicClient {
     fn fetch_http1_once(
         &self,
         request: &HttpRequest,
         current_url: &str,
+        nav_context: Option<cookie::SameSiteContext>,
     ) -> Result<(url::Url, HttpResponse), NetError> {
         let target = RequestTarget::parse(current_url)?;
-        let request_bytes = build_http1_request(request, &target)?;
+        let cookie_header = self.request_cookie_header(request, &target, nav_context);
+        let request_bytes = build_http1_request(request, &target, cookie_header.as_deref())?;
         let response_bytes = send_http1_request(self.tls.as_ref(), &target, &request_bytes)?;
         let response = parse_response(&response_bytes)?;
+        self.store_response_cookies(&response, &target);
         Ok((target.parsed, response))
     }
 }
@@ -245,11 +381,19 @@ fn request_path(parsed: &url::Url) -> String {
     }
 }
 
-fn build_http1_request(request: &HttpRequest, target: &RequestTarget) -> Result<Vec<u8>, NetError> {
+fn build_http1_request(
+    request: &HttpRequest,
+    target: &RequestTarget,
+    cookie_header: Option<&str>,
+) -> Result<Vec<u8>, NetError> {
     let mut request_bytes = Vec::with_capacity(512);
     write_request_line(&mut request_bytes, request, target)?;
     write_content_encoding_header(&mut request_bytes, &request.headers)?;
     write_custom_headers(&mut request_bytes, &request.headers)?;
+    if let Some(cookie_header) = cookie_header {
+        write!(request_bytes, "Cookie: {cookie_header}\r\n")
+            .map_err(|e| NetError::new(format!("Write error: {e}")))?;
+    }
     write_content_length(&mut request_bytes, request.body.len())?;
     request_bytes.extend_from_slice(b"\r\n");
     request_bytes.extend_from_slice(&request.body);
@@ -421,19 +565,24 @@ impl BasicClient {
         }
 
         // Try the HTTP/2 multiplexed path for same-HTTPS-host requests.
-        if let Some((host, port)) = same_https_host(requests) {
+        // Every URL parses exactly once, up front. A malformed URL sends the
+        // whole batch down the HTTP/1.1 path, where fetch() reports a proper
+        // per-request error -- never a silently rewritten request target.
+        let parsed_urls: Option<Vec<url::Url>> = requests
+            .iter()
+            .map(|r| url::Url::parse(&r.url).ok())
+            .collect();
+        if let Some(parsed_urls) = &parsed_urls
+            && let Some((host, port)) = same_https_host(parsed_urls)
+        {
             let h2_config = self.tls.h2_config();
             let h2_reqs: Vec<h2_client::H2Request> = requests
                 .iter()
-                .map(|r| {
-                    // UNWRAP-OK: "https://localhost/" is a static, syntactically valid URL.
-                    let parsed = url::Url::parse(&r.url)
-                        .unwrap_or_else(|_| url::Url::parse("https://localhost/").unwrap());
-                    h2_client::H2Request {
-                        path: parsed.path().to_string(),
-                        query: parsed.query().map(std::string::ToString::to_string),
-                        extra_headers: r.headers.clone(),
-                    }
+                .zip(parsed_urls)
+                .map(|(r, parsed)| h2_client::H2Request {
+                    path: parsed.path().to_string(),
+                    query: parsed.query().map(std::string::ToString::to_string),
+                    extra_headers: r.headers.clone(),
                 })
                 .collect();
 
@@ -462,25 +611,24 @@ impl BasicClient {
 }
 
 /*
- * same_https_host -- return (host, port) if all requests target the same HTTPS host.
+ * same_https_host -- return (host, port) when every parsed URL targets the
+ * same HTTPS host.
  *
- * WHY: HTTP/2 multiplexing only benefits requests to the same server over one
- * connection. Mixed hosts or HTTP requests go through sequential HTTP/1.1.
+ * HTTP/2 multiplexing only benefits requests to the same server over one
+ * connection; mixed hosts or HTTP requests go through sequential HTTP/1.1.
+ * The caller (fetch_parallel) parses the request URLs exactly once and
+ * passes them here, so no URL string is ever re-parsed or substituted.
  *
- * Returns None if: requests is empty, any URL is HTTP, or hosts differ.
+ * Returns None if: urls is empty, any URL is HTTP, or hosts/ports differ.
  */
-fn same_https_host(requests: &[HttpRequest]) -> Option<(String, u16)> {
-    if requests.is_empty() {
-        return None;
-    }
-    let first = url::Url::parse(&requests[0].url).ok()?;
+fn same_https_host(urls: &[url::Url]) -> Option<(String, u16)> {
+    let first = urls.first()?;
     if first.scheme() != "https" {
         return None;
     }
     let host = first.host_str()?.to_string();
     let port = first.port().unwrap_or(443);
-    for req in requests.iter().skip(1) {
-        let parsed = url::Url::parse(&req.url).ok()?;
+    for parsed in urls.iter().skip(1) {
         if parsed.scheme() != "https" {
             return None;
         }

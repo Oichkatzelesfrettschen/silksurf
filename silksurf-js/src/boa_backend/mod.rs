@@ -16,11 +16,12 @@
 
 use std::{
     cell::RefCell,
-    collections::{HashMap, VecDeque},
+    collections::HashMap,
+    fmt::Write as _,
     path::PathBuf,
     rc::Rc,
     sync::{Arc, Mutex},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use boa_engine::{
@@ -43,6 +44,30 @@ const DEFAULT_HOST_CALLBACK_BUDGET: usize = 256;
 const TRACE_HOST_CALLBACKS_ENV: &str = "SILKSURF_TRACE_HOST_CALLBACKS";
 
 type HostSchedulerRef = Rc<RefCell<HostScheduler>>;
+
+/// Async-test completion state recorded by the `$DONE` host function.
+///
+/// `$DONE()` (or a falsy argument) signals success; a truthy argument signals
+/// failure with a message; a second call is itself a failure. This mirrors the
+/// test262 async convention and the pattern benchmark harnesses use to signal
+/// the end of an asynchronous run through the host job/timer queue.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AsyncCompletion {
+    /// `$DONE` has not been called yet.
+    Pending,
+    /// `$DONE()` was called with no error.
+    Passed,
+    /// `$DONE(error)` was called, or `$DONE` was called more than once.
+    Failed(String),
+}
+
+#[derive(Default)]
+struct AsyncDoneCell {
+    called: bool,
+    result: Option<Result<(), String>>,
+}
+
+type AsyncDoneRef = Rc<RefCell<AsyncDoneCell>>;
 
 #[derive(Clone, Copy)]
 enum HostCallbackQueue {
@@ -68,11 +93,18 @@ struct ScheduledHostCallback {
     queue: HostCallbackQueue,
 }
 
+/// A repeating timer: `next_due` advances by `period` each firing.
+struct IntervalEntry {
+    id: u32,
+    period: Duration,
+    next_due: Instant,
+}
+
 #[derive(Default)]
 struct HostScheduler {
     next_id: u32,
-    timeout_callbacks: VecDeque<u32>,
-    interval_callbacks: Vec<u32>,
+    timeout_callbacks: Vec<(u32, Instant)>,
+    interval_callbacks: Vec<IntervalEntry>,
     animation_frame_callbacks: Vec<u32>,
 }
 
@@ -80,17 +112,22 @@ impl HostScheduler {
     fn new() -> Self {
         Self {
             next_id: 1,
-            timeout_callbacks: VecDeque::new(),
+            timeout_callbacks: Vec::new(),
             interval_callbacks: Vec::new(),
             animation_frame_callbacks: Vec::new(),
         }
     }
 
-    fn schedule(&mut self, queue: HostCallbackQueue) -> u32 {
+    fn schedule(&mut self, queue: HostCallbackQueue, delay: Duration) -> u32 {
         let id = self.next_callback_id();
+        let now = Instant::now();
         match queue {
-            HostCallbackQueue::Timeout => self.timeout_callbacks.push_back(id),
-            HostCallbackQueue::Interval => self.interval_callbacks.push(id),
+            HostCallbackQueue::Timeout => self.timeout_callbacks.push((id, now + delay)),
+            HostCallbackQueue::Interval => self.interval_callbacks.push(IntervalEntry {
+                id,
+                period: delay,
+                next_due: now + delay,
+            }),
             HostCallbackQueue::AnimationFrame => self.animation_frame_callbacks.push(id),
         }
         id
@@ -98,9 +135,8 @@ impl HostScheduler {
 
     fn cancel(&mut self, id: u32) {
         self.timeout_callbacks
-            .retain(|callback_id| *callback_id != id);
-        self.interval_callbacks
-            .retain(|callback_id| *callback_id != id);
+            .retain(|(callback_id, _)| *callback_id != id);
+        self.interval_callbacks.retain(|entry| entry.id != id);
         self.animation_frame_callbacks
             .retain(|callback_id| *callback_id != id);
     }
@@ -111,31 +147,74 @@ impl HostScheduler {
             || !self.animation_frame_callbacks.is_empty()
     }
 
-    fn take_timer_callbacks(&mut self, max_callbacks: usize) -> Vec<ScheduledHostCallback> {
-        let mut callbacks = Vec::new();
-        while callbacks.len() < max_callbacks {
-            let Some(id) = self.timeout_callbacks.pop_front() else {
-                break;
-            };
-            callbacks.push(ScheduledHostCallback {
-                id,
-                repeat: false,
-                queue: HostCallbackQueue::Timeout,
-            });
+    /// Earliest instant at which a scheduled timer becomes runnable.
+    ///
+    /// Pending animation-frame callbacks report `now`: they are frame-paced
+    /// by the presenter, so any waiting event loop should wake immediately.
+    fn next_deadline(&self) -> Option<Instant> {
+        let mut deadline: Option<Instant> = None;
+        let mut consider = |candidate: Instant| {
+            deadline = Some(deadline.map_or(candidate, |current| current.min(candidate)));
+        };
+        for &(_, due) in &self.timeout_callbacks {
+            consider(due);
         }
-        let remaining = max_callbacks.saturating_sub(callbacks.len());
-        callbacks.extend(
-            self.interval_callbacks
-                .iter()
-                .copied()
-                .take(remaining)
-                .map(|id| ScheduledHostCallback {
-                    id,
-                    repeat: true,
-                    queue: HostCallbackQueue::Interval,
-                }),
-        );
-        callbacks
+        for entry in &self.interval_callbacks {
+            consider(entry.next_due);
+        }
+        if !self.animation_frame_callbacks.is_empty() {
+            consider(Instant::now());
+        }
+        deadline
+    }
+
+    /// Take up to `max_callbacks` timers whose deadline has passed,
+    /// earliest deadline first. Due intervals re-arm by their period.
+    fn take_timer_callbacks(&mut self, max_callbacks: usize) -> Vec<ScheduledHostCallback> {
+        let now = Instant::now();
+        let mut due: Vec<(Instant, ScheduledHostCallback)> = Vec::new();
+        self.timeout_callbacks.retain(|&(id, deadline)| {
+            if deadline <= now {
+                due.push((
+                    deadline,
+                    ScheduledHostCallback {
+                        id,
+                        repeat: false,
+                        queue: HostCallbackQueue::Timeout,
+                    },
+                ));
+                false
+            } else {
+                true
+            }
+        });
+        for entry in &mut self.interval_callbacks {
+            if entry.next_due <= now {
+                due.push((
+                    entry.next_due,
+                    ScheduledHostCallback {
+                        id: entry.id,
+                        repeat: true,
+                        queue: HostCallbackQueue::Interval,
+                    },
+                ));
+                entry.next_due = now + entry.period;
+            }
+        }
+        due.sort_by_key(|&(deadline, _)| deadline);
+        let overflow: Vec<ScheduledHostCallback> = due
+            .split_off(max_callbacks.min(due.len()))
+            .into_iter()
+            .map(|(_, callback)| callback)
+            .collect();
+        // Budget-clipped one-shot timeouts go back on the queue as
+        // immediately-due entries; intervals re-fire from their next_due.
+        for callback in overflow {
+            if !callback.repeat {
+                self.timeout_callbacks.push((callback.id, now));
+            }
+        }
+        due.into_iter().map(|(_, callback)| callback).collect()
     }
 
     fn take_animation_frame_callbacks(&mut self) -> Vec<ScheduledHostCallback> {
@@ -157,13 +236,7 @@ impl HostScheduler {
 }
 
 type StorageMap = Rc<RefCell<HashMap<String, String>>>;
-type CookieJar = Rc<RefCell<Vec<(String, String)>>>;
-
-struct CookieAssignment {
-    name: String,
-    value: String,
-    delete: bool,
-}
+type CookieJar = Arc<Mutex<silksurf_net::cookie::PartitionedCookieStore>>;
 
 fn install_storage_objects(ctx: &mut Context) {
     let local_storage = storage_object(ctx);
@@ -301,98 +374,73 @@ fn storage_key_native(storage: &StorageMap) -> NativeFunction {
 }
 
 fn new_cookie_jar() -> CookieJar {
-    Rc::new(RefCell::new(Vec::new()))
+    Arc::new(Mutex::new(
+        silksurf_net::cookie::PartitionedCookieStore::new(),
+    ))
 }
 
-fn document_cookie_getter(ctx: &mut Context, jar: &CookieJar) -> JsFunction {
-    FunctionObjectBuilder::new(ctx.realm(), document_cookie_get_native(jar)).build()
+fn document_cookie_getter(
+    ctx: &mut Context,
+    jar: &CookieJar,
+    top_level_site: &str,
+    host: &str,
+) -> JsFunction {
+    FunctionObjectBuilder::new(
+        ctx.realm(),
+        document_cookie_get_native(jar, top_level_site, host),
+    )
+    .build()
 }
 
-fn document_cookie_setter(ctx: &mut Context, jar: &CookieJar) -> JsFunction {
-    FunctionObjectBuilder::new(ctx.realm(), document_cookie_set_native(jar)).build()
+fn document_cookie_setter(
+    ctx: &mut Context,
+    jar: &CookieJar,
+    top_level_site: &str,
+    host: &str,
+) -> JsFunction {
+    FunctionObjectBuilder::new(
+        ctx.realm(),
+        document_cookie_set_native(jar, top_level_site, host),
+    )
+    .build()
 }
 
-fn document_cookie_get_native(jar: &CookieJar) -> NativeFunction {
-    let jar = Rc::clone(jar);
+fn document_cookie_get_native(jar: &CookieJar, top_level_site: &str, host: &str) -> NativeFunction {
+    let jar = Arc::clone(jar);
+    let top_level_site = top_level_site.to_string();
+    let host = host.to_string();
     // SAFETY: Boa stores the native closure with owned Rust captures for the JS function lifetime.
 
     unsafe {
         NativeFunction::from_closure(move |_this, _args, _ctx| {
-            Ok(JsValue::from(JsString::from(
-                cookie_header_value(&jar).as_str(),
-            )))
+            let header = jar
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .document_cookie_string(&top_level_site, &host, silksurf_net::cookie::now_unix());
+            Ok(JsValue::from(JsString::from(header.as_str())))
         })
     }
 }
 
-fn document_cookie_set_native(jar: &CookieJar) -> NativeFunction {
-    let jar = Rc::clone(jar);
+fn document_cookie_set_native(jar: &CookieJar, top_level_site: &str, host: &str) -> NativeFunction {
+    let jar = Arc::clone(jar);
+    let top_level_site = top_level_site.to_string();
+    let host = host.to_string();
     // SAFETY: Boa stores the native closure with owned Rust captures for the JS function lifetime.
 
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let value = storage_string_arg(args.first(), ctx)?;
-            if let Some(assignment) = parse_cookie_assignment(value.as_str()) {
-                apply_cookie_assignment(&jar, assignment);
-            }
+            jar.lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .set_document_cookie(
+                    &top_level_site,
+                    &host,
+                    value.as_str(),
+                    silksurf_net::cookie::now_unix(),
+                );
             Ok(JsValue::undefined())
         })
-    }
-}
-
-fn cookie_header_value(jar: &CookieJar) -> String {
-    let jar = jar.borrow();
-    let byte_len = jar
-        .iter()
-        .map(|(name, value)| name.len() + value.len() + 2)
-        .sum();
-    let mut header = String::with_capacity(byte_len);
-    for (index, (name, value)) in jar.iter().enumerate() {
-        if index > 0 {
-            header.push_str("; ");
-        }
-        header.push_str(name);
-        header.push('=');
-        header.push_str(value);
-    }
-    header
-}
-
-fn parse_cookie_assignment(input: &str) -> Option<CookieAssignment> {
-    let mut parts = input.split(';');
-    let pair = parts.next()?.trim();
-    let (name, value) = pair.split_once('=')?;
-    let name = name.trim();
-    if name.is_empty() || name.starts_with('$') {
-        return None;
-    }
-    let delete = parts.any(cookie_attribute_deletes);
-    Some(CookieAssignment {
-        name: name.to_string(),
-        value: value.trim().to_string(),
-        delete,
-    })
-}
-
-fn cookie_attribute_deletes(attribute: &str) -> bool {
-    let attr = attribute.trim();
-    attr.eq_ignore_ascii_case("max-age=0")
-        || attr.eq_ignore_ascii_case("max-age=-1")
-        || attr.eq_ignore_ascii_case("expires=thu, 01 jan 1970 00:00:00 gmt")
-}
-
-fn apply_cookie_assignment(jar: &CookieJar, assignment: CookieAssignment) {
-    let mut jar = jar.borrow_mut();
-    if let Some(index) = jar.iter().position(|(name, _)| name == &assignment.name) {
-        if assignment.delete {
-            jar.remove(index);
-        } else {
-            jar[index].1 = assignment.value;
-        }
-        return;
-    }
-    if !assignment.delete {
-        jar.push((assignment.name, assignment.value));
     }
 }
 
@@ -745,6 +793,7 @@ pub struct SilkContext {
     ctx: Context,
     module_loader: Rc<MapModuleLoader>,
     scheduler: HostSchedulerRef,
+    async_done: AsyncDoneRef,
     start_time: Instant,
 }
 
@@ -815,13 +864,14 @@ impl SilkContext {
         install_stream_constructors(&mut ctx);
         install_crypto(&mut ctx);
         install_abort_api(&mut ctx);
+        install_xml_http_request(&mut ctx);
 
         // -- document stub ----------------------------------------------------
         // getElementById / querySelector / querySelectorAll return null until
         // the full DOM bridge (NativeObject-backed NodeId handles) is wired in.
         let cookie_jar = new_cookie_jar();
-        let cookie_getter = document_cookie_getter(&mut ctx, &cookie_jar);
-        let cookie_setter = document_cookie_setter(&mut ctx, &cookie_jar);
+        let cookie_getter = document_cookie_getter(&mut ctx, &cookie_jar, "", "");
+        let cookie_setter = document_cookie_setter(&mut ctx, &cookie_jar, "", "");
         let document = ObjectInitializer::new(&mut ctx)
             .function(
                 NativeFunction::from_fn_ptr(|_, _, _| Ok(JsValue::null())),
@@ -950,12 +1000,13 @@ impl SilkContext {
 
             .expect("navigator: install on fresh context cannot fail");
 
-        // -- performance stub ------------------------------------------------
-        // performance.now() returns 0.0; mark() and measure() are no-ops.
-        // Scripts that measure relative durations will get zero but not crash.
+        // -- performance ------------------------------------------------------
+        // now() returns fractional milliseconds since a process-wide monotonic
+        // epoch, so benchmark self-timing measures real elapsed time; mark()
+        // and measure() remain no-ops.
         let performance = ObjectInitializer::new(&mut ctx)
             .function(
-                NativeFunction::from_fn_ptr(|_, _, _| Ok(JsValue::from(0.0f64))),
+                NativeFunction::from_fn_ptr(performance_now),
                 js_string!("now"),
                 0,
             )
@@ -977,11 +1028,14 @@ impl SilkContext {
             .expect("performance: install on fresh context cannot fail");
 
         install_storage_objects(&mut ctx);
+        let async_done = Rc::new(RefCell::new(AsyncDoneCell::default()));
+        install_async_done(&mut ctx, &async_done);
 
         Self {
             ctx,
             module_loader,
             scheduler,
+            async_done,
             start_time: Instant::now(),
         }
     }
@@ -1048,6 +1102,16 @@ impl SilkContext {
         self.scheduler.borrow().has_pending_callbacks()
     }
 
+    /// Earliest instant at which a scheduled host callback becomes due.
+    ///
+    /// Event loops use this to sleep exactly until the next `setTimeout` or
+    /// `setInterval` deadline instead of polling; `None` means nothing is
+    /// scheduled and the loop can wait for external events alone.
+    #[must_use]
+    pub fn next_host_callback_deadline(&self) -> Option<Instant> {
+        self.scheduler.borrow().next_deadline()
+    }
+
     /// Run queued setTimeout, setInterval, and requestAnimationFrame callbacks.
     ///
     /// The caller supplies the tick cadence. `max_timer_callbacks` bounds timer
@@ -1094,7 +1158,24 @@ impl SilkContext {
     #[must_use]
     pub fn with_dom(dom: &Arc<Mutex<silksurf_dom::Dom>>) -> Self {
         let mut ctx = Self::new();
-        dom_bridge::install_document(dom, &mut ctx.ctx);
+        dom_bridge::install_document(dom, &mut ctx.ctx, &new_cookie_jar(), "", "");
+        ctx
+    }
+
+    /// Build a context with the DOM bridge and a shared cookie jar scoped to the
+    /// document `host`, so `document.cookie` reads and writes the same store the
+    /// HTTP client uses for that host. This is how cookies round-trip between
+    /// network responses and script. An empty `host` leaves document.cookie
+    /// unscoped (it matches every cookie in the jar).
+    #[must_use]
+    pub fn with_dom_and_cookies(
+        dom: &Arc<Mutex<silksurf_dom::Dom>>,
+        cookie_jar: &Arc<Mutex<silksurf_net::cookie::PartitionedCookieStore>>,
+        top_level_site: &str,
+        host: &str,
+    ) -> Self {
+        let mut ctx = Self::new();
+        dom_bridge::install_document(dom, &mut ctx.ctx, cookie_jar, top_level_site, host);
         ctx
     }
 
@@ -1134,6 +1215,110 @@ impl SilkContext {
     fn frame_timestamp_ms(&self) -> f64 {
         self.start_time.elapsed().as_secs_f64() * 1000.0
     }
+
+    /// Current async-completion state signaled through `$DONE`.
+    #[must_use]
+    pub fn async_completion(&self) -> AsyncCompletion {
+        match &self.async_done.borrow().result {
+            None => AsyncCompletion::Pending,
+            Some(Ok(())) => AsyncCompletion::Passed,
+            Some(Err(message)) => AsyncCompletion::Failed(message.clone()),
+        }
+    }
+
+    /// Clear the `$DONE` state so the context can drive another async run.
+    pub fn reset_async_completion(&mut self) {
+        let mut cell = self.async_done.borrow_mut();
+        cell.called = false;
+        cell.result = None;
+    }
+
+    /// Pump the microtask queue and host timer callbacks until `$DONE` fires or
+    /// no scheduled work remains, waiting out timer deadlines up to `max_wall`.
+    ///
+    /// Returns the final `AsyncCompletion`: `Pending` means the script neither
+    /// called `$DONE` nor left runnable work (or the wall-clock budget expired).
+    /// This is the synchronous driver an embedder without a live event loop
+    /// uses to run a promise/`setTimeout`-based async test to completion.
+    pub fn drive_until_done(&mut self, max_wall: Duration) -> AsyncCompletion {
+        let overall_deadline = Instant::now() + max_wall;
+        loop {
+            // Drain promise reactions from the last eval/callback, then run any
+            // due timers (which itself drains the jobs they enqueue).
+            self.run_pending_jobs();
+            let _ = self.run_ready_host_callbacks();
+            if !matches!(self.async_completion(), AsyncCompletion::Pending) {
+                return self.async_completion();
+            }
+            // With no pending timers, nothing further can call $DONE.
+            if !self.has_pending_host_callbacks() {
+                return AsyncCompletion::Pending;
+            }
+            let now = Instant::now();
+            if now >= overall_deadline {
+                return AsyncCompletion::Pending;
+            }
+            match self.next_host_callback_deadline() {
+                Some(next) if next > now => {
+                    std::thread::sleep((next - now).min(overall_deadline - now));
+                }
+                Some(_) => {}
+                None => return AsyncCompletion::Pending,
+            }
+        }
+    }
+}
+
+/// Install the `$DONE(error)` host function recording async-test completion.
+fn install_async_done(ctx: &mut Context, done: &AsyncDoneRef) {
+    let cell = Rc::clone(done);
+    // SAFETY: the closure captures an Rc<RefCell<AsyncDoneCell>>, which holds no
+    // Boa GC pointers, so the native function needs no trace hook.
+    let done_fn = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let outcome = match args.first() {
+                Some(value) if value.to_boolean() => Err(done_error_message(value, ctx)),
+                _ => Ok(()),
+            };
+            let mut cell = cell.borrow_mut();
+            if cell.called {
+                cell.result = Some(Err("$DONE called more than once".to_string()));
+            } else {
+                cell.called = true;
+                cell.result = Some(outcome);
+            }
+            Ok(JsValue::undefined())
+        })
+    };
+    ctx.register_global_callable(js_string!("$DONE"), 1, done_fn)
+        // UNWRAP-OK: fresh context cannot already define $DONE.
+        .expect("$DONE: install on fresh context cannot fail");
+}
+
+/// Format a `$DONE(error)` argument into a failure message, preferring
+/// `name: message` for error-like objects.
+fn done_error_message(value: &JsValue, ctx: &mut Context) -> String {
+    if let Some(object) = value.as_object() {
+        let name = object
+            .get(js_string!("name"), ctx)
+            .ok()
+            .filter(|v| !v.is_undefined())
+            .and_then(|v| v.to_string(ctx).ok())
+            .map(|s| s.to_std_string_lossy());
+        let message = object
+            .get(js_string!("message"), ctx)
+            .ok()
+            .filter(|v| !v.is_undefined())
+            .and_then(|v| v.to_string(ctx).ok())
+            .map(|s| s.to_std_string_lossy());
+        if let (Some(name), Some(message)) = (&name, &message) {
+            return format!("{name}: {message}");
+        }
+    }
+    value.to_string(ctx).map_or_else(
+        |_| "async test signaled failure".to_string(),
+        |s| s.to_std_string_lossy(),
+    )
 }
 
 fn install_host_scheduler(ctx: &mut Context, scheduler: &HostSchedulerRef) {
@@ -1148,6 +1333,7 @@ fn install_host_scheduler(ctx: &mut Context, scheduler: &HostSchedulerRef) {
                 &timeout_scheduler,
                 HostCallbackQueue::Timeout,
                 args.first(),
+                args.get(1),
             )
         })
     };
@@ -1165,6 +1351,7 @@ fn install_host_scheduler(ctx: &mut Context, scheduler: &HostSchedulerRef) {
                 &interval_scheduler,
                 HostCallbackQueue::Interval,
                 args.first(),
+                args.get(1),
             )
         })
     };
@@ -1182,6 +1369,7 @@ fn install_host_scheduler(ctx: &mut Context, scheduler: &HostSchedulerRef) {
                 &frame_scheduler,
                 HostCallbackQueue::AnimationFrame,
                 args.first(),
+                None,
             )
         })
     };
@@ -1240,6 +1428,7 @@ fn register_host_callback(
     scheduler: &HostSchedulerRef,
     queue: HostCallbackQueue,
     callback: Option<&JsValue>,
+    delay_ms: Option<&JsValue>,
 ) -> boa_engine::JsResult<JsValue> {
     let Some(callback) = callback.and_then(JsValue::as_object) else {
         return Ok(JsValue::from(0_u32));
@@ -1248,7 +1437,12 @@ fn register_host_callback(
         return Ok(JsValue::from(0_u32));
     }
 
-    let id = scheduler.borrow_mut().schedule(queue);
+    // HTML timers clamp negative and non-numeric delays to 0ms.
+    let delay = delay_ms
+        .and_then(JsValue::as_number)
+        .filter(|ms| ms.is_finite() && *ms > 0.0)
+        .map_or(Duration::ZERO, |ms| Duration::from_secs_f64(ms / 1000.0));
+    let id = scheduler.borrow_mut().schedule(queue, delay);
     host_callback_registry(ctx)?.set(id, callback.clone(), false, ctx)?;
     Ok(JsValue::from(id))
 }
@@ -1692,6 +1886,481 @@ fn call_websocket_handler(
     Ok(())
 }
 
+/// `performance.now()`: fractional milliseconds since a process-wide epoch.
+///
+/// The epoch is the first call's instant, so the first reading is ~0 and every
+/// later reading is a monotonic elapsed time suitable for benchmark deltas.
+fn performance_now(
+    _this: &JsValue,
+    _args: &[JsValue],
+    _ctx: &mut Context,
+) -> boa_engine::JsResult<JsValue> {
+    static EPOCH: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    let epoch = EPOCH.get_or_init(Instant::now);
+    Ok(JsValue::from(epoch.elapsed().as_secs_f64() * 1000.0))
+}
+
+// ---- XMLHttpRequest implementation -----------------------------------------
+
+// readyState values from the XHR specification.
+const XHR_UNSENT: u8 = 0;
+const XHR_OPENED: u8 = 1;
+const XHR_HEADERS_RECEIVED: u8 = 2;
+const XHR_LOADING: u8 = 3;
+const XHR_DONE: u8 = 4;
+
+/// Install `XMLHttpRequest` as a global constructor.
+///
+/// The request executes synchronously inside `send()` (the browser's blocking
+/// net path), so the readyState progression and the load/readystatechange
+/// events all fire before `send()` returns. This matches synchronous XHR and
+/// serves benchmark harnesses that use XHR only to pull resource files.
+fn install_xml_http_request(ctx: &mut Context) {
+    let constructor =
+        FunctionObjectBuilder::new(ctx.realm(), NativeFunction::from_fn_ptr(xhr_constructor))
+            .name(js_string!("XMLHttpRequest"))
+            .length(0)
+            .constructor(true)
+            .build();
+    let constructor_object: JsObject = constructor.clone().into();
+    for (name, value) in [
+        ("UNSENT", XHR_UNSENT),
+        ("OPENED", XHR_OPENED),
+        ("HEADERS_RECEIVED", XHR_HEADERS_RECEIVED),
+        ("LOADING", XHR_LOADING),
+        ("DONE", XHR_DONE),
+    ] {
+        constructor_object
+            .set(js_string!(name), value, false, ctx)
+            // UNWRAP-OK: fresh constructor cannot already carry the constant.
+            .expect("XMLHttpRequest readyState constant install cannot fail");
+    }
+    ctx.register_global_property(js_string!("XMLHttpRequest"), constructor, Attribute::all())
+        // UNWRAP-OK: fresh context cannot already define XMLHttpRequest.
+        .expect("XMLHttpRequest: install on fresh context cannot fail");
+}
+
+fn xhr_constructor(
+    _this: &JsValue,
+    _args: &[JsValue],
+    ctx: &mut Context,
+) -> boa_engine::JsResult<JsValue> {
+    let request_headers = JsArray::new(ctx);
+    let response_headers = JsArray::new(ctx);
+    let load_listeners = JsArray::new(ctx);
+    let error_listeners = JsArray::new(ctx);
+    let readystate_listeners = JsArray::new(ctx);
+    let instance = ObjectInitializer::new(ctx)
+        .property(js_string!("readyState"), XHR_UNSENT, Attribute::all())
+        .property(js_string!("status"), 0_u32, Attribute::all())
+        .property(js_string!("statusText"), js_string!(""), Attribute::all())
+        .property(js_string!("responseText"), js_string!(""), Attribute::all())
+        .property(js_string!("response"), js_string!(""), Attribute::all())
+        .property(js_string!("responseType"), js_string!(""), Attribute::all())
+        .property(
+            js_string!("onreadystatechange"),
+            JsValue::null(),
+            Attribute::all(),
+        )
+        .property(js_string!("onload"), JsValue::null(), Attribute::all())
+        .property(js_string!("onerror"), JsValue::null(), Attribute::all())
+        .property(
+            js_string!("__xhrMethod"),
+            js_string!("GET"),
+            Attribute::all(),
+        )
+        .property(js_string!("__xhrUrl"), js_string!(""), Attribute::all())
+        .property(
+            js_string!("__xhrRequestHeaders"),
+            request_headers,
+            Attribute::all(),
+        )
+        .property(
+            js_string!("__xhrResponseHeaders"),
+            response_headers,
+            Attribute::all(),
+        )
+        .property(
+            js_string!("__xhrLoadListeners"),
+            load_listeners,
+            Attribute::all(),
+        )
+        .property(
+            js_string!("__xhrErrorListeners"),
+            error_listeners,
+            Attribute::all(),
+        )
+        .property(
+            js_string!("__xhrReadyStateListeners"),
+            readystate_listeners,
+            Attribute::all(),
+        )
+        .function(NativeFunction::from_fn_ptr(xhr_open), js_string!("open"), 2)
+        .function(
+            NativeFunction::from_fn_ptr(xhr_set_request_header),
+            js_string!("setRequestHeader"),
+            2,
+        )
+        .function(NativeFunction::from_fn_ptr(xhr_send), js_string!("send"), 1)
+        .function(
+            NativeFunction::from_fn_ptr(xhr_abort),
+            js_string!("abort"),
+            0,
+        )
+        .function(
+            NativeFunction::from_fn_ptr(xhr_get_all_response_headers),
+            js_string!("getAllResponseHeaders"),
+            0,
+        )
+        .function(
+            NativeFunction::from_fn_ptr(xhr_get_response_header),
+            js_string!("getResponseHeader"),
+            1,
+        )
+        .function(
+            NativeFunction::from_fn_ptr(xhr_add_event_listener),
+            js_string!("addEventListener"),
+            2,
+        )
+        .build();
+    Ok(instance.into())
+}
+
+fn xhr_open(this: &JsValue, args: &[JsValue], ctx: &mut Context) -> boa_engine::JsResult<JsValue> {
+    let Some(instance) = this.as_object() else {
+        return Ok(JsValue::undefined());
+    };
+    let method = args
+        .first()
+        .map(|value| value.to_string(ctx))
+        .transpose()?
+        .map_or_else(|| "GET".to_string(), |s| s.to_std_string_lossy());
+    let url = args
+        .get(1)
+        .map(|value| value.to_string(ctx))
+        .transpose()?
+        .map_or_else(String::new, |s| s.to_std_string_lossy());
+    instance.set(
+        js_string!("__xhrMethod"),
+        js_string!(method.as_str()),
+        false,
+        ctx,
+    )?;
+    instance.set(js_string!("__xhrUrl"), js_string!(url.as_str()), false, ctx)?;
+    // A fresh open() resets any accumulated request headers and prior result.
+    instance.set(
+        js_string!("__xhrRequestHeaders"),
+        JsArray::new(ctx),
+        false,
+        ctx,
+    )?;
+    instance.set(js_string!("status"), 0_u32, false, ctx)?;
+    instance.set(js_string!("responseText"), js_string!(""), false, ctx)?;
+    set_xhr_ready_state(&instance, XHR_OPENED, ctx)?;
+    Ok(JsValue::undefined())
+}
+
+fn xhr_set_request_header(
+    this: &JsValue,
+    args: &[JsValue],
+    ctx: &mut Context,
+) -> boa_engine::JsResult<JsValue> {
+    let Some(instance) = this.as_object() else {
+        return Ok(JsValue::undefined());
+    };
+    let (Some(name), Some(value)) = (args.first(), args.get(1)) else {
+        return Ok(JsValue::undefined());
+    };
+    let name = name.to_string(ctx)?;
+    let value = value.to_string(ctx)?;
+    let headers = instance.get(js_string!("__xhrRequestHeaders"), ctx)?;
+    if let Some(headers) = headers.as_object() {
+        let headers = JsArray::from_object(headers)?;
+        let pair = JsArray::new(ctx);
+        pair.push(JsValue::from(name), ctx)?;
+        pair.push(JsValue::from(value), ctx)?;
+        headers.push(JsValue::from(pair), ctx)?;
+    }
+    Ok(JsValue::undefined())
+}
+
+fn xhr_send(this: &JsValue, args: &[JsValue], ctx: &mut Context) -> boa_engine::JsResult<JsValue> {
+    use silksurf_net::{BasicClient, HttpMethod, HttpRequest, NetClient};
+
+    let Some(instance) = this.as_object() else {
+        return Ok(JsValue::undefined());
+    };
+    let method_str = instance
+        .get(js_string!("__xhrMethod"), ctx)?
+        .to_string(ctx)?
+        .to_std_string_lossy();
+    let url = instance
+        .get(js_string!("__xhrUrl"), ctx)?
+        .to_string(ctx)?
+        .to_std_string_lossy();
+    let method = match method_str.to_ascii_uppercase().as_str() {
+        "POST" => HttpMethod::Post,
+        "PUT" => HttpMethod::Put,
+        "DELETE" => HttpMethod::Delete,
+        _ => HttpMethod::Get,
+    };
+    let body = match args.first() {
+        Some(value) if !value.is_undefined() && !value.is_null() => {
+            value.to_string(ctx)?.to_std_string_lossy().into_bytes()
+        }
+        _ => Vec::new(),
+    };
+    let headers = collect_xhr_request_headers(&instance, ctx)?;
+
+    let request = HttpRequest {
+        method,
+        url,
+        headers,
+        body,
+    };
+
+    match BasicClient::new().fetch(&request) {
+        Ok(response) => {
+            store_xhr_response(&instance, &response, ctx)?;
+            set_xhr_ready_state(&instance, XHR_HEADERS_RECEIVED, ctx)?;
+            set_xhr_ready_state(&instance, XHR_LOADING, ctx)?;
+            set_xhr_ready_state(&instance, XHR_DONE, ctx)?;
+            fire_xhr_event(&instance, "load", "__xhrLoadListeners", "onload", ctx)?;
+        }
+        Err(err) => {
+            instance.set(js_string!("status"), 0_u32, false, ctx)?;
+            instance.set(
+                js_string!("statusText"),
+                js_string!(err.message.as_str()),
+                false,
+                ctx,
+            )?;
+            set_xhr_ready_state(&instance, XHR_DONE, ctx)?;
+            fire_xhr_event(&instance, "error", "__xhrErrorListeners", "onerror", ctx)?;
+        }
+    }
+    Ok(JsValue::undefined())
+}
+
+fn xhr_abort(
+    _this: &JsValue,
+    _args: &[JsValue],
+    _ctx: &mut Context,
+) -> boa_engine::JsResult<JsValue> {
+    // The request completes synchronously inside send(); there is no in-flight
+    // transfer to cancel, so abort() is a no-op after the fact.
+    Ok(JsValue::undefined())
+}
+
+fn xhr_get_all_response_headers(
+    this: &JsValue,
+    _args: &[JsValue],
+    ctx: &mut Context,
+) -> boa_engine::JsResult<JsValue> {
+    let Some(instance) = this.as_object() else {
+        return Ok(JsValue::from(js_string!("")));
+    };
+    let headers = instance.get(js_string!("__xhrResponseHeaders"), ctx)?;
+    let mut out = String::new();
+    if let Some(headers) = headers.as_object() {
+        let headers = JsArray::from_object(headers)?;
+        let length = headers.length(ctx)?;
+        for index in 0..length {
+            let pair = headers.get(index, ctx)?;
+            if let Some(pair) = pair.as_object() {
+                let pair = JsArray::from_object(pair)?;
+                let name = pair.get(0_u64, ctx)?.to_string(ctx)?.to_std_string_lossy();
+                let value = pair.get(1_u64, ctx)?.to_string(ctx)?.to_std_string_lossy();
+                let _ = write!(out, "{name}: {value}\r\n");
+            }
+        }
+    }
+    Ok(JsValue::from(js_string!(out.as_str())))
+}
+
+fn xhr_get_response_header(
+    this: &JsValue,
+    args: &[JsValue],
+    ctx: &mut Context,
+) -> boa_engine::JsResult<JsValue> {
+    let Some(instance) = this.as_object() else {
+        return Ok(JsValue::null());
+    };
+    let Some(target) = args.first() else {
+        return Ok(JsValue::null());
+    };
+    let target = target.to_string(ctx)?.to_std_string_lossy();
+    let headers = instance.get(js_string!("__xhrResponseHeaders"), ctx)?;
+    if let Some(headers) = headers.as_object() {
+        let headers = JsArray::from_object(headers)?;
+        let length = headers.length(ctx)?;
+        for index in 0..length {
+            let pair = headers.get(index, ctx)?;
+            if let Some(pair) = pair.as_object() {
+                let pair = JsArray::from_object(pair)?;
+                let name = pair.get(0_u64, ctx)?.to_string(ctx)?.to_std_string_lossy();
+                if name.eq_ignore_ascii_case(&target) {
+                    return pair.get(1_u64, ctx);
+                }
+            }
+        }
+    }
+    Ok(JsValue::null())
+}
+
+fn xhr_add_event_listener(
+    this: &JsValue,
+    args: &[JsValue],
+    ctx: &mut Context,
+) -> boa_engine::JsResult<JsValue> {
+    let Some(instance) = this.as_object() else {
+        return Ok(JsValue::undefined());
+    };
+    let (Some(kind), Some(listener)) = (args.first(), args.get(1)) else {
+        return Ok(JsValue::undefined());
+    };
+    let Some(listener) = listener.as_object().filter(JsObject::is_callable) else {
+        return Ok(JsValue::undefined());
+    };
+    let kind = kind.to_string(ctx)?.to_std_string_lossy();
+    let slot = match kind.as_str() {
+        "load" => "__xhrLoadListeners",
+        "error" => "__xhrErrorListeners",
+        "readystatechange" => "__xhrReadyStateListeners",
+        _ => return Ok(JsValue::undefined()),
+    };
+    let listeners = instance.get(js_string!(slot), ctx)?;
+    if let Some(listeners) = listeners.as_object() {
+        JsArray::from_object(listeners)?.push(JsValue::from(listener.clone()), ctx)?;
+    }
+    Ok(JsValue::undefined())
+}
+
+/// Advance readyState and fire the readystatechange handler plus listeners.
+fn set_xhr_ready_state(
+    instance: &JsObject,
+    state: u8,
+    ctx: &mut Context,
+) -> boa_engine::JsResult<()> {
+    instance.set(js_string!("readyState"), state, false, ctx)?;
+    fire_xhr_event(
+        instance,
+        "readystatechange",
+        "__xhrReadyStateListeners",
+        "onreadystatechange",
+        ctx,
+    )
+}
+
+/// Invoke the on-property handler and every registered listener for an event.
+fn fire_xhr_event(
+    instance: &JsObject,
+    _event_name: &str,
+    listener_slot: &str,
+    property: &str,
+    ctx: &mut Context,
+) -> boa_engine::JsResult<()> {
+    call_optional_method(instance, js_string!(property), &[], ctx)?;
+    let listeners = instance.get(js_string!(listener_slot), ctx)?;
+    if let Some(listeners) = listeners.as_object() {
+        let listeners = JsArray::from_object(listeners)?;
+        let length = listeners.length(ctx)?;
+        for index in 0..length {
+            let listener = listeners.get(index, ctx)?;
+            if let Some(listener) = listener.as_object().filter(JsObject::is_callable) {
+                listener.call(&JsValue::from(instance.clone()), &[], ctx)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn collect_xhr_request_headers(
+    instance: &JsObject,
+    ctx: &mut Context,
+) -> boa_engine::JsResult<Vec<(String, String)>> {
+    let mut out = Vec::new();
+    let headers = instance.get(js_string!("__xhrRequestHeaders"), ctx)?;
+    if let Some(headers) = headers.as_object() {
+        let headers = JsArray::from_object(headers)?;
+        let length = headers.length(ctx)?;
+        for index in 0..length {
+            let pair = headers.get(index, ctx)?;
+            if let Some(pair) = pair.as_object() {
+                let pair = JsArray::from_object(pair)?;
+                let name = pair.get(0_u64, ctx)?.to_string(ctx)?.to_std_string_lossy();
+                let value = pair.get(1_u64, ctx)?.to_string(ctx)?.to_std_string_lossy();
+                out.push((name, value));
+            }
+        }
+    }
+    if out
+        .iter()
+        .all(|(name, _)| !name.eq_ignore_ascii_case("Accept"))
+    {
+        out.push(("Accept".to_string(), "*/*".to_string()));
+    }
+    Ok(out)
+}
+
+fn store_xhr_response(
+    instance: &JsObject,
+    response: &silksurf_net::HttpResponse,
+    ctx: &mut Context,
+) -> boa_engine::JsResult<()> {
+    let body = String::from_utf8_lossy(&response.body).to_string();
+    instance.set(js_string!("status"), u32::from(response.status), false, ctx)?;
+    instance.set(
+        js_string!("statusText"),
+        js_string!(http_status_text(response.status)),
+        false,
+        ctx,
+    )?;
+    instance.set(
+        js_string!("responseText"),
+        js_string!(body.as_str()),
+        false,
+        ctx,
+    )?;
+    instance.set(
+        js_string!("response"),
+        js_string!(body.as_str()),
+        false,
+        ctx,
+    )?;
+    let response_headers = JsArray::new(ctx);
+    for (name, value) in &response.headers {
+        let pair = JsArray::new(ctx);
+        pair.push(JsValue::from(js_string!(name.as_str())), ctx)?;
+        pair.push(JsValue::from(js_string!(value.as_str())), ctx)?;
+        response_headers.push(JsValue::from(pair), ctx)?;
+    }
+    instance.set(
+        js_string!("__xhrResponseHeaders"),
+        response_headers,
+        false,
+        ctx,
+    )?;
+    Ok(())
+}
+
+fn http_status_text(status: u16) -> &'static str {
+    match status {
+        200 => "OK",
+        201 => "Created",
+        204 => "No Content",
+        301 => "Moved Permanently",
+        302 => "Found",
+        304 => "Not Modified",
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        404 => "Not Found",
+        500 => "Internal Server Error",
+        _ => "",
+    }
+}
+
 // ---- fetch() implementation ------------------------------------------------
 
 fn fetch_input_url(input: &JsValue, ctx: &mut Context) -> boa_engine::JsResult<String> {
@@ -1762,20 +2431,7 @@ fn build_response_object(response: silksurf_net::HttpResponse, ctx: &mut Context
     let status = response.status;
     let body = response.body;
 
-    let status_text = match status {
-        200 => "OK",
-        201 => "Created",
-        204 => "No Content",
-        301 => "Moved Permanently",
-        302 => "Found",
-        304 => "Not Modified",
-        400 => "Bad Request",
-        401 => "Unauthorized",
-        403 => "Forbidden",
-        404 => "Not Found",
-        500 => "Internal Server Error",
-        _ => "",
-    };
+    let status_text = http_status_text(status);
 
     // Build headers JsArray of [name, value] pairs.
     let headers_arr = JsArray::new(ctx);
@@ -2107,6 +2763,59 @@ mod tests {
     }
 
     #[test]
+    fn document_cookie_rejects_http_only_assignment() {
+        let mut ctx = SilkContext::new();
+        ctx.eval(
+            "document.cookie = 'visible=1'; \
+             document.cookie = 'secret=2; HttpOnly'; \
+             globalThis.jar = document.cookie;",
+        )
+        .expect("script sets cookies");
+        // A script cannot set an HttpOnly cookie, so it never appears.
+        let jar = global_string(&mut ctx, "jar");
+        assert!(jar.contains("visible=1"), "jar: {jar}");
+        assert!(!jar.contains("secret"), "HttpOnly cookie leaked: {jar}");
+    }
+
+    #[test]
+    fn shared_jar_bridges_document_cookie_and_http() {
+        // A partitioned jar shared with the HTTP client: an HTTP-set cookie in
+        // the top-level document's first-party partition is readable via
+        // document.cookie, and a document.cookie write lands in the same
+        // partition the first-party HTTP client would read/send.
+        use silksurf_net::cookie::{PartitionedCookieStore, partition_key};
+        let top = "https://example.com";
+        let dom = std::sync::Arc::new(std::sync::Mutex::new(silksurf_dom::Dom::new()));
+        let jar = std::sync::Arc::new(std::sync::Mutex::new(PartitionedCookieStore::new()));
+        // First-party partition = partition_key(top, top).
+        jar.lock()
+            .unwrap()
+            .store_mut(&partition_key(top, top))
+            .set_from_set_cookie("sid=fromhttp", "example.com", 0);
+
+        let mut ctx = SilkContext::with_dom_and_cookies(&dom, &jar, top, "example.com");
+        ctx.eval("globalThis.seen = document.cookie; document.cookie = 'pref=dark';")
+            .expect("script reads and writes document.cookie");
+
+        assert_eq!(global_string(&mut ctx, "seen"), "sid=fromhttp");
+        // The document.cookie write is visible in the same first-party partition.
+        let jar = jar.lock().unwrap();
+        let store = jar
+            .store(&partition_key(top, top))
+            .expect("first-party partition exists");
+        let header = store.cookie_header(
+            "example.com",
+            "/",
+            true,
+            true,
+            silksurf_net::cookie::SameSiteContext::Unknown,
+            0,
+        );
+        assert!(header.contains("sid=fromhttp"), "header: {header}");
+        assert!(header.contains("pref=dark"), "header: {header}");
+    }
+
+    #[test]
     fn crypto_get_random_values_fills_typed_array() {
         let mut ctx = SilkContext::new();
         ctx.eval(
@@ -2279,9 +2988,13 @@ mod tests {
 
         .expect("script schedules interval");
 
+        // Intervals are deadline-ordered: each firing becomes due only after
+        // its 1ms period elapses, so the drain waits out the period first.
+        std::thread::sleep(std::time::Duration::from_millis(2));
         assert_eq!(ctx.run_ready_host_callbacks().unwrap(), 1);
         assert_number_eq(&mut ctx, "count", 1.0);
         assert!(ctx.has_pending_host_callbacks());
+        std::thread::sleep(std::time::Duration::from_millis(2));
         assert_eq!(ctx.run_ready_host_callbacks().unwrap(), 1);
         assert_number_eq(&mut ctx, "count", 2.0);
         assert!(!ctx.has_pending_host_callbacks());

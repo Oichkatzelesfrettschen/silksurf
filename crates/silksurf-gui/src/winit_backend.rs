@@ -48,6 +48,7 @@ type RetainedPreparedCallback = dyn FnMut(WinitRetainedBufferTag);
 type PresentedCallback = dyn FnMut(WinitPresentedFrame);
 type InputCallback = dyn FnMut(WinitInput, u32, u32, &WinitWakeHandle) -> WinitInputResult;
 type WakeCallback = dyn FnMut() -> bool;
+type HostWorkDeadlineCallback = dyn FnMut() -> Option<Instant>;
 const MAX_PRESENT_DAMAGE_RECTS: usize = 5;
 const BUFFER_WAIT_TRACE_THRESHOLD: Duration = Duration::from_millis(1);
 const WAYLAND_REDRAW_PACE_INITIAL: Duration = Duration::from_millis(1);
@@ -337,6 +338,7 @@ pub struct WinitWindow {
     height: u32,
     display_backend: WinitDisplayBackend,
     wayland_presenter: WinitWaylandPresenter,
+    host_work_deadline_fn: Option<Box<HostWorkDeadlineCallback>>,
 }
 
 impl WinitWindow {
@@ -352,7 +354,23 @@ impl WinitWindow {
             height,
             display_backend: WinitDisplayBackend::Auto,
             wayland_presenter: WinitWaylandPresenter::Auto,
+            host_work_deadline_fn: None,
         })
+    }
+
+    /// Register a deadline source for scheduled host work (JS timers).
+    ///
+    /// The event loop calls this before sleeping and, when it returns
+    /// `Some(instant)`, waits with `ControlFlow::WaitUntil` so the wake
+    /// callback runs as the deadline passes instead of blocking on the next
+    /// external event.
+    #[must_use]
+    pub fn with_host_work_deadline(
+        mut self,
+        deadline_fn: impl FnMut() -> Option<Instant> + 'static,
+    ) -> Self {
+        self.host_work_deadline_fn = Some(Box::new(deadline_fn));
+        self
     }
 
     /// Select the native display server backend before entering the event loop.
@@ -522,6 +540,7 @@ impl WinitWindow {
                 input_fn(input, width, height, wake)
             }),
             wake_fn: Box::new(wake_fn),
+            host_work_deadline_fn: self.host_work_deadline_fn,
         };
         if let Err(e) = event_loop.run_app(&mut app) {
             eprintln!("[SilkSurf] winit: event loop error: {e}");
@@ -771,6 +790,7 @@ struct WinitApp {
     presented_fn: Box<PresentedCallback>,
     input_fn: Box<InputCallback>,
     wake_fn: Box<WakeCallback>,
+    host_work_deadline_fn: Option<Box<HostWorkDeadlineCallback>>,
 }
 
 impl ApplicationHandler<WinitUserEvent> for WinitApp {
@@ -871,6 +891,7 @@ impl ApplicationHandler<WinitUserEvent> for WinitApp {
         self.handle_ready_work();
         self.drive_input_probe();
         self.flush_paced_redraw(event_loop);
+        self.apply_host_work_deadline(event_loop);
     }
 }
 
@@ -1117,6 +1138,25 @@ impl WinitApp {
         if let Some(window) = self.window.clone() {
             self.request_or_pace_redraw(&window, RedrawRequestKind::Paced);
         }
+    }
+
+    /// Sleep no longer than the next scheduled host-work deadline.
+    ///
+    /// `flush_paced_redraw` may already have armed a `WaitUntil` for redraw
+    /// pacing; the earlier of the two instants wins so neither timers nor
+    /// pacing stall the other.
+    fn apply_host_work_deadline(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(deadline_fn) = self.host_work_deadline_fn.as_mut() else {
+            return;
+        };
+        let Some(deadline) = deadline_fn() else {
+            return;
+        };
+        let target = match event_loop.control_flow() {
+            ControlFlow::WaitUntil(existing) => existing.min(deadline),
+            _ => deadline,
+        };
+        event_loop.set_control_flow(ControlFlow::WaitUntil(target));
     }
 
     fn handle_ready_work(&mut self) {

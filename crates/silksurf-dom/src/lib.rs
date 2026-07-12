@@ -1,10 +1,14 @@
 //! DOM data structures and traversal APIs (cleanroom).
 
 pub mod a11y;
+pub mod canvas2d;
 pub mod diff;
+
+pub use canvas2d::CanvasSurface;
 
 use silksurf_core::{Atom, SilkInterner, SmallString, should_intern_identifier};
 use smallvec::SmallVec;
+use std::collections::HashMap;
 use std::sync::RwLock;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
@@ -65,6 +69,7 @@ pub enum TagName {
     P,
     A,
     Img,
+    Canvas,
     Table,
     Thead,
     Tbody,
@@ -124,6 +129,7 @@ impl TagName {
             "p" => TagName::P,
             "a" => TagName::A,
             "img" => TagName::Img,
+            "canvas" => TagName::Canvas,
             "table" => TagName::Table,
             "thead" => TagName::Thead,
             "tbody" => TagName::Tbody,
@@ -181,6 +187,7 @@ impl TagName {
             TagName::P => "p",
             TagName::A => "a",
             TagName::Img => "img",
+            TagName::Canvas => "canvas",
             TagName::Table => "table",
             TagName::Thead => "thead",
             TagName::Tbody => "tbody",
@@ -356,6 +363,10 @@ pub struct Dom {
     style_generation: u64,
     pending_structure_change: bool,
     pending_style_change: bool,
+    /// Per-canvas-element backing bitmaps. A canvas element owns its 2D
+    /// drawing surface; JS draw calls mutate it in place and the paint
+    /// pipeline snapshots its pixels. Keyed by the canvas element `NodeId`.
+    canvas_surfaces: HashMap<NodeId, CanvasSurface>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -389,6 +400,7 @@ impl Dom {
             style_generation: (instance_id as u64) << 32,
             pending_structure_change: false,
             pending_style_change: false,
+            canvas_surfaces: HashMap::new(),
         }
     }
 
@@ -898,6 +910,43 @@ impl Dom {
     /// Total number of nodes in the DOM (used for parallel array sizing).
     pub fn node_count(&self) -> usize {
         self.nodes.len()
+    }
+
+    /// Get or create the 2D backing surface for a canvas element, sized to
+    /// `width` x `height`. An existing surface with different dimensions is
+    /// resized (which resets its pixels, matching `canvas.width`/`height`).
+    pub fn ensure_canvas_surface(
+        &mut self,
+        node: NodeId,
+        width: u32,
+        height: u32,
+    ) -> &mut CanvasSurface {
+        let surface = self
+            .canvas_surfaces
+            .entry(node)
+            .or_insert_with(|| CanvasSurface::new(width, height));
+        if surface.width() != width.max(1) || surface.height() != height.max(1) {
+            surface.resize(width, height);
+        }
+        surface
+    }
+
+    /// Mutable access to an existing canvas surface, if the node has one.
+    pub fn canvas_surface_mut(&mut self, node: NodeId) -> Option<&mut CanvasSurface> {
+        self.canvas_surfaces.get_mut(&node)
+    }
+
+    /// Read-only access to an existing canvas surface, if the node has one.
+    #[must_use]
+    pub fn canvas_surface(&self, node: NodeId) -> Option<&CanvasSurface> {
+        self.canvas_surfaces.get(&node)
+    }
+
+    /// Node ids of every canvas element that has a backing surface. The paint
+    /// pipeline iterates these to snapshot canvas pixels into the display list.
+    #[must_use]
+    pub fn canvas_surface_ids(&self) -> Vec<NodeId> {
+        self.canvas_surfaces.keys().copied().collect()
     }
 
     fn push_node(&mut self, kind: NodeKind) -> NodeId {

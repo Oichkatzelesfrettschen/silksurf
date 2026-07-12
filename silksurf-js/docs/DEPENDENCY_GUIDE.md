@@ -665,23 +665,23 @@ cargo bench --features jit
 
 ```
 Need to store/access data?
-├── All bit patterns valid?
-│   └── Yes: bytemuck (Pod, Zeroable)
-│   └── No: zerocopy (TryFromBytes)
-│
-├── Need serialization?
-│   └── Zero-copy access: rkyv
-│   └── Text format: serde_json
-│
-├── String data?
-│   └── Identifiers: lasso (interning)
-│   └── Searching: memchr (SIMD)
-│
-├── Boolean flags?
-│   └── Named flags: bitflags
-│   └── Dense array: bitvec
-│
-└── Small collection?
-    └── Fixed max size: tinyvec
-    └── Ring buffer: ringbuf
++-- All bit patterns valid?
+|   +-- Yes: bytemuck (Pod, Zeroable)
+|   +-- No: zerocopy (TryFromBytes)
+|
++-- Need serialization?
+|   +-- Zero-copy access: rkyv
+|   +-- Text format: serde_json
+|
++-- String data?
+|   +-- Identifiers: lasso (interning)
+|   +-- Searching: memchr (SIMD)
+|
++-- Boolean flags?
+|   +-- Named flags: bitflags
+|   +-- Dense array: bitvec
+|
++-- Small collection?
+    +-- Fixed max size: tinyvec
+    +-- Ring buffer: ringbuf
 ```
