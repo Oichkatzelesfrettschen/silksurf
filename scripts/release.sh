@@ -89,7 +89,7 @@ fi
 # --- Step 2: local-gate full ------------------------------------------------
 # Per ADR-009 the local-gate is the canonical merge gate. We require the
 # full variant (fmt + clippy + warnings-as-errors + tests + deny + MSRV +
-# doc + CMake + CTest) so a release tag implies the same artefact has
+# doc) so a release tag implies the same artefact has
 # already passed every check that lands code on main.
 if [ "${SKIP_GATE:-0}" = "1" ]; then
     log "SKIP_GATE=1 set -- bypassing local_gate.sh full (DISCOURAGED)"

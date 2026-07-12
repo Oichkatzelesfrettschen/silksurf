@@ -19,8 +19,6 @@ machinery. The hot path of the render pipeline.
     fused pipeline (see GLOSSARY -> CascadeView).
   * `compute_style_for_node`, `compute_style_for_node_with_index`,
     `compute_style_for_node_with_workspace`, `compute_styles`.
-  * `style_soa::StyleSoA` -- post-cascade Structure-of-Arrays view
-    consumed by layout; built from BFS order via `StyleSoA::from_bfs`.
   * `CssError` -- crate-local error; `From<CssError> for
     silksurf_core::SilkError` lives at the bottom of `lib.rs`.
 
@@ -33,8 +31,6 @@ machinery. The hot path of the render pipeline.
   3. `compute_styles(...)` walks the DOM in BFS order, populating
      `ComputedStyle` per node, with cascade workspace dedup via the
      `IndexedSelector.pair_id` bitvec.
-  4. `StyleSoA::from_bfs(bfs_order, styles)` produces the SoA view for
-     layout to consume.
 
 The 9.5 us steady-state benchmark exercises this entire path (see
 `docs/PERFORMANCE.md`).
@@ -47,5 +43,8 @@ The 9.5 us steady-state benchmark exercises this entire path (see
 ## Status
 
 Functional, fast, and well-fuzzed (`fuzz/css_tokenizer`,
-`fuzz/css_parser`). Three Phase-4.4 SoA TODOs remain (`ComputedStyle`,
-`Dimensions`, `DisplayList`); see GLOSSARY entry.
+`fuzz/css_parser`). The speculative post-cascade SoA surfaces
+(`StyleSoA`, `DimensionsSoA`, `DisplayListBatched`) are removed:
+measured construction cost erased the fused-pipeline win, and
+`CascadeView` already carries the column layout on the cascade hot
+path.

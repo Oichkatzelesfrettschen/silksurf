@@ -14,7 +14,7 @@ Rendering pipeline:  0.7 MB  (buffers, caches)
 XCB/GUI:             0.5 MB
 Resources/fonts:     0.3 MB
 Overhead:            5.2 MB  (code, data, glibc, etc.)
-────────────────────────
+------------------------
 TOTAL:              10.0 MB
 ```
 
@@ -154,8 +154,8 @@ void merge_regions(struct region *regions, int *count) {
 Frame 1: Render div.box (changed)
 Frame 2: Render p.text (changed)
 Frame 3: Render img (changed)
-→ Spread work across frames
-→ Maintain 60 FPS
+-> Spread work across frames
+-> Maintain 60 FPS
 ```
 
 ---

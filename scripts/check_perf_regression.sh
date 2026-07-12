@@ -14,9 +14,12 @@
 # looser thresholds let drift through.
 #
 # Why two entries (not baseline.json): baseline.json is hand-curated for
-# release tracking and updates infrequently. history.ndjson is appended
-# every CI run, so consecutive comparisons surface regressions the moment
-# they land rather than at the next baseline refresh.
+# release tracking and updates infrequently. history.ndjson holds curated
+# milestone rows; local benchmark runs append to the ignored
+# perf/results/history.local.ndjson (perf/run_baselines.sh). When the
+# local file exists, its newest row is compared against the newest
+# curated row, so a fresh measurement is judged against the last promoted
+# milestone without churning the tracked file.
 #
 # Why python3 (not jq or awk): python3 is the most universally available
 # of the three and gives us clean JSON parsing + arithmetic in one
@@ -34,6 +37,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HISTORY="${REPO_ROOT}/perf/history.ndjson"
+LOCAL_HISTORY="${REPO_ROOT}/perf/results/history.local.ndjson"
 
 # Threshold: fail when a metric grows by THIS_FRACTION or more vs prior run.
 # Expressed as a fraction (0.05 = 5%). Kept in sync with docs/PERFORMANCE.md.
@@ -54,7 +58,7 @@ fi
 # Hand off to python3 for JSON parsing + comparison. We pass the file
 # path and threshold as argv to keep the heredoc free of shell expansion
 # surprises.
-python3 - "${HISTORY}" "${THRESHOLD_FRACTION}" <<'PY'
+python3 - "${HISTORY}" "${THRESHOLD_FRACTION}" "${LOCAL_HISTORY}" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -68,21 +72,28 @@ TRACKED = [
 
 history_path = Path(sys.argv[1])
 threshold = float(sys.argv[2])
+local_path = Path(sys.argv[3])
 
 # Read all non-blank lines. ndjson means one JSON object per line; blanks
 # (trailing newline, accidental gaps) are tolerated to keep the file
-# robust to manual edits.
+# robust to manual edits. Curated rows come first; local (unpromoted)
+# rows follow, so the newest local measurement is always entries[-1] and
+# the row it is judged against is the one before it.
 entries = []
-for raw in history_path.read_text(encoding="utf-8").splitlines():
-    line = raw.strip()
-    if not line:
-        continue
-    try:
-        entries.append(json.loads(line))
-    except json.JSONDecodeError as exc:
-        print(f"check_perf_regression: ERROR: malformed JSON line: {exc}",
-              file=sys.stderr)
-        sys.exit(2)
+sources = [history_path]
+if local_path.is_file():
+    sources.append(local_path)
+for source in sources:
+    for raw in source.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError as exc:
+            print(f"check_perf_regression: ERROR: malformed JSON line "
+                  f"in {source.name}: {exc}", file=sys.stderr)
+            sys.exit(2)
 
 if len(entries) < 2:
     # Insufficient history -- one entry means no prior to compare against;

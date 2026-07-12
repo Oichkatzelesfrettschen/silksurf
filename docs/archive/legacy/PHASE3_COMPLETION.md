@@ -50,7 +50,7 @@ typedef struct {
 **Algorithm Highlights:**
 - Rectangle clamping to screen bounds prevents out-of-bounds access
 - Bounding box merging reduces region count for XDamage extension
-- O(n) linear search through damage rects (n ≤ 256)
+- O(n) linear search through damage rects (n <= 256)
 
 **Performance Impact:**
 ```
@@ -90,7 +90,7 @@ struct cache_entry {
 ```
 
 **LRU Eviction Strategy:**
-1. On cache hit: Move entry from position → tail (most recently used)
+1. On cache hit: Move entry from position -> tail (most recently used)
 2. On capacity overflow: Evict head (least recently used)
 3. Automatic allocation: Find free entry or evict LRU
 
@@ -200,14 +200,14 @@ struct silk_renderer {
 **Frame Rendering Pipeline:**
 ```
 silk_renderer_begin_frame()     /* Reset damage tracker */
-  ↓
+  v
 silk_renderer_fill_rect()       /* Rendering operations */
 silk_renderer_copy_pixels()     /* All track damage regions */
 silk_renderer_blend_pixels()    /* Compositor-style blending */
 silk_renderer_clear()           /* Background clear */
-  ↓
+  v
 silk_renderer_end_frame()       /* Finalize frame */
-  ↓
+  v
 silk_renderer_present()         /* Push to X11 window */
 ```
 
@@ -260,13 +260,13 @@ const char *silk_renderer_backend()           /* SSE2/AVX2/C selection */
 
 ```
 Application (main.c)
-        ↓
+        v
 silk_renderer_t (unified interface)
-    ├── silk_damage_tracker_t (partial redraw)
-    ├── silk_pixmap_cache_t (VRAM reuse)
-    ├── silk_pixel_ops (SIMD/C fallback)
-    ├── silk_window_mgr_t (Phase 2)
-    └── silk_app_window_t (backbuffer)
+    +-- silk_damage_tracker_t (partial redraw)
+    +-- silk_pixmap_cache_t (VRAM reuse)
+    +-- silk_pixel_ops (SIMD/C fallback)
+    +-- silk_window_mgr_t (Phase 2)
+    +-- silk_app_window_t (backbuffer)
 ```
 
 ---
@@ -292,13 +292,13 @@ silk_renderer_t (unified interface)
 
 ### Manual Testing
 ```
-✓ Window creation and event loop integration
-✓ Damage region tracking and statistics
-✓ Pixmap cache create/destroy/hit rates
-✓ SIMD backend auto-detection (SSE2/AVX2/C)
-✓ Rendering operations (clear, fill_rect, copy)
-✓ Frame lifecycle (begin/end/present)
-✓ Memory cleanup on shutdown
+[x] Window creation and event loop integration
+[x] Damage region tracking and statistics
+[x] Pixmap cache create/destroy/hit rates
+[x] SIMD backend auto-detection (SSE2/AVX2/C)
+[x] Rendering operations (clear, fill_rect, copy)
+[x] Frame lifecycle (begin/end/present)
+[x] Memory cleanup on shutdown
 ```
 
 ### Performance Benchmarks
@@ -334,13 +334,13 @@ Frame latency (1024x768, 60 FPS target):
 
 | Check | Status | Notes |
 |-------|--------|-------|
-| Compilation | ✓ Pass | Zero errors, warnings are acceptable stubs |
-| Binary Size | ✓ 43 KB | Minimal footprint including subsystems |
-| Memory Safety | ✓ Safe | No buffer overflows, bounds-checked |
-| Encapsulation | ✓ Clean | Opaque types, accessor functions |
-| SIMD Fallback | ✓ Portable | C implementations available on all platforms |
-| Error Handling | ✓ Defensive | NULL checks, bounds validation |
-| Documentation | ✓ Complete | Inline comments, header documentation |
+| Compilation | [x] Pass | Zero errors, warnings are acceptable stubs |
+| Binary Size | [x] 43 KB | Minimal footprint including subsystems |
+| Memory Safety | [x] Safe | No buffer overflows, bounds-checked |
+| Encapsulation | [x] Clean | Opaque types, accessor functions |
+| SIMD Fallback | [x] Portable | C implementations available on all platforms |
+| Error Handling | [x] Defensive | NULL checks, bounds validation |
+| Documentation | [x] Complete | Inline comments, header documentation |
 
 ---
 

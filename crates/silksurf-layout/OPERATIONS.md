@@ -9,7 +9,6 @@ No environment variables are consumed at runtime.
 - `build_layout_tree` takes a `&Dom` and an optional pre-computed style map. Callers must ensure `dom.generation()` matches the style map's generation if one is supplied -- passing a stale style map produces incorrect geometry.
 - `LayoutNeighborTable::rebuild` is O(N) in DOM nodes. It must be called before each layout pass when the DOM has changed (gated by generation counter in `FusedWorkspace`).
 - `Rect` coordinates are floating-point pixels in the same coordinate space as the viewport. Overflow is not clamped at this layer; the rasterizer clips to the buffer bounds.
-- `DimensionsSoA` is an optional SoA cache for callers that need per-node geometry in column-oriented form. It is not maintained automatically; callers fill it via `DimensionsSoA::from_layout_tree` after each layout pass.
 
 ## Common failure modes
 
@@ -36,6 +35,5 @@ Fix: call `rebuild` after every DOM mutation batch. The `FusedWorkspace` generat
 | Bound | Enforced by |
 |---|---|
 | Layout tree depth | DOM tree depth (bounded by HTML parser `MAX_TOKENS_PER_FEED`) |
-| `DimensionsSoA` size | Bounded by DOM node count |
 
 No explicit cap on layout node count at this layer; rely on parser-level bounds.

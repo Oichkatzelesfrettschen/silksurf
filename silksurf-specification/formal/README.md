@@ -1,7 +1,7 @@
 # Formal Specifications -- silksurf-specification/formal/
 
-This directory contains TLA+ formal models for two core silksurf subsystems.
-Both specs are written for TLA+ 2 and are checkable with TLC.
+This directory contains TLA+ formal models for three core silksurf subsystems.
+All specs are written for TLA+ 2 and are checkable with TLC.
 
 TLC is NOT part of the local build gate (cmake/ctest).  Run it manually as
 described below.  It requires a separate JVM-based install; see
@@ -59,10 +59,40 @@ The supplied cache_coherence.cfg uses 3 keys, 2 values, and MAX_CAPACITY = 3.
 TLC exhausts this space quickly.  Add more keys or values for deeper coverage.
 
 
+## BrowserLoader.tla
+
+**What it models**: The async-fetch-versus-DOM-node-lifetime race in
+silksurf-engine.  A navigation fetches a resource on the network/worker thread
+while the render thread owns the DOM and may free the target node mid-flight
+(the user closes the tab or navigates away) before the response arrives.
+
+**Operations modelled**:
+- FreeNode -- the render thread frees the node at any point before the commit
+- Fetch / Load -- the network request progresses empty -> loading -> loaded
+- Update -- the commit point; the correct implementation checks node liveness
+            and commits the DOM update only to a live node, leaving a freed
+            node untouched
+
+**Key invariant**: NoUseAfterFree -- a ghost flag records whether any commit
+ever wrote to a freed node; it stays FALSE under every interleaving of the free
+and the commit.  Also checked: CommitOnlyAfterLoad (no commit before the load)
+and the Termination property (the loader always finishes, even when the node is
+freed mid-fetch).  A regression that committed unconditionally would flip the
+ghost flag and TLC would report the counterexample trace (verified by mutation:
+injecting an unconditional commit makes TLC report "Invariant NoUseAfterFree is
+violated").
+
+**How to run**:
+
+    tlc BrowserLoader.tla -config BrowserLoader.cfg
+
+The state space is tiny (8 distinct states); TLC exhausts it instantly.
+
 ## Notes
 
-- Both .cfg files list the invariants to check.  If TLC reports a violation,
-  the counterexample trace pinpoints which state sequence breaks the property.
-- TLC is NOT invoked by cmake, ctest, or CI.  It is a manual verification step.
-- The specs follow the style of BrowserLoader.tla at the repository root.
+- Every .cfg lists the invariants (and, for BrowserLoader, the Termination
+  property) to check.  If TLC reports a violation, the counterexample trace
+  pinpoints which state sequence breaks the property.
+- TLC is NOT invoked by the local gate (make check/test) or CI.  It is a manual
+  verification step; a JVM-based TLC install is required.
 - Unicode is not used; all text is ASCII for portability across editors and CI logs.

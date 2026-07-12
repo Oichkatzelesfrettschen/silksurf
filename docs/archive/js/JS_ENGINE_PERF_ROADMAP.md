@@ -11,7 +11,7 @@ and memory footprint.
 4. DROPPED: `cfg(feature = "parallel")` multi-file lexing pass (`rayon` removed).
 5. DONE: Gate `tracing` + `tracing-subscriber` under `tracing-full`.
 6. DONE: Optional TUI/graphics deps removed; revisit only with explicit UI scope.
-7. TODO: Add a `features.md` doc explaining feature → code path wiring.
+7. TODO: Add a `features.md` doc explaining feature -> code path wiring.
 
 ## Phase 1: Lexer/Parser Hot Paths
 8. Lexing: use `memchr` / `memchr3` for delimiter scans and skip loops.
@@ -32,7 +32,7 @@ and memory footprint.
 ## Phase 3: GC + Interning
 20. Mark bits: adopt `bitvec` for compact mark/gray sets.
 21. Heap blocks: align object headers to cache lines; pack header fields.
-22. Interning: freeze `Rodeo` → `RodeoResolver` after parse for fast resolve.
+22. Interning: freeze `Rodeo` -> `RodeoResolver` after parse for fast resolve.
 23. String storage: ensure SSO or inline string fast path; avoid rehashing.
 24. Weak refs: batch finalization queues; reduce churn in `Vec` growth.
 

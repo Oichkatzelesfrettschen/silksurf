@@ -9,12 +9,17 @@ publish = false
 bumpalo = { workspace = true }
 smol_str = { workspace = true }
 thiserror = { workspace = true }
+idna = { workspace = true }
 
 [dev-dependencies]
 criterion = "0.8"
 
 [[bench]]
 name = "interner"
+harness = false
+
+[[bench]]
+name = "bpe"
 harness = false
 
 [lints]

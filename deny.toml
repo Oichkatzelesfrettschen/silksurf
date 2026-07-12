@@ -15,15 +15,23 @@ exclude-dev = false
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 ignore = [
-    # paste is a transitive dependency pulled in by boa_engine 0.21.1
-    # (via boa_string -> paste proc-macro). The advisory is about
-    # maintenance status, not a security vulnerability. We cannot remove
-    # it without upgrading boa_engine to a future release that drops paste.
-    { id = "RUSTSEC-2024-0436", reason = "transitive dep of boa_engine 0.21.1; maintenance-only advisory, no CVE" },
-    # ttf-parser is a transitive dependency pulled in by cosmic-text 0.19.0
-    # through fontdb 0.23.0. The winit decoration path is disabled; this
-    # remaining path stays until the text stack moves fully to skrifa.
-    { id = "RUSTSEC-2026-0192", reason = "transitive dep of cosmic-text 0.19.0 via fontdb 0.23.0; migration target is skrifa/fontations" },
+    # Both ignores are "unmaintained" informational advisories, not CVEs:
+    # each has `informational = "unmaintained"` and `patched = []` (no fixed
+    # version exists). boa_engine 0.21.1 and cosmic-text 0.19.0 are the LATEST
+    # published versions (verified 2026-07-11), so there is no upgrade that
+    # clears them; the fix requires the UPSTREAM crates to drop the transitive
+    # dep, or migrating off the engine/text stack. Neither is a security
+    # regression. Reaching zero ignores is therefore gated on upstream, not on
+    # us -- see AD-022 amendment and docs/design/THREAT-MODEL.md.
+    #
+    # paste (proc-macro) via boa_engine 0.21.1 -> boa_string. Migration target:
+    # pastey (a paste fork), but it publishes under a different crate name, so
+    # a drop-in [patch] is not available.
+    { id = "RUSTSEC-2024-0436", reason = "unmaintained-only (no CVE, patched=[]); transitive via boa_engine 0.21.1 (latest); no upgrade clears it; target pastey not drop-in" },
+    # ttf-parser via cosmic-text 0.19.0 -> fontdb 0.23.0. Migration target:
+    # skrifa/fontations, but its API differs from ttf-parser, so fontdb (not us)
+    # must migrate first.
+    { id = "RUSTSEC-2026-0192", reason = "unmaintained-only (no CVE, patched=[]); transitive via cosmic-text 0.19.0 (latest) -> fontdb; no upgrade clears it; target skrifa not API-compatible in fontdb" },
 ]
 
 [licenses]

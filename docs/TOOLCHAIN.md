@@ -79,8 +79,8 @@ Default policy: treat warnings as errors for Rust code.
 - Track known warnings in `docs/archive/testing/WARNINGS_AUDIT.md`.
 
 ## Legacy C Targets
-Rust crates use Cargo; legacy C targets are in the root `Makefile` only.
-- `cmake -B build && cmake --build build` (legacy C build)
+Rust crates use Cargo; the root `Makefile` is the canonical entry point.
+- Legacy C/CMake build: removed (AD-024); git history preserves it
 
 ## Core Dump Handling (Repo-Local)
 We do not change system-wide `kernel.core_pattern`.

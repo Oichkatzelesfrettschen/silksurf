@@ -539,7 +539,7 @@ Silksurf handles 4, libcss defines 60+.
 
 ## Conclusion
 
-The CSS_INVALID error is **not a bug**—it is a **design mismatch**. LibCSS was designed for a complete browser implementation (NetSurf) where the handler provides all necessary CSS property defaults. Silksurf attempts to use libcss minimally, but providing only 4 out of 60+ properties causes cascade failures.
+The CSS_INVALID error is **not a bug**--it is a **design mismatch**. LibCSS was designed for a complete browser implementation (NetSurf) where the handler provides all necessary CSS property defaults. Silksurf attempts to use libcss minimally, but providing only 4 out of 60+ properties causes cascade failures.
 
 **Proper fix**: Either:
 1. Expand handler to cover all properties (short-term workaround)

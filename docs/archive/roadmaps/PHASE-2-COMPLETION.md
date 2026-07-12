@@ -17,7 +17,7 @@ Phase 2 successfully delivered a complete, native CSS cascade engine and selecto
 
 ## Phase 2 Deliverables
 
-### Phase 2.1: Native CSS Cascade Engine ✓ COMPLETE
+### Phase 2.1: Native CSS Cascade Engine [x] COMPLETE
 
 **Files Created**:
 - `src/document/css_cascade.h` (270 lines)
@@ -35,7 +35,7 @@ Phase 2 successfully delivered a complete, native CSS cascade engine and selecto
 - Inheritance handling for inherited properties
 - Initial value fallback for unspecified properties
 
-**Test Results**: **5/5 tests passing** ✓
+**Test Results**: **5/5 tests passing** [x]
 - test_basic_cascade
 - test_cascade_specificity
 - test_cascade_origin
@@ -49,7 +49,7 @@ Phase 2 successfully delivered a complete, native CSS cascade engine and selecto
 
 ---
 
-### Phase 2.2: CSS Selector Matching Engine ✓ COMPLETE
+### Phase 2.2: CSS Selector Matching Engine [x] COMPLETE
 
 **Files Created**:
 - `src/document/css_selector_match.h` (260+ lines)
@@ -64,7 +64,7 @@ Phase 2 successfully delivered a complete, native CSS cascade engine and selecto
 - Error handling and edge cases
 - Foundation for Phase 3 parser integration
 
-**Test Results**: **8/8 tests passing** ✓
+**Test Results**: **8/8 tests passing** [x]
 - test_parse_type_selector
 - test_parse_class_selector
 - test_parse_id_selector
@@ -81,13 +81,13 @@ Phase 2 successfully delivered a complete, native CSS cascade engine and selecto
 
 ---
 
-### Phase 2.3: Validation and Infrastructure ✓ COMPLETE
+### Phase 2.3: Validation and Infrastructure [x] COMPLETE
 
 **Files Created**:
 - `tests/test_css_native_pipeline.c` (350+ lines)
 - `PHASE-3-CSS-PARSER-PLAN.md` (1000+ lines)
 
-**Validation Test Results**: **7/7 tests passing** ✓
+**Validation Test Results**: **7/7 tests passing** [x]
 - test_selector_parsing (5/5 selector types)
 - test_specificity_calculation (3/3 specificity tiers)
 - test_edge_cases (empty, NULL, universal)
@@ -110,19 +110,19 @@ Phase 2 successfully delivered a complete, native CSS cascade engine and selecto
 
 | Test | Status | Notes |
 |------|--------|-------|
-| #1: parser_basic | ✓ PASS | LibHubbub HTML parsing |
-| #2: dom_parsing | ✓ PASS | DOM tree construction |
-| #3: css_engine | ✓ PASS | CSS engine initialization |
-| #4: css_cascade | ✗ FAIL | LibCSS cleanup segfault (infrastructure) |
-| #5: css_cascade_native | ✓ PASS | 5/5 native cascade tests |
-| #6: css_cascade_integration | ✗ FAIL | DOM navigation issue (separate) |
-| #7: css_selector_matching | ✓ PASS | 8/8 selector matching tests |
-| #8: css_native_pipeline | ✓ PASS | 7/7 Phase 2 validation tests |
-| #9: simd_detection | ✓ PASS | CPU SIMD capability detection |
-| #10: e2e_rendering | ✓ PASS | Full rendering pipeline |
-| #11: inline_layout | ✓ PASS | Text layout algorithm |
-| #12: replaced_elements | ✓ PASS | Image and element sizing |
-| #13: xcb_shm | ✓ PASS | X11 shared memory setup |
+| #1: parser_basic | [x] PASS | LibHubbub HTML parsing |
+| #2: dom_parsing | [x] PASS | DOM tree construction |
+| #3: css_engine | [x] PASS | CSS engine initialization |
+| #4: css_cascade | [FAIL] FAIL | LibCSS cleanup segfault (infrastructure) |
+| #5: css_cascade_native | [x] PASS | 5/5 native cascade tests |
+| #6: css_cascade_integration | [FAIL] FAIL | DOM navigation issue (separate) |
+| #7: css_selector_matching | [x] PASS | 8/8 selector matching tests |
+| #8: css_native_pipeline | [x] PASS | 7/7 Phase 2 validation tests |
+| #9: simd_detection | [x] PASS | CPU SIMD capability detection |
+| #10: e2e_rendering | [x] PASS | Full rendering pipeline |
+| #11: inline_layout | [x] PASS | Text layout algorithm |
+| #12: replaced_elements | [x] PASS | Image and element sizing |
+| #13: xcb_shm | [x] PASS | X11 shared memory setup |
 
 **Known Issues** (2 failures, not Phase 2 scope):
 - Test #4: LibCSS document cleanup in parserutils (external dependency issue)
@@ -197,17 +197,17 @@ Pseudo:     :hover, :focus, :first-child, etc.
 
 ```
 Phase 2 (Complete):
-├── css_cascade.c ──────────────── Cascade algorithm
-├── css_property_spec.c ────────── Property definitions
-├── css_selector_match.c ──────── Selector matching
-├── css_select_handler.c ──────── Handler callbacks (modified)
-└── tests/ ────────────────────── Comprehensive tests
++-- css_cascade.c ---------------- Cascade algorithm
++-- css_property_spec.c ---------- Property definitions
++-- css_selector_match.c -------- Selector matching
++-- css_select_handler.c -------- Handler callbacks (modified)
++-- tests/ ---------------------- Comprehensive tests
 
 Phase 3 (Required - blocking full integration):
-├── CSS Tokenizer ────────────── Token stream generation
-├── CSS Parser ──────────────── Selector + declaration parsing
-├── Rule Storage ────────────── Parsed stylesheet rules
-└── Integration Layer ────────── Connect parser to cascade
++-- CSS Tokenizer -------------- Token stream generation
++-- CSS Parser ---------------- Selector + declaration parsing
++-- Rule Storage -------------- Parsed stylesheet rules
++-- Integration Layer ---------- Connect parser to cascade
 ```
 
 ---
@@ -218,25 +218,25 @@ Phase 3 (Required - blocking full integration):
 
 LibCSS provides an opaque stylesheet processing pipeline:
 ```
-CSS Text → LibCSS Parser → [Internal Rule Storage] → css_select_style()
-                                                           ↓
+CSS Text -> LibCSS Parser -> [Internal Rule Storage] -> css_select_style()
+                                                           v
                                                     (Black box cascade)
-                                                           ↓
+                                                           v
                                                     Computed Style
 ```
 
 **Problem**: LibCSS doesn't expose matched rules before cascading. To use our native cascade engine, we need:
 ```
-CSS Text → [Parser] → Parsed Rules → Selector Matching → Native Cascade → Style
+CSS Text -> [Parser] -> Parsed Rules -> Selector Matching -> Native Cascade -> Style
 ```
 
 ### Phase 2 Without Phase 3
 
 Currently we have:
-- ✓ Native cascade algorithm (works great)
-- ✓ Selector matching infrastructure (works great)
-- ✗ CSS parser (requires Phase 3)
-- ✗ Full native pipeline (blocked on parser)
+- [x] Native cascade algorithm (works great)
+- [x] Selector matching infrastructure (works great)
+- [FAIL] CSS parser (requires Phase 3)
+- [FAIL] Full native pipeline (blocked on parser)
 
 **Workaround used in Phase 2**: Keep using LibCSS for now, maintain our cascade engine for future use.
 
@@ -252,19 +252,19 @@ Currently we have:
 
 ## Phase 2 Code Quality
 
-### Compiler Quality Gates ✓
+### Compiler Quality Gates [x]
 - **Warnings**: 0 (with `-Wall -Wextra -Werror`)
 - **Memory Leaks**: 0 (validated with ASAN)
 - **Memory Safety**: All string operations bounds-checked
 - **Standards Compliance**: C11 standard
 
-### Test Coverage ✓
+### Test Coverage [x]
 - **Unit Tests**: 20+ tests across 3 modules
 - **Integration Tests**: 7 validation tests
 - **Test Pass Rate**: 100% (Phase 2 components)
 - **Edge Cases**: NULL, empty, boundary conditions covered
 
-### Documentation ✓
+### Documentation [x]
 - **Header Files**: Clear API documentation
 - **Implementation**: Inline comments explaining algorithms
 - **Test Files**: Documented test scenarios
@@ -321,7 +321,7 @@ Currently we have:
 
 **Tasks**:
 1. **CSS Tokenizer** (300 lines, 2-3 days)
-   - Convert CSS text → tokens
+   - Convert CSS text -> tokens
    - Handle strings, numbers, units, symbols
 
 2. **Selector Parser** (400 lines, 3-4 days)
@@ -358,7 +358,7 @@ Currently we have:
 
 ## Success Criteria Achieved
 
-### Phase 2 Complete ✓
+### Phase 2 Complete [x]
 - [x] Native cascade algorithm implemented and tested
 - [x] Selector matching infrastructure complete
 - [x] 0 compiler warnings (with `-Werror`)
@@ -368,14 +368,14 @@ Currently we have:
 - [x] Comprehensive test coverage
 - [x] Architecture ready for Phase 3
 
-### Architecture Decisions ✓
+### Architecture Decisions [x]
 - [x] Cleanroom design: separate from LibCSS cascade
 - [x] Modular implementation: reusable components
 - [x] Per-property error handling (modern browser approach)
 - [x] Flat array design: SIMD optimization ready
 - [x] Complete specificity support per CSS spec
 
-### Documentation ✓
+### Documentation [x]
 - [x] Clear API documentation
 - [x] Algorithm explanation with examples
 - [x] Comprehensive Phase 3 plan
@@ -408,7 +408,7 @@ Currently we have:
    - Achieve 1500 lines of clean code
 
 2. **Integration Testing**
-   - Test parser → selector matching → cascade pipeline
+   - Test parser -> selector matching -> cascade pipeline
    - Validate against real-world stylesheets
    - Performance benchmarking
 
@@ -437,7 +437,7 @@ The modular architecture enables:
 4. Superior debugging and diagnostics
 5. Alignment with project's cleanroom architecture
 
-**Status**: Phase 2 Foundation Complete ✓
+**Status**: Phase 2 Foundation Complete [x]
 **Next**: Phase 3 - CSS Parser Implementation
 **Timeline**: 2-3 weeks to full native CSS pipeline
 
@@ -451,9 +451,9 @@ Date: 2026-01-29
 Test Framework: ctest
 
 Core Components:
-  ✓ CSS Cascade Native:        5/5 tests passing
-  ✓ CSS Selector Matching:     8/8 tests passing
-  ✓ CSS Native Pipeline:       7/7 tests passing
+  [x] CSS Cascade Native:        5/5 tests passing
+  [x] CSS Selector Matching:     8/8 tests passing
+  [x] CSS Native Pipeline:       7/7 tests passing
 
 Total Phase 2 Validation:      20/20 tests passing (100%)
 

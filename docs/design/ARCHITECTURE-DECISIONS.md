@@ -1,14 +1,14 @@
 # SilkSurf Architecture Decision Records (ADRs)
 
 **Purpose**: Document key architectural decisions with rationale and alternatives
-**Format**: Context → Decision → Rationale → Consequences → Alternatives
+**Format**: Context -> Decision -> Rationale -> Consequences -> Alternatives
 **Updated**: 2026-01-29
 
 ---
 
 ## AD-001: Cleanroom Implementation Strategy
 
-**Status**: ✅ Accepted
+**Status**: Accepted
 **Date**: 2025-12-30
 **Deciders**: Architecture Team
 **Context**:
@@ -32,13 +32,13 @@ Cleanroom implementation - build from specifications only, no code reference to 
 
 **Consequences**:
 
-✅ **Positive**:
+**Positive**:
 - Clean IP, no licensing concerns
 - Optimized for modern use cases, no legacy baggage
 - Team gains deep spec knowledge
 - Can make unconventional choices (arena allocators, pure XCB)
 
-⚠️ **Negative**:
+**Negative**:
 - Longer initial development time
 - Must rediscover edge cases that existing browsers already handle
 - Higher risk of spec misinterpretation
@@ -73,7 +73,7 @@ Cleanroom implementation - build from specifications only, no code reference to 
 
 ## AD-002: Hybrid Rust + C Architecture
 
-**Status**: ✅ Accepted
+**Status**: Accepted; C-side superseded by AD-024 (Legacy C Tree Retirement)
 **Date**: 2025-12-30
 **Context**:
 
@@ -95,13 +95,13 @@ Hybrid architecture:
 
 **Consequences**:
 
-✅ **Positive**:
+**Positive**:
 - Memory safety for JS engine (most attack surface)
 - Can use battle-tested NetSurf libraries immediately
 - Rust's zero-cost abstractions for performance
 - C's simplicity reduces cognitive load for core rendering
 
-⚠️ **Negative**:
+**Negative**:
 - FFI boundary requires careful design
 - Two build systems (CMake + Cargo)
 - Team needs both C and Rust expertise
@@ -123,7 +123,7 @@ Hybrid architecture:
 
 **Implementation Notes**:
 
-- C ↔ Rust FFI via extern "C" ABI
+- C <-> Rust FFI via extern "C" ABI
 - Clear ownership boundaries (C owns DOM, Rust owns JS heap)
 - Validation at FFI boundary (never trust foreign pointers)
 - Arena allocators on both sides reduce FFI crossing frequency
@@ -146,7 +146,7 @@ extern "C" fn dom_node_get_attribute(node: *mut DOMNode, name: *const c_char) ->
 
 ## AD-003: Pure XCB GUI (No GTK)
 
-**Status**: ✅ Accepted
+**Status**: Accepted
 **Date**: 2025-12-31
 **Context**:
 
@@ -166,14 +166,14 @@ Pure XCB (X C Binding) with no high-level toolkit (GTK, Qt).
 
 **Consequences**:
 
-✅ **Positive**:
+**Positive**:
 - Fastest possible rendering path
 - No GTK theme engine overhead
 - Small memory footprint (<1MB for GUI layer)
 - Direct access to X11 extensions (XShm, XDamage, XComposite)
 - Perfect control over event handling
 
-⚠️ **Negative**:
+**Negative**:
 - Must implement UI widgets ourselves (buttons, menus, dialogs)
 - No automatic HiDPI scaling (must implement)
 - Wayland support requires separate implementation
@@ -214,7 +214,7 @@ Pure XCB (X C Binding) with no high-level toolkit (GTK, Qt).
 
 ## AD-004: Arena Allocator for DOM/Layout
 
-**Status**: ✅ Accepted
+**Status**: Accepted
 **Date**: 2025-12-31
 **Context**:
 
@@ -234,14 +234,14 @@ Arena (bump) allocator for DOM nodes, layout boxes, and CSS computed styles.
 
 **Consequences**:
 
-✅ **Positive**:
+**Positive**:
 - 10-100x faster allocation than malloc
 - Zero fragmentation
 - Simpler code (no individual cleanup)
 - Better cache locality (30% speedup on traversals)
 - Memory usage peaks are predictable
 
-⚠️ **Negative**:
+**Negative**:
 - Cannot free individual nodes during page lifetime
 - Memory "leaks" until page unload (acceptable)
 - Requires upfront size estimate
@@ -272,8 +272,8 @@ silk_arena_destroy(arena); // frees all nodes at once
 ```
 
 **Memory Estimates**:
-- Typical page: ~1000 DOM nodes × 128 bytes = 128KB
-- Complex page: ~10,000 nodes × 128 bytes = 1.28MB
+- Typical page: ~1000 DOM nodes x 128 bytes = 128KB
+- Complex page: ~10,000 nodes x 128 bytes = 1.28MB
 - Arena size: 2MB default (allows growth)
 
 **References**:
@@ -284,7 +284,7 @@ silk_arena_destroy(arena); // frees all nodes at once
 
 ## AD-005: Test262 95%+ Compliance Target
 
-**Status**: ✅ Accepted
+**Status**: Accepted
 **Date**: 2025-12-31
 **Context**:
 
@@ -303,13 +303,13 @@ Target 95%+ Test262 compliance, with explicit documentation of unsupported featu
 
 **Consequences**:
 
-✅ **Positive**:
+**Positive**:
 - Faster time to usable product
 - Clear communication of limitations
 - Can prioritize common features
 - Realistic goal for small team
 
-⚠️ **Negative**:
+**Negative**:
 - Some websites may break
 - Need to track and document unsupported features
 - May need to implement missing features later based on user needs
@@ -362,7 +362,7 @@ Target 95%+ Test262 compliance, with explicit documentation of unsupported featu
 
 ## AD-006: Neural Integration (BPE + LSTM)
 
-**Status**: 🟡 Experimental
+**Status**: [PARTIAL] Experimental
 **Date**: 2025-12-31
 **Context**:
 
@@ -381,13 +381,13 @@ Experimental integration of BPE (Byte Pair Encoding) for lexical optimization an
 
 **Consequences**:
 
-✅ **Positive**:
+**Positive**:
 - Potential 20-40% lexing speedup
 - Novel research contribution
 - Demonstrates ML integration in systems software
 - Optional feature (can disable)
 
-⚠️ **Negative**:
+**Negative**:
 - Complexity increase
 - Model training required
 - Unpredictable on unusual code
@@ -426,11 +426,11 @@ Experimental integration of BPE (Byte Pair Encoding) for lexical optimization an
 
 ## AD-007: Damage Tracking for Rendering
 
-**Status**: ✅ Accepted
+**Status**: Accepted
 **Date**: 2025-12-31
 **Context**:
 
-Full-screen redraws are expensive (1920×1080×4 bytes = 8MB per frame). Most changes are local.
+Full-screen redraws are expensive (1920x1080x4 bytes = 8MB per frame). Most changes are local.
 
 **Decision**:
 
@@ -445,13 +445,13 @@ Implement damage tracking - record which screen regions changed, only redraw tho
 
 **Consequences**:
 
-✅ **Positive**:
+**Positive**:
 - 100+ FPS rendering (vs 10-20 FPS full redraw)
 - Reduced power consumption
 - Smoother scrolling and animations
 - Better use of GPU bandwidth
 
-⚠️ **Negative**:
+**Negative**:
 - Additional complexity in tracking changes
 - Must compute damage regions correctly (bugs = visual glitches)
 - Not all operations benefit (full-page animations still expensive)
@@ -482,7 +482,7 @@ for (int i = 0; i < regions->count; i++) {
 ```
 
 **Damage Sources**:
-- Text cursor blinking (10×20 pixel region)
+- Text cursor blinking (10x20 pixel region)
 - Typing (variable-width character)
 - Scrolling (vertical strip, can optimize with XCopyArea)
 - Animations (bounding box of animated element)
@@ -1008,8 +1008,8 @@ from the lint scope.
 
 ## AD-021: Internationalization Posture -- Minimal Subset, ICU Deferred
 
-**Status**: Accepted
-**Date**: 2026-05-14
+**Status**: Accepted (amended 2026-07-11: direct `idna` dep for PSL)
+**Date**: 2026-05-14 (amended 2026-07-11)
 **Deciders**: SNAZZY-WAFFLE roadmap (P8.S4)
 
 ### Context
@@ -1079,10 +1079,27 @@ A follow-on ADR (target AD-025 or later) will evaluate icu4x vs system
 libicu at the point where `Intl.Collator`, `Intl.DateTimeFormat`, or RTL
 layout becomes a tracked gap rather than a known limitation.
 
+### Amendment (2026-07-11): direct `idna` dependency for PSL normalization
+
+`silksurf-core` now takes a **direct** `idna` dependency (workspace-pinned
+`idna 1.1.0`). This is the "direct idna dep" the ignored test in
+`crates/silksurf-net/tests/idn.rs` anticipated. It adds **no new crate to
+the compiled closure** -- `idna` was already there transitively via `url`
+(Decision point 2) -- it only makes the dependency explicit where core's
+Public Suffix List matcher (`silksurf_core::psl`) needs it. The matcher
+normalizes the list's U-label (Unicode) rules to their A-label (Punycode)
+form so they match the Punycode hostnames `url::host_str` yields; without
+that step IDN hosts would fall through to the default `*` rule and be
+over-grouped into one site (a silent isolation loss). This stays inside
+the minimal-subset posture: no ICU, no bespoke IDNA (the crate's UTS#46
+tables are reused, honoring the cleanroom point in the Rationale).
+
 ### See
 
+  * `crates/silksurf-core/src/psl.rs` -- registrable-domain matcher (uses `idna`)
   * `crates/silksurf-net/tests/idn.rs` -- IDN/Punycode round-trip test
   * AD-005 -- Test262 compliance target (Intl excluded from Phase 1)
+  * AD-022 (fourth amendment) -- site = eTLD+1 via the Public Suffix List
   * https://docs.rs/unicode-segmentation
   * https://docs.rs/idna
 
@@ -1090,8 +1107,9 @@ layout becomes a tracked gap rather than a known limitation.
 
 ## AD-022: Privacy and Site Isolation Skeleton -- Deferred
 
-**Status**: Accepted (skeleton only; implementation deferred)
-**Date**: 2026-05-14
+**Status**: Accepted (skeleton); partition + cookie substrate partially
+implemented 2026-07-11..12 -- see Amendments
+**Date**: 2026-05-14 (amended 2026-07-11, 2026-07-12)
 **Deciders**: SNAZZY-WAFFLE roadmap (P8.S9)
 
 ### Context
@@ -1165,6 +1183,102 @@ Negative: the engine has no cookie isolation, no storage partitioning,
 no fingerprinting mitigations, and no process isolation.  It should not
 be used with untrusted web content until these are addressed.  This
 limitation is documented in `docs/design/THREAT-MODEL.md`.
+
+### Amendment (2026-07-11): partition + cookie substrate
+
+The skeleton is partly implemented. What is NOW real (so this ADR no
+longer reads as "nothing done"):
+
+  * **Cookie primitives + store** (`silksurf-net::cookie`): a real
+    `Cookie` with domain/path/expiry/Secure/HttpOnly/SameSite, an RFC
+    6265 `parse_set_cookie`, an HTTP-date parser, and a `CookieStore`
+    that produces `Cookie` request headers (domain/path/Secure/expiry/
+    SameSite filtered) and the `document.cookie` string. Homed in net,
+    not the engine, because `silksurf-js` (document.cookie) cannot reach
+    `silksurf-engine`; net is the one crate both consume.
+  * **document.cookie is wired to it**: the JS bridge now stores
+    attribute-aware cookies, respects expiry, and refuses to set
+    HttpOnly cookies from script. This is the real consumer.
+  * **Partition key** (`privacy::partition_key`): NO LONGER a passthrough.
+    Signature CHANGED from `partition_key(origin) -> String` to
+    `partition_key(top_level_origin, resource_origin) -> String`,
+    returning `"<resource-site>^<top-level-site>"`. This supersedes the
+    Decision's claim that "all call sites already pass origin and the
+    only change will be the return value" -- there were no call sites
+    (dead code), so the signature change is safe.
+  * **StoragePartition**: real `{ key }` with `for_context` /`from_key`.
+  * **PartitionedCookieStore** (net): `HashMap<key, CookieStore>` giving
+    cookie isolation across partitions; tested.
+  * **Origin/Site classification** (`sandbox`): real same-origin /
+    same-site logic replacing the fake `SiteIsolation` registry (which
+    enforced nothing -- exactly the false assurance this ADR warns of).
+
+Further amendment (2026-07-11): the **HTTP round-trip** is now LANDED.
+`BasicClient` attaches the `Cookie` header on requests and stores
+`Set-Cookie` from responses; one `Arc<Mutex<CookieStore>>` per session
+(on `BrowserRenderConfig`) is shared by the worker-thread fetch client
+(`SpeculativeRenderer::attach_cookie_jar`) and the main-thread
+`SilkContext::with_dom_and_cookies` (host-scoped to the document). The
+worker/main thread split forced `Arc<Mutex>`. Verified by net round-trip
+tests, a JS shared-jar bridge test, and a headless end-to-end smoke.
+
+Third amendment (2026-07-11): **top-level-site partitioning** landed,
+unlocking two features. The session jar is now `PartitionedCookieStore`
+keyed by `(top_level_site, resource_site)`; the top-level site is
+threaded per navigation (`BrowserRenderConfig.top_level_site`, set from
+the destination URL). (1) **Partition-keyed jars**: a resource embedded
+under two top-level sites gets two isolated cookie stores; document.cookie
+uses the first-party partition. (2) **SameSite subresource enforcement**:
+cross-site subresources withhold Strict/Lax cookies; same-site send them.
+An empty top-level site degrades to `Unknown` + `UNPARTITIONED` (no
+enforcement, one store) so an unplumbed path never silently drops
+cookies. STILL deferred within SameSite: top-level-NAVIGATION Strict
+withholding (needs a navigation initiator/referrer, not tracked).
+
+Fourth amendment (2026-07-11): **site = registrable domain (eTLD+1)**
+landed. Both site derivations -- `sandbox::Origin::site` and
+`silksurf_net::cookie::site_of_url` -- now reduce the host to its
+registrable domain through one entry point, `silksurf_core::psl::
+registrable_domain`, backed by a vendored Public Suffix List
+(`crates/silksurf-core/data/public_suffix_list.dat`, MPL-2.0, both ICANN
+and PRIVATE sections). So `a.example.com` and `b.example.com` share a
+site while `a.co.uk` and `b.co.uk` do not, and `a.github.io` /
+`b.github.io` stay separate via the PRIVATE section. A host with no
+registrable domain (IP literal, bare public suffix, `localhost`) keeps
+its full host (maximally partitioned). U-label rules are normalized to
+Punycode via `idna` so IDN hosts are not over-grouped -- see the AD-021
+amendment for the direct-`idna` dependency this takes.
+
+Fifth amendment (2026-07-12): **SameSite top-level-navigation
+enforcement** landed. `BrowserNavigationRequest` now carries an
+`initiator_site` -- the site of the page that started the navigation --
+set on page-initiated navigations (link click, form GET/POST) from the
+current page's URL (which is still the OLD page at request-build time;
+`state.frame` is replaced only on completion), and `None` for
+browser-initiated ones (address bar, bookmark, history, initial load).
+`silksurf_net::cookie::navigation_same_site_context(initiator,
+destination, safe_method)` classifies the top-level document fetch:
+`None`/same-site initiator is `SameSite` (Strict sent); a cross-site
+initiator is `CrossSiteTopLevel` for a safe method (Strict withheld,
+Lax rides) and `CrossSiteSubresource` for an unsafe method (Lax withheld
+too, RFC 6265bis). `BasicClient::fetch_navigation` computes the context
+once and applies it across the redirect chain; the renderer routes the
+top-level document (only) through it. This closes the pre-fix CSRF
+exposure where a cross-site link click sent the destination's Strict
+cookies (the top-level site equals the destination, so the subresource
+rule saw it as same-site). `CrossSiteTopLevel` is now produced.
+
+What is STILL deferred (so partial reads as partial):
+
+  * **Redirect-hop SameSite reclassification**: the navigation context is
+    frozen from the initiator and the original destination, so a
+    cross-site redirect reached from a same-site navigation is not
+    re-flagged. The partition also stays keyed on the original
+    destination across a cross-site redirect (pre-existing).
+  * **Third-party storage partitioning** (localStorage/IndexedDB/Cache):
+    still no storage layer to partition (P10+).
+  * **Fingerprinting audit** (P10) and **process-level site isolation**
+    (future process-model ADR: IPC, seccomp/Landlock): unchanged.
 
 ### Alternatives Considered
 
@@ -1286,12 +1400,250 @@ Negative:
 
 ---
 
+## AD-024: Legacy C Tree Retirement
+
+**Status**: Accepted
+**Date**: 2026-07-09
+**Deciders**: Architecture Team
+**Supersedes**: the C-side implementation assignment of AD-002
+
+### Context
+
+AD-002 (2025-12-30) assigned DOM/HTML/CSS parsing and the GUI to a C
+implementation under `src/` and `include/`, built by `CMakeLists.txt`.
+The stable-Rust migration (AD-008) and the crate build-out since then
+moved every one of those subsystems into owning Rust crates:
+
+| C module | Owning Rust crate |
+|---|---|
+| `src/document/html_tokenizer.c`, `tree_builder.c` | `silksurf-html` |
+| `src/document/dom_node.c`, `document.c` | `silksurf-dom` |
+| `src/css/*`, `src/document/css_*.c` | `silksurf-css` |
+| `src/layout/box_model.c`, `inline.c` | `silksurf-layout` |
+| `src/rendering/*` | `silksurf-render` |
+| `src/memory/arena.c`, `pool.c`, `refcount.c` | `silksurf-core` |
+| `src/gui/*` (XCB, SHM, event loop) | `silksurf-gui` |
+
+`src/README_LEGACY.md` already states the tree is a historical
+cleanroom reference and not part of the Rust build, but no ADR records
+that decision. Three documents (the Makefile legacy section,
+`docs/development/LOCAL-GATE.md`, `docs/REPO-LAYOUT.md`) cite AD-007
+for a "deprecate or integrate" decision; AD-007 is Damage Tracking and
+contains no such decision. The C GUI build path is already broken: the
+Makefile `gui` target references `src/css/cascade.c`, which no longer
+exists, so that target has not compiled since the file's removal.
+
+### Decision
+
+The legacy C tree (`src/`, `include/`, `CMakeLists.txt`, and the C
+sources under `tests/`) is retired. It is a historical cleanroom
+reference, not a build target. Retirement executes incrementally, in
+dependency order, with `make full` green after every step:
+
+1. Code that no target builds is deleted immediately
+   (`src/document/tree_builder.c`, the empty `src/core/`, the broken
+   Makefile `gui` target).
+2. Capabilities with no Rust equivalent are re-homed before their C
+   module is deleted. The single such capability is the BPE tokenizer
+   (`src/neural/bpe.c`, `src/neural/bpe_bench.c`,
+   `include/silksurf/neural_bpe.h`), whose fate follows AD-006
+   (Neural Integration, Experimental): port to a Rust crate if AD-006
+   proceeds, archive with the C tree if AD-006 is abandoned.
+3. `src/ffi/js_engine_wrapper.c` exists only to serve the C binaries
+   and is deleted together with them.
+4. Duplicated C modules (table above), their CMake targets, the C
+   tests, and the AFL seed trees (`fuzz_in/`, `fuzz_in_css/`,
+   `fuzz_corpus/`) are removed once steps 1-3 land. Rust fuzzing
+   continues under `fuzz/` (cargo-fuzz).
+
+Until removal completes, no new work extends the C tree.
+
+### Rationale
+
+  * Every C subsystem has an owning Rust crate; the duplication is
+    pure carrying cost (~10.9k LOC) that doubles search, metric, and
+    audit surface without executing in any default build.
+  * The broken `gui` target demonstrates the tree receives no
+    maintenance; keeping unbuildable code invites false confidence.
+  * The cleanroom reference value is preserved by git history and by
+    `docs/LEGACY_C_PORTING.md` (the porting map), not by keeping the
+    tree checked out.
+
+### Consequences
+
+Positive:
+  * Single build system (Cargo + Makefile wrapper) once complete.
+  * Marker, line-count, and complexity metrics describe the live
+    product instead of a 2x shadow surface.
+
+Negative:
+  * The BPE benchmark surface disappears until the AD-006 decision
+    lands (step 2 blocks bulk deletion of `src/neural/`).
+  * Contributors lose in-tree C reference reading; the porting map
+    and git history replace it.
+
+### Alternatives Considered
+
+  * **Integrate (finish the C browser)** -- rejected. AD-008 committed
+    the project to stable Rust; the C tree lost its build integrity
+    (broken `gui` target) without anyone noticing, which measures its
+    real maintenance level.
+  * **Keep indefinitely as reference** -- rejected. Git history
+    preserves the reference; a checked-out shadow tree distorts every
+    repository metric and marker sweep.
+
+### See
+
+  * `src/README_LEGACY.md` -- prior informal statement of this decision
+  * `docs/LEGACY_C_PORTING.md` -- C module -> Rust crate porting map
+  * AD-002 -- Hybrid Rust + C (C-side superseded by this ADR)
+  * AD-006 -- Neural Integration (governs the BPE re-home decision)
+  * AD-008 -- Stable-Rust Migration
+  * `docs/roadmaps/DEBT-RECONCILIATION-ROADMAP.md` -- retirement tasks
+
+---
+
+## AD-025: boa_engine Confirmed as the JS Runtime; Hand-Written VM Removed
+
+**Status**: Accepted
+**Date**: 2026-07-09
+**Deciders**: Architecture Team (engine audit); owner decision on VM removal
+**Extends**: the L7 boa_engine adoption; supersedes L7's preserve-the-VM clause
+
+### Context
+
+L7 adopted boa_engine 0.21 as the production JS runtime and preserved
+the hand-written VM (~10k LOC: lexer, parser, bytecode compiler,
+register VM, tri-color GC, Cranelift JIT scaffolding) behind the
+non-default `legacy-vm` feature, labeled "NOT MAINTAINED ... expect
+bitrot" in the crate manifest. The preserved tree accumulated exactly
+the predicted debt: an unsound GC mark phase (roots marked, children
+never traced), a JIT shim with no caller justifying five Cranelift
+dependencies, a duplicate DOM bridge, platform-binding modules (wasm,
+napi) that could not compile because they imported the gated VM without
+its feature, and ten crate dependencies serving no reachable code.
+
+### Engine audit
+
+The requirement is a memory-safe, lightweight, embeddable engine for a
+low-resource pure-Rust browser. Candidates:
+
+  * **boa_engine (adopted)** -- pure Rust, no C toolchain or FFI
+    boundary, memory-safe by construction, active upstream. Measured
+    in-tree: 99.81% of executed test262 (69.38% of total; Intl, ESM,
+    async, FinalizationRegistry skips are recorded and scheduled in the
+    debt roadmap). Weakest on raw throughput, acceptable for the
+    browser's script profile; the pending boa upgrade also clears
+    RUSTSEC-2024-0436.
+  * **rusty_v8 / deno_core** -- fastest and most conformant, but a
+    multi-hundred-MB build, tens of MB of binary, and a C++ engine
+    behind unsafe bindings; contradicts the low-resource profile and
+    the single-toolchain build.
+  * **rquickjs (QuickJS)** -- small and highly conformant, but a C
+    engine behind an unsafe FFI boundary; reintroduces the C toolchain
+    AD-024 just removed and moves JS memory safety outside Rust.
+  * **Duktape / mujs** -- ES5-era; fail modern-web requirements.
+  * **Hand-written VM (removed)** -- full ownership and the original
+    cleanroom goal, but test262 parity is a multi-year effort; the
+    2026-05 lexer-only baseline was 66% at tokenizer level.
+
+boa_engine remains the correct engine: it is the only candidate that is
+simultaneously pure-Rust, memory-safe, embeddable through a typed API,
+and close enough to full conformance that the remaining gaps are
+host-layer work (module loader, event loop, Intl data) rather than
+engine replacement.
+
+### Decision
+
+boa_engine stays the production runtime, accessed exclusively through
+`silksurf_js::SilkContext`. The hand-written VM is removed: `src/vm/`,
+`src/bytecode/`, `src/lexer/`, `src/parser/`, `src/gc/`, `src/jit/`,
+`src/ffi.rs`, `src/wasm.rs`, `src/napi.rs`, `src/verification.rs`, the
+lexer-only test262 runner, the VM benches and examples, and the
+`legacy-vm`, `jit`, `wasm`, `napi`, `mmap`, `neural`, and `constrained`
+features with their dependencies (cranelift x5, wasm-bindgen,
+console_error_panic_hook, napi x2, memmap2, bumpalo, bytemuck,
+zerocopy, rkyv, unicode-xid, memchr, regress, phf, static_assertions,
+bitvec). Git history preserves the sources;
+`silksurf-specification/SILKSURF-JS-DESIGN.md` preserves the design.
+The crate builds as a plain `lib`; embedders use the `SilkContext` Rust
+API (a deliberate FFI surface, if ever needed, is a future ADR).
+
+### Consequences
+
+Positive: ~10k dormant LOC and ~15 dependencies leave the tree; the
+duplicate DOM bridge and the unsound GC no longer exist to confuse
+audits; JS conformance work concentrates on one engine's host layer.
+
+Negative: reviving a custom VM means starting from git history and the
+design spec rather than compiling code; wasm/napi embedding surfaces
+disappear until rebuilt against boa (they did not compile anyway).
+
+### See
+
+  * `silksurf-js/src/boa_backend/mod.rs` -- SilkContext host layer
+  * `docs/conformance/SCORECARD.md` -- dual-denominator test262 status
+  * AD-005 (test262 target), AD-021 (Intl posture), AD-024 (C tree)
+  * `docs/roadmaps/DEBT-RECONCILIATION-ROADMAP.md` --
+    conformance-honesty-and-expansion workstream
+
+---
+
+## AD-026: Page-Content Accessibility Tree Deferred
+
+**Status**: Accepted (deferral recorded; chrome a11y ships, page-content
+tree deferred)
+**Date**: 2026-07-11
+**Deciders**: security-substrate-buildout workstream
+
+### Context
+
+`crates/silksurf-dom/src/a11y.rs` is a data-only skeleton
+(`AccessibilityTree`, `AccessibilityNode`, an 8-variant
+`AccessibilityRole`) with no builder: nothing walks the DOM to produce an
+accessibility tree, and there is no AT-SPI bridge. The
+`a11y-substrate-scheduling` roadmap item said to schedule it behind the
+security substrate and record the deferral in an ADR if it slips again.
+It has slipped again (P8.S5 unstarted), so this ADR records the deferral.
+
+The browser is NOT accessibility-blind at the chrome level: the app ships
+a working AccessKit integration (`crates/silksurf-app/src/accessibility.rs`,
+`accessibility` feature) exposing the address bar, navigation buttons,
+status, links, and page inputs as an AccessKit tree. What is missing is a
+*page-content* accessibility tree derived from the rendered DOM.
+
+### Decision
+
+Defer the page-content accessibility tree. Keep the `a11y.rs` skeleton as
+the reserved surface. The deferred work is: `build_a11y_tree(dom, styles,
+layout)` (role derivation from tag + `role=`, WAI-ARIA accessible-name
+computation, focus/state capture, the full role set) plus an AT-SPI
+exposure path in `silksurf-gui`. Prerequisite ordering: the security
+substrate (cookies/partitioning) precedes it per the roadmap.
+
+### Rationale
+
+Chrome-level a11y already gives the shipped UI screen-reader reachability.
+Page-content a11y is a large, self-contained subsystem (name computation
+and the ~80-role set are non-trivial and independently testable). Bundling
+it into the security batch would dilute both; a dated deferral is the
+honest record the roadmap asked for.
+
+### Consequences
+
+Positive: the deferral is explicit and findable; chrome a11y is not
+mistaken for page a11y. Negative: assistive technology cannot read page
+*content* (only browser chrome) until `build_a11y_tree` lands. AT-SPI on
+Linux (ADR-010) remains the long-term target.
+
+---
+
 ## Decision Log
 
 | ID | Title | Status | Date | Impact |
 |----|-------|--------|------|--------|
 | AD-001 | Cleanroom Implementation | Accepted | 2025-12-30 | High |
-| AD-002 | Hybrid Rust + C | Accepted | 2025-12-30 | High |
+| AD-002 | Hybrid Rust + C | C-side superseded by AD-024 | 2025-12-30 | High |
 | AD-003 | Pure XCB GUI | Accepted | 2025-12-31 | High |
 | AD-004 | Arena Allocator | Accepted | 2025-12-31 | Medium |
 | AD-005 | Test262 95% Target | Accepted | 2025-12-31 | Medium |
@@ -1308,6 +1660,9 @@ Negative:
 | AD-021 | Internationalization Posture (Minimal Subset, ICU Deferred) | Accepted | 2026-05-14 | Medium |
 | AD-022 | Privacy and Site Isolation Skeleton (Deferred) | Accepted | 2026-05-14 | High |
 | AD-023 | Unicode BiDi and Line-Breaking Crate Adoption | Adopted | 2026-05-14 | Medium |
+| AD-024 | Legacy C Tree Retirement | Accepted | 2026-07-09 | High |
+| AD-025 | boa_engine Confirmed; Hand-Written VM Removed | Accepted | 2026-07-09 | High |
+| AD-026 | Page-Content Accessibility Tree Deferred | Accepted | 2026-07-11 | Medium |
 
 ---
 
@@ -1337,5 +1692,5 @@ SNAZZY-WAFFLE roadmap.
   * `/CLAUDE.md` -- Engineering standards
   * `/CONTRIBUTING.md` -- Onboarding and gate discipline
   * `/docs/development/LOCAL-GATE.md` -- Local-gate reference
-  * `/docs/roadmaps/PHASE-3-IMPLEMENTATION-ROADMAP.md` -- Implementation status
+  * `/docs/roadmaps/DEBT-RECONCILIATION-ROADMAP.md -- Debt inventory and reconciliation plan
   * `/silksurf-specification/` -- Technical specifications

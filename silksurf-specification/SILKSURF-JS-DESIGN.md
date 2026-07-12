@@ -17,7 +17,7 @@ parser, CSS engine, DOM tree, layout/rendering).
 Key design properties:
 - NO JavaScript object heap allocations during parsing (arena allocation)
 - O(1) string comparison (string interning via IDs)
-- -99% allocations vs Boa/QuickJS (observed: 88,141 → ~10 allocations for fib(35))
+- -99% allocations vs Boa/QuickJS (observed: 88,141 -> ~10 allocations for fib(35))
 - Expected: 95%+ Test262 compliance (vs Boa's 94.12%)
 - Direct bytecode execution (no JIT initially; JIT-ready instruction set)
 - Hybrid GC: arena reset per-frame + generational tracing + reference counting cycles
@@ -1821,7 +1821,7 @@ PART 7: TEST262 COMPLIANCE STRATEGY
 - Proxy, Reflect
 
 **Week 15-16: Edge Cases & Optimization**
-- Numeric edge cases (±Infinity, NaN, -0)
+- Numeric edge cases (?Infinity, NaN, -0)
 - Type coercion subtleties
 - Unicode handling
 - Performance tuning

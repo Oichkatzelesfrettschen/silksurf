@@ -1,7 +1,7 @@
 # SilkSurf Rust Migration Plan + Implementation Status Map
 
 > Updated 2026-04-30: expanded from a 70-line plan stub into the
-> spec ↔ implementation map. The migration phases (1-8) below are
+> spec <-> implementation map. The migration phases (1-8) below are
 > historical; all phases land in the workspace as of `main` =
 > `ac00472`. The current debt-reconciliation roadmap is the
 > SNAZZY-WAFFLE plan at `/.claude/plans/`. See `docs/REPO-LAYOUT.md`
@@ -31,7 +31,7 @@
   * Legacy C is frozen; no new features in `src/` beyond migration
     needs (see ADR-007).
 
-## Spec ↔ implementation map
+## Spec <-> implementation map
 
 The columns below show, for each design document, which crate(s)
 implement the design and what status that implementation is in.
