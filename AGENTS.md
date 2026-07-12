@@ -46,6 +46,56 @@ Use durable names for branches, commits, docs, bundles, tests, and findings.
 Name the target, mechanism, and evidence or outcome. Do not use phase, wave,
 mission, sprint, session, agent, or chronology labels as primary names.
 
+## Engineering Posture
+
+- Every implementation decision is a genuine solution. When blocked, rescope
+  and trace the root cause; do not hack around it, silently narrow scope, or
+  leave core logic behind a TODO.
+- Cleanroom boundary: production code and `silksurf-specification/` never
+  depend on `diff-analysis/` (enforced by `scripts/lint_cleanroom.sh`).
+- Update specifications and ADRs (`docs/design/ARCHITECTURE-DECISIONS.md`)
+  before or with the code they govern. State the mechanism, then the
+  consequence, then the evidence.
+- Scope cuts are named, never silent: a deferred piece gets one line in the
+  owning roadmap with the mechanism name and the reason.
+
+## Commits and Pull Requests
+
+Commit subjects use a component prefix and a concise mechanism:
+`silksurf-js: park fetch resolvers in a GC-rooted registry`. The subject
+carries component and mechanism only; issue and PR links ride in trailers.
+
+The body makes the invariant, the change, and the evidence reviewable in one
+to five sentences: name the root cause or constraint, name the fix, cite the
+spec rule, function, or crate boundary when load-bearing, and state test
+movement plainly. Commit prose is plain ASCII, declarative present tense,
+American English. A body that reads like a worklog -- nested bullets from a
+coarse squash, several sub-components -- means the commits were not granular
+enough: split them or compress to the aggregate mechanism.
+
+Chronology, build invocations, tool output, host names, and validation
+checklists live in the PR description, not the commit body. Historical design
+debate about rejected alternatives lives in the commit message or PR, never
+in source comments.
+
+Each commit is buildable, reviewable, and bisectable. Formatting churn and
+logic changes ride separate commits. One logical change per commit; one topic
+per PR. No fixup commits arrive for review.
+
+Branch names, first commit subjects, and PR titles carry durable mechanism
+names, set before first push. Wave, phase, mission, session, sprint, and
+agent labels never serve as primary names.
+
+Trailers:
+
+- `Fixes:` names only the earlier commit that introduced the defect.
+- `Closes:` carries issue URLs.
+- AI disclosure lives in commit trailers alone, never in file headers or
+  source comments. Use `Assisted-by: <tool> (<model>)` for mixed human/AI
+  work and `Generated-by: <tool> (<model>)` when AI generated almost the
+  entire change. `Co-authored-by:` is reserved for human co-authors. Trivial
+  mechanical changes may omit disclosure.
+
 ## Rust Workflow
 
 - Read the current code path before editing.
