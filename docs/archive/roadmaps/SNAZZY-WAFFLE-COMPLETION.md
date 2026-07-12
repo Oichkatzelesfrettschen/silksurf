@@ -1,3 +1,15 @@
+> **SUPERSEDED (archived 2026-07-12).** This completion report is a
+> historical snapshot of the 2026-05-15 tree. Several statuses below were
+> later falsified or overtaken by the debt-reconciliation pass and AD-024:
+> the legacy C tree it reports as "kept" is fully retired and removed;
+> the SoA work it reports as "deferred behind feature flags" was deleted
+> (soa-wire-or-delete); the privacy skeleton it reports as "closed" was a
+> stub later partially rebuilt into real cookie-partition mechanisms
+> (AD-022 amendments); the WPT subset it reports lives on and has grown
+> (crates/silksurf-engine/conformance/wpt/). For current state see
+> docs/roadmaps/DEBT-RECONCILIATION-ROADMAP.md and
+> docs/roadmaps/SPA-CAPABILITY-ROADMAP.md.
+
 # SNAZZY-WAFFLE Completion Report
 
 Date: 2026-05-15

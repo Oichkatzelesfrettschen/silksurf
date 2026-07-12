@@ -10,8 +10,9 @@ infrastructure), and a tracked-file non-ASCII sweep. Every finding below
 carries a file or file:line citation. Line numbers reflect the tree at the
 date above; the file and symbol names are the durable anchors.
 
-This roadmap sequences the paydown of debt that SNAZZY-WAFFLE-COMPLETION.md
-left open and that the scans surface. Each workstream carries a mechanism
+This roadmap sequences the paydown of debt that
+docs/archive/roadmaps/SNAZZY-WAFFLE-COMPLETION.md (archived; several of its
+statuses were later falsified) left open and that the scans surface. Each workstream carries a mechanism
 name; each task carries a descriptive slug, an evidence gate, and explicit
 dependencies. Tasks marked **LANDED** are complete with the gate evidence
 noted.
@@ -278,7 +279,8 @@ the main.rs items.
 
 ## app-monolith-decomposition -- LANDED
 
-main.rs (14319 lines, 404 functions) is now 539 lines: the module
+main.rs (14319 lines, 404 functions) is now under 600 lines (578 at the
+2026-07-12 re-audit): the module
 declarations, the mimalloc allocator, main(), the winit event-loop
 glue, and the headless static-render path. Twelve modules carry the
 rest, cut by a deterministic extraction script driven by a symbol
@@ -300,7 +302,7 @@ outline, a cross-module call-edge map, and a per-test ownership table
 - Every planned sub-extraction (argb-simd-packer, cli-and-tracing-init,
   browser-shell-glue, in-file-test-relocation, script-tag-helper) landed
   inside this split.
-- Gate evidence: main.rs 539 lines (< 1500); make full green (62 test
+- Gate evidence: main.rs 578 lines (< 1500); make full green (62 test
   suites, 145 app tests -- 141 default + 4 integration; 143 with
   --features accessibility); headless smoke exits 0 with "Pipeline
   complete"; --backend=winit smoke presents frames until timeout.
@@ -738,11 +740,33 @@ cleanroom-boundary-restoration    [independent of each other;
                                    governance-pointer-repair]
 ```
 
-Next landings in order: cross-reference-link-repair (spec README link),
-gate-docstring-alignment, c-ffi-shim-retirement plus
-duplicated-c-module-removal (completing AD-024 steps 3-4),
-legacy-vm-preserve-or-delete-decision, interner-atom-expect-justification.
-Each is a small, separately-verifiable change gated by `make full`.
+Next landings in order (reconciled 2026-07-12 against the tree; the
+previous list here named work already marked LANDED above):
+
+1. treebuilder-document-expect-annotation -- bare
+   `.expect("document node present")` at
+   crates/silksurf-html/src/tree_builder.rs (funnel or justify).
+2. wayland-shm-safe-wrapper -- 15 unsafe occurrences in
+   crates/silksurf-gui/src/wayland_shm.rs behind one contracted wrapper.
+3. sendptr-send-sync-soundness-proof -- `unsafe impl Send/Sync for
+   SendPtr` in crates/silksurf-render/src/lib.rs needs the invariant
+   argument recorded in UNSAFE-CONTRACTS.md.
+4. deny-policy-hardening -- flip `multiple-versions` to deny once the two
+   informational RUSTSEC ignores (RUSTSEC-2024-0436, RUSTSEC-2026-0192)
+   resolve upstream.
+5. workspace-lint-allowlist-triage / per-crate-allow-shrink.
+6. crate-metadata-provenance -- `license.workspace` in every manifest.
+7. msrv-exercise-policy -- `make msrv` target exercising the pinned MSRV.
+8. cleanroom physical relocations -- planning-doc-re-homing,
+   tool-output-relocation, generated-artifact-relocation,
+   external-reference-deduplication, spec-readme-reframing (all above).
+9. test262 full-corpus re-run -- blocked on corpus availability; the
+   retained full-corpus baseline lives in docs/conformance/SCORECARD.md.
+
+Forward feature work (event dispatch, innerHTML reparse, live style,
+async networking, DOM API surface) is sequenced separately in
+docs/roadmaps/SPA-CAPABILITY-ROADMAP.md.
+Each item is a small, separately-verifiable change gated by `make full`.
 
 ## Verification checklist (applies to every workstream)
 
