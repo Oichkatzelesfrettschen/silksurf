@@ -25,6 +25,8 @@ crate-type = ["lib"]
 # DOM bridge and networking (for JS-DOM and fetch() integration)
 silksurf-dom = { path = "../crates/silksurf-dom" }
 silksurf-net = { path = "../crates/silksurf-net" }
+silksurf-css = { path = "../crates/silksurf-css" }
+silksurf-html = { path = "../crates/silksurf-html" }
 
 # Production JS engine: ECMA-262 2024+ compliant (register VM, ICs, Promises).
 # boa_runtime provides Console, timers stubs, and other host object scaffolding.

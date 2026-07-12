@@ -14,14 +14,15 @@ use std::sync::{Arc, Mutex, PoisonError};
 use boa_engine::{
     Context, JsNativeError, JsResult, JsString, JsValue, NativeFunction, js_string,
     object::{
-        FunctionObjectBuilder, JsObject, ObjectInitializer,
+        FunctionObjectBuilder, ObjectInitializer,
         builtins::{JsArray, JsFunction},
     },
     property::Attribute,
 };
+use silksurf_css::{CssTokenizer, SelectorList, matches_selector_list, parse_selector_list};
 use silksurf_dom::{Dom, DomError, NodeId, NodeKind, TagName};
 
-const EVENT_LISTENERS_REGISTRY: &str = "__silksurfEventListeners";
+use super::event_dispatch;
 
 // ---- helpers ---------------------------------------------------------------
 
@@ -66,48 +67,165 @@ fn collect_text_inner(dom: &Dom, node: NodeId, buf: &mut String) {
     }
 }
 
-// ---- selector matching (simplified) ----------------------------------------
+// ---- selector matching (silksurf-css engine) --------------------------------
 
-fn matches_selector(dom: &Dom, node: NodeId, selector: &str) -> bool {
-    if let Some(id) = selector.strip_prefix('#') {
-        if let Ok(attrs) = dom.attributes(node) {
-            return attrs
-                .iter()
-                .any(|a| a.name.as_str() == "id" && a.value.as_str() == id);
-        }
-        return false;
-    }
-    if let Some(class) = selector.strip_prefix('.') {
-        if let Ok(attrs) = dom.attributes(node)
-            && let Some(cls) = attrs.iter().find(|a| a.name.as_str() == "class")
-        {
-            return cls.value.as_str().split_whitespace().any(|c| c == class);
-        }
-        return false;
-    }
-    // Plain tag selector (case-insensitive)
-    matches!(
-        dom.element_name(node),
-        Ok(Some(tag)) if tag.eq_ignore_ascii_case(selector)
-    )
+/// querySelector in a rAF loop is a hot path; the parse cache turns repeated
+/// selector strings into one clone. The cache is thread-local because a
+/// `SilkContext` never crosses threads; the cap bounds adversarial pages that
+/// generate unbounded distinct selector strings.
+const SELECTOR_CACHE_CAP: usize = 256;
+
+thread_local! {
+    static SELECTOR_CACHE: std::cell::RefCell<std::collections::HashMap<String, SelectorList>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
-fn collect_matches(dom: &Dom, node: NodeId, selector: &str, out: &mut Vec<NodeId>) {
-    if matches_selector(dom, node, selector) {
+/// Parse a selector string through the real CSS engine. Empty or unparseable
+/// selectors yield None (querySelector then matches nothing, mirroring the
+/// forgiving behavior the old shim had).
+fn parse_selector_cached(selector: &str) -> Option<SelectorList> {
+    let cached = SELECTOR_CACHE.with(|cache| cache.borrow().get(selector).cloned());
+    if let Some(list) = cached {
+        return Some(list);
+    }
+    let mut tokenizer = CssTokenizer::new();
+    let mut tokens = tokenizer.feed(selector).ok()?;
+    tokens.extend(tokenizer.finish().ok()?);
+    let list = parse_selector_list(tokens);
+    if list.selectors.is_empty() {
+        return None;
+    }
+    SELECTOR_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.len() >= SELECTOR_CACHE_CAP {
+            cache.clear();
+        }
+        cache.insert(selector.to_string(), list.clone());
+    });
+    Some(list)
+}
+
+fn collect_matches(dom: &Dom, node: NodeId, list: &SelectorList, out: &mut Vec<NodeId>) {
+    if dom.element_name(node).ok().flatten().is_some() && matches_selector_list(dom, node, list) {
         out.push(node);
     }
     if let Ok(children) = dom.children(node) {
         let owned: Vec<NodeId> = children.to_vec();
         for child in owned {
-            collect_matches(dom, child, selector, out);
+            collect_matches(dom, child, list, out);
         }
     }
 }
 
 pub(super) fn query_all(dom: &Dom, root: NodeId, selector: &str) -> Vec<NodeId> {
+    let Some(list) = parse_selector_cached(selector) else {
+        return Vec::new();
+    };
     let mut results = Vec::new();
-    collect_matches(dom, root, selector, &mut results);
+    collect_matches(dom, root, &list, &mut results);
     results
+}
+
+/// Element.matches(selector).
+fn node_matches(dom: &Dom, node: NodeId, selector: &str) -> bool {
+    parse_selector_cached(selector).is_some_and(|list| matches_selector_list(dom, node, &list))
+}
+
+/// Element.closest(selector): self first, then ancestors.
+fn node_closest(dom: &Dom, node: NodeId, selector: &str) -> Option<NodeId> {
+    let list = parse_selector_cached(selector)?;
+    let mut current = Some(node);
+    while let Some(candidate) = current {
+        if dom.element_name(candidate).ok().flatten().is_some()
+            && matches_selector_list(dom, candidate, &list)
+        {
+            return Some(candidate);
+        }
+        current = dom.parent(candidate).ok().flatten();
+    }
+    None
+}
+
+fn node_matches_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
+
+    unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let Some(selector) = selector_arg(args.first(), ctx)? else {
+                return Ok(JsValue::from(false));
+            };
+            let matched = {
+                let dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+                node_matches(&dom, node_id, &selector)
+            };
+            Ok(JsValue::from(matched))
+        })
+    }
+}
+
+fn node_closest_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
+
+    unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let Some(selector) = selector_arg(args.first(), ctx)? else {
+                return Ok(JsValue::null());
+            };
+            let found = {
+                let dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+                node_closest(&dom, node_id, &selector)
+            };
+            match found {
+                Some(id) => Ok(node_to_js_object(&arc, id, ctx)),
+                None => Ok(JsValue::null()),
+            }
+        })
+    }
+}
+
+fn node_query_selector_native(
+    dom_arc: &Arc<Mutex<Dom>>,
+    node_id: NodeId,
+    all: bool,
+) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
+
+    unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let Some(selector) = selector_arg(args.first(), ctx)? else {
+                return if all {
+                    Ok(JsValue::from(JsArray::new(ctx)))
+                } else {
+                    Ok(JsValue::null())
+                };
+            };
+            // Scoped query: match descendants only, not the context node.
+            let matches = {
+                let dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+                let mut out = Vec::new();
+                if let Some(list) = parse_selector_cached(&selector)
+                    && let Ok(children) = dom.children(node_id)
+                {
+                    let owned: Vec<NodeId> = children.to_vec();
+                    for child in owned {
+                        collect_matches(&dom, child, &list, &mut out);
+                    }
+                }
+                out
+            };
+            if all {
+                node_array(&arc, matches, ctx)
+            } else {
+                match matches.into_iter().next() {
+                    Some(id) => Ok(node_to_js_object(&arc, id, ctx)),
+                    None => Ok(JsValue::null()),
+                }
+            }
+        })
+    }
 }
 
 // ---- node info snapshot (dom must be held by caller) -----------------------
@@ -210,23 +328,6 @@ fn form_control_value(dom: &Dom, node_id: NodeId) -> String {
         .unwrap_or_default()
 }
 
-fn event_listener_key(node_id: NodeId, event_type: &str) -> JsString {
-    JsString::from(format!("{}:{event_type}", node_id.raw()).as_str())
-}
-
-fn event_listener_registry(ctx: &mut Context) -> JsResult<JsObject> {
-    let key = js_string!(EVENT_LISTENERS_REGISTRY);
-    let global = ctx.global_object().clone();
-    let existing = global.get(key.clone(), ctx)?;
-    if let Some(registry) = existing.as_object() {
-        return Ok(registry.clone());
-    }
-
-    let registry = ObjectInitializer::new(ctx).build();
-    global.set(key, registry.clone(), false, ctx)?;
-    Ok(registry)
-}
-
 fn event_type_arg(arg: Option<&JsValue>, ctx: &mut Context) -> JsResult<Option<String>> {
     let Some(value) = arg else {
         return Ok(None);
@@ -250,33 +351,11 @@ fn event_type_from_dispatch_arg(arg: Option<&JsValue>, ctx: &mut Context) -> JsR
     Ok(value.to_string(ctx)?.to_std_string_lossy())
 }
 
-fn listener_array(
-    node_id: NodeId,
-    event_type: &str,
-    create: bool,
-    ctx: &mut Context,
-) -> JsResult<Option<JsArray>> {
-    let registry = event_listener_registry(ctx)?;
-    let key = event_listener_key(node_id, event_type);
-    let existing = registry.get(key.clone(), ctx)?;
-    if let Some(object) = existing.as_object()
-        && object.is_array()
-    {
-        return Ok(Some(JsArray::from_object(object.clone())?));
-    }
-    if !create {
-        return Ok(None);
-    }
-
-    let array = JsArray::new(ctx);
-    registry.set(key, array.clone(), false, ctx)?;
-    Ok(Some(array))
-}
-
 fn add_event_listener(
     node_id: NodeId,
     event_type: Option<&JsValue>,
     callback: Option<&JsValue>,
+    options: Option<&JsValue>,
     ctx: &mut Context,
 ) -> JsResult<JsValue> {
     let Some(event_type) = event_type_arg(event_type, ctx)? else {
@@ -285,18 +364,7 @@ fn add_event_listener(
     let Some(callback_object) = callback.and_then(JsValue::as_callable) else {
         return Ok(JsValue::undefined());
     };
-
-    let Some(array) = listener_array(node_id, event_type.as_str(), true, ctx)? else {
-        return Ok(JsValue::undefined());
-    };
-    let callback_value = JsValue::from(callback_object.clone());
-    let length = array.length(ctx)?;
-    for index in 0..length {
-        if array.get(index, ctx)?.strict_equals(&callback_value) {
-            return Ok(JsValue::undefined());
-        }
-    }
-    array.push(callback_value, ctx)?;
+    event_dispatch::add_listener(node_id, event_type.as_str(), &callback_object, options, ctx)?;
     Ok(JsValue::undefined())
 }
 
@@ -304,6 +372,7 @@ fn remove_event_listener(
     node_id: NodeId,
     event_type: Option<&JsValue>,
     callback: Option<&JsValue>,
+    options: Option<&JsValue>,
     ctx: &mut Context,
 ) -> JsResult<JsValue> {
     let Some(event_type) = event_type_arg(event_type, ctx)? else {
@@ -312,29 +381,13 @@ fn remove_event_listener(
     let Some(callback_object) = callback.and_then(JsValue::as_callable) else {
         return Ok(JsValue::undefined());
     };
-    let Some(array) = listener_array(node_id, event_type.as_str(), false, ctx)? else {
-        return Ok(JsValue::undefined());
-    };
-
-    let callback_value = JsValue::from(callback_object.clone());
-    let mut write_index = 0_u64;
-    let length = array.length(ctx)?;
-    for read_index in 0..length {
-        let value = array.get(read_index, ctx)?;
-        if value.strict_equals(&callback_value) {
-            continue;
-        }
-        if write_index != read_index {
-            array.set(write_index, value, false, ctx)?;
-        }
-        write_index += 1;
-    }
-    array.set(js_string!("length"), write_index, false, ctx)?;
+    event_dispatch::remove_listener(node_id, event_type.as_str(), &callback_object, options, ctx)?;
     Ok(JsValue::undefined())
 }
 
 fn dispatch_event(
     this: &JsValue,
+    dom_arc: &Arc<Mutex<Dom>>,
     node_id: NodeId,
     event_arg: Option<&JsValue>,
     ctx: &mut Context,
@@ -343,36 +396,13 @@ fn dispatch_event(
     if event_type.is_empty() {
         return Ok(JsValue::from(false));
     }
-    let Some(array) = listener_array(node_id, event_type.as_str(), false, ctx)? else {
-        return Ok(JsValue::from(true));
-    };
-
     let event = if let Some(object) = event_arg.and_then(JsValue::as_object) {
-        object.set(js_string!("target"), this.clone(), false, ctx)?;
-        JsValue::from(object.clone())
+        object.clone()
     } else {
-        let object = ObjectInitializer::new(ctx)
-            .property(
-                js_string!("type"),
-                JsString::from(event_type.as_str()),
-                Attribute::all(),
-            )
-            .property(js_string!("target"), this.clone(), Attribute::all())
-            .build();
-        JsValue::from(object)
+        event_dispatch::build_event_object(event_type.as_str(), false, false, false, ctx)
     };
-
-    let mut callbacks = Vec::new();
-    let length = array.length(ctx)?;
-    for index in 0..length {
-        if let Some(callback) = array.get(index, ctx)?.as_callable() {
-            callbacks.push(callback.clone());
-        }
-    }
-    for callback in callbacks {
-        callback.call(this, std::slice::from_ref(&event), ctx)?;
-    }
-    Ok(JsValue::from(true))
+    let proceed = event_dispatch::propagate_event(dom_arc, node_id, this, &event, ctx)?;
+    Ok(JsValue::from(proceed))
 }
 
 // ---- accessor getter builder -----------------------------------------------
@@ -403,8 +433,9 @@ pub(super) fn node_to_js_object(
     let snap = node_snapshot(dom_arc, node_id);
     let accessors = node_accessors(dom_arc, node_id, ctx);
     let methods = node_methods(dom_arc, node_id);
-    let style = ObjectInitializer::new(ctx).build();
-    let dataset = ObjectInitializer::new(ctx).build();
+    let style = super::css_object::make_proxy_for_node("__silksurfMakeStyleProxy", node_id, ctx);
+    let dataset =
+        super::css_object::make_proxy_for_node("__silksurfMakeDatasetProxy", node_id, ctx);
 
     // ---- assemble the JS object ---------------------------------------------
 
@@ -521,6 +552,19 @@ pub(super) fn node_to_js_object(
             2,
         )
         .function(methods.dispatch_event, js_string!("dispatchEvent"), 1)
+        // -- selector queries (silksurf-css engine) --
+        .function(node_matches_native(dom_arc, node_id), js_string!("matches"), 1)
+        .function(node_closest_native(dom_arc, node_id), js_string!("closest"), 1)
+        .function(
+            node_query_selector_native(dom_arc, node_id, false),
+            js_string!("querySelector"),
+            1,
+        )
+        .function(
+            node_query_selector_native(dom_arc, node_id, true),
+            js_string!("querySelectorAll"),
+            1,
+        )
         // -- canvas 2D context (returns null for non-canvas elements) --
         .function(getcontext_native(dom_arc, node_id), js_string!("getContext"), 1)
         .build()
@@ -580,7 +624,7 @@ fn node_accessors(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId, ctx: &mut Context)
         text_content_get: make_getter(ctx, text_content_get_native(dom_arc, node_id)),
         text_content_set: make_getter(ctx, text_content_set_native(dom_arc, node_id)),
         inner_html_get: make_getter(ctx, text_content_get_native(dom_arc, node_id)),
-        inner_html_set: make_getter(ctx, text_content_set_native(dom_arc, node_id)),
+        inner_html_set: make_getter(ctx, inner_html_set_native(dom_arc, node_id)),
         value_get: make_getter(ctx, value_get_native(dom_arc, node_id)),
         value_set: make_getter(ctx, value_set_native(dom_arc, node_id)),
         src_get: make_getter(ctx, attribute_get_native(dom_arc, node_id, "src")),
@@ -598,7 +642,7 @@ fn node_methods(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NodeMethods {
         replace_child: replace_child_native(dom_arc, node_id),
         add_event_listener: node_add_event_listener_native(node_id),
         remove_event_listener: node_remove_event_listener_native(node_id),
-        dispatch_event: node_dispatch_event_native(node_id),
+        dispatch_event: node_dispatch_event_native(dom_arc, node_id),
     }
 }
 
@@ -876,6 +920,40 @@ fn text_content_set_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> Native
     }
 }
 
+/// innerHTML setter: clear existing children, fragment-parse the markup in
+/// this element's context, splice the result. Scripts in the fragment stay
+/// inert (fragment parsing semantics). The whole operation runs under one
+/// Dom lock acquisition; no JS executes while it is held.
+fn inner_html_set_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
+
+    unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let html = args
+                .first()
+                .map(|value| value.to_string(ctx).map(|s| s.to_std_string_lossy()))
+                .transpose()?
+                .unwrap_or_default();
+            let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+            let context_tag = dom
+                .element_name(node_id)
+                .ok()
+                .flatten()
+                .map_or_else(|| "div".to_string(), std::string::ToString::to_string);
+            let existing: Vec<NodeId> = dom
+                .children(node_id)
+                .map(<[NodeId]>::to_vec)
+                .unwrap_or_default();
+            for child in existing {
+                let _ = dom.remove_child(node_id, child);
+            }
+            silksurf_html::parse_fragment_into(&mut dom, node_id, &context_tag, &html);
+            Ok(JsValue::undefined())
+        })
+    }
+}
+
 fn value_get_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
     let arc = Arc::clone(dom_arc);
     // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
@@ -913,7 +991,7 @@ fn node_add_event_listener_native(node_id: NodeId) -> NativeFunction {
 
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
-            add_event_listener(node_id, args.first(), args.get(1), ctx)
+            add_event_listener(node_id, args.first(), args.get(1), args.get(2), ctx)
         })
     }
 }
@@ -923,17 +1001,18 @@ fn node_remove_event_listener_native(node_id: NodeId) -> NativeFunction {
 
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
-            remove_event_listener(node_id, args.first(), args.get(1), ctx)
+            remove_event_listener(node_id, args.first(), args.get(1), args.get(2), ctx)
         })
     }
 }
 
-fn node_dispatch_event_native(node_id: NodeId) -> NativeFunction {
+fn node_dispatch_event_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
     // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
 
     unsafe {
         NativeFunction::from_closure(move |this, args, ctx| {
-            dispatch_event(this, node_id, args.first(), ctx)
+            dispatch_event(this, &arc, node_id, args.first(), ctx)
         })
     }
 }
@@ -955,6 +1034,7 @@ pub(super) fn install_document(
     cookie_host: &str,
 ) {
     let root = NodeId::from_raw(0);
+    super::css_object::install_style_dataset_natives(dom_arc, ctx);
     let methods = document_methods(dom_arc, root);
     let accessors = document_accessors(dom_arc, root, ctx);
     let cookie_getter =
@@ -1068,7 +1148,7 @@ fn document_methods(dom_arc: &Arc<Mutex<Dom>>, root: NodeId) -> DocumentMethods 
         create_text_node: document_create_text_node_native(dom_arc),
         add_event_listener: node_add_event_listener_native(root),
         remove_event_listener: node_remove_event_listener_native(root),
-        dispatch_event: node_dispatch_event_native(root),
+        dispatch_event: node_dispatch_event_native(dom_arc, root),
     }
 }
 
@@ -2167,6 +2247,165 @@ mod tests {
             "var el = document.getElementById('greeting'); \
              var pn = el ? el.parentNode : null; \
              globalThis._has_parent = pn !== null;",
+        )
+        .expect("eval should succeed");
+    }
+
+    #[test]
+    fn style_write_lands_in_style_attribute_and_marks_dirty() {
+        let (arc, _root) = simple_dom();
+        {
+            let mut dom = arc.lock().unwrap();
+            let _ = dom.take_dirty_nodes();
+        }
+        let mut ctx = SilkContext::with_dom(&arc);
+        ctx.eval(
+            "var el = document.getElementById('greeting'); \
+             el.style.backgroundColor = 'red'; \
+             el.style.width = '5px'; \
+             var attr = el.getAttribute('style'); \
+             if (attr !== 'background-color: red; width: 5px') { throw new Error('attr: ' + attr); } \
+             if (el.style.backgroundColor !== 'red') { throw new Error('readback failed'); } \
+             if (el.style.getPropertyValue('width') !== '5px') { throw new Error('getPropertyValue'); } \
+             el.style.removeProperty('width'); \
+             if (el.getAttribute('style') !== 'background-color: red') { throw new Error('remove'); } \
+             if (el.style.cssText !== 'background-color: red') { throw new Error('cssText read'); }",
+        )
+        .expect("eval should succeed");
+        let mut dom = arc.lock().unwrap();
+        assert!(!dom.take_dirty_nodes().is_empty(), "style write must dirty");
+    }
+
+    #[test]
+    fn style_css_text_write_replaces_declarations() {
+        let (arc, _root) = simple_dom();
+        let mut ctx = SilkContext::with_dom(&arc);
+        ctx.eval(
+            "var el = document.getElementById('greeting'); \
+             el.style.cssText = 'color: blue; margin: 4px'; \
+             if (el.style.color !== 'blue') { throw new Error('color'); } \
+             if (el.style.margin !== '4px') { throw new Error('margin'); }",
+        )
+        .expect("eval should succeed");
+    }
+
+    #[test]
+    fn dataset_maps_camel_case_to_data_attributes() {
+        let (arc, _root) = simple_dom();
+        let mut ctx = SilkContext::with_dom(&arc);
+        ctx.eval(
+            "var el = document.getElementById('greeting'); \
+             el.dataset.userKind = 'probe'; \
+             if (el.getAttribute('data-user-kind') !== 'probe') { throw new Error('attr'); } \
+             if (el.dataset.userKind !== 'probe') { throw new Error('readback'); } \
+             if (el.dataset.missing !== undefined) { throw new Error('missing'); }",
+        )
+        .expect("eval should succeed");
+    }
+
+    #[test]
+    fn inner_html_reparses_markup_into_live_children() {
+        let (arc, _root) = simple_dom();
+        let mut ctx = SilkContext::with_dom(&arc);
+        ctx.eval(
+            "var el = document.getElementById('greeting'); \
+             el.innerHTML = '<b class=\"loud\">Hi</b><span>there</span>'; \
+             var b = el.querySelector('b.loud'); \
+             if (b === null) { throw new Error('fragment element missing'); } \
+             if (b.textContent !== 'Hi') { throw new Error('fragment text: ' + b.textContent); } \
+             if (el.children.length !== 2) { throw new Error('children: ' + el.children.length); }",
+        )
+        .expect("eval should succeed");
+    }
+
+    #[test]
+    fn inner_html_replaces_existing_children_and_marks_dirty() {
+        let (arc, _root) = simple_dom();
+        {
+            let mut dom = arc.lock().unwrap();
+            let _ = dom.take_dirty_nodes();
+        }
+        let mut ctx = SilkContext::with_dom(&arc);
+        ctx.eval(
+            "var el = document.getElementById('greeting'); \
+             el.innerHTML = '<i>only</i>'; \
+             if (el.children.length !== 1) { throw new Error('old children remain'); } \
+             if (el.textContent !== 'only') { throw new Error('text: ' + el.textContent); }",
+        )
+        .expect("eval should succeed");
+        let mut dom = arc.lock().unwrap();
+        assert!(!dom.take_dirty_nodes().is_empty());
+    }
+
+    #[test]
+    fn query_selector_supports_descendant_and_attribute_selectors() {
+        let mut dom = Dom::new();
+        let root = dom.create_document();
+        let outer = dom.create_element("div");
+        let _ = dom.set_attribute(outer, "class", "wrap");
+        let inner = dom.create_element("span");
+        let _ = dom.set_attribute(inner, "data-kind", "probe");
+        let _ = dom.set_attribute(inner, "class", "a b");
+        let _ = dom.append_child(root, outer);
+        let _ = dom.append_child(outer, inner);
+        dom.materialize_resolve_table();
+        let arc = Arc::new(Mutex::new(dom));
+        let mut ctx = SilkContext::with_dom(&arc);
+        ctx.eval(
+            "if (document.querySelector('div.wrap > span.a') === null) { throw new Error('child combinator'); } \
+             if (document.querySelector('div span[data-kind=probe]') === null) { throw new Error('attribute'); } \
+             if (document.querySelector('div.wrap > em') !== null) { throw new Error('non-match matched'); } \
+             if (document.querySelectorAll('.a.b').length !== 1) { throw new Error('compound class'); }",
+        )
+        .expect("eval should succeed");
+    }
+
+    #[test]
+    fn element_matches_and_closest_walk_ancestors() {
+        let mut dom = Dom::new();
+        let root = dom.create_document();
+        let form = dom.create_element("form");
+        let _ = dom.set_attribute(form, "id", "f");
+        let field = dom.create_element("input");
+        let _ = dom.set_attribute(field, "id", "field");
+        let _ = dom.append_child(root, form);
+        let _ = dom.append_child(form, field);
+        dom.materialize_resolve_table();
+        let arc = Arc::new(Mutex::new(dom));
+        let mut ctx = SilkContext::with_dom(&arc);
+        ctx.eval(
+            "var field = document.getElementById('field'); \
+             if (!field.matches('input')) { throw new Error('matches tag'); } \
+             if (field.matches('div')) { throw new Error('matches wrong tag'); } \
+             var form = field.closest('form'); \
+             if (form === null || form.nodeId !== document.getElementById('f').nodeId) { \
+               throw new Error('closest form'); \
+             } \
+             if (field.closest('table') !== null) { throw new Error('closest non-match'); }",
+        )
+        .expect("eval should succeed");
+    }
+
+    #[test]
+    fn scoped_query_selector_excludes_context_node() {
+        let mut dom = Dom::new();
+        let root = dom.create_document();
+        let outer = dom.create_element("div");
+        let _ = dom.set_attribute(outer, "id", "outer");
+        let inner = dom.create_element("div");
+        let _ = dom.set_attribute(inner, "id", "inner");
+        let _ = dom.append_child(root, outer);
+        let _ = dom.append_child(outer, inner);
+        dom.materialize_resolve_table();
+        let arc = Arc::new(Mutex::new(dom));
+        let mut ctx = SilkContext::with_dom(&arc);
+        ctx.eval(
+            "var outer = document.getElementById('outer'); \
+             var hits = outer.querySelectorAll('div'); \
+             if (hits.length !== 1) { throw new Error('scoped count ' + hits.length); } \
+             if (hits[0].nodeId !== document.getElementById('inner').nodeId) { \
+               throw new Error('scoped target'); \
+             }",
         )
         .expect("eval should succeed");
     }
