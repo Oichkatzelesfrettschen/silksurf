@@ -105,7 +105,8 @@ run_h2spec() {
 
 run_wpt() {
     echo "==> wpt (synthetic in-tree subset)"
-    cargo build --release -p silksurf-engine --bin wpt_runner --quiet
+    cargo build --release -p silksurf-engine --bin wpt_runner \
+        --features js-conformance --quiet
     ./target/release/wpt_runner \
         --dir crates/silksurf-engine/conformance/wpt/fixtures \
         --scorecard crates/silksurf-engine/conformance/wpt-scorecard.json \

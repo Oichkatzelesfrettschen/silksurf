@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+<head><title>js event bubbling</title></head>
+<body>
+<div id="outer"><button id="inner">go</button></div>
+<script>
+document.addEventListener('click', function (e) {
+  if (e.target.id === 'inner') {
+    var marker = document.createElement('em');
+    marker.setAttribute('id', 'delegated-marker');
+    document.getElementById('outer').appendChild(marker);
+  }
+});
+</script>
+</body>
+</html>

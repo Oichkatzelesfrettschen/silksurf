@@ -10,17 +10,17 @@
     layout rects, and paint-list invariants. test262 and h2spec rows remain
     at their prior baselines.)
   * Baseline date: 2026-07-01
-  * Reproducer: `cargo run -p silksurf-engine --bin wpt_runner -- --verbose`
+  * Reproducer: `cargo run -p silksurf-engine --features js-conformance --bin wpt_runner -- --verbose`
 
 ## Harness summary
 
 | Harness | Status | Coverage | Last result |
 |---------|--------|----------|-------------|
-| **test262** (boa runner, full eval) | functional | 47 703 tests, scope language+built-ins+annexB; skips at that baseline: Intl (no ICU data, AD-021), ESM modules, $DONE async, FinalizationRegistry -- async and static ESM now execute (2026-07-11/12), pending a corpus re-run | 33 098 pass / 62 fail / 14 543 skip = **99.81 % of executed**, **69.38 % of total** (2026-05-17 baseline). Both denominators are load-bearing: the executed rate excludes 30.5 % of the suite. See `silksurf-js/conformance/test262-boa-scorecard.json` |
-| **test262** (lexer-only, legacy VM) | runner removed (AD-025) | 157 of ~53 040 .js files (numeric-literals subset) | 104 / 157 = 66.24 % at lexer level (2026-05-14 baseline, historical). JSON retained: `test262-scorecard.json` |
+| **test262** (boa runner, full eval) | functional | 47 703 tests, scope language+built-ins+annexB; skips at that baseline: Intl (no ICU data, AD-021), ESM modules, $DONE async, FinalizationRegistry -- async and static ESM now execute (2026-07-11/12), pending a corpus re-run | 33 098 pass / 62 fail / 14 543 skip = **99.81 % of executed**, **69.38 % of total** (2026-05-17 baseline, recorded in the section below; the runner JSON holds only the latest run). Both denominators are load-bearing: the executed rate excludes 30.5 % of the suite. |
+| **test262** (lexer-only, legacy VM) | runner removed (AD-025) | 157 of ~53 040 .js files (numeric-literals subset) | 104 / 157 = 66.24 % at lexer level (2026-05-14 baseline, historical). JSON retained: `docs/archive/conformance/test262-lexer-scorecard.json` |
 | **TLS loader sanity** (silksurf-tls) | functional | 4 unit tests covering empty PEM, malformed PEM, default-host loader, root-store diagnostics | 4 / 4 pass |
 | **HTTP/2 (h2spec)** | scaffolded | `scripts/run_h2spec.sh` driver + JSON scorecard schema; in-tree h2 server still pending | 0 / 0 (stub -- needs in-tree server or operator-supplied `SILKSURF_H2_HOST`). See `crates/silksurf-engine/conformance/h2spec-scorecard.json` |
-| **HTML / CSS / Layout / Paint WPT (synthetic)** | functional | 63 in-tree fixtures exercising HTML structure, CSS selectors and properties, inline style cascade, Taffy layout rects, and fused paint-list suppression | 63 / 0 / 0 (pass / fail / skip), 100.00 % @ 2026-07-02 refresh. See `crates/silksurf-engine/conformance/wpt-scorecard.json` |
+| **HTML / CSS / Layout / Paint / JS-event WPT (synthetic)** | functional | 70 in-tree fixtures exercising HTML structure, CSS selectors and properties, inline style cascade, Taffy layout rects, fused paint-list suppression, and JS checks (event dispatch, complex selectors, innerHTML reparse, live style-to-cascade, matchMedia, getComputedStyle; js-conformance feature) | 70 / 0 / 0 (pass / fail / skip), 100.00 % @ 2026-07-12 refresh. See `crates/silksurf-engine/conformance/wpt-scorecard.json` |
 | **TLS 1.3 RFC 8446 vectors** | DELEGATED | rustls owns protocol-level conformance; silksurf-tls only owns the loader / config / extra-CA surface | NOT YET MEASURED in-tree; relies on upstream rustls test suite. A first-party vector harness is queued (P5.S4 follow-on) |
 | **OCSP stapling (RFC 6066)** | DEFERRED | not yet enforced in silksurf-net | NOT YET MEASURED (P5.S4) |
 | **HSTS (RFC 6797)** | DEFERRED | not yet enforced in silksurf-net | NOT YET MEASURED (P5.S4) |
@@ -29,8 +29,11 @@
 
 ### test262 (boa runner, full evaluation)
 
-  * Source: `silksurf-js/conformance/test262-boa-scorecard.json`
-    (2026-05-17 run, retained verbatim as evidence).
+  * Source: 2026-05-17 full-corpus run, recorded here. The scorecard
+    JSON at `silksurf-js/conformance/test262-boa-scorecard.json` is the
+    runner's LATEST-run artifact and is overwritten by every run; it
+    currently holds the 2026-07-11 Promise-subset run (scope "language",
+    639 tests: 633 pass / 0 fail / 6 skip), NOT this baseline.
   * Scope: language + built-ins + annexB; 47 703 tests total,
     33 160 executed (pass + fail), 14 543 skipped.
   * Result, two denominators, both always quoted together:
@@ -63,7 +66,7 @@
 
 ### test262 (JS tokeniser, legacy VM -- runner removed)
 
-  * Source: `docs/conformance/test262-scorecard.json` (historical
+  * Source: `docs/archive/conformance/test262-lexer-scorecard.json` (historical
     artifact; the lexer-only runner and the hand-written VM are removed
     per AD-025 and live in git history).
   * Subset: `language/literals/numeric` (157 files of ~53 040).
@@ -72,19 +75,24 @@
 
 ### HTML / CSS / Layout / Paint WPT (synthetic)
 
-  * 63 pass / 0 fail / 0 skip = 100.00 % across 63 in-tree fixtures.
+  * 70 pass / 0 fail / 0 skip = 100.00 % across 70 in-tree fixtures
+    (2026-07-12: adds seven js_* fixtures -- event bubbling, click
+    preventDefault, complex querySelector, innerHTML reparse, style
+    write-to-cascade, matchMedia, getComputedStyle -- executed with
+    `--features js-conformance`).
   * Reproducer:
     ```sh
-    cargo run -p silksurf-engine --bin wpt_runner -- --verbose
+    cargo run -p silksurf-engine --features js-conformance --bin wpt_runner -- --verbose
     ```
   * Source: `crates/silksurf-engine/conformance/wpt-scorecard.json`.
   * Fixture set: `crates/silksurf-engine/conformance/wpt/fixtures/`
-    (63 self-contained HTML files; each has a registered check inside
+    (70 self-contained HTML files; each has a registered check inside
     `wpt_runner.rs`).
   * Scope: synthetic WPT-style checks over the in-tree engine. The runner
     validates produced DOM, CSS selector/property behavior, inline style
-    cascade ordering, flex layout rects, and fused display-list output. It does
-    not execute JavaScript or vendor the upstream WPT corpus.
+    cascade ordering, flex layout rects, and fused display-list output; the
+    js_* fixtures additionally execute inline scripts through SilkContext and
+    dispatch synthetic trusted events. The upstream WPT corpus is not vendored.
   * Paint coverage: `paint_visible_text_and_hidden_metadata.html` requires
     visible body text and background color to reach `DisplayItem` output while
     script, style, head metadata, and `display:none` body text stay out of the

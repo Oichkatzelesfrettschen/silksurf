@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head><title>js innerHTML fragment reparse</title></head>
+<body>
+<div id="host"><p>old content</p></div>
+<script>
+var host = document.getElementById('host');
+host.innerHTML = '<ul id="fresh"><li class="row">a</li><li class="row">b</li></ul>';
+if (host.querySelectorAll('ul#fresh > li.row').length === 2 &&
+    document.querySelector('#host p') === null) {
+  var marker = document.createElement('em');
+  marker.setAttribute('id', 'innerhtml-marker');
+  host.appendChild(marker);
+}
+</script>
+</body>
+</html>
