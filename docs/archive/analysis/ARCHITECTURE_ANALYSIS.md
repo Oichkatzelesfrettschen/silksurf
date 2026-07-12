@@ -25,12 +25,12 @@ After analyzing four major browser implementations (Ladybird, Servo, NetSurf, Sc
 **HTML Parser Structure:**
 ```
 LibWeb/HTML/Parser/
-├── HTMLTokenizer.cpp (~120k LOC, 70+ states)
-├── HTMLParser.cpp (~265k LOC, 21 insertion modes)
-├── HTMLToken.h (6 token types)
-├── StackOfOpenElements
-├── ListOfActiveFormattingElements
-└── Entities.json (146k - HTML entity table)
++-- HTMLTokenizer.cpp (~120k LOC, 70+ states)
++-- HTMLParser.cpp (~265k LOC, 21 insertion modes)
++-- HTMLToken.h (6 token types)
++-- StackOfOpenElements
++-- ListOfActiveFormattingElements
++-- Entities.json (146k - HTML entity table)
 ```
 
 **Key Patterns:**
@@ -70,23 +70,23 @@ LibWeb/HTML/Parser/
 **CSS Structure:**
 ```
 components/script/dom/css/
-├── css.rs
-├── cssconditionrule.rs
-├── cssmediarule.rs
-├── cssstylerule.rs
-├── cssstylesheet.rs
-├── cssstyledeclaration.rs
-└── [25 total CSS DOM modules]
++-- css.rs
++-- cssconditionrule.rs
++-- cssmediarule.rs
++-- cssstylerule.rs
++-- cssstylesheet.rs
++-- cssstyledeclaration.rs
++-- [25 total CSS DOM modules]
 ```
 
 **Layout Structure:**
 ```
 components/layout/
-├── stylesheets/ (UA, quirks, presentational hints)
-├── flexbox/
-├── flow/
-├── fragment_tree/
-└── table/
++-- stylesheets/ (UA, quirks, presentational hints)
++-- flexbox/
++-- flow/
++-- fragment_tree/
++-- table/
 ```
 
 **Key Patterns:**
@@ -117,13 +117,13 @@ components/layout/
 **HTML Structure:**
 ```
 content/handlers/html/
-├── html.c (main handler)
-├── box_construct.c (box tree construction)
-├── box_normalise.c (box tree normalization)
-├── css.c (stylesheet management)
-├── layout.c (layout engine)
-├── form.c, forms.c (form handling)
-└── table.c (table layout)
++-- html.c (main handler)
++-- box_construct.c (box tree construction)
++-- box_normalise.c (box tree normalization)
++-- css.c (stylesheet management)
++-- layout.c (layout engine)
++-- form.c, forms.c (form handling)
++-- table.c (table layout)
 ```
 
 **Key Patterns:**
@@ -195,30 +195,30 @@ Based on analysis, the optimal design combines:
 **Architecture:**
 ```
 src/document/
-├── html_tokenizer.c (~3,000 LOC)
-│   ├── Character-by-character state machine
-│   ├── 12 core states (simplified from Ladybird's 70+)
-│   └── Entity decoding (inline, not external JSON)
-│
-├── html_token.c (~500 LOC)
-│   ├── Token types: DOCTYPE, StartTag, EndTag, Comment, Character, EOF
-│   └── Attribute storage
-│
-├── html_parser.c (~8,000 LOC)
-│   ├── Tree construction state machine
-│   ├── 8-10 insertion modes (simplified from Ladybird's 21)
-│   ├── Open element stack
-│   ├── Formatting element list
-│   └── Minimal adoption agency algorithm
-│
-├── dom_core.c (~5,000 LOC)
-│   ├── Node types: Element, Text, Comment, Document
-│   ├── Tree operations: append, insert, remove
-│   ├── Attribute management
-│   └── Reference counting (arena-based)
-│
-└── html_entities.c (~2,000 LOC)
-    └── Common entity table (not full HTML5 set)
++-- html_tokenizer.c (~3,000 LOC)
+|   +-- Character-by-character state machine
+|   +-- 12 core states (simplified from Ladybird's 70+)
+|   +-- Entity decoding (inline, not external JSON)
+|
++-- html_token.c (~500 LOC)
+|   +-- Token types: DOCTYPE, StartTag, EndTag, Comment, Character, EOF
+|   +-- Attribute storage
+|
++-- html_parser.c (~8,000 LOC)
+|   +-- Tree construction state machine
+|   +-- 8-10 insertion modes (simplified from Ladybird's 21)
+|   +-- Open element stack
+|   +-- Formatting element list
+|   +-- Minimal adoption agency algorithm
+|
++-- dom_core.c (~5,000 LOC)
+|   +-- Node types: Element, Text, Comment, Document
+|   +-- Tree operations: append, insert, remove
+|   +-- Attribute management
+|   +-- Reference counting (arena-based)
+|
++-- html_entities.c (~2,000 LOC)
+    +-- Common entity table (not full HTML5 set)
 ```
 
 **Key Design Decisions:**
@@ -267,27 +267,27 @@ src/document/
 **Architecture:**
 ```
 src/document/
-├── css_tokenizer.c (~2,000 LOC)
-│   ├── CSS syntax tokenization
-│   ├── String handling, comments, whitespace
-│   └── Number and unit parsing
-│
-├── css_parser.c (~4,000 LOC)
-│   ├── Selector parsing
-│   ├── Property value parsing
-│   ├── Media query support (basic)
-│   └── Stylesheet construction
-│
-├── css_cascade.c (~3,000 LOC)
-│   ├── Specificity calculation
-│   ├── Origin cascade (UA → Author → Inline)
-│   ├── Inheritance
-│   └── Computed value resolution
-│
-└── css_select.c (~2,000 LOC)
-    ├── Selector matching against DOM
-    ├── Type, class, ID, attribute selectors
-    └── Pseudo-classes (:hover, :focus, etc.)
++-- css_tokenizer.c (~2,000 LOC)
+|   +-- CSS syntax tokenization
+|   +-- String handling, comments, whitespace
+|   +-- Number and unit parsing
+|
++-- css_parser.c (~4,000 LOC)
+|   +-- Selector parsing
+|   +-- Property value parsing
+|   +-- Media query support (basic)
+|   +-- Stylesheet construction
+|
++-- css_cascade.c (~3,000 LOC)
+|   +-- Specificity calculation
+|   +-- Origin cascade (UA -> Author -> Inline)
+|   +-- Inheritance
+|   +-- Computed value resolution
+|
++-- css_select.c (~2,000 LOC)
+    +-- Selector matching against DOM
+    +-- Type, class, ID, attribute selectors
+    +-- Pseudo-classes (:hover, :focus, etc.)
 ```
 
 **Key Design Decisions:**
@@ -329,29 +329,29 @@ src/document/
 **Architecture:**
 ```
 src/document/
-├── dom_node.c (~2,500 LOC)
-│   ├── Node base class
-│   ├── Element node
-│   ├── Text node
-│   ├── Comment node
-│   └── Tree traversal
-│
-├── dom_element.c (~2,000 LOC)
-│   ├── Attribute management
-│   ├── Class list
-│   ├── ID lookup
-│   └── Tag name matching
-│
-├── dom_document.c (~1,500 LOC)
-│   ├── Document root
-│   ├── Element factory
-│   ├── Node lookup (getElementById, etc.)
-│   └── Tree modification
-│
-└── dom_string.c (~1,000 LOC)
-    ├── String pooling
-    ├── Case-insensitive comparison
-    └── Arena-allocated strings
++-- dom_node.c (~2,500 LOC)
+|   +-- Node base class
+|   +-- Element node
+|   +-- Text node
+|   +-- Comment node
+|   +-- Tree traversal
+|
++-- dom_element.c (~2,000 LOC)
+|   +-- Attribute management
+|   +-- Class list
+|   +-- ID lookup
+|   +-- Tag name matching
+|
++-- dom_document.c (~1,500 LOC)
+|   +-- Document root
+|   +-- Element factory
+|   +-- Node lookup (getElementById, etc.)
+|   +-- Tree modification
+|
++-- dom_string.c (~1,000 LOC)
+    +-- String pooling
+    +-- Case-insensitive comparison
+    +-- Arena-allocated strings
 ```
 
 **Key Design Decisions:**
@@ -419,8 +419,8 @@ src/document/
 - [ ] Write cascade tests
 
 ### Phase 4i: Integration & Testing (Week 13-14)
-- [ ] Integrate tokenizer → parser → DOM
-- [ ] Integrate CSS parsing → cascade → computed styles
+- [ ] Integrate tokenizer -> parser -> DOM
+- [ ] Integrate CSS parsing -> cascade -> computed styles
 - [ ] Full system testing
 - [ ] Performance optimization
 - [ ] Memory leak detection
@@ -467,8 +467,8 @@ src/document/
 - No per-node malloc/free
 
 ### 4. Clean Interfaces
-- Clear separation: Tokenizer → Parser → DOM
-- CSS Parser → Cascade → Computed Styles
+- Clear separation: Tokenizer -> Parser -> DOM
+- CSS Parser -> Cascade -> Computed Styles
 - Testable components
 
 ### 5. Incremental Implementation
@@ -481,14 +481,14 @@ src/document/
 ## Testing Strategy
 
 ### Unit Tests
-- Tokenizer: Character stream → Tokens
-- Parser: Tokens → DOM tree
-- CSS Parser: CSS text → Stylesheet
-- Cascade: Stylesheets → Computed styles
+- Tokenizer: Character stream -> Tokens
+- Parser: Tokens -> DOM tree
+- CSS Parser: CSS text -> Stylesheet
+- Cascade: Stylesheets -> Computed styles
 
 ### Integration Tests
-- HTML → DOM tree construction
-- CSS → Styled DOM
+- HTML -> DOM tree construction
+- CSS -> Styled DOM
 - Full document rendering pipeline
 
 ### Compliance Tests
@@ -501,14 +501,14 @@ src/document/
 ## Success Criteria
 
 ### Phase 4 Complete When:
-1. ✅ Can parse simple HTML documents into DOM tree
-2. ✅ Can parse simple CSS stylesheets
-3. ✅ Can compute styles for DOM elements
-4. ✅ No crashes (unlike Phase 4a/4b with libdom/libcss)
-5. ✅ All unit tests pass
-6. ✅ Can render test_document_full.html correctly
-7. ✅ Memory clean (no leaks detected by valgrind)
-8. ✅ Performance acceptable (< 50ms for typical page)
+1. [x] Can parse simple HTML documents into DOM tree
+2. [x] Can parse simple CSS stylesheets
+3. [x] Can compute styles for DOM elements
+4. [x] No crashes (unlike Phase 4a/4b with libdom/libcss)
+5. [x] All unit tests pass
+6. [x] Can render test_document_full.html correctly
+7. [x] Memory clean (no leaks detected by valgrind)
+8. [x] Performance acceptable (< 50ms for typical page)
 
 ---
 

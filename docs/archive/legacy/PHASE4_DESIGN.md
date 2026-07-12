@@ -25,19 +25,19 @@ Phase 4 integrates a complete web engine into SilkSurf, enabling rendering of HT
 
 ```
 HTML Input
-    ↓
+    v
 libhubbub HTML5 Parser
-    ↓
+    v
 DOM Tree (libdom)
-    ↓
+    v
 CSS Cascade (libcss)
-    ↓
+    v
 Computed Styles + Layout
-    ↓
+    v
 Render Tree
-    ↓
+    v
 Phase 3 Renderer (damage tracking, SIMD pixel ops)
-    ↓
+    v
 X11 Window Display
 ```
 

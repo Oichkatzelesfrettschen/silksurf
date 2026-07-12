@@ -209,7 +209,7 @@ if (err == CSS_INVALID) {
 
 ---
 
-### Solution 3: Native CSS Cascade Engine ⭐ RECOMMENDED
+### Solution 3: Native CSS Cascade Engine ? RECOMMENDED
 **Status**: Recommended long-term solution
 
 **What it entails**:
@@ -349,7 +349,7 @@ if (err != CSS_OK) {
 - Tightly coupled
 
 ### SilkSurf Cleanroom Approach
-- Specification-driven: "CSS spec → code, directly"
+- Specification-driven: "CSS spec -> code, directly"
 - Transparent cascade algorithm
 - Loosely coupled components
 

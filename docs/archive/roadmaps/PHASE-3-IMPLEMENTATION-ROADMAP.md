@@ -1,3 +1,8 @@
+> **SUPERSEDED (archived 2026-07-09).** This document describes the
+> pre-Rust-pivot C/CMake plan. The product is the Rust workspace; see
+> docs/roadmaps/DEBT-RECONCILIATION-ROADMAP.md and
+> docs/roadmaps/SNAZZY-WAFFLE-COMPLETION.md for current state.
+
 # SilkSurf Phase 3 Implementation Roadmap
 
 **Status**: In Progress (Week 1-2)
@@ -9,7 +14,7 @@
 
 ## Current Status (Week 1-2)
 
-### ✅ Completed
+### [x] Completed
 
 **Core Infrastructure:**
 - [x] Build system operational (CMake + Cargo integration)
@@ -27,10 +32,10 @@
 - [x] Zero segfaults
 - [x] Valgrind clean (0 memory errors)
 
-### 🚧 In Progress
+### [WIP] In Progress
 
 **CSS Styling:**
-- [ ] CSS cascade algorithm completion (selector matching ✓, style application pending)
+- [ ] CSS cascade algorithm completion (selector matching [x], style application pending)
 - [ ] Full libcss callback implementation
 - [ ] Computed style extraction
 
@@ -71,7 +76,7 @@
 
 ## Weekly Milestones
 
-### Week 1-2: Infrastructure & Foundation ✅
+### Week 1-2: Infrastructure & Foundation [x]
 
 **Completed:**
 - Build system operational
@@ -81,12 +86,12 @@
 - Memory safety verified
 
 **Acceptance Criteria Met:**
-- ✓ CMake builds cleanly
-- ✓ All headers compile
-- ✓ Tests run successfully
-- ✓ Zero memory errors
+- [x] CMake builds cleanly
+- [x] All headers compile
+- [x] Tests run successfully
+- [x] Zero memory errors
 
-### Week 3-4: Core Parsing & DOM (Current) 🚧
+### Week 3-4: Core Parsing & DOM (Current) [WIP]
 
 **Rust Team:**
 - [ ] JavaScript lexer (50+ MB/s target)
@@ -128,7 +133,7 @@
 ### Week 7-8: Rendering Pipeline
 
 **Graphics Team:**
-- [ ] Layout → pixel coordinate mapping
+- [ ] Layout -> pixel coordinate mapping
 - [ ] Background/border rendering
 - [ ] Text rendering with FreeType
 - [ ] Image rendering
@@ -157,7 +162,7 @@
 ### Week 11-12: Integration & Polish
 
 **All Teams:**
-- [ ] Full pipeline integration (HTML → JS → render)
+- [ ] Full pipeline integration (HTML -> JS -> render)
 - [ ] Event handling (click, scroll, input)
 - [ ] Performance optimization
 - [ ] Bug fixes and stability
@@ -180,8 +185,8 @@
 - [ ] 100+ FPS rendering (damage-tracked)
 - [ ] <10MB memory per tab
 - [ ] <500ms page load time
-- [ ] Zero compiler warnings ✓
-- [ ] Zero memory leaks ✓
+- [ ] Zero compiler warnings [x]
+- [ ] Zero memory leaks [x]
 
 **Process:**
 - [ ] CI/CD passing on all commits

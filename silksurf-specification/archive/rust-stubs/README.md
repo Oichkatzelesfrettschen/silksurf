@@ -43,7 +43,7 @@ If SilkSurf later implements custom tokenizers in Rust:
 ## Why Archived
 
 **Reason**: Focus on completing C-based implementation first
-- Current: HTML/CSS parsing with proven C libraries ✓
+- Current: HTML/CSS parsing with proven C libraries [x]
 - Current: CSS cascade and layout engine (in progress)
 - Current: Rendering pipeline integration (planned)
 - Future: Consider custom Rust tokenizers if performance bottlenecks appear

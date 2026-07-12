@@ -3,7 +3,7 @@
 ## Project Structure & Module Organization
 - `crates/`: Rust subsystem crates (`silksurf-html`, `silksurf-css`, `silksurf-dom`, `silksurf-layout`, `silksurf-render`, `silksurf-engine`, `silksurf-net`, `silksurf-tls`, plus app/gui).
 - `silksurf-js/`: Rust JS engine crate and harnesses.
-- `src/`, `include/`, `tests/`, `CMakeLists.txt`, `Makefile`: legacy C sources (migration-only).
+- `Makefile`: canonical build entry point wrapping Cargo (the legacy C tree is removed; AD-024).
 - `docs/`: canonical architecture, performance, tooling, cleanroom, and testing docs (see `docs/README.md`).
 - `silksurf-specification/`, `diff-analysis/`: cleanroom specs and design research.
 - `silksurf-extras/`, `silksurf-js/test262/`: local reference checkouts (untracked).
@@ -17,11 +17,11 @@
 - `cargo run -p silksurf-engine --bin bench_pipeline`: run pipeline benchmark binary.
 - `cargo run -p silksurf-css --bin bench_css`: run CSS benchmark binary.
 - `cd fuzz && cargo fuzz run html_tokenizer`: run fuzzing (requires `cargo-fuzz`).
-- `cmake -B build && cmake --build build`: legacy C build (migration-only).
+- `make check` / `make test` / `make full`: canonical gates (see docs/development/LOCAL-GATE.md).
 
 ## Coding Style & Naming Conventions
 - Rust: run `cargo fmt` and `cargo clippy`; use idiomatic `snake_case` for functions/vars and `CamelCase` for types; keep crate APIs cohesive.
-- C (legacy): C11, 4-space indentation, `silk_*` functions/typedefs, `SILK_*` macros, and `SILKSURF_*_H` header guards.
+- Legacy C conventions live in git history with the removed tree (AD-024).
 
 ## Testing Guidelines
 - Prefer tests alongside each crate (`crates/*/tests/` and module `#[cfg(test)]`).

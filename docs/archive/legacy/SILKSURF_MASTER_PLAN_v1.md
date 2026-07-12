@@ -23,39 +23,39 @@
 ### 1.2 Directory Structure
 ```
 silksurf/
-├── docs/                      # Architecture & design docs
-│   ├── XCB_GUIDE.md          # XCB programmer's reference
-│   ├── ARCHITECTURE.md        # System design
-│   ├── OPTIMIZATION.md        # Performance strategy
-│   └── MEMORY_MODEL.md        # RAM management
-├── src/
-│   ├── core/                  # Web engine (from NeoSurf)
-│   │   ├── content/           # HTML/CSS/JS handlers
-│   │   ├── desktop/           # Desktop abstraction
-│   │   └── utils/             # Generic utilities
-│   ├── gui/                   # XCB GUI framework
-│   │   ├── xcb_wrapper.c      # Low-level XCB bindings
-│   │   ├── window.c           # Window management
-│   │   ├── widgets.c          # Minimal widget set
-│   │   └── render.c           # Rendering pipeline
-│   ├── rendering/             # Graphics & optimization
-│   │   ├── pixel_ops.c        # Optimized pixel operations
-│   │   ├── damage_tracking.c  # Partial update tracking
-│   │   ├── buffer_pool.c      # Memory pooling
-│   │   └── shader_accel.c     # GPU acceleration (DRI, DRI2, DRI3)
-│   └── main.c                 # Entry point
-├── include/
-│   ├── silksurf/
-│   │   ├── browser.h
-│   │   ├── gui.h
-│   │   ├── renderer.h
-│   │   └── config.h
-├── CMakeLists.txt             # Build system
-├── Makefile                   # Fast rebuild
-└── perf/
-    ├── benchmarks.c           # Performance tests
-    ├── memory_trace.c         # Memory profiling
-    └── profile.sh             # Profiling scripts
++-- docs/                      # Architecture & design docs
+|   +-- XCB_GUIDE.md          # XCB programmer's reference
+|   +-- ARCHITECTURE.md        # System design
+|   +-- OPTIMIZATION.md        # Performance strategy
+|   +-- MEMORY_MODEL.md        # RAM management
++-- src/
+|   +-- core/                  # Web engine (from NeoSurf)
+|   |   +-- content/           # HTML/CSS/JS handlers
+|   |   +-- desktop/           # Desktop abstraction
+|   |   +-- utils/             # Generic utilities
+|   +-- gui/                   # XCB GUI framework
+|   |   +-- xcb_wrapper.c      # Low-level XCB bindings
+|   |   +-- window.c           # Window management
+|   |   +-- widgets.c          # Minimal widget set
+|   |   +-- render.c           # Rendering pipeline
+|   +-- rendering/             # Graphics & optimization
+|   |   +-- pixel_ops.c        # Optimized pixel operations
+|   |   +-- damage_tracking.c  # Partial update tracking
+|   |   +-- buffer_pool.c      # Memory pooling
+|   |   +-- shader_accel.c     # GPU acceleration (DRI, DRI2, DRI3)
+|   +-- main.c                 # Entry point
++-- include/
+|   +-- silksurf/
+|   |   +-- browser.h
+|   |   +-- gui.h
+|   |   +-- renderer.h
+|   |   +-- config.h
++-- CMakeLists.txt             # Build system
++-- Makefile                   # Fast rebuild
++-- perf/
+    +-- benchmarks.c           # Performance tests
+    +-- memory_trace.c         # Memory profiling
+    +-- profile.sh             # Profiling scripts
 ```
 
 ---
@@ -88,7 +88,7 @@ silksurf/
 1. Static allocation where possible
 2. Object pooling (reuse objects)
 3. Lazy loading (features on demand)
-4. Minimal GTK → XCB (eliminate dependency bloat)
+4. Minimal GTK -> XCB (eliminate dependency bloat)
 5. Inline critical paths (cache-friendly)
 6. SIMD optimizations (SSE2/AVX for rendering)
 
@@ -228,12 +228,12 @@ struct xcb_button {
 
 ## Success Criteria
 
-1. ✓ Builds cleanly with CMake
-2. ✓ Renders complex HTML/CSS correctly
-3. ✓ Executes JavaScript
-4. ✓ Handles images, media
-5. ✓ Fast XCB GUI (no flicker, smooth scroll)
-6. ✓ <10 MB RAM baseline
-7. ✓ <500ms startup
-8. ✓ 60+ FPS rendering
+1. [x] Builds cleanly with CMake
+2. [x] Renders complex HTML/CSS correctly
+3. [x] Executes JavaScript
+4. [x] Handles images, media
+5. [x] Fast XCB GUI (no flicker, smooth scroll)
+6. [x] <10 MB RAM baseline
+7. [x] <500ms startup
+8. [x] 60+ FPS rendering
 

@@ -78,8 +78,39 @@ or not exposed at the v0.1 surface.
   * **Site isolation.** No process-per-origin separation. JS from origin
     A can in principle observe DOM state from origin B if the engine is
     embedding multiple documents. v0.1 ships single-origin only.
-  * **Third-party cookies / storage partitioning.** No cookie subsystem
-    yet.
+    Same-origin/same-site *classification* now exists (`sandbox::Origin`,
+    scheme + registrable-domain site via the Public Suffix List in
+    `silksurf_core::psl`), but it is classification only -- no process or
+    context enforcement (AD-022 amendment, 2026-07-11).
+  * **Third-party cookies / storage partitioning.** PARTIAL (AD-022
+    amendment, 2026-07-11): real cookie primitives and an attribute-aware
+    store exist (`silksurf-net::cookie`), `document.cookie` uses them and
+    refuses HttpOnly-from-script, and `privacy::partition_key` +
+    `PartitionedCookieStore` give per-(resource-site, top-level-site)
+    cookie isolation. The HTTP round-trip works and is now PARTITIONED:
+    `BasicClient` holds a `CookieContext { PartitionedCookieStore,
+    top_level_site }`, keying each request's cookies by
+    `(top_level_site, resource_site)`, so a third-party embedded under two
+    top-level sites gets two isolated stores; the same jar is shared with
+    `document.cookie` (first-party partition). SameSite is enforced for
+    cross-site subresources (Strict/Lax withheld). SameSite is also enforced on
+    top-level NAVIGATIONS: the navigation's initiator site is tracked
+    (`BrowserNavigationRequest.initiator_site`), and a cross-site navigation
+    withholds Strict (and Lax too for an unsafe method, per RFC 6265bis) via
+    `navigation_same_site_context`; a browser-initiated navigation (address bar,
+    bookmark, history) is same-site and sends Strict. Sites are the registrable
+    domain (eTLD+1) via the Public Suffix List (`silksurf_core::psl`), so
+    `a.co.uk`/`b.co.uk` partition separately while `a.example.com`/
+    `b.example.com` share a site. STILL MISSING: the RFC 6265
+    `Domain=<public suffix>` attribute rejection (the parser accepts it; site
+    keying is unaffected), redirect-hop SameSite reclassification (the context
+    is frozen from the initiator and original destination), and any
+    localStorage/IndexedDB to partition. Cookie isolation now holds against
+    cross-site subresource tracking, honors registrable-domain boundaries, and
+    enforces SameSite on navigations -- but SameSite is not a complete CSRF
+    defense: GET-based state changes, cookies sent without a SameSite attribute
+    treated as Lax-by-default, and the redirect gap remain server-side / future
+    work.
   * **Fingerprinting surface.** Canvas, WebGL, Audio, fonts, screen
     resolution -- none enumerated yet.
   * **Subresource Integrity (SRI).** Not yet validated.

@@ -8,9 +8,9 @@ Target completion: End Q1 2026 (estimated mid-March)
 STATUS LEGEND
 ================================================================================
 
-🟢 Defined (spec complete, ready to implement)
-🟡 Proposed (approval needed)
-🔵 Blocked (dependency or clarification needed)
+[OK] Defined (spec complete, ready to implement)
+[PARTIAL] Proposed (approval needed)
+[INFO] Blocked (dependency or clarification needed)
 
 ================================================================================
 PHASE 3: PARALLEL IMPLEMENTATION (12 WEEKS)
@@ -28,7 +28,7 @@ PHASE 3: PARALLEL IMPLEMENTATION (12 WEEKS)
 
 **Weekly Breakdown**:
 
-### Week 1-2: Infrastructure & Foundational Components 🟢
+### Week 1-2: Infrastructure & Foundational Components [OK]
 **Milestone**: Build system operational, arena allocators tested
 
 **Rust Team**:
@@ -57,7 +57,7 @@ PHASE 3: PARALLEL IMPLEMENTATION (12 WEEKS)
 - [ ] ccache integration for fast rebuilds
 - **Acceptance**: Full build succeeds, <2 minutes clean build
 
-### Week 3-4: Core Parsing 🟢
+### Week 3-4: Core Parsing [OK]
 **Milestone**: HTML/CSS/JS tokenization complete, basic parsing works
 
 **Rust Team**:
@@ -80,12 +80,12 @@ PHASE 3: PARALLEL IMPLEMENTATION (12 WEEKS)
 - [ ] Text input widget (basic)
 - **Acceptance**: Click button, input text, render visually
 
-### Week 5-6: DOM & Bytecode 🟢
+### Week 5-6: DOM & Bytecode [OK]
 **Milestone**: DOM tree construction, bytecode compilation working
 
 **Rust Team**:
 - [ ] Bytecode instruction set (define all 50+ opcodes)
-- [ ] Compiler (AST → bytecode, single-pass)
+- [ ] Compiler (AST -> bytecode, single-pass)
 - [ ] Basic VM execution (load, store, arithmetic)
 - [ ] Test with simple JS programs (fib, factorial)
 - **Acceptance**: fib(30) runs correctly, <100ms
@@ -94,7 +94,7 @@ PHASE 3: PARALLEL IMPLEMENTATION (12 WEEKS)
 - [ ] DOM node creation, tree manipulation
 - [ ] HTML5 tree construction algorithm (basic)
 - [ ] CSS parser (simple selectors, properties)
-- [ ] Integration: Tokenizer → Tree → DOM
+- [ ] Integration: Tokenizer -> Tree -> DOM
 - **Acceptance**: Parse HTML, build DOM tree, no crashes
 
 **Graphics Team**:
@@ -103,7 +103,7 @@ PHASE 3: PARALLEL IMPLEMENTATION (12 WEEKS)
 - [ ] Damage tracking basic rectangle marking
 - **Acceptance**: All 4 widgets render, interact with mouse
 
-### Week 7-8: Layout & Styling 🟢
+### Week 7-8: Layout & Styling [OK]
 **Milestone**: CSS cascade working, basic layout computed
 
 **Rust Team**:
@@ -126,8 +126,8 @@ PHASE 3: PARALLEL IMPLEMENTATION (12 WEEKS)
 - [ ] XShm integration (10x faster than socket)
 - **Acceptance**: Incremental rendering, 60 FPS on 1920x1080
 
-### Week 9-10: Rendering & Integration 🟢
-**Milestone**: Full rendering pipeline, SilkSurfJS ↔ C core FFI working
+### Week 9-10: Rendering & Integration [OK]
+**Milestone**: Full rendering pipeline, SilkSurfJS <-> C core FFI working
 
 **Rust Team**:
 - [ ] Exception handling (try/catch/finally)
@@ -137,7 +137,7 @@ PHASE 3: PARALLEL IMPLEMENTATION (12 WEEKS)
 - **Acceptance**: All Test262 target metrics met or documented
 
 **C Core Team**:
-- [ ] Rendering pipeline (DOM → layout boxes → paint)
+- [ ] Rendering pipeline (DOM -> layout boxes -> paint)
 - [ ] Color parsing & blending (alpha, RGB)
 - [ ] Text rendering (basic bitmap fonts or freetype)
 - [ ] Integration with XCB rendering
@@ -155,8 +155,8 @@ PHASE 3: PARALLEL IMPLEMENTATION (12 WEEKS)
 - [ ] LSTM model design & training infrastructure setup
 - **Acceptance**: Training pipeline defined, first model iteration
 
-### Week 11-12: Testing & Polish 🟢
-**Milestone**: Full browser functional, Test262 ≥95%, bugs fixed
+### Week 11-12: Testing & Polish [OK]
+**Milestone**: Full browser functional, Test262 >=95%, bugs fixed
 
 **All Teams**:
 - [ ] Comprehensive Test262 run (full suite)
@@ -166,12 +166,12 @@ PHASE 3: PARALLEL IMPLEMENTATION (12 WEEKS)
 - [ ] Documentation update (README, build instructions)
 - [ ] Code cleanup (lint, format, warnings=errors pass)
 - **Acceptance**:
-  - Test262: ≥95% compliance
+  - Test262: >=95% compliance
   - Fuzzing: No crashes on 1K test cases
   - Performance: Throughput baseline recorded
   - Build: Zero warnings, all tests pass
 
-**Phase 3 Output**: Functional CLI + XCB browser, Test262 ≥95%
+**Phase 3 Output**: Functional CLI + XCB browser, Test262 >=95%
 
 ================================================================================
 PHASE 4: OPTIMIZATION & FORMAL VERIFICATION (4 WEEKS)
@@ -181,7 +181,7 @@ PHASE 4: OPTIMIZATION & FORMAL VERIFICATION (4 WEEKS)
 
 **Team Structure**: Performance-focused, 2-3 core team members
 
-### Week 1-2: Performance Profiling & Optimization 🟡
+### Week 1-2: Performance Profiling & Optimization [PARTIAL]
 
 **Profiling**:
 - [ ] Measure baseline (latency, throughput, memory per operation)
@@ -200,7 +200,7 @@ PHASE 4: OPTIMIZATION & FORMAL VERIFICATION (4 WEEKS)
 - Layout: 60 FPS maintained with 1000+ element pages
 - Memory: <200MB for Top 100 websites
 
-### Week 3-4: Formal Verification & Final Testing 🟡
+### Week 3-4: Formal Verification & Final Testing [PARTIAL]
 
 **Formal Verification**:
 - [ ] TLA+ GC proof (arena + generational + refcounting)
@@ -229,7 +229,7 @@ PHASE 5: PRODUCTION HARDENING (4 WEEKS)
 
 **Team Structure**: 2-3 people (security, documentation, platforms)
 
-### Week 1: Security Hardening 🟡
+### Week 1: Security Hardening [PARTIAL]
 
 - [ ] Security audit (code review for buffer overflows, input validation)
 - [ ] ASAN/UBSAN run (undefined behavior detection)
@@ -241,7 +241,7 @@ PHASE 5: PRODUCTION HARDENING (4 WEEKS)
 - All ASAN/UBSAN warnings resolved
 - Valgrind clean (no leaks on Top 100 websites)
 
-### Week 2: Documentation & Packaging 🟡
+### Week 2: Documentation & Packaging [PARTIAL]
 
 - [ ] User documentation (README, build, usage)
 - [ ] Developer documentation (API reference, architecture guide)
@@ -253,7 +253,7 @@ PHASE 5: PRODUCTION HARDENING (4 WEEKS)
 - All interfaces documented (CLI, TUI, Curses, XCB)
 - Example programs provided
 
-### Week 3: Cross-Platform Support 🟡
+### Week 3: Cross-Platform Support [PARTIAL]
 
 **Target platforms**:
 - Linux x86_64 (primary, required)
@@ -268,10 +268,10 @@ PHASE 5: PRODUCTION HARDENING (4 WEEKS)
 
 **Acceptance Criteria**:
 - Linux x86_64 + ARM64 both build cleanly
-- Test262 ≥95% on both platforms
+- Test262 >=95% on both platforms
 - Performance <5% variance between platforms
 
-### Week 4: Release Preparation 🟡
+### Week 4: Release Preparation [PARTIAL]
 
 - [ ] Final code review (all Phase 3-5 work)
 - [ ] Version bump & release tagging (v0.1.0)
@@ -286,27 +286,27 @@ CRITICAL PATH & DEPENDENCIES
 
 ```
 Phase 3:
-├─ Weeks 1-2 (Infrastructure)
-│  └─ Required before: Week 3+
-├─ Weeks 3-8 (Parsing, DOM, Layout)
-│  └─ Rust & C core can progress in parallel
-├─ Weeks 9-10 (Rendering & FFI)
-│  └─ Requires: Lexer, Parser, DOM complete
-├─ Week 11-12 (Testing & Polish)
-│  └─ Requires: All systems integrated
-└─ Phase 3 Output: Functional browser ✓
++- Weeks 1-2 (Infrastructure)
+|  +- Required before: Week 3+
++- Weeks 3-8 (Parsing, DOM, Layout)
+|  +- Rust & C core can progress in parallel
++- Weeks 9-10 (Rendering & FFI)
+|  +- Requires: Lexer, Parser, DOM complete
++- Week 11-12 (Testing & Polish)
+|  +- Requires: All systems integrated
++- Phase 3 Output: Functional browser [x]
 
 Phase 4 (Sequential, builds on Phase 3):
-├─ Weeks 1-2: Profiling & optimization
-├─ Weeks 3-4: Formal verification & final testing
-└─ Phase 4 Output: Performance validated ✓
++- Weeks 1-2: Profiling & optimization
++- Weeks 3-4: Formal verification & final testing
++- Phase 4 Output: Performance validated [x]
 
 Phase 5 (Sequential, builds on Phase 4):
-├─ Week 1: Security hardening
-├─ Week 2: Documentation
-├─ Week 3: Cross-platform support
-├─ Week 4: Release preparation
-└─ Phase 5 Output: v0.1.0 Release ✓
++- Week 1: Security hardening
++- Week 2: Documentation
++- Week 3: Cross-platform support
++- Week 4: Release preparation
++- Phase 5 Output: v0.1.0 Release [x]
 ```
 
 **No blockers**: All Phase 2 specs complete; Phase 3 can start immediately.
@@ -339,7 +339,7 @@ KEY METRICS & SUCCESS CRITERIA
 
 | Milestone | Phase 3 | Phase 4 | Phase 5 | Final |
 |-----------|---------|---------|---------|-------|
-| Test262 Compliance | 95%+ | 95%+ | 95%+ | ≥95% |
+| Test262 Compliance | 95%+ | 95%+ | 95%+ | >=95% |
 | Lexer throughput | 50+ MB/s | 50-100 | 50-100 | 50-100 |
 | 60 FPS layout | Yes | Yes | Yes | Yes |
 | Fuzzing crashes | 0 | 0 | 0 | 0 |
@@ -352,7 +352,7 @@ KEY METRICS & SUCCESS CRITERIA
 RISK MITIGATION
 ================================================================================
 
-**Risk: Phase 3 overruns (12 weeks → 14+ weeks)**
+**Risk: Phase 3 overruns (12 weeks -> 14+ weeks)**
 - Mitigation: Parallel teams, clear acceptance criteria per week
 - Fallback: Defer TUI/Curses interfaces to Phase 3.5
 

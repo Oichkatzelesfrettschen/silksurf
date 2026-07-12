@@ -19,7 +19,7 @@ kept for cleanroom reference only.
   doctypes (TagName/AttributeName enums, `SmallString`, selective id/class
   interning) [implemented]
 - `src/document/document.c` -> `crates/silksurf-engine` orchestration pipeline
-  (parse → style → layout → render, JS hooks stubbed) [partial]
+  (parse -> style -> layout -> render, JS hooks stubbed) [partial]
 - `src/document/css_select_handler.c` -> `crates/silksurf-css` selector matching
   (`SelectorIdent` + interner fast paths) [implemented]
 - `src/document/css_engine.c` -> `crates/silksurf-css` cascade/computed styles

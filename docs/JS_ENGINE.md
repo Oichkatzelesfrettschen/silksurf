@@ -14,10 +14,13 @@ DOM mutations should batch changes and trigger incremental render via
 `EnginePipeline::render_document_incremental_from_dom`.
 
 ## Module Boundaries
-- `lexer/`: tokenization (`Lexer`, `TokenKind`, `Span`).
-- `parser/`: AST construction (`Program`, `Statement`, `Expression`).
-- `bytecode/`: instruction stream (`Chunk`, `Opcode`).
-- `vm/`: execution engine + snapshots.
+- `boa_backend/`: the production runtime. `SilkContext` wraps
+  boa_engine and installs the browser host layer (DOM bridge in
+  `boa_backend/dom_bridge.rs`, document/location/navigator, storage,
+  crypto, fetch, timers, console).
+- `bin/test262_boa.rs`: conformance runner (dual-denominator scorecard).
+- The hand-written lexer/parser/bytecode/VM modules are removed per
+  AD-025; git history and `SILKSURF-JS-DESIGN.md` preserve them.
 - `gc/`: arena/heap + tracing hooks.
 - `jit/`: optional Cranelift backend (`feature = "jit"`).
 - `ffi/`, `napi/`, `wasm/`: host bindings.

@@ -1,9 +1,9 @@
 # Repository Layout
 
 > A new contributor opening the silksurf repo for the first time encounters
-> a mix of Rust workspace, C/CMake legacy, formal models, fuzz infra,
-> reference checkouts, and several conventions that are obvious only after
-> reading the ADRs. This document is the map.
+> a Rust workspace, formal models, fuzz infra, reference checkouts, and
+> several conventions that are obvious only after reading the ADRs. This
+> document is the map.
 
 ## Top-level directories
 
@@ -16,14 +16,10 @@
 | `diff-analysis/` | Cleanroom reference analysis surface; strict no-import-from policy from `crates/*/src` | yes (analysis only) |
 | `docs/` | Human-readable documentation, runbooks, ADRs | yes |
 | `scripts/` | Build, gate, and developer scripts (`local_gate.sh`, `install-git-hooks.sh`, lints, hooks) | yes |
-| `fuzz/` | libfuzzer-sys harness crate (separate from workspace) | yes |
-| `fuzz_corpus/` | Seed inputs for the legacy AFL++ harnesses (CMake-built `silksurf_fuzz` and `silksurf_css_fuzz`) | yes |
+| `fuzz/` | libfuzzer-sys harness crate (separate from workspace); corpus under `fuzz/corpus/` | yes |
 | `perf/` | Benchmark baselines and runner scripts | yes |
-| `src/` | **Legacy C/C++ harness sources** built by `CMakeLists.txt`; pending the deprecate-or-integrate decision recorded in ADR-007 | yes |
-| `include/` | C/C++ headers paired with `src/` | yes |
-| `tests/` | Top-level CMake-driven CTest sources (16 tests) | yes |
-| `target/`, `build/`, `build-asan/`, `build-fuzz/`, `build-webview/` | Build output trees; ignored | no |
-| `fuzz_in/`, `fuzz_in_css/`, `fuzz_out*/`, `infer-out/`, `logs/`, `states/` | Tool output; ignored | no |
+| `target/`, `build*/` | Build output trees; ignored (`build*` dirs are historical C-harness output, kept in `make clean` so stale checkouts converge) | no |
+| `fuzz_out*/`, `infer-out/`, `logs/`, `states/` | Tool output; ignored | no |
 | `~/` (literal tilde) | Accidental artifact from a tool that did not expand `~` -- safe to delete | no (gitignored) |
 
 ## Top-level files
@@ -40,30 +36,27 @@
 | `Cargo.toml`, `Cargo.lock` | Rust workspace manifest + pinned dependency graph |
 | `rust-toolchain.toml` | Pinned stable Rust 1.94.1 (see ADR-008) |
 | `deny.toml` | cargo-deny supply-chain policy |
-| `Makefile` | Convenience wrapper around CMake + Cargo (see ADR-007) |
-| `CMakeLists.txt` | Legacy C/AFL++ harness (see ADR-007) |
-| `BrowserLoader.tla`, `BrowserLoader.cfg` | TLA+ formal model of the browser-loader state machine -- precedent for the formal-models phase (P8.S12 in the SNAZZY-WAFFLE roadmap) |
-| `BrowserLoader.old` | Earlier revision of the TLA+ model, kept for diff history |
-| `lsan.supp` | LeakSanitizer suppressions used when building with `-DCMAKE_BUILD_TYPE=ASAN` |
+| `Makefile` | Canonical build entry point wrapping Cargo |
+| `BrowserLoader.tla`, `BrowserLoader.cfg` | TLA+ formal model of the browser-loader state machine; consolidation into `silksurf-specification/formal/` with real invariants is tracked in `docs/roadmaps/DEBT-RECONCILIATION-ROADMAP.md` |
 | `generate_diffs.sh` | Diff-analysis helper (cleanroom comparison artefact) |
 
 ## Why silksurf-js is outside crates/
 
 Convention: every workspace member that is part of the engine pipeline
-lives under `crates/`. silksurf-js is the deliberate exception. It is the
-JavaScript runtime -- a self-contained subsystem that compiles standalone
-to FFI (libsilksurf-js.so) for embedding outside the engine, and it has
-its own clippy.toml, rustfmt.toml, and feature-gate matrix (NaN-boxing
-modes, GC backends, FFI dispatch). Putting it under `crates/` would
-imply it is consumed *only* through the engine, which is not the
-intent.
+lives under `crates/`. silksurf-js is the deliberate exception. It is
+the JavaScript runtime -- a self-contained subsystem embedding
+boa_engine behind `SilkContext`, with its own conformance runner
+(test262_boa) and host-object layer (DOM bridge, storage, crypto,
+fetch, timers). Putting it under `crates/` would imply it is consumed
+*only* through the engine, which is not the intent; embedders use the
+`SilkContext` Rust API directly (AD-025).
 
-## Why CMakeLists.txt + Makefile + src/ + include/ + tests/
+## Where the legacy C harness went
 
-The repo predates the all-Rust pivot. The C harness is currently kept
-green by the local-gate full pass (`scripts/local_gate.sh full`) so the
-deprecate-or-integrate decision (ADR-007) can be made without surprise
-breakage. New work should not extend the C harness.
+The repo predates the all-Rust pivot. AD-024 retired the C harness
+(`src/`, `include/`, `tests/`, `CMakeLists.txt`, AFL seed trees); the
+removal is complete and git history preserves the sources.
+`docs/LEGACY_C_PORTING.md` maps each C module to its owning Rust crate.
 
 ## Conventions a new contributor must know
 

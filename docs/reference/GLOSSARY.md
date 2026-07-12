@@ -16,10 +16,30 @@
 
 ### BPE (Byte Pair Encoding)
 **Type**: Compression/Tokenization Algorithm
-**Definition**: Iterative algorithm that merges frequent byte pairs into single tokens
-**SilkSurf Usage**: JavaScript lexer optimization, neural token prediction
-**Performance**: 50+ MB/s tokenization target
+**Definition**: Maps registered byte sequences (common HTML fragments) to single u16 tokens via greedy longest-prefix trie matching, with raw byte values as the lossless fallback.
+**SilkSurf Usage**: `silksurf_core::bpe::BpeTokenizer` (AD-006 experimental scope; re-homed from the retired C tree under AD-024)
+**Performance**: 50+ MB/s tokenization target; bench at `crates/silksurf-core/benches/bpe.rs`
 **Reference**: `SILKSURF-JS-DESIGN.md`
+
+### bpe / BpeTokenizer
+**Type**: Core tokenizer module
+**Definition**: `silksurf-core` module hosting `BpeTokenizer`: `add_merge(sequence, id)` registers a byte sequence under a nonzero u16 id (ids conventionally start at 256; 0 is the internal no-token sentinel), `encode(input)` emits the greedy longest-prefix token stream with raw-byte fallback. Vec-backed trie, index-linked children, no unsafe.
+
+### canvas_surface / canvas_surface_mut / canvas_surface_ids / ensure_canvas_surface
+**Type**: DOM canvas backing-store accessors
+**Definition**: `silksurf-dom` `Dom` methods managing per-canvas-element 2D backing bitmaps (`CanvasSurface`, keyed by the canvas `NodeId`). `ensure_canvas_surface(node, width, height)` gets or creates the surface (resizing resets pixels, matching `canvas.width`/`height`); `canvas_surface(node)` / `canvas_surface_mut(node)` borrow it for the paint snapshot and JS draw calls; `canvas_surface_ids()` lists canvases with surfaces so the display-list builder can snapshot each into a render `ImageSurface`. A canvas element owns its bitmap, so the store lives on the `Dom` both the JS bridge and the paint pipeline already share.
+
+### CookieContext / with_cookie_context / tls_provider
+**Type**: BasicClient partitioned cookie round-trip
+**Definition**: `silksurf-net` types enabling the HTTP cookie round-trip with partitioning and SameSite enforcement. `CookieContext { jar: Arc<Mutex<PartitionedCookieStore>>, top_level_site }` pairs a shared partitioned jar with the current navigation's top-level site. `with_cookie_context(jar, top_level_site)` attaches it: each request carries the `Cookie` header for its partition (keyed by top-level site + resource site) and stores `Set-Cookie` there; SameSite is enforced for cross-site subresources; an empty top-level site degrades to the unpartitioned store with no enforcement. The same jar is shared with the JS `document.cookie` bridge (first-party partition). `tls_provider()` returns the client's TLS provider so a caller (`SpeculativeRenderer::attach_cookie_context`) can rebuild the client with the same TLS configuration plus the cookie context.
+
+### psl / registrable_domain
+**Type**: Public Suffix List matcher (site derivation)
+**Definition**: `silksurf_core::psl::registrable_domain(host)` returns the registrable domain (eTLD+1) of a host -- the public suffix (effective TLD) plus one more label -- or `None` when the host has none (an IP literal, a bare public suffix like `co.uk` or `github.io`, or `localhost`), in which case the caller keeps the full host as its own site. It is backed by a vendored Public Suffix List (`crates/silksurf-core/data/public_suffix_list.dat`, MPL-2.0, ICANN + PRIVATE sections) and implements the publicsuffix.org algorithm: normal, wildcard (`*.ck`), and exception (`!www.ck`) rules, longest match wins, exception rules take priority, and a default `*` rule when nothing matches. U-label (Unicode) rules are normalized to Punycode via `idna` so IDN hosts match the A-label form `url::host_str` yields. This is the single entry point both site derivations call -- `silksurf_net::cookie::site_of_url` and `silksurf_engine::sandbox::Origin::site` -- so cookie partition keying and same-site classification agree. Result: `a.example.com` and `b.example.com` share the site `example.com`; `a.co.uk`/`b.co.uk` and `a.github.io`/`b.github.io` are distinct sites.
+
+### navigation_same_site_context / fetch_navigation
+**Type**: Top-level-navigation SameSite enforcement
+**Definition**: `silksurf_net::cookie::navigation_same_site_context(initiator_site, destination_site, safe_method)` classifies a top-level navigation's SameSite posture from the site that initiated it: `None` (browser-initiated -- address bar, bookmark, history, initial load) or a same-site initiator is `SameSite` (Strict rides); a cross-site initiator is `CrossSiteTopLevel` for a safe method (GET/HEAD -- Strict withheld, Lax and None ride) and `CrossSiteSubresource` for an unsafe method (POST etc. -- Lax withheld too, per RFC 6265bis). `silksurf_net::BasicClient::fetch_navigation(request, initiator_site)` computes this once from the request URL and method and applies it across the redirect chain, in contrast to the trait `fetch` which classifies as a subresource. The initiator is threaded from the app as `BrowserNavigationRequest.initiator_site`, set on page-initiated navigations from the current page URL. This closes the CSRF exposure where a cross-site link click sent the destination's Strict cookies (the top-level site equals the destination, so the subresource rule read it as same-site).
 
 ### Cleanroom Implementation
 **Type**: Development Methodology
@@ -51,7 +71,7 @@
 **Definition**: CSS visual layout model where each element is a rectangular box
 **Components**: content, padding, border, margin
 **SilkSurf Status**: Implementation pending (Task #25)
-**Formula**: `total_width = content + 2×(padding + border + margin)`
+**Formula**: `total_width = content + 2x(padding + border + margin)`
 
 ### Cascade
 **Type**: CSS Algorithm
@@ -76,9 +96,9 @@
 
 ### Rendering Pipeline
 **Type**: System Architecture
-**Definition**: HTML → Parse → DOM → Style → Layout → Paint → Display
+**Definition**: HTML -> Parse -> DOM -> Style -> Layout -> Paint -> Display
 **SilkSurf Stages**:
-1. HTML Parse (libhubbub → libdom)
+1. HTML Parse (libhubbub -> libdom)
 2. CSS Parse (libcss)
 3. Style Computation (cascade algorithm)
 4. Layout (box model, positioning)
@@ -122,7 +142,7 @@
 **Type**: Data Structure
 **Definition**: Tree representation of program structure
 **SilkSurf Usage**: JavaScript parser output
-**Phases**: Tokens → AST → Bytecode
+**Phases**: Tokens -> AST -> Bytecode
 **Status**: Planned (Rust implementation)
 
 ### Bytecode
@@ -162,7 +182,7 @@
 **Type**: Compiler Optimization
 **Definition**: Compiler uses runtime profiling data to optimize hot paths
 **SilkSurf Usage**: Optional build mode for 10-30% speedup
-**Process**: Build with instrumentation → Run workload → Rebuild with profile
+**Process**: Build with instrumentation -> Run workload -> Rebuild with profile
 **Reference**: `docs/development/BUILD.md`
 
 ### SIMD (Single Instruction, Multiple Data)
@@ -185,11 +205,9 @@
 ## Build Terms
 
 ### CMake
-**Type**: Build System
+**Type**: Build System (historical)
 **Definition**: Cross-platform build configuration tool
-**SilkSurf Usage**: C/C++ components, test targets
-**Files**: `CMakeLists.txt`
-**Commands**: `cmake -B build`, `cmake --build build`
+**SilkSurf Usage**: Built the legacy C harness, removed under AD-024; git history preserves `CMakeLists.txt`. The canonical build is the root `Makefile` wrapping Cargo.
 
 ### Cargo
 **Type**: Rust Build Tool
@@ -201,7 +219,7 @@
 ### FFI (Foreign Function Interface)
 **Type**: Interop Mechanism
 **Definition**: Calling functions across language boundaries
-**SilkSurf Usage**: C ↔ Rust for JavaScript engine integration
+**SilkSurf Usage**: C <-> Rust for JavaScript engine integration
 **Safety**: Type marshalling, validation at boundary
 **Status**: Incomplete (Task #33)
 
@@ -289,7 +307,7 @@
 **Definition**: Treat all warnings as errors
 **SilkSurf Policy**: Enabled by default (enforces 0 warnings)
 **Purpose**: Prevent drift, catch issues early
-**Status**: ✓ All code compiles with -Werror
+**Status**: [x] All code compiles with -Werror
 
 ---
 
@@ -299,34 +317,34 @@
 **Type**: C Library
 **Origin**: NetSurf Project
 **Purpose**: CSS parsing, selector matching, cascade algorithm
-**SilkSurf Integration**: ✓ Complete (handler callbacks implemented)
+**SilkSurf Integration**: [x] Complete (handler callbacks implemented)
 **Features**: Full CSS 2.1, partial CSS3
 
 ### libdom
 **Type**: C Library
 **Origin**: NetSurf Project
 **Purpose**: DOM tree construction, manipulation, traversal
-**SilkSurf Integration**: ✓ Complete
+**SilkSurf Integration**: [x] Complete
 **API**: W3C DOM Core Level 3 compatible
 
 ### libhubbub
 **Type**: C Library
 **Origin**: NetSurf Project
 **Purpose**: HTML5 tokenization and parsing
-**SilkSurf Integration**: ✓ Complete
+**SilkSurf Integration**: [x] Complete
 **Compliance**: HTML5 tokenizer specification
 
 ### libparserutils
 **Type**: C Library
 **Origin**: NetSurf Project
 **Purpose**: Common parsing utilities (character encoding, input streams)
-**SilkSurf Integration**: ✓ Dependency of libhubbub/libdom
+**SilkSurf Integration**: [x] Dependency of libhubbub/libdom
 
 ### libpixman
 **Type**: C Library
 **Origin**: Cairo/X.org
 **Purpose**: Low-level pixel manipulation
-**SilkSurf Integration**: ✓ Used for alpha blending
+**SilkSurf Integration**: [x] Used for alpha blending
 **Features**: Porter-Duff compositing, antialiasing
 
 ---
@@ -614,6 +632,10 @@ files and the relevant ADRs.
 **Type**: Unicode text function
 **Definition**: Returns the set of Unicode line-break opportunity positions in a text run according to UAX #14. Used by the inline layout engine to determine where to wrap text.
 
+### unresolved_font_relative_px
+**Type**: Layout invariant funnel function
+**Definition**: The single boundary every em/rem match arm in silksurf-layout routes through when a font-relative length survives past the cascade (which resolves em/rem to px before layout). Fails loudly via `debug_assert!` in debug and test builds so the gate catches cascade regressions; degrades to a deterministic 0 px in release builds so a regressed page still paints instead of aborting the frame.
+
 ### materialize_resolve_table
 **Type**: DOM phase-boundary function
 **Definition**: Snapshots the `SilkInterner` into the lock-free monotonic resolve table (`Vec<SmallString>`). Must be called after every `into_dom()` and every `end_mutation_batch()`. Without it, `resolve_fast` panics. See silksurf-dom OPERATIONS.md.
@@ -811,5 +833,5 @@ files and the relevant ADRs.
 - `/docs/design/UNSAFE-CONTRACTS.md` - Unsafe-block index
 - `/docs/design/ARCHITECTURE-DECISIONS.md` - ADRs (incl. AD-008 stable Rust, AD-009 local-only CI, AD-010 XCB-only GUI)
 - `/docs/PERFORMANCE.md` - Bench reproducibility and steady-state results
-- `/docs/roadmaps/PHASE-3-IMPLEMENTATION-ROADMAP.md` - Current milestones
+- `/docs/roadmaps/DEBT-RECONCILIATION-ROADMAP.md` - Current reconciliation plan
 - `/silksurf-specification/` - Technical specifications
