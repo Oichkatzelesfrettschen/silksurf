@@ -3,6 +3,18 @@
 SilkSurf is a cleanroom implementation. Reference repositories are used only to
 distill behaviors into specs and tests; no code is copied.
 
+## Boundary enforcement
+
+The `diff-analysis/` reference-analysis tree and the production/spec trees are
+separated by a one-directional boundary: production and the specification study
+reference material but never depend on it. `scripts/lint_cleanroom.sh` (run by
+`make check`) gates this in two rules: (1) no production Rust source
+(`crates/*/src`, `silksurf-js/src`) or Cargo manifest may name `diff-analysis`
+at all; (2) no file under `silksurf-specification/` may point at a specific file
+inside `diff-analysis` (a bare `../diff-analysis/` directory mention that
+describes the boundary is allowed). Both hold today; the gate keeps the boundary
+from silently eroding.
+
 ## Reference Sources (Local Checkouts)
 - `silksurf-extras/Amaya-Editor`: layout/editor UI ideas and rendering behavior.
 - `silksurf-extras/boa`: JS engine architecture patterns.

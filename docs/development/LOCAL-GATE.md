@@ -33,6 +33,9 @@ FUZZ=1 scripts/local_gate.sh full   # add fuzz smoke (30s/target * 5 targets)
 | `cargo clippy --workspace --all-targets -- -D clippy::{correctness,suspicious,perf,complexity}` | Catch bugs and obvious slop |
 | `scripts/lint_unwrap.sh` (when present)                        | Every `unwrap`/`expect` site must be annotated `// UNWRAP-OK: <invariant>` (see ADR for error policy) |
 | `scripts/lint_unsafe.sh` (when present)                        | Every `unsafe { ... }` block must be preceded within 5 lines by `// SAFETY:` (see `docs/design/UNSAFE-CONTRACTS.md`) |
+| `scripts/lint_glossary.sh` (when present)                      | Every crate-root public domain term is defined in `docs/reference/GLOSSARY.md` |
+| `scripts/lint_doc_links.sh` (when present)                     | Relative markdown links in live docs resolve |
+| `scripts/lint_cleanroom.sh` (when present)                     | Production and `silksurf-specification/` do not depend on `diff-analysis/` (see `docs/CLEANROOM.md`) |
 
 Target wall time: under 30s on a warm `target/` cache.
 
@@ -47,7 +50,6 @@ Target wall time: under 30s on a warm `target/` cache.
 | `cargo doc --workspace --no-deps --document-private-items`     | Catches missing/broken doc links and rustdoc warnings |
 | (opt-in `MIRI=1`) `cargo +nightly miri test -p silksurf-core -p silksurf-css --lib` | UB and aliasing-rule check on the unsafe-heavy crates |
 | (opt-in `FUZZ=1`) 30s/target on each of the 5 fuzz targets    | Cheap regression check that fuzzers still build and run |
-| `cmake -B build && cmake --build build && ctest --test-dir build` | Legacy C/C++ harness (see ADR-007 for deprecation tracking) |
 
 ## Pre-flight requirements
 
@@ -81,12 +83,13 @@ Bumping the MSRV is a two-line change:
 
 The two-line change should land in its own commit with an ADR amendment.
 
-## Why the C/C++ build still runs
+## Status of the legacy C/C++ harness
 
-ADR-007 catalogues the legacy C/AFL++ harness under `src/`, `include/`,
-`silksurf-extras/`, and `CMakeLists.txt`. Until the deprecate-or-integrate
-decision lands, the local-gate keeps it green so accidental drift is caught
-immediately.
+AD-024 retired the legacy C harness (`src/`, `include/`, `tests/`,
+`CMakeLists.txt`, AFL seed trees); the removal is complete and git
+history preserves the sources. The gate never built it.
+`docs/LEGACY_C_PORTING.md` records the C module -> Rust crate mapping
+that replaces it.
 
 ## Why miri and fuzz are opt-in
 
