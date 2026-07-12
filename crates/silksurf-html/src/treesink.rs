@@ -16,10 +16,12 @@ use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use html5ever::parse_document;
 use html5ever::tendril::{StrTendril, TendrilSink};
 use html5ever::tree_builder::{ElementFlags, NodeOrText, QuirksMode, TreeSink};
-use html5ever::{Attribute as Html5Attr, ExpandedName, ParseOpts, QualName};
+use html5ever::{
+    Attribute as Html5Attr, ExpandedName, LocalName, ParseOpts, QualName, ns, parse_document,
+    parse_fragment,
+};
 
 use silksurf_dom::{Dom, Namespace, NodeId};
 
@@ -284,6 +286,46 @@ pub fn parse_html(input: &str) -> Dom {
     parse_document(sink, ParseOpts::default()).one(input)
 }
 
+/// Parse `html` as a fragment in the context of a `context_tag` element and
+/// splice the resulting nodes under `parent` in the live `dom`.
+///
+/// The fragment runs through html5ever's fragment tree-construction mode with
+/// the context element's tag, so context-sensitive content parses the way the
+/// HTML standard requires (`<tr>` inside a table context, `<li>` inside a
+/// list). html5ever appends the parsed nodes under a synthetic root element in
+/// a scratch `Dom`; `Dom::import_subtree` then re-creates each node in the
+/// destination tree, which marks dirty nodes for incremental repaint.
+/// Scripts inside the fragment are NOT executed (fragment parsing is inert,
+/// matching innerHTML semantics).
+pub fn parse_fragment_into(dom: &mut Dom, parent: NodeId, context_tag: &str, html: &str) {
+    let sink = SilkDomBuilder::new();
+    let context_name = QualName::new(
+        None,
+        ns!(html),
+        LocalName::from(context_tag.to_ascii_lowercase()),
+    );
+    let scratch: Dom =
+        parse_fragment(sink, ParseOpts::default(), context_name, Vec::new(), false).one(html);
+    // Fragment output shape: document root -> synthetic root element -> nodes.
+    let scratch_root = NodeId::from_raw(0);
+    let Some(container) = scratch
+        .children(scratch_root)
+        .ok()
+        .and_then(|children| children.first().copied())
+    else {
+        return;
+    };
+    let Ok(children) = scratch.children(container) else {
+        return;
+    };
+    let owned: Vec<NodeId> = children.to_vec();
+    for child in owned {
+        // Import failures (unknown nodes) cannot occur for freshly parsed
+        // fragment output; a failed child import skips that child only.
+        let _ = dom.import_subtree(&scratch, child, parent);
+    }
+}
+
 // ---- tests ------------------------------------------------------------------
 
 #[cfg(test)]
@@ -297,6 +339,65 @@ mod tests {
             .iter()
             .copied()
             .find(|&child| dom.element_name(child).ok().flatten().is_some())
+    }
+
+    #[test]
+    fn fragment_parse_splices_nodes_under_parent() {
+        let mut dom = Dom::new();
+        let root = dom.create_document();
+        let host = dom.create_element("div");
+        let _ = dom.append_child(root, host);
+        let _ = dom.take_dirty_nodes();
+
+        parse_fragment_into(&mut dom, host, "div", "<b class=\"x\">bold</b> tail");
+
+        let children = dom.children(host).unwrap().to_vec();
+        assert_eq!(children.len(), 2);
+        assert_eq!(dom.element_name(children[0]).unwrap(), Some("b"));
+        let attrs = dom.attributes(children[0]).unwrap();
+        assert!(
+            attrs
+                .iter()
+                .any(|a| a.name.as_str() == "class" && a.value.as_str() == "x")
+        );
+        assert!(matches!(
+            dom.node(children[1]).unwrap().kind(),
+            NodeKind::Text { text } if text == " tail"
+        ));
+        assert!(!dom.take_dirty_nodes().is_empty(), "import must mark dirty");
+    }
+
+    #[test]
+    fn fragment_parse_honors_table_context() {
+        let mut dom = Dom::new();
+        let root = dom.create_document();
+        let row = dom.create_element("tr");
+        let _ = dom.append_child(root, row);
+
+        parse_fragment_into(&mut dom, row, "tr", "<td>cell</td>");
+
+        let children = dom.children(row).unwrap().to_vec();
+        assert_eq!(children.len(), 1);
+        assert_eq!(dom.element_name(children[0]).unwrap(), Some("td"));
+    }
+
+    #[test]
+    fn fragment_parse_keeps_script_content_inert() {
+        let mut dom = Dom::new();
+        let root = dom.create_document();
+        let host = dom.create_element("div");
+        let _ = dom.append_child(root, host);
+
+        parse_fragment_into(
+            &mut dom,
+            host,
+            "div",
+            "<script>window.x = 1;</script><p>ok</p>",
+        );
+
+        let children = dom.children(host).unwrap().to_vec();
+        assert_eq!(children.len(), 2);
+        assert_eq!(dom.element_name(children[0]).unwrap(), Some("script"));
     }
 
     #[test]
