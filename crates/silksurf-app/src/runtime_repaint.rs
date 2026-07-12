@@ -8,14 +8,27 @@ pub(crate) fn drain_initial_host_callbacks(js_ctx: &mut SilkContext) {
         return;
     }
 
-    match js_ctx.run_host_callbacks(64) {
-        Ok(count) if count > 0 => {
-            eprintln!("[SilkSurf] Initial host callbacks: {count}");
+    // Initial-script fetches complete on worker threads; one-shot embedders
+    // (headless render, first paint) pump briefly so those promises settle
+    // before the page is declared built. Timers do NOT extend this window --
+    // only in-flight network holds it open, bounded at 2 seconds.
+    let settle_deadline = std::time::Instant::now() + std::time::Duration::from_millis(2000);
+    let mut total = 0_usize;
+    loop {
+        match js_ctx.run_host_callbacks(64) {
+            Ok(count) => total += count,
+            Err(err) => {
+                eprintln!("[SilkSurf] Initial host callback error: {err}");
+                return;
+            }
         }
-        Ok(_) => {}
-        Err(err) => {
-            eprintln!("[SilkSurf] Initial host callback error: {err}");
+        if js_ctx.inflight_network_requests() == 0 || std::time::Instant::now() >= settle_deadline {
+            break;
         }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    if total > 0 {
+        eprintln!("[SilkSurf] Initial host callbacks: {total}");
     }
 }
 
@@ -34,12 +47,44 @@ pub(crate) fn tick_browser_runtime(state: &mut BrowserState) -> bool {
             return true;
         }
     };
+
+    // Same-document navigations from history.pushState/replaceState: record
+    // them in session history and reflect the address bar, no reload.
+    let intents = runtime.js_ctx.take_history_intents();
+    let mut chrome_changed = false;
+    for intent in intents {
+        let resolved = url::Url::parse(&state.frame.url)
+            .ok()
+            .and_then(|base| base.join(&intent.url).ok())
+            .map_or_else(|| intent.url.clone(), |joined| joined.to_string());
+        if intent.replace {
+            if let Some(entry) = state.history.get_mut(state.history_index) {
+                entry.clone_from(&resolved);
+            }
+        } else {
+            state.history.truncate(state.history_index + 1);
+            state.history.push(resolved.clone());
+            state.history_index = state.history.len() - 1;
+        }
+        state.frame.url.clone_from(&resolved);
+        state.address_text = resolved;
+        chrome_changed = true;
+    }
+
+    // localStorage writeback: flush dirtied entries to the origin store.
+    if let Some(entries) = runtime.js_ctx.take_local_storage_if_dirty() {
+        crate::profile::flush_local_storage(&state.frame.url, &entries);
+    }
+
     state.runtime = Some(runtime);
+    if chrome_changed {
+        mark_redraw(state, BrowserRedrawMode::AddressChrome);
+    }
     if let Some(redraw_mode) = redraw_mode {
         mark_redraw(state, redraw_mode);
         return true;
     }
-    false
+    chrome_changed
 }
 
 pub(crate) fn repaint_runtime_host_callbacks(

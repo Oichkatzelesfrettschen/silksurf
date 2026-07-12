@@ -233,6 +233,33 @@ pub(crate) fn handle_browser_primary_click(
         return focus_address_input(runtime);
     }
     let mut redraw_requested = blur_address_input(runtime);
+
+    // JS listeners see the click first (mousedown -> mouseup -> click through
+    // the capture/bubble tree); preventDefault() on click suppresses the
+    // native default action below (input focus, link follow).
+    let click_dispatch = {
+        let mut state = runtime.state.borrow_mut();
+        let outcome = crate::js_events::with_page_runtime(&mut state, |page, frame| {
+            crate::js_events::dispatch_native_click(
+                page,
+                frame,
+                x,
+                y,
+                current_scroll,
+                runtime.chrome_height,
+            )
+        })
+        .unwrap_or_default();
+        if let Some(mode) = outcome.redraw {
+            mark_redraw(&mut state, mode);
+        }
+        outcome
+    };
+    redraw_requested |= click_dispatch.redraw.is_some();
+    if click_dispatch.default_prevented {
+        return true;
+    }
+
     if let Some(input_node) = hit_test_page_input(runtime, x, y, current_scroll) {
         let mut state = runtime.state.borrow_mut();
         if activate_page_input_control(&mut state, input_node) {
@@ -360,6 +387,31 @@ pub(crate) fn handle_text_input(runtime: &BrowserInputRuntime<'_>, ch: char) -> 
         mark_address_edit_redraw(&mut state, full_address_damage);
         return true;
     }
+    if let Some(focused) = state.focused_input {
+        // JS-first: keydown may consume the keystroke before the edit lands.
+        let key = ch.to_string();
+        let keydown = crate::js_events::with_page_runtime(&mut state, |page, frame| {
+            crate::js_events::dispatch_native_keydown(page, frame, focused, &key)
+        })
+        .unwrap_or_default();
+        if let Some(mode) = keydown.redraw {
+            mark_redraw(&mut state, mode);
+        }
+        if keydown.default_prevented {
+            return true;
+        }
+        let edited = push_focused_input_char(&mut state, ch);
+        if edited {
+            let post = crate::js_events::with_page_runtime(&mut state, |page, frame| {
+                crate::js_events::dispatch_native_post_edit(page, frame, focused, &key)
+            })
+            .unwrap_or_default();
+            if let Some(mode) = post.redraw {
+                mark_redraw(&mut state, mode);
+            }
+        }
+        return edited || keydown.redraw.is_some();
+    }
     push_focused_input_char(&mut state, ch)
 }
 
@@ -391,6 +443,30 @@ pub(crate) fn submit_address_input(runtime: &BrowserInputRuntime<'_>) -> bool {
 }
 
 pub(crate) fn submit_focused_form(runtime: &BrowserInputRuntime<'_>) -> bool {
+    // JS listeners see submit first; preventDefault() cancels the navigation.
+    {
+        let mut state = runtime.state.borrow_mut();
+        let form_node = state.focused_input.and_then(|focused| {
+            let page = state.runtime.as_ref()?;
+            let dom = page
+                .dom
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            nearest_form_node(&dom, focused)
+        });
+        if let Some(form) = form_node {
+            let submit = crate::js_events::with_page_runtime(&mut state, |page, frame| {
+                crate::js_events::dispatch_native_submit(page, frame, form)
+            })
+            .unwrap_or_default();
+            if let Some(mode) = submit.redraw {
+                mark_redraw(&mut state, mode);
+            }
+            if submit.default_prevented {
+                return true;
+            }
+        }
+    }
     // A form submission is page-initiated: the submitting page is the SameSite
     // initiator for both GET and POST targets.
     let (target, initiator) = {
@@ -481,7 +557,31 @@ pub(crate) fn handle_backspace_input(runtime: &BrowserInputRuntime<'_>) -> bool 
         mark_address_edit_redraw(&mut state, true);
         return true;
     }
-    if edit_focused_input_backspace(&mut state) {
+    if let Some(focused) = state.focused_input {
+        let keydown = crate::js_events::with_page_runtime(&mut state, |page, frame| {
+            crate::js_events::dispatch_native_keydown(page, frame, focused, "Backspace")
+        })
+        .unwrap_or_default();
+        if let Some(mode) = keydown.redraw {
+            mark_redraw(&mut state, mode);
+        }
+        if keydown.default_prevented {
+            return true;
+        }
+        if edit_focused_input_backspace(&mut state) {
+            let post = crate::js_events::with_page_runtime(&mut state, |page, frame| {
+                crate::js_events::dispatch_native_post_edit(page, frame, focused, "Backspace")
+            })
+            .unwrap_or_default();
+            if let Some(mode) = post.redraw {
+                mark_redraw(&mut state, mode);
+            }
+            return true;
+        }
+        if keydown.redraw.is_some() {
+            return true;
+        }
+    } else if edit_focused_input_backspace(&mut state) {
         return true;
     }
     drop(state);
