@@ -275,6 +275,9 @@ pub(crate) fn build_browser_page_with_buffers_for_height(
         &payload.render_config.top_level_site,
         &cookie_host,
     );
+    js_ctx.preload_local_storage(crate::profile::load_local_storage(&payload.url));
+    js_ctx.set_viewport(viewport.width, viewport.height);
+    install_computed_style_provider(&mut js_ctx, &dom_arc, &stylesheet);
     {
         let mut dom = dom_arc
             .lock()
@@ -629,6 +632,64 @@ pub(crate) fn execute_static_module_scripts(
         }
     }
     js_ctx.run_pending_jobs();
+}
+
+/// Install the computed-style provider for `getComputedStyle`.
+///
+/// The provider computes the node's style fresh on every query (Dom +
+/// stylesheet captured by the closure), so `element.style` writes made
+/// earlier in the same script are already visible. Supported properties:
+/// display, color, background-color, width, height, font-size, position,
+/// opacity; anything else returns None (serialized as the empty string).
+pub(crate) fn install_computed_style_provider(
+    js_ctx: &mut SilkContext,
+    dom_arc: &Arc<Mutex<silksurf_dom::Dom>>,
+    stylesheet: &silksurf_css::Stylesheet,
+) {
+    let dom_arc = Arc::clone(dom_arc);
+    let stylesheet = stylesheet.clone();
+    js_ctx.set_computed_style_provider(std::rc::Rc::new(move |node, property| {
+        let dom = dom_arc
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let style = silksurf_css::compute_style_for_node(&dom, node, &stylesheet, None);
+        serialize_computed_property(&style, property)
+    }));
+}
+
+fn serialize_color(color: silksurf_css::Color) -> String {
+    format!("rgb({}, {}, {})", color.r, color.g, color.b)
+}
+
+fn serialize_length(length: silksurf_css::Length) -> String {
+    match length {
+        silksurf_css::Length::Px(px) => format!("{px}px"),
+        other => format!("{other:?}"),
+    }
+}
+
+fn serialize_length_or_auto(value: silksurf_css::LengthOrAuto) -> String {
+    match value {
+        silksurf_css::LengthOrAuto::Auto => "auto".to_string(),
+        silksurf_css::LengthOrAuto::Length(length) => serialize_length(length),
+    }
+}
+
+fn serialize_computed_property(
+    style: &silksurf_css::ComputedStyle,
+    property: &str,
+) -> Option<String> {
+    match property {
+        "display" => Some(format!("{:?}", style.display).to_ascii_lowercase()),
+        "color" => Some(serialize_color(style.color)),
+        "background-color" => Some(serialize_color(style.background_color)),
+        "width" => Some(serialize_length_or_auto(style.width)),
+        "height" => Some(serialize_length_or_auto(style.height)),
+        "font-size" => Some(serialize_length(style.font_size)),
+        "position" => Some(format!("{:?}", style.position).to_ascii_lowercase()),
+        "opacity" => Some(format!("{}", style.opacity)),
+        _ => None,
+    }
 }
 
 pub(crate) fn take_dom_dirty_nodes(

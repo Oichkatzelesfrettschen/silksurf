@@ -17,6 +17,7 @@ silksurf-gui = { path = "../silksurf-gui", default-features = false, features = 
 silksurf-js = { path = "../../silksurf-js" }
 silksurf-core = { path = "../silksurf-core" }
 url = { workspace = true }
+serde_json = { workspace = true }
 arboard = { workspace = true }
 mimalloc = { workspace = true }
 quick_cache = { workspace = true }
