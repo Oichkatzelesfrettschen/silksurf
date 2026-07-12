@@ -1076,7 +1076,9 @@ pub(super) fn install_document(
             }
         })();
     ";
-    if let Err(err) = ctx.eval(boa_engine::Source::from_bytes(interface_bootstrap.as_bytes())) {
+    if let Err(err) = ctx.eval(boa_engine::Source::from_bytes(
+        interface_bootstrap.as_bytes(),
+    )) {
         eprintln!("silksurf-js: DOM interface bootstrap failed: {err}");
     }
     let methods = document_methods(dom_arc, root);
