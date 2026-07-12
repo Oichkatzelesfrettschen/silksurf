@@ -49,4 +49,7 @@ pub mod tracing_support;
 pub mod boa_backend;
 
 // Re-export the crate-level entry point.
-pub use boa_backend::{AsyncCompletion, SilkContext};
+pub use boa_backend::{
+    AsyncCompletion, ComputedStyleProvider, DispatchOutcome, HistoryIntent, SilkContext,
+    SyntheticEvent, SyntheticField,
+};

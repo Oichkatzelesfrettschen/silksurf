@@ -37,7 +37,10 @@ use boa_engine::{
 };
 use boa_runtime::Console;
 
+mod css_object;
 mod dom_bridge;
+mod event_dispatch;
+mod net_queue;
 
 const HOST_CALLBACKS_REGISTRY: &str = "__silksurfHostCallbacks";
 const DEFAULT_HOST_CALLBACK_BUDGET: usize = 256;
@@ -238,9 +241,14 @@ impl HostScheduler {
 type StorageMap = Rc<RefCell<HashMap<String, String>>>;
 type CookieJar = Arc<Mutex<silksurf_net::cookie::PartitionedCookieStore>>;
 
-fn install_storage_objects(ctx: &mut Context) {
-    let local_storage = storage_object(ctx);
-    let session_storage = storage_object(ctx);
+type StorageDirtyFlag = Rc<std::cell::Cell<bool>>;
+
+/// Install localStorage/sessionStorage; returns the localStorage map and its
+/// dirty flag so the embedder can preload persisted entries and flush writes.
+fn install_storage_objects(ctx: &mut Context) -> (StorageMap, StorageDirtyFlag) {
+    let dirty = Rc::new(std::cell::Cell::new(false));
+    let (local_storage, local_map) = storage_object(ctx, Some(&dirty));
+    let (session_storage, _session_map) = storage_object(ctx, None);
     ctx.register_global_property(js_string!("localStorage"), local_storage, Attribute::all())
         // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
 
@@ -253,14 +261,15 @@ fn install_storage_objects(ctx: &mut Context) {
     // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
 
     .expect("sessionStorage: install on fresh context cannot fail");
+    (local_map, dirty)
 }
 
-fn storage_object(ctx: &mut Context) -> JsObject {
+fn storage_object(ctx: &mut Context, dirty: Option<&StorageDirtyFlag>) -> (JsObject, StorageMap) {
     let storage = Rc::new(RefCell::new(HashMap::new()));
     let length_getter =
         FunctionObjectBuilder::new(ctx.realm(), storage_length_native(&storage)).build();
 
-    ObjectInitializer::new(ctx)
+    let object = ObjectInitializer::new(ctx)
         .accessor(
             js_string!("length"),
             Some(length_getter),
@@ -268,15 +277,24 @@ fn storage_object(ctx: &mut Context) -> JsObject {
             Attribute::CONFIGURABLE | Attribute::ENUMERABLE,
         )
         .function(storage_get_item_native(&storage), js_string!("getItem"), 1)
-        .function(storage_set_item_native(&storage), js_string!("setItem"), 2)
         .function(
-            storage_remove_item_native(&storage),
+            storage_set_item_native(&storage, dirty),
+            js_string!("setItem"),
+            2,
+        )
+        .function(
+            storage_remove_item_native(&storage, dirty),
             js_string!("removeItem"),
             1,
         )
-        .function(storage_clear_native(&storage), js_string!("clear"), 0)
+        .function(
+            storage_clear_native(&storage, dirty),
+            js_string!("clear"),
+            0,
+        )
         .function(storage_key_native(&storage), js_string!("key"), 1)
-        .build()
+        .build();
+    (object, storage)
 }
 
 fn storage_string_arg(arg: Option<&JsValue>, ctx: &mut Context) -> boa_engine::JsResult<String> {
@@ -314,8 +332,12 @@ fn storage_get_item_native(storage: &StorageMap) -> NativeFunction {
     }
 }
 
-fn storage_set_item_native(storage: &StorageMap) -> NativeFunction {
+fn storage_set_item_native(
+    storage: &StorageMap,
+    dirty: Option<&StorageDirtyFlag>,
+) -> NativeFunction {
     let storage = Rc::clone(storage);
+    let dirty = dirty.map(Rc::clone);
     // SAFETY: Boa stores the native closure with owned Rust captures for the JS function lifetime.
 
     unsafe {
@@ -323,31 +345,45 @@ fn storage_set_item_native(storage: &StorageMap) -> NativeFunction {
             let key = storage_string_arg(args.first(), ctx)?;
             let value = storage_string_arg(args.get(1), ctx)?;
             storage.borrow_mut().insert(key, value);
+            if let Some(flag) = &dirty {
+                flag.set(true);
+            }
             Ok(JsValue::undefined())
         })
     }
 }
 
-fn storage_remove_item_native(storage: &StorageMap) -> NativeFunction {
+fn storage_remove_item_native(
+    storage: &StorageMap,
+    dirty: Option<&StorageDirtyFlag>,
+) -> NativeFunction {
     let storage = Rc::clone(storage);
+    let dirty = dirty.map(Rc::clone);
     // SAFETY: Boa stores the native closure with owned Rust captures for the JS function lifetime.
 
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let key = storage_string_arg(args.first(), ctx)?;
             storage.borrow_mut().remove(&key);
+            if let Some(flag) = &dirty {
+                flag.set(true);
+            }
             Ok(JsValue::undefined())
         })
     }
 }
 
-fn storage_clear_native(storage: &StorageMap) -> NativeFunction {
+fn storage_clear_native(storage: &StorageMap, dirty: Option<&StorageDirtyFlag>) -> NativeFunction {
     let storage = Rc::clone(storage);
+    let dirty = dirty.map(Rc::clone);
     // SAFETY: Boa stores the native closure with owned Rust captures for the JS function lifetime.
 
     unsafe {
         NativeFunction::from_closure(move |_this, _args, _ctx| {
             storage.borrow_mut().clear();
+            if let Some(flag) = &dirty {
+                flag.set(true);
+            }
             Ok(JsValue::undefined())
         })
     }
@@ -795,6 +831,71 @@ pub struct SilkContext {
     scheduler: HostSchedulerRef,
     async_done: AsyncDoneRef,
     start_time: Instant,
+    /// Live document handle; present only for contexts built with a DOM
+    /// bridge (`with_dom` / `with_dom_and_cookies`). Event dispatch needs it
+    /// for ancestor-path snapshots.
+    dom: Option<Arc<Mutex<silksurf_dom::Dom>>>,
+    /// Network completion queue: fetch worker threads report here and
+    /// `run_host_callbacks` settles the parked promises.
+    net: net_queue::NetQueue,
+    /// Live WebSocket sessions; `run_host_callbacks` pumps their incoming
+    /// frames into on{open,message,error,close} handlers.
+    ws_sessions: WsSessionsRef,
+    /// Live `EventSource` subscriptions, pumped the same way.
+    sse_subscriptions: SseSubscriptionsRef,
+    /// Same-document navigations queued by history.pushState/replaceState.
+    history_intents: HistoryIntentsRef,
+    /// localStorage backing map; the embedder preloads persisted entries
+    /// and flushes writes signaled by `storage_dirty`.
+    local_storage: StorageMap,
+    storage_dirty: StorageDirtyFlag,
+    /// Viewport dimensions backing matchMedia (and future viewport units).
+    viewport: ViewportRef,
+}
+
+/// Extra payload field on a synthetic event object.
+#[derive(Debug, Clone)]
+pub enum SyntheticField {
+    Number(f64),
+    Text(String),
+    Flag(bool),
+}
+
+/// A host-synthesized DOM event (a real user click or keystroke, as opposed
+/// to a script-created `dispatchEvent` argument). Dispatched events carry
+/// `isTrusted: true`.
+#[derive(Debug, Clone)]
+pub struct SyntheticEvent {
+    pub event_type: String,
+    pub bubbles: bool,
+    pub cancelable: bool,
+    pub fields: Vec<(String, SyntheticField)>,
+}
+
+impl SyntheticEvent {
+    #[must_use]
+    pub fn new(event_type: &str, bubbles: bool, cancelable: bool) -> Self {
+        Self {
+            event_type: event_type.to_string(),
+            bubbles,
+            cancelable,
+            fields: Vec::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_field(mut self, name: &str, value: SyntheticField) -> Self {
+        self.fields.push((name.to_string(), value));
+        self
+    }
+}
+
+/// Result of dispatching a synthetic event through the listener tree.
+#[derive(Debug, Clone, Copy)]
+pub struct DispatchOutcome {
+    /// True when a listener called `preventDefault()` on a cancelable event;
+    /// the embedder must then suppress the native default action.
+    pub default_prevented: bool,
 }
 
 impl Default for SilkContext {
@@ -830,37 +931,14 @@ impl SilkContext {
             .expect("console: install on fresh context cannot fail");
 
         // -- fetch() ----------------------------------------------------------
-        // Synchronous execution: the HTTP request blocks the calling thread.
-        // The returned JsPromise is pre-resolved (or pre-rejected), so .then()
-        // chains and await both work correctly without an async event loop.
-        ctx.register_global_callable(
-            js_string!("fetch"),
-            1,
-            NativeFunction::from_fn_ptr(|_this, args, ctx| {
-                let Some(input) = args.first() else {
-                    let err = JsNativeError::typ()
-                        .with_message("fetch: URL argument is required");
-                    return Ok(JsValue::from(JsPromise::from_result::<
-                        JsValue,
-                        JsNativeError,
-                    >(Err(err), ctx)));
-                };
-                if fetch_signal_is_aborted(args, ctx)? {
-                    let err = JsNativeError::error().with_message("fetch: signal is aborted");
-                    return Ok(JsValue::from(JsPromise::from_result::<
-                        JsValue,
-                        JsNativeError,
-                    >(Err(err), ctx)));
-                }
-                let url = fetch_input_url(input, ctx)?;
-                Ok(JsValue::from(fetch_sync(url.as_str(), ctx)))
-            }),
-        )
-        // UNWRAP-OK: fresh Context cannot already have "fetch" defined.
-        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
-
-        .expect("fetch: install on fresh context cannot fail");
-        install_websocket(&mut ctx);
+        // Asynchronous execution: the request runs on a worker thread and the
+        // promise settles when run_host_callbacks drains the completion queue.
+        let net = net_queue::NetQueue::new();
+        install_async_fetch(&mut ctx, &net.shared);
+        let ws_sessions: WsSessionsRef = Rc::new(RefCell::new(Vec::new()));
+        install_websocket(&mut ctx, &ws_sessions);
+        let sse_subscriptions: SseSubscriptionsRef = Rc::new(RefCell::new(Vec::new()));
+        install_event_source(&mut ctx, &sse_subscriptions);
         install_stream_constructors(&mut ctx);
         install_crypto(&mut ctx);
         install_abort_api(&mut ctx);
@@ -976,6 +1054,56 @@ impl SilkContext {
 
             .expect("location: install on fresh context cannot fail");
 
+        // -- queueMicrotask / matchMedia / history ------------------------------
+        let history_intents: HistoryIntentsRef = Rc::new(RefCell::new(Vec::new()));
+        let viewport = Rc::new(std::cell::Cell::new((1280.0_f32, 720.0_f32)));
+        install_match_media_native(&mut ctx, &viewport);
+        install_history_intent_native(&mut ctx, &history_intents);
+        let bootstrap = r"
+            globalThis.queueMicrotask = function (cb) {
+                Promise.resolve().then(function () { cb(); });
+            };
+            globalThis.matchMedia = function (query) {
+                query = String(query);
+                return {
+                    media: query,
+                    matches: __silksurfMatchMedia(query),
+                    onchange: null,
+                    addEventListener: function () {},
+                    removeEventListener: function () {},
+                    addListener: function () {},
+                    removeListener: function () {}
+                };
+            };
+            globalThis.history = {
+                state: null,
+                length: 1,
+                pushState: function (state, _title, url) {
+                    this.state = state;
+                    this.length += 1;
+                    if (url !== undefined && url !== null) {
+                        location.href = String(url);
+                    }
+                    __silksurfHistoryIntent(false, url === undefined || url === null ? '' : String(url),
+                        state === undefined ? 'null' : JSON.stringify(state) || 'null');
+                },
+                replaceState: function (state, _title, url) {
+                    this.state = state;
+                    if (url !== undefined && url !== null) {
+                        location.href = String(url);
+                    }
+                    __silksurfHistoryIntent(true, url === undefined || url === null ? '' : String(url),
+                        state === undefined ? 'null' : JSON.stringify(state) || 'null');
+                },
+                back: function () {},
+                forward: function () {},
+                go: function () {}
+            };
+        ";
+        ctx.eval(Source::from_bytes(bootstrap.as_bytes()))
+            // UNWRAP-OK: the bootstrap script is a compile-time constant that parses.
+            .expect("host bootstrap script evaluates");
+
         // -- navigator stub --------------------------------------------------
         // Minimal subset for feature-detection: userAgent, platform, language,
         // onLine (true), cookieEnabled (true).
@@ -1027,7 +1155,7 @@ impl SilkContext {
 
             .expect("performance: install on fresh context cannot fail");
 
-        install_storage_objects(&mut ctx);
+        let (local_storage, storage_dirty) = install_storage_objects(&mut ctx);
         let async_done = Rc::new(RefCell::new(AsyncDoneCell::default()));
         install_async_done(&mut ctx, &async_done);
 
@@ -1037,6 +1165,92 @@ impl SilkContext {
             scheduler,
             async_done,
             start_time: Instant::now(),
+            dom: None,
+            net,
+            ws_sessions,
+            sse_subscriptions,
+            history_intents,
+            viewport,
+            local_storage,
+            storage_dirty,
+        }
+    }
+
+    /// Seed localStorage with persisted entries (before page scripts run).
+    pub fn preload_local_storage(&mut self, entries: HashMap<String, String>) {
+        self.local_storage.borrow_mut().extend(entries);
+        self.storage_dirty.set(false);
+    }
+
+    /// Snapshot localStorage when a write happened since the last take.
+    pub fn take_local_storage_if_dirty(&mut self) -> Option<HashMap<String, String>> {
+        if !self.storage_dirty.get() {
+            return None;
+        }
+        self.storage_dirty.set(false);
+        Some(self.local_storage.borrow().clone())
+    }
+
+    /// Update the viewport dimensions matchMedia evaluates against.
+    /// The embedder calls this on window resize.
+    pub fn set_viewport(&mut self, width: f32, height: f32) {
+        self.viewport.set((width, height));
+    }
+
+    /// Drain the same-document navigations queued by history.pushState and
+    /// replaceState since the last call.
+    pub fn take_history_intents(&mut self) -> Vec<HistoryIntent> {
+        std::mem::take(&mut *self.history_intents.borrow_mut())
+    }
+
+    /// Install the computed-style provider backing `getComputedStyle`.
+    ///
+    /// The provider maps (node, kebab-case property) to a serialized value,
+    /// computed fresh on demand -- so a `style.color` write made earlier in
+    /// the same script is visible immediately. Properties the provider does
+    /// not serialize return the empty string, matching the CSSOM contract
+    /// for unsupported properties.
+    pub fn set_computed_style_provider(&mut self, provider: ComputedStyleProvider) {
+        // SAFETY: the capture is an Rc closure over app data, no GC pointers.
+        let native = unsafe {
+            NativeFunction::from_closure(move |_this, args, ctx| {
+                let node = args
+                    .first()
+                    .map(|value| value.to_u32(ctx))
+                    .transpose()?
+                    .unwrap_or(0);
+                let prop = args
+                    .get(1)
+                    .map(|value| value.to_string(ctx).map(|s| s.to_std_string_lossy()))
+                    .transpose()?
+                    .unwrap_or_default();
+                let kebab = css_object::camel_to_kebab(&prop);
+                let value = provider(silksurf_dom::NodeId::from_raw(node as usize), &kebab)
+                    .unwrap_or_default();
+                Ok(JsValue::from(JsString::from(value.as_str())))
+            })
+        };
+        let _ =
+            self.ctx
+                .register_global_callable(js_string!("__silksurfComputedStyleGet"), 2, native);
+        let bootstrap = r"
+            globalThis.getComputedStyle = function (el) {
+                var nodeId = el && typeof el.nodeId === 'number' ? el.nodeId : 0;
+                return new Proxy({}, {
+                    get: function (t, prop) {
+                        if (prop === 'getPropertyValue') {
+                            return function (name) {
+                                return __silksurfComputedStyleGet(nodeId, name);
+                            };
+                        }
+                        if (typeof prop !== 'string') { return undefined; }
+                        return __silksurfComputedStyleGet(nodeId, prop);
+                    }
+                });
+            };
+        ";
+        if let Err(err) = self.ctx.eval(Source::from_bytes(bootstrap.as_bytes())) {
+            eprintln!("silksurf-js: getComputedStyle bootstrap failed: {err}");
         }
     }
 
@@ -1096,10 +1310,14 @@ impl SilkContext {
         let _ = self.ctx.run_jobs();
     }
 
-    /// Return true when host timer or frame callbacks are ready to run.
+    /// Return true when host timer or frame callbacks are ready to run, or
+    /// network requests are still in flight.
     #[must_use]
     pub fn has_pending_host_callbacks(&self) -> bool {
         self.scheduler.borrow().has_pending_callbacks()
+            || self.net.in_flight() > 0
+            || !self.ws_sessions.borrow().is_empty()
+            || !self.sse_subscriptions.borrow().is_empty()
     }
 
     /// Earliest instant at which a scheduled host callback becomes due.
@@ -1109,7 +1327,18 @@ impl SilkContext {
     /// scheduled and the loop can wait for external events alone.
     #[must_use]
     pub fn next_host_callback_deadline(&self) -> Option<Instant> {
-        self.scheduler.borrow().next_deadline()
+        let timer_deadline = self.scheduler.borrow().next_deadline();
+        // In-flight network work polls at a fixed cadence; the completion
+        // channel cannot wake the winit loop directly (a real waker via
+        // EventLoopProxy is a named follow-up in the SPA roadmap).
+        let live_push_channels =
+            !self.ws_sessions.borrow().is_empty() || !self.sse_subscriptions.borrow().is_empty();
+        let net_deadline = (self.net.in_flight() > 0 || live_push_channels)
+            .then(|| Instant::now() + std::time::Duration::from_millis(10));
+        match (timer_deadline, net_deadline) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (deadline, None) | (None, deadline) => deadline,
+        }
     }
 
     /// Run queued setTimeout, setInterval, and requestAnimationFrame callbacks.
@@ -1138,10 +1367,264 @@ impl SilkContext {
             }
             trace_host_callback(trace_callbacks, callback, callback_start.elapsed());
         }
+        ran += self.drain_net_completions()?;
+        ran += self.drain_ws_events()?;
+        ran += self.drain_sse_events()?;
         let jobs_start = Instant::now();
         self.run_pending_jobs();
         trace_host_callback_jobs(trace_callbacks, jobs_start.elapsed());
         Ok(ran)
+    }
+
+    /// Network requests spawned but not yet drained. One-shot embedders
+    /// (headless render, CLI runners) use this to pump briefly until page
+    /// fetches settle instead of sleeping on timer deadlines.
+    #[must_use]
+    pub fn inflight_network_requests(&self) -> usize {
+        self.net.in_flight()
+    }
+
+    /// Pump every live WebSocket session's incoming frames into its JS
+    /// instance's on{open,message,error,close} handlers. Sessions whose
+    /// socket closed are unbound and their JS registry slot cleared.
+    fn drain_ws_events(&mut self) -> Result<usize, String> {
+        // Snapshot events first: handler invocation re-enters the context and
+        // must not hold the sessions borrow.
+        let mut events: Vec<(u64, silksurf_net::WsIncoming)> = Vec::new();
+        let mut closed_keys: Vec<u64> = Vec::new();
+        {
+            let sessions = self.ws_sessions.borrow();
+            for binding in sessions.iter() {
+                while let Some(event) = binding.session.try_next() {
+                    if matches!(event, silksurf_net::WsIncoming::Closed) {
+                        closed_keys.push(binding.key);
+                    }
+                    events.push((binding.key, event));
+                }
+            }
+        }
+        let fired = events.len();
+        for (key, event) in events {
+            let Some(socket) = ws_instance_object(key, &mut self.ctx).map_err(|e| e.to_string())?
+            else {
+                continue;
+            };
+            let result: boa_engine::JsResult<()> = (|| {
+                match event {
+                    silksurf_net::WsIncoming::Open => {
+                        socket.set(js_string!("readyState"), 1_u32, false, &mut self.ctx)?;
+                        let open_event = ObjectInitializer::new(&mut self.ctx)
+                            .property(js_string!("type"), js_string!("open"), Attribute::all())
+                            .build();
+                        call_websocket_handler(
+                            &socket,
+                            js_string!("onopen"),
+                            open_event.into(),
+                            &mut self.ctx,
+                        )?;
+                    }
+                    silksurf_net::WsIncoming::Text(text) => {
+                        socket.set(
+                            js_string!("lastMessage"),
+                            JsString::from(text.as_str()),
+                            false,
+                            &mut self.ctx,
+                        )?;
+                        let event = websocket_message_event(text.as_str(), &mut self.ctx);
+                        call_websocket_handler(
+                            &socket,
+                            js_string!("onmessage"),
+                            event,
+                            &mut self.ctx,
+                        )?;
+                    }
+                    silksurf_net::WsIncoming::Binary(bytes) => {
+                        let text = String::from_utf8_lossy(&bytes).to_string();
+                        let event = websocket_message_event(text.as_str(), &mut self.ctx);
+                        call_websocket_handler(
+                            &socket,
+                            js_string!("onmessage"),
+                            event,
+                            &mut self.ctx,
+                        )?;
+                    }
+                    silksurf_net::WsIncoming::Error(message) => {
+                        socket.set(
+                            js_string!("lastError"),
+                            JsString::from(message.as_str()),
+                            false,
+                            &mut self.ctx,
+                        )?;
+                        let event = websocket_error_event(message.as_str(), &mut self.ctx);
+                        call_websocket_handler(
+                            &socket,
+                            js_string!("onerror"),
+                            event,
+                            &mut self.ctx,
+                        )?;
+                    }
+                    silksurf_net::WsIncoming::Closed => {
+                        socket.set(js_string!("readyState"), 3_u32, false, &mut self.ctx)?;
+                        let close_event = ObjectInitializer::new(&mut self.ctx)
+                            .property(js_string!("type"), js_string!("close"), Attribute::all())
+                            .build();
+                        call_websocket_handler(
+                            &socket,
+                            js_string!("onclose"),
+                            close_event.into(),
+                            &mut self.ctx,
+                        )?;
+                    }
+                }
+                Ok(())
+            })();
+            result.map_err(|err| format!("{err}"))?;
+        }
+        if !closed_keys.is_empty() {
+            self.ws_sessions
+                .borrow_mut()
+                .retain(|binding| !closed_keys.contains(&binding.key));
+            for key in closed_keys {
+                ws_drop_instance(key, &mut self.ctx).map_err(|err| format!("{err}"))?;
+            }
+        }
+        Ok(fired)
+    }
+
+    /// Pump every live `EventSource` subscription's events into its JS
+    /// instance's handlers. Named events dispatch to `on<type>` when such a
+    /// handler exists, otherwise to `onmessage`.
+    fn drain_sse_events(&mut self) -> Result<usize, String> {
+        let mut events: Vec<(u64, silksurf_net::SseIncoming)> = Vec::new();
+        let mut closed_keys: Vec<u64> = Vec::new();
+        {
+            let subscriptions = self.sse_subscriptions.borrow();
+            for binding in subscriptions.iter() {
+                while let Some(event) = binding.subscription.try_next() {
+                    if matches!(event, silksurf_net::SseIncoming::Closed) {
+                        closed_keys.push(binding.key);
+                    }
+                    events.push((binding.key, event));
+                }
+            }
+        }
+        let fired = events.len();
+        for (key, event) in events {
+            let Some(source) =
+                sse_instance_object(key, &mut self.ctx).map_err(|e| e.to_string())?
+            else {
+                continue;
+            };
+            let result: boa_engine::JsResult<()> = (|| {
+                match event {
+                    silksurf_net::SseIncoming::Open => {
+                        source.set(js_string!("readyState"), 1_u32, false, &mut self.ctx)?;
+                        let open_event = ObjectInitializer::new(&mut self.ctx)
+                            .property(js_string!("type"), js_string!("open"), Attribute::all())
+                            .build();
+                        call_websocket_handler(
+                            &source,
+                            js_string!("onopen"),
+                            open_event.into(),
+                            &mut self.ctx,
+                        )?;
+                    }
+                    silksurf_net::SseIncoming::Event(sse_event) => {
+                        let event_object = ObjectInitializer::new(&mut self.ctx)
+                            .property(
+                                js_string!("type"),
+                                JsString::from(sse_event.event_type.as_str()),
+                                Attribute::all(),
+                            )
+                            .property(
+                                js_string!("data"),
+                                JsString::from(sse_event.data.as_str()),
+                                Attribute::all(),
+                            )
+                            .property(
+                                js_string!("lastEventId"),
+                                JsString::from(sse_event.id.unwrap_or_default().as_str()),
+                                Attribute::all(),
+                            )
+                            .build();
+                        let named = JsString::from(format!("on{}", sse_event.event_type).as_str());
+                        let has_named = source
+                            .get(named.clone(), &mut self.ctx)?
+                            .as_object()
+                            .is_some_and(|handler| handler.is_callable());
+                        let handler_name = if has_named {
+                            named
+                        } else {
+                            js_string!("onmessage")
+                        };
+                        call_websocket_handler(
+                            &source,
+                            handler_name,
+                            event_object.into(),
+                            &mut self.ctx,
+                        )?;
+                    }
+                    silksurf_net::SseIncoming::Error(message) => {
+                        let event = websocket_error_event(message.as_str(), &mut self.ctx);
+                        call_websocket_handler(
+                            &source,
+                            js_string!("onerror"),
+                            event,
+                            &mut self.ctx,
+                        )?;
+                    }
+                    silksurf_net::SseIncoming::Closed => {
+                        source.set(js_string!("readyState"), 2_u32, false, &mut self.ctx)?;
+                    }
+                }
+                Ok(())
+            })();
+            result.map_err(|err| format!("{err}"))?;
+        }
+        if !closed_keys.is_empty() {
+            self.sse_subscriptions
+                .borrow_mut()
+                .retain(|binding| !closed_keys.contains(&binding.key));
+            for key in closed_keys {
+                sse_drop_instance(key, &mut self.ctx).map_err(|err| format!("{err}"))?;
+            }
+        }
+        Ok(fired)
+    }
+
+    /// Settle promises for every network completion that has arrived.
+    fn drain_net_completions(&mut self) -> Result<usize, String> {
+        let completions = self.net.drain();
+        if completions.is_empty() {
+            return Ok(0);
+        }
+        let mut settled = 0;
+        for completion in completions {
+            let resolvers =
+                take_net_resolvers(completion.id, &mut self.ctx).map_err(|err| format!("{err}"))?;
+            let Some((resolve, reject)) = resolvers else {
+                continue;
+            };
+            let (function, argument) = match completion.payload {
+                net_queue::NetPayload::Response(response) => {
+                    (resolve, build_response_object(response, &mut self.ctx))
+                }
+                net_queue::NetPayload::Error(message) => {
+                    let error = JsNativeError::error().with_message(message);
+                    (
+                        reject,
+                        boa_engine::JsError::from(error).to_opaque(&mut self.ctx),
+                    )
+                }
+            };
+            if let Some(callable) = function.as_callable() {
+                callable
+                    .call(&JsValue::undefined(), &[argument], &mut self.ctx)
+                    .map_err(|err| format!("{err}"))?;
+                settled += 1;
+            }
+        }
+        Ok(settled)
     }
 
     /// Run queued host callbacks with the default per-tick timer budget.
@@ -1159,6 +1642,7 @@ impl SilkContext {
     pub fn with_dom(dom: &Arc<Mutex<silksurf_dom::Dom>>) -> Self {
         let mut ctx = Self::new();
         dom_bridge::install_document(dom, &mut ctx.ctx, &new_cookie_jar(), "", "");
+        ctx.dom = Some(Arc::clone(dom));
         ctx
     }
 
@@ -1176,7 +1660,66 @@ impl SilkContext {
     ) -> Self {
         let mut ctx = Self::new();
         dom_bridge::install_document(dom, &mut ctx.ctx, cookie_jar, top_level_site, host);
+        ctx.dom = Some(Arc::clone(dom));
         ctx
+    }
+
+    /// Dispatch a host-synthesized event at `target` with full
+    /// capture/target/bubble propagation, then drain microtasks -- the same
+    /// post-tick cadence the host scheduler uses.
+    ///
+    /// Returns an error string when this context has no DOM bridge installed.
+    pub fn dispatch_dom_event(
+        &mut self,
+        target: silksurf_dom::NodeId,
+        event: &SyntheticEvent,
+    ) -> Result<DispatchOutcome, String> {
+        let dom = self
+            .dom
+            .clone()
+            .ok_or_else(|| "dispatch_dom_event: context has no DOM bridge".to_string())?;
+        let event_object = event_dispatch::build_event_object(
+            event.event_type.as_str(),
+            event.bubbles,
+            event.cancelable,
+            true,
+            &mut self.ctx,
+        );
+        for (name, value) in &event.fields {
+            let js_value = match value {
+                SyntheticField::Number(n) => JsValue::from(*n),
+                SyntheticField::Text(s) => JsValue::from(JsString::from(s.as_str())),
+                SyntheticField::Flag(b) => JsValue::from(*b),
+            };
+            event_object
+                .set(
+                    JsString::from(name.as_str()),
+                    js_value,
+                    false,
+                    &mut self.ctx,
+                )
+                .map_err(|err| format!("{err}"))?;
+        }
+        let target_value = dom_bridge::node_to_js_object(&dom, target, &mut self.ctx);
+        let proceed = event_dispatch::propagate_event(
+            &dom,
+            target,
+            &target_value,
+            &event_object,
+            &mut self.ctx,
+        )
+        .map_err(|err| format!("{err}"))?;
+        self.run_pending_jobs();
+        Ok(DispatchOutcome {
+            default_prevented: !proceed,
+        })
+    }
+
+    /// True when any listener for `event_type` is registered on any node.
+    /// Embedders check this before synthesizing input events so pages without
+    /// listeners pay no dispatch cost.
+    pub fn has_dom_listeners(&mut self, event_type: &str) -> bool {
+        event_dispatch::any_listener_for_type(event_type, &mut self.ctx).unwrap_or(false)
     }
 
     fn call_registered_callback(
@@ -1499,20 +2042,201 @@ fn trace_host_callback_jobs(enabled: bool, elapsed: std::time::Duration) {
     }
 }
 
-fn install_websocket(ctx: &mut Context) {
-    let websocket = FunctionObjectBuilder::new(
-        ctx.realm(),
-        NativeFunction::from_fn_ptr(websocket_constructor),
-    )
-    .name(js_string!("WebSocket"))
-    .length(1)
-    .constructor(true)
-    .build();
+fn install_websocket(ctx: &mut Context, sessions: &WsSessionsRef) {
+    let sessions = Rc::clone(sessions);
+    let next_key = Rc::new(RefCell::new(0_u64));
+    // SAFETY: the capture is Rc-based session bookkeeping, no GC pointers.
+    let constructor = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            websocket_session_constructor(&sessions, &next_key, args, ctx)
+        })
+    };
+    let websocket = FunctionObjectBuilder::new(ctx.realm(), constructor)
+        .name(js_string!("WebSocket"))
+        .length(1)
+        .constructor(true)
+        .build();
 
     ctx.register_global_property(js_string!("WebSocket"), websocket, Attribute::all())
         // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
 
         .expect("WebSocket: install on fresh context cannot fail");
+}
+
+/// A same-document navigation the page requested via history.pushState or
+/// replaceState. The embedder drains these each tick and records them in its
+/// session history without reloading.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryIntent {
+    pub replace: bool,
+    pub url: String,
+    /// JSON-serialized state (structured-clone-lite; documented limitation).
+    pub state_json: String,
+}
+
+type HistoryIntentsRef = Rc<RefCell<Vec<HistoryIntent>>>;
+
+type ViewportRef = Rc<std::cell::Cell<(f32, f32)>>;
+
+/// Callback the embedder installs to serialize computed style values.
+pub type ComputedStyleProvider = Rc<dyn Fn(silksurf_dom::NodeId, &str) -> Option<String>>;
+
+/// `__silksurfMatchMedia(query)`: evaluate a media query prelude against the
+/// current viewport through the silksurf-css evaluator.
+fn install_match_media_native(ctx: &mut Context, viewport: &ViewportRef) {
+    let viewport = Rc::clone(viewport);
+    // SAFETY: the capture is Rc<Cell<(f32, f32)>>, no GC pointers.
+    let native = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let query = args
+                .first()
+                .map(|value| value.to_string(ctx).map(|s| s.to_std_string_lossy()))
+                .transpose()?
+                .unwrap_or_default();
+            let mut tokenizer = silksurf_css::CssTokenizer::new();
+            let mut tokens = tokenizer.feed(query.as_str()).unwrap_or_default();
+            tokens.extend(tokenizer.finish().unwrap_or_default());
+            let (width, height) = viewport.get();
+            let matches = silksurf_css::media::evaluate_media_query(&tokens, width, height);
+            Ok(JsValue::from(matches))
+        })
+    };
+    let _ = ctx.register_global_callable(js_string!("__silksurfMatchMedia"), 1, native);
+}
+
+/// `__silksurfHistoryIntent(replace, url, stateJson)`: queue a same-document
+/// navigation for the embedder to drain.
+fn install_history_intent_native(ctx: &mut Context, intents: &HistoryIntentsRef) {
+    let intents = Rc::clone(intents);
+    // SAFETY: the capture is Rc<RefCell<Vec<HistoryIntent>>>, no GC pointers.
+    let native = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let replace = args.first().is_some_and(boa_engine::JsValue::to_boolean);
+            let url = args
+                .get(1)
+                .map(|value| value.to_string(ctx).map(|s| s.to_std_string_lossy()))
+                .transpose()?
+                .unwrap_or_default();
+            let state_json = args
+                .get(2)
+                .map(|value| value.to_string(ctx).map(|s| s.to_std_string_lossy()))
+                .transpose()?
+                .unwrap_or_else(|| "null".to_string());
+            intents.borrow_mut().push(HistoryIntent {
+                replace,
+                url,
+                state_json,
+            });
+            Ok(JsValue::undefined())
+        })
+    };
+    let _ = ctx.register_global_callable(js_string!("__silksurfHistoryIntent"), 3, native);
+}
+
+/// One live SSE subscription, keyed to its JS instance in the hidden
+/// `__silksurfSseInstances` registry.
+struct SseBinding {
+    key: u64,
+    subscription: silksurf_net::SseSubscription,
+}
+
+type SseSubscriptionsRef = Rc<RefCell<Vec<SseBinding>>>;
+
+const SSE_INSTANCES_REGISTRY: &str = "__silksurfSseInstances";
+
+fn sse_instance_object(key: u64, ctx: &mut Context) -> boa_engine::JsResult<Option<JsObject>> {
+    let registry = event_dispatch::hidden_global_object(SSE_INSTANCES_REGISTRY, ctx)?;
+    Ok(registry
+        .get(JsString::from(key.to_string().as_str()), ctx)?
+        .as_object())
+}
+
+fn sse_drop_instance(key: u64, ctx: &mut Context) -> boa_engine::JsResult<()> {
+    let registry = event_dispatch::hidden_global_object(SSE_INSTANCES_REGISTRY, ctx)?;
+    registry.set(
+        JsString::from(key.to_string().as_str()),
+        JsValue::undefined(),
+        false,
+        ctx,
+    )?;
+    Ok(())
+}
+
+/// `EventSource` constructor over `SseSubscription`. `readyState`: 0 CONNECTING,
+/// 1 OPEN, 2 CLOSED (`EventSource` spec values). Events arrive through the
+/// host-callback drain; named events dispatch to `on<type>` handlers with
+/// `onmessage` as the default.
+fn install_event_source(ctx: &mut Context, subscriptions: &SseSubscriptionsRef) {
+    let subscriptions = Rc::clone(subscriptions);
+    let next_key = Rc::new(RefCell::new(0_u64));
+    // SAFETY: the capture is Rc-based subscription bookkeeping, no GC pointers.
+    let constructor = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let Some(url_value) = args.first() else {
+                return Err(JsNativeError::typ()
+                    .with_message("EventSource: URL argument is required")
+                    .into());
+            };
+            let url = url_value.to_string(ctx)?.to_std_string_lossy();
+            let key = {
+                let mut next = next_key.borrow_mut();
+                let key = *next;
+                *next += 1;
+                key
+            };
+            let subscription = silksurf_net::SseSubscription::connect(url.as_str());
+            subscriptions
+                .borrow_mut()
+                .push(SseBinding { key, subscription });
+
+            let close_subscriptions = Rc::clone(&subscriptions);
+            // SAFETY (inherited from the enclosing unsafe block): Rc-based
+            // bookkeeping capture, no GC pointers.
+            let close_fn = {
+                NativeFunction::from_closure(move |this, _args, ctx| {
+                    // Dropping the subscription severs the channel; the
+                    // reader thread exits on its next send.
+                    close_subscriptions
+                        .borrow_mut()
+                        .retain(|binding| binding.key != key);
+                    if let Some(object) = this.as_object() {
+                        object.set(js_string!("readyState"), 2_u32, false, ctx)?;
+                    }
+                    Ok(JsValue::undefined())
+                })
+            };
+
+            let source = ObjectInitializer::new(ctx)
+                .property(
+                    js_string!("url"),
+                    JsString::from(url.as_str()),
+                    Attribute::all(),
+                )
+                .property(js_string!("readyState"), 0_u32, Attribute::all())
+                .property(js_string!("onopen"), JsValue::null(), Attribute::all())
+                .property(js_string!("onmessage"), JsValue::null(), Attribute::all())
+                .property(js_string!("onerror"), JsValue::null(), Attribute::all())
+                .function(close_fn, js_string!("close"), 0)
+                .build();
+            let registry = event_dispatch::hidden_global_object(SSE_INSTANCES_REGISTRY, ctx)?;
+            registry.set(
+                JsString::from(key.to_string().as_str()),
+                source.clone(),
+                false,
+                ctx,
+            )?;
+            Ok(JsValue::from(source))
+        })
+    };
+    let event_source = FunctionObjectBuilder::new(ctx.realm(), constructor)
+        .name(js_string!("EventSource"))
+        .length(1)
+        .constructor(true)
+        .build();
+    ctx.register_global_property(js_string!("EventSource"), event_source, Attribute::all())
+        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+
+        .expect("EventSource: install on fresh context cannot fail");
 }
 
 fn install_stream_constructors(ctx: &mut Context) {
@@ -1720,8 +2444,40 @@ fn call_optional_method(
     Ok(())
 }
 
-fn websocket_constructor(
-    _this: &JsValue,
+/// One live WebSocket transport, keyed to its JS instance in the hidden
+/// `__silksurfWsInstances` registry (GC-rooted there, never in Rust).
+struct WsBinding {
+    key: u64,
+    session: silksurf_net::WebSocketSession,
+}
+
+type WsSessionsRef = Rc<RefCell<Vec<WsBinding>>>;
+
+const WS_INSTANCES_REGISTRY: &str = "__silksurfWsInstances";
+
+fn ws_instance_object(key: u64, ctx: &mut Context) -> boa_engine::JsResult<Option<JsObject>> {
+    let registry = event_dispatch::hidden_global_object(WS_INSTANCES_REGISTRY, ctx)?;
+    Ok(registry
+        .get(JsString::from(key.to_string().as_str()), ctx)?
+        .as_object())
+}
+
+fn ws_drop_instance(key: u64, ctx: &mut Context) -> boa_engine::JsResult<()> {
+    let registry = event_dispatch::hidden_global_object(WS_INSTANCES_REGISTRY, ctx)?;
+    registry.set(
+        JsString::from(key.to_string().as_str()),
+        JsValue::undefined(),
+        false,
+        ctx,
+    )?;
+    Ok(())
+}
+
+/// Session-backed WebSocket constructor: connects in the background and
+/// delivers open/message/error/close through the host-callback drain.
+fn websocket_session_constructor(
+    sessions: &WsSessionsRef,
+    next_key: &Rc<RefCell<u64>>,
     args: &[JsValue],
     ctx: &mut Context,
 ) -> boa_engine::JsResult<JsValue> {
@@ -1732,117 +2488,72 @@ fn websocket_constructor(
     };
     let url = url_value.to_string(ctx)?.to_std_string_lossy();
 
+    let key = {
+        let mut next = next_key.borrow_mut();
+        let key = *next;
+        *next += 1;
+        key
+    };
+    let session = silksurf_net::WebSocketSession::connect(url.as_str());
+    sessions.borrow_mut().push(WsBinding { key, session });
+
+    let send_sessions = Rc::clone(sessions);
+    // SAFETY: the capture is Rc<RefCell<Vec<WsBinding>>> + u64, no GC pointers.
+    let send_fn = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let payload = args
+                .first()
+                .map(|value| value.to_string(ctx))
+                .transpose()?
+                .map(|value| value.to_std_string_lossy())
+                .unwrap_or_default();
+            let sessions = send_sessions.borrow();
+            if let Some(binding) = sessions.iter().find(|binding| binding.key == key) {
+                // Frames queued before the handshake finishes are buffered by
+                // the session and flushed once the socket opens.
+                let _ = binding.session.send_text(payload);
+            }
+            Ok(JsValue::undefined())
+        })
+    };
+
+    let close_sessions = Rc::clone(sessions);
+    // SAFETY: the capture is Rc<RefCell<Vec<WsBinding>>> + u64, no GC pointers.
+    let close_fn = unsafe {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
+            let sessions = close_sessions.borrow();
+            if let Some(binding) = sessions.iter().find(|binding| binding.key == key) {
+                binding.session.close();
+            }
+            Ok(JsValue::undefined())
+        })
+    };
+
     let socket = ObjectInitializer::new(ctx)
         .property(
             js_string!("url"),
             JsString::from(url.as_str()),
             Attribute::all(),
         )
-        .property(js_string!("readyState"), 1_u32, Attribute::all())
+        .property(js_string!("readyState"), 0_u32, Attribute::all())
         .property(js_string!("lastMessage"), js_string!(""), Attribute::all())
         .property(js_string!("lastError"), js_string!(""), Attribute::all())
         .property(js_string!("onopen"), JsValue::null(), Attribute::all())
         .property(js_string!("onmessage"), JsValue::null(), Attribute::all())
         .property(js_string!("onerror"), JsValue::null(), Attribute::all())
         .property(js_string!("onclose"), JsValue::null(), Attribute::all())
-        .function(
-            NativeFunction::from_fn_ptr(websocket_send),
-            js_string!("send"),
-            1,
-        )
-        .function(
-            NativeFunction::from_fn_ptr(websocket_close),
-            js_string!("close"),
-            0,
-        )
+        .function(send_fn, js_string!("send"), 1)
+        .function(close_fn, js_string!("close"), 0)
         .build();
 
+    let registry = event_dispatch::hidden_global_object(WS_INSTANCES_REGISTRY, ctx)?;
+    registry.set(
+        JsString::from(key.to_string().as_str()),
+        socket.clone(),
+        false,
+        ctx,
+    )?;
     Ok(JsValue::from(socket))
-}
-
-fn websocket_send(
-    this: &JsValue,
-    args: &[JsValue],
-    ctx: &mut Context,
-) -> boa_engine::JsResult<JsValue> {
-    let socket = websocket_receiver(this)?;
-    let url = socket
-        .get(js_string!("url"), ctx)?
-        .to_string(ctx)?
-        .to_std_string_lossy();
-    let payload = args
-        .first()
-        .map(|value| value.to_string(ctx))
-        .transpose()?
-        .map(|value| value.to_std_string_lossy())
-        .unwrap_or_default();
-
-    match silksurf_net::websocket_text_roundtrip(url.as_str(), payload.as_str()) {
-        Ok(reply) => {
-            let message = websocket_reply_text(reply);
-            socket.set(
-                js_string!("lastMessage"),
-                JsString::from(message.as_str()),
-                false,
-                ctx,
-            )?;
-            call_websocket_handler(
-                &socket,
-                js_string!("onmessage"),
-                websocket_message_event(message.as_str(), ctx),
-                ctx,
-            )?;
-        }
-        Err(err) => {
-            socket.set(js_string!("readyState"), 3_u32, false, ctx)?;
-            socket.set(
-                js_string!("lastError"),
-                JsString::from(err.message.as_str()),
-                false,
-                ctx,
-            )?;
-            call_websocket_handler(
-                &socket,
-                js_string!("onerror"),
-                websocket_error_event(err.message.as_str(), ctx),
-                ctx,
-            )?;
-        }
-    }
-
-    Ok(JsValue::undefined())
-}
-
-fn websocket_close(
-    this: &JsValue,
-    _args: &[JsValue],
-    ctx: &mut Context,
-) -> boa_engine::JsResult<JsValue> {
-    let socket = websocket_receiver(this)?;
-    socket.set(js_string!("readyState"), 3_u32, false, ctx)?;
-    let close_event = ObjectInitializer::new(ctx)
-        .property(js_string!("type"), js_string!("close"), Attribute::all())
-        .build();
-    call_websocket_handler(&socket, js_string!("onclose"), close_event.into(), ctx)?;
-    Ok(JsValue::undefined())
-}
-
-fn websocket_receiver(this: &JsValue) -> boa_engine::JsResult<JsObject> {
-    this.as_object().ok_or_else(|| {
-        JsNativeError::typ()
-            .with_message("WebSocket method requires a WebSocket object")
-            .into()
-    })
-}
-
-fn websocket_reply_text(reply: silksurf_net::WebSocketReply) -> String {
-    match reply {
-        silksurf_net::WebSocketReply::Text(text) => text,
-        silksurf_net::WebSocketReply::Binary(bytes) => {
-            String::from_utf8_lossy(bytes.as_slice()).to_string()
-        }
-        silksurf_net::WebSocketReply::Close => String::new(),
-    }
 }
 
 fn websocket_message_event(message_data: &str, ctx: &mut Context) -> JsValue {
@@ -2396,42 +3107,214 @@ fn fetch_signal_is_aborted(args: &[JsValue], ctx: &mut Context) -> boa_engine::J
     Ok(false)
 }
 
-/// Execute a single HTTP GET synchronously and return a pre-resolved `JsPromise`.
-///
-/// The Promise is pre-resolved (or pre-rejected), so `.then()` chains and
-/// `await` both work without an async event loop.  Only GET is supported when
-/// called without an options argument.
-fn fetch_sync(url: &str, ctx: &mut Context) -> JsPromise {
-    use silksurf_net::{BasicClient, HttpMethod, HttpRequest, NetClient};
+const PENDING_NET_REGISTRY: &str = "__silksurfPendingNet";
 
-    let request = HttpRequest {
-        method: HttpMethod::Get,
-        url: url.to_owned(),
-        headers: vec![("Accept".to_owned(), "*/*".to_owned())],
-        body: Vec::new(),
-    };
+/// Build the `HttpRequest` a `fetch()` call describes: method/headers/body from
+/// the init object (second argument), GET with Accept: */* by default.
+fn fetch_request_from_init(
+    url: String,
+    init: Option<&JsValue>,
+    ctx: &mut Context,
+) -> boa_engine::JsResult<silksurf_net::HttpRequest> {
+    use silksurf_net::{HttpMethod, HttpRequest};
+    let mut method = HttpMethod::Get;
+    let mut headers: Vec<(String, String)> = vec![("Accept".to_owned(), "*/*".to_owned())];
+    let mut body = Vec::new();
 
-    match BasicClient::new().fetch(&request) {
-        Ok(response) => {
-            let response_val = build_response_object(response, ctx);
-            JsPromise::from_result::<JsValue, JsNativeError>(Ok(response_val), ctx)
+    if let Some(init) = init.and_then(JsValue::as_object) {
+        let method_value = init.get(js_string!("method"), ctx)?;
+        if !method_value.is_undefined() {
+            let name = method_value.to_string(ctx)?.to_std_string_lossy();
+            method = match name.to_ascii_uppercase().as_str() {
+                "POST" => HttpMethod::Post,
+                _ => HttpMethod::Get,
+            };
         }
-        Err(err) => {
-            let js_err = JsNativeError::error().with_message(err.message.clone());
-            JsPromise::from_result::<JsValue, JsNativeError>(Err(js_err), ctx)
+        let headers_value = init.get(js_string!("headers"), ctx)?;
+        if let Some(headers_object) = headers_value.as_object() {
+            for key in headers_object.own_property_keys(ctx)? {
+                let name = key.to_string();
+                let value = headers_object
+                    .get(key, ctx)?
+                    .to_string(ctx)?
+                    .to_std_string_lossy();
+                headers.push((name, value));
+            }
+        }
+        let body_value = init.get(js_string!("body"), ctx)?;
+        if !body_value.is_undefined() && !body_value.is_null() {
+            body = body_value
+                .to_string(ctx)?
+                .to_std_string_lossy()
+                .into_bytes();
         }
     }
+
+    Ok(HttpRequest {
+        method,
+        url,
+        headers,
+        body,
+    })
+}
+
+/// Park a pending promise's resolving functions under the request id.
+/// JS-side storage keeps them GC-rooted until the completion drains.
+fn park_net_resolvers(
+    id: u64,
+    functions: &boa_engine::builtins::promise::ResolvingFunctions,
+    ctx: &mut Context,
+) -> boa_engine::JsResult<()> {
+    let registry = event_dispatch::hidden_global_object(PENDING_NET_REGISTRY, ctx)?;
+    let entry = ObjectInitializer::new(ctx)
+        .property(
+            js_string!("resolve"),
+            functions.resolve.clone(),
+            Attribute::all(),
+        )
+        .property(
+            js_string!("reject"),
+            functions.reject.clone(),
+            Attribute::all(),
+        )
+        .build();
+    registry.set(JsString::from(id.to_string().as_str()), entry, false, ctx)?;
+    Ok(())
+}
+
+fn take_net_resolvers(
+    id: u64,
+    ctx: &mut Context,
+) -> boa_engine::JsResult<Option<(JsValue, JsValue)>> {
+    let registry = event_dispatch::hidden_global_object(PENDING_NET_REGISTRY, ctx)?;
+    let key = JsString::from(id.to_string().as_str());
+    let entry = registry.get(key.clone(), ctx)?;
+    let Some(entry) = entry.as_object() else {
+        return Ok(None);
+    };
+    let resolve = entry.get(js_string!("resolve"), ctx)?;
+    let reject = entry.get(js_string!("reject"), ctx)?;
+    registry.set(key, JsValue::undefined(), false, ctx)?;
+    Ok(Some((resolve, reject)))
+}
+
+/// Register the queue-backed `fetch()` global.
+fn install_async_fetch(ctx: &mut Context, shared: &net_queue::NetSharedRef) {
+    let shared = Rc::clone(shared);
+    // SAFETY: the capture is Rc<RefCell<NetShared>>, which holds no boa
+    // GC-managed pointers; Boa stores the closure for the function lifetime.
+    let fetch_fn = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let Some(input) = args.first() else {
+                let err = JsNativeError::typ().with_message("fetch: URL argument is required");
+                return Ok(JsValue::from(JsPromise::from_result::<
+                    JsValue,
+                    JsNativeError,
+                >(Err(err), ctx)));
+            };
+            if fetch_signal_is_aborted(args, ctx)? {
+                let err = JsNativeError::error().with_message("fetch: signal is aborted");
+                return Ok(JsValue::from(JsPromise::from_result::<
+                    JsValue,
+                    JsNativeError,
+                >(Err(err), ctx)));
+            }
+            let url = fetch_input_url(input, ctx)?;
+            let request = fetch_request_from_init(url, args.get(1), ctx)?;
+            let (promise, functions) = JsPromise::new_pending(ctx);
+            let (id, tx) = shared.borrow_mut().begin_request();
+            park_net_resolvers(id, &functions, ctx)?;
+            net_queue::spawn_request(id, tx, request);
+            Ok(JsValue::from(promise))
+        })
+    };
+    // UNWRAP-OK: fresh Context cannot already have "fetch" defined.
+    ctx.register_global_callable(js_string!("fetch"), 1, fetch_fn)
+        .expect("fetch: install on fresh context cannot fail");
 }
 
 /// Build a plain JS Response-like object from an HTTP response.
 ///
 /// Exposes: status (u32), ok (bool), statusText (string),
 /// `text()` -> `Promise<string>`, `json()` -> `Promise<object>`.
+/// Bytes handed to `reader.read()` per resolution. The body is already fully
+/// buffered (socket-level streaming is a named follow-up inside `BasicClient`);
+/// slicing keeps consumer loops (`while (!done) read()`) exercised the way a
+/// streamed response will exercise them.
+const RESPONSE_BODY_CHUNK_BYTES: usize = 16 * 1024;
+
+/// Build `response.body`: an object whose `getReader().read()` drains the
+/// buffered body chunk by chunk as `{value: Uint8Array, done}` promises.
+fn build_response_body_stream(body: &[u8], ctx: &mut Context) -> JsValue {
+    use boa_engine::object::builtins::JsUint8Array;
+
+    let chunks: std::collections::VecDeque<Vec<u8>> = body
+        .chunks(RESPONSE_BODY_CHUNK_BYTES)
+        .map(<[u8]>::to_vec)
+        .collect();
+    let store = Rc::new(RefCell::new(chunks));
+
+    // SAFETY: the capture is Rc<RefCell<VecDeque<Vec<u8>>>>, no GC pointers.
+    let get_reader = unsafe {
+        NativeFunction::from_closure(move |_this, _args, ctx| {
+            let store = Rc::clone(&store);
+            // SAFETY (inherited from the enclosing unsafe block): same
+            // capture shape; per-reader clone of the store.
+            let read_fn = {
+                NativeFunction::from_closure(move |_this, _args, ctx| {
+                    let next = store.borrow_mut().pop_front();
+                    let result = match next {
+                        Some(chunk) => {
+                            let value = JsUint8Array::from_iter(chunk, ctx)?;
+                            ObjectInitializer::new(ctx)
+                                .property(js_string!("value"), value, Attribute::all())
+                                .property(js_string!("done"), false, Attribute::all())
+                                .build()
+                        }
+                        None => ObjectInitializer::new(ctx)
+                            .property(js_string!("value"), JsValue::undefined(), Attribute::all())
+                            .property(js_string!("done"), true, Attribute::all())
+                            .build(),
+                    };
+                    Ok(JsValue::from(JsPromise::from_result::<
+                        JsValue,
+                        JsNativeError,
+                    >(
+                        Ok(JsValue::from(result)), ctx
+                    )))
+                })
+            };
+            let cancel_fn = NativeFunction::from_fn_ptr(|_this, _args, ctx| {
+                Ok(JsValue::from(JsPromise::from_result::<
+                    JsValue,
+                    JsNativeError,
+                >(
+                    Ok(JsValue::undefined()), ctx
+                )))
+            });
+            let release_fn = NativeFunction::from_fn_ptr(|_, _, _| Ok(JsValue::undefined()));
+            let reader = ObjectInitializer::new(ctx)
+                .function(read_fn, js_string!("read"), 0)
+                .function(cancel_fn, js_string!("cancel"), 0)
+                .function(release_fn, js_string!("releaseLock"), 0)
+                .build();
+            Ok(JsValue::from(reader))
+        })
+    };
+
+    ObjectInitializer::new(ctx)
+        .function(get_reader, js_string!("getReader"), 0)
+        .property(js_string!("locked"), false, Attribute::all())
+        .build()
+        .into()
+}
+
 fn build_response_object(response: silksurf_net::HttpResponse, ctx: &mut Context) -> JsValue {
     let status = response.status;
     let body = response.body;
 
     let status_text = http_status_text(status);
+    let body_stream = build_response_body_stream(&body, ctx);
 
     // Build headers JsArray of [name, value] pairs.
     let headers_arr = JsArray::new(ctx);
@@ -2491,6 +3374,7 @@ fn build_response_object(response: silksurf_net::HttpResponse, ctx: &mut Context
             Attribute::all(),
         )
         .property(js_string!("headers"), headers_arr, Attribute::all())
+        .property(js_string!("body"), body_stream, Attribute::all())
         .function(text_fn, js_string!("text"), 0)
         .function(json_fn, js_string!("json"), 0)
         .build()
@@ -3001,58 +3885,218 @@ mod tests {
     }
 
     #[test]
-    fn websocket_send_invokes_onmessage() {
+    fn websocket_session_delivers_open_message_and_close() {
         let (url, server) = start_websocket_echo_server();
         let mut ctx = SilkContext::new();
         ctx.eval(
             format!(
-                "globalThis.wsHit = false; \
+                "globalThis.wsEvents = []; \
                  globalThis.wsData = ''; \
                  var ws = new WebSocket('{url}'); \
+                 ws.onopen = function () {{ globalThis.wsEvents.push('open:' + ws.readyState); }}; \
                  ws.onmessage = function (event) {{ \
-                   globalThis.wsHit = true; \
+                   globalThis.wsEvents.push('message'); \
                    globalThis.wsData = event.data; \
                  }}; \
-                 ws.send('hello-ai'); \
-                 globalThis.wsLast = ws.lastMessage; \
-                 globalThis.wsReady = ws.readyState;"
+                 ws.onclose = function () {{ globalThis.wsEvents.push('close:' + ws.readyState); }}; \
+                 ws.send('hello-ai');"
             )
             .as_str(),
         )
-        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+        .expect("script opens websocket");
 
-        .expect("script sends websocket message");
-
+        // Pump until the close handler fires; the session delivers open,
+        // the echoed frame, then close, all through host-callback drains.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let _ = ctx.run_ready_host_callbacks();
+            let events = global_string(&mut ctx, "wsEvents");
+            if events.contains("close") || Instant::now() >= deadline {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
         server.join().expect("echo server exits");
-        assert!(global_bool(&mut ctx, "wsHit"));
+        assert_eq!(
+            global_string(&mut ctx, "wsEvents"),
+            "open:1,message,close:3"
+        );
         assert_eq!(global_string(&mut ctx, "wsData"), "hello-ai");
-        assert_eq!(global_string(&mut ctx, "wsLast"), "hello-ai");
-        assert_number_eq(&mut ctx, "wsReady", 1.0);
     }
 
     #[test]
-    fn websocket_send_invokes_onerror_for_invalid_url() {
+    fn websocket_connect_failure_fires_onerror_then_onclose() {
         let mut ctx = SilkContext::new();
         ctx.eval(
             "globalThis.wsErrorHit = false; \
              globalThis.wsErrorMessage = ''; \
+             globalThis.wsClosed = false; \
              var ws = new WebSocket('ws://127.0.0.1:1'); \
              ws.onerror = function (event) { \
                globalThis.wsErrorHit = true; \
                globalThis.wsErrorMessage = event.message; \
              }; \
-             ws.send('hello'); \
-             globalThis.wsReady = ws.readyState; \
-             globalThis.wsLastError = ws.lastError;",
+             ws.onclose = function () { globalThis.wsClosed = true; };",
         )
-        // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
+        .expect("script constructs websocket");
 
-        .expect("script handles websocket error");
-
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let _ = ctx.run_ready_host_callbacks();
+            if global_bool(&mut ctx, "wsClosed") || Instant::now() >= deadline {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
         assert!(global_bool(&mut ctx, "wsErrorHit"));
         assert!(!global_string(&mut ctx, "wsErrorMessage").is_empty());
-        assert!(!global_string(&mut ctx, "wsLastError").is_empty());
-        assert_number_eq(&mut ctx, "wsReady", 3.0);
+        assert!(global_bool(&mut ctx, "wsClosed"));
+    }
+
+    #[test]
+    fn queue_microtask_runs_before_timers() {
+        let mut ctx = SilkContext::new();
+        ctx.eval(
+            "globalThis.order = []; \
+             setTimeout(function () { globalThis.order.push('timer'); }, 0); \
+             queueMicrotask(function () { globalThis.order.push('micro'); });",
+        )
+        .expect("script schedules work");
+        ctx.run_pending_jobs();
+        let _ = ctx.run_ready_host_callbacks();
+        assert_eq!(global_string(&mut ctx, "order"), "micro,timer");
+    }
+
+    #[test]
+    fn match_media_evaluates_against_set_viewport() {
+        let mut ctx = SilkContext::new();
+        ctx.set_viewport(800.0, 600.0);
+        ctx.eval(
+            "globalThis.wide = matchMedia('(min-width: 700px)').matches; \
+             globalThis.narrow = matchMedia('(min-width: 900px)').matches;",
+        )
+        .expect("script evaluates media queries");
+        assert!(global_bool(&mut ctx, "wide"));
+        assert!(!global_bool(&mut ctx, "narrow"));
+        ctx.set_viewport(1000.0, 600.0);
+        ctx.eval("globalThis.nowWide = matchMedia('(min-width: 900px)').matches;")
+            .expect("script re-evaluates");
+        assert!(global_bool(&mut ctx, "nowWide"));
+    }
+
+    #[test]
+    fn push_state_queues_history_intents_and_updates_location() {
+        let mut ctx = SilkContext::new();
+        ctx.eval(
+            "history.pushState({page: 1}, '', '/one'); \
+             history.replaceState({page: 2}, '', '/two'); \
+             globalThis.statePage = history.state.page; \
+             globalThis.loc = location.href;",
+        )
+        .expect("script drives history");
+        assert_number_eq(&mut ctx, "statePage", 2.0);
+        assert_eq!(global_string(&mut ctx, "loc"), "/two");
+        let intents = ctx.take_history_intents();
+        assert_eq!(intents.len(), 2);
+        assert!(!intents[0].replace);
+        assert_eq!(intents[0].url, "/one");
+        assert_eq!(intents[0].state_json, "{\"page\":1}");
+        assert!(intents[1].replace);
+        assert!(ctx.take_history_intents().is_empty());
+    }
+
+    #[test]
+    fn local_storage_preload_and_dirty_snapshot_roundtrip() {
+        let mut ctx = SilkContext::new();
+        let mut seed = HashMap::new();
+        seed.insert("token".to_string(), "abc".to_string());
+        ctx.preload_local_storage(seed);
+        assert!(ctx.take_local_storage_if_dirty().is_none());
+        ctx.eval(
+            "if (localStorage.getItem('token') !== 'abc') { throw new Error('preload'); } \
+             localStorage.setItem('theme', 'dark');",
+        )
+        .expect("script reads preload and writes");
+        let snapshot = ctx
+            .take_local_storage_if_dirty()
+            .expect("write marks dirty");
+        assert_eq!(snapshot.get("theme").map(String::as_str), Some("dark"));
+        assert_eq!(snapshot.get("token").map(String::as_str), Some("abc"));
+        assert!(ctx.take_local_storage_if_dirty().is_none());
+    }
+
+    #[test]
+    fn computed_style_provider_backs_get_computed_style() {
+        let mut dom = silksurf_dom::Dom::new();
+        let document = dom.create_document();
+        let probe = dom.create_element("div");
+        dom.set_attribute(probe, "id", "probe").expect("id sets");
+        dom.append_child(document, probe).expect("probe attaches");
+        dom.materialize_resolve_table();
+        let arc = Arc::new(Mutex::new(dom));
+        let mut ctx = SilkContext::with_dom(&arc);
+        let target = probe;
+        ctx.set_computed_style_provider(Rc::new(move |queried, prop| {
+            (queried == target && prop == "background-color").then(|| "rgb(255, 0, 0)".to_string())
+        }));
+        ctx.eval(
+            "var el = document.getElementById('probe'); \
+             globalThis.bg = getComputedStyle(el).backgroundColor; \
+             globalThis.viaFn = getComputedStyle(el).getPropertyValue('background-color'); \
+             globalThis.missing = getComputedStyle(el).width;",
+        )
+        .expect("script reads computed style");
+        assert_eq!(global_string(&mut ctx, "bg"), "rgb(255, 0, 0)");
+        assert_eq!(global_string(&mut ctx, "viaFn"), "rgb(255, 0, 0)");
+        assert_eq!(global_string(&mut ctx, "missing"), "");
+    }
+
+    #[test]
+    fn event_source_streams_named_and_default_events() {
+        use std::io::Write;
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("sse server binds");
+        let addr = listener.local_addr().expect("sse server has addr");
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("client connects");
+            let mut discard = [0u8; 1024];
+            let _ = std::io::Read::read(&mut stream, &mut discard);
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n\
+                      data: tick\n\nevent: delta\ndata: tock\n\n",
+                )
+                .expect("server writes stream");
+        });
+
+        let mut ctx = SilkContext::new();
+        ctx.eval(
+            format!(
+                "globalThis.sseLog = []; \
+                 var es = new EventSource('http://{addr}/stream'); \
+                 es.onopen = function () {{ globalThis.sseLog.push('open:' + es.readyState); }}; \
+                 es.onmessage = function (e) {{ globalThis.sseLog.push('msg:' + e.data); }}; \
+                 es.ondelta = function (e) {{ globalThis.sseLog.push('delta:' + e.data); }};"
+            )
+            .as_str(),
+        )
+        .expect("script constructs EventSource");
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let _ = ctx.run_ready_host_callbacks();
+            let log = global_string(&mut ctx, "sseLog");
+            if log.contains("delta:tock") || Instant::now() >= deadline {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        server.join().expect("server exits");
+        assert_eq!(
+            global_string(&mut ctx, "sseLog"),
+            "open:1,msg:tick,delta:tock"
+        );
     }
 
     #[test]
