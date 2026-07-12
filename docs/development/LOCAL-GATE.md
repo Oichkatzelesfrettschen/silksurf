@@ -36,6 +36,7 @@ FUZZ=1 scripts/local_gate.sh full   # add fuzz smoke (30s/target * 5 targets)
 | `scripts/lint_glossary.sh` (when present)                      | Every crate-root public domain term is defined in `docs/reference/GLOSSARY.md` |
 | `scripts/lint_doc_links.sh` (when present)                     | Relative markdown links in live docs resolve |
 | `scripts/lint_cleanroom.sh` (when present)                     | Production and `silksurf-specification/` do not depend on `diff-analysis/` (see `docs/CLEANROOM.md`) |
+| `scripts/lint_ascii.sh` (when present)                         | Authored markdown outside archive/external/vendor trees is pure ASCII |
 
 Target wall time: under 30s on a warm `target/` cache.
 

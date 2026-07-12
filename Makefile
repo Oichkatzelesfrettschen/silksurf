@@ -5,7 +5,7 @@
 #
 #   make check   -- fast gate: fmt + clippy -D warnings + lint_unwrap
 #                   + lint_unsafe + lint_glossary + lint_doc_links
-#                   + lint_cleanroom
+#                   + lint_cleanroom + lint_ascii
 #   make test    -- workspace tests with -D warnings
 #   make full    -- check + test + cargo deny + cargo doc
 #   make fmt     -- auto-format all Rust and C sources
@@ -82,6 +82,7 @@ check:
 	@if [ -x scripts/lint_glossary.sh ]; then scripts/lint_glossary.sh; fi
 	@if [ -x scripts/lint_doc_links.sh ]; then scripts/lint_doc_links.sh; fi
 	@if [ -x scripts/lint_cleanroom.sh ]; then scripts/lint_cleanroom.sh; fi
+	@if [ -x scripts/lint_ascii.sh ]; then scripts/lint_ascii.sh; fi
 
 # Workspace tests with -D warnings.
 # Wired into full gate (pre-push hook) via the full target.
