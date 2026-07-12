@@ -521,6 +521,54 @@ impl Dom {
         Ok(())
     }
 
+    /// Recursively copy a subtree from another `Dom` under `dest_parent`.
+    ///
+    /// Every node is re-created through the ordinary constructors
+    /// (`create_element_ns`, `set_attribute`, `append_child`, ...), so dirty
+    /// tracking and structure-generation bookkeeping fire exactly as
+    /// script-driven mutation would. This is the splice half of
+    /// innerHTML: html5ever parses the fragment into a scratch `Dom`, and
+    /// this copies it into the live tree. Document nodes cannot be
+    /// imported (`UnknownNode`); doctypes are re-created verbatim.
+    pub fn import_subtree(
+        &mut self,
+        src: &Dom,
+        src_node: NodeId,
+        dest_parent: NodeId,
+    ) -> Result<NodeId, DomError> {
+        let new_node = match src.node(src_node)?.kind() {
+            NodeKind::Document => return Err(DomError::UnknownNode(src_node)),
+            NodeKind::Doctype {
+                name,
+                public_id,
+                system_id,
+            } => self.create_doctype(name.clone(), public_id.clone(), system_id.clone()),
+            NodeKind::Element {
+                name,
+                namespace,
+                attributes,
+            } => {
+                let pairs: Vec<(String, String)> = attributes
+                    .iter()
+                    .map(|attr| (attr.name.as_str().to_string(), attr.value.to_string()))
+                    .collect();
+                let element = self.create_element_ns(name.as_str(), namespace.clone());
+                for (attr_name, attr_value) in pairs {
+                    self.set_attribute(element, attr_name, attr_value)?;
+                }
+                element
+            }
+            NodeKind::Text { text } => self.create_text(text.clone()),
+            NodeKind::Comment { data } => self.create_comment(data.clone()),
+        };
+        self.append_child(dest_parent, new_node)?;
+        let children: Vec<NodeId> = src.children(src_node)?.to_vec();
+        for child in children {
+            self.import_subtree(src, child, new_node)?;
+        }
+        Ok(new_node)
+    }
+
     /// Remove a child node from its parent.
     pub fn remove_child(&mut self, parent: NodeId, child: NodeId) -> Result<(), DomError> {
         let parent_index = self.node_index(parent)?;

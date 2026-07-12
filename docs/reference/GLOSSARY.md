@@ -816,6 +816,12 @@ files and the relevant ADRs.
 **Type**: DOM accessor function
 **Definition**: Acquires a mutable reference to the `Dom`'s `SilkInterner` within a closure. Safe to call at any time; the returned atoms are valid until the next `materialize_resolve_table()`. See silksurf-dom OPERATIONS.md.
 
+### import_subtree
+**Type**: DOM mutation helper
+**Definition**: Recursively copies a subtree from another `Dom` under a destination parent, re-creating every node through the ordinary constructors so dirty tracking and structure-generation bookkeeping fire exactly as script-driven mutation would. The splice half of innerHTML: html5ever parses the fragment into a scratch `Dom` (`parse_fragment_into`), and `import_subtree` copies it into the live tree.
+
+---
+
 ### with_mutation_batch
 **Type**: DOM mutation helper
 **Definition**: Opens a mutation batch, runs the supplied closure with mutable DOM access, then calls `end_mutation_batch()`. Advances `dom.generation()` and flushes the dirty-node set at depth zero. Preferred over manual `begin_mutation_batch` / `end_mutation_batch` pairing.
