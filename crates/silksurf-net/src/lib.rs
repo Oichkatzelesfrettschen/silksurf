@@ -37,9 +37,14 @@
 pub mod cache;
 pub mod cookie;
 pub mod h2_client;
+pub mod sse;
 pub mod websocket;
+pub mod websocket_session;
+
+pub use sse::{SseEvent, SseIncoming, SseParser, SseSubscription};
 
 pub use websocket::{WebSocketReply, websocket_text_roundtrip};
+pub use websocket_session::{WebSocketSession, WsIncoming};
 
 use rustls::StreamOwned;
 use silksurf_tls::{RustlsProvider, TlsProvider};

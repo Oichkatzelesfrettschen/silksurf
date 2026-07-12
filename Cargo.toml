@@ -58,7 +58,9 @@ arboard = { version = "3.6", default-features = false, features = ["wayland-data
 # behind the app-level accessibility feature; native adapters stay out of the
 # default low-resource runtime until a presenter-specific integration lands.
 accesskit = "0.24"
-tokio = { version = "1", features = ["rt", "io-util", "net", "time"] }
+# macros + sync power the persistent WebSocket session (select! loop over an
+# outbound tokio channel and the socket stream).
+tokio = { version = "1", features = ["rt", "io-util", "net", "time", "macros", "sync"] }
 tokio-rustls = "0.26"
 h2 = "0.4"
 tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
