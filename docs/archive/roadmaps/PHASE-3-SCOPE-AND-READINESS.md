@@ -14,11 +14,11 @@ Phase 2 is COMPLETE. All specifications frozen. Phase 3 implementation can begin
 immediately with zero blockers.
 
 **Status**: READY FOR PHASE 3 KICKOFF
-- ✅ Architecture frozen (5 specifications, 6500+ lines)
-- ✅ Teams identified and parallelizable
-- ✅ Dependency graph mapped (no critical blockers)
-- ✅ CI/CD pipeline designed (GitHub Actions ready)
-- ✅ Go/No-Go checklist passed (all gates green)
+- [x] Architecture frozen (5 specifications, 6500+ lines)
+- [x] Teams identified and parallelizable
+- [x] Dependency graph mapped (no critical blockers)
+- [x] CI/CD pipeline designed (GitHub Actions ready)
+- [x] Go/No-Go checklist passed (all gates green)
 
 **Expected Phase 3 Outcome**: Functional SilkSurf browser, 95%+ Test262 compliance,
 60 FPS layout, 100+ FPS rendering (damage-tracked).
@@ -45,7 +45,7 @@ ARCHITECTURE FREEZE DECLARATION
    - DOM tree: streaming construction, traversal, manipulation
    - Layout: box model, block/inline/replaced element handling
    - Rendering: damage tracking, double-buffering, XShm acceleration
-   - Integration: tokenizer → tree → DOM → layout → render pipeline
+   - Integration: tokenizer -> tree -> DOM -> layout -> render pipeline
 
 3. SILKSURF-XCB-GUI-DESIGN.md (1200 lines)
    - Window management: XCB init, non-blocking event loop, lifecycle
@@ -76,7 +76,7 @@ ARCHITECTURE FREEZE DECLARATION
 - Discovered gaps: rescope + roadmap update (not silent fixes)
 - Performance improvements: measure before/after, document results
 
-**Architecture Review Sign-Off**: ✅ APPROVED BY CLAUDE CODE (2025-12-31)
+**Architecture Review Sign-Off**: [x] APPROVED BY CLAUDE CODE (2025-12-31)
 
 ================================================================================
 PARALLEL IMPLEMENTATION TEAMS
@@ -215,47 +215,47 @@ TASK DEPENDENCY MAPPING
 
 ```
 Week 1-2: PARALLEL (Infrastructure - all teams start simultaneously)
-├── Rust: Arena allocator + lexer token types
-├── C Core: Arena allocator (C) + HTML5 tokenizer skeleton
-├── Graphics: XCB window init + double-buffer pixmap
-└── Build: GitHub Actions CI/CD pipeline setup
++-- Rust: Arena allocator + lexer token types
++-- C Core: Arena allocator (C) + HTML5 tokenizer skeleton
++-- Graphics: XCB window init + double-buffer pixmap
++-- Build: GitHub Actions CI/CD pipeline setup
 
 Week 3-4: PARALLEL (Core Parsing)
-├── Rust: Complete lexer + parser foundation
-├── C Core: HTML5 tokenizer complete + CSS tokenizer + tree constructor
-└── Graphics: Widget base class + button + input widgets
++-- Rust: Complete lexer + parser foundation
++-- C Core: HTML5 tokenizer complete + CSS tokenizer + tree constructor
++-- Graphics: Widget base class + button + input widgets
 
 Week 5-6: PARALLEL (DOM & Bytecode)
-├── Rust: Bytecode instruction set + compiler + basic VM
-└── C Core: DOM node creation + tree manipulation + CSS parser
++-- Rust: Bytecode instruction set + compiler + basic VM
++-- C Core: DOM node creation + tree manipulation + CSS parser
 
 Week 7-8: MOSTLY PARALLEL (Layout & Styling)
-├── Rust: GC system + string interning + call expressions
-└── C Core: CSS cascade + style computation + layout engine
++-- Rust: GC system + string interning + call expressions
++-- C Core: CSS cascade + style computation + layout engine
 
 Week 9-10: INTEGRATION REQUIRED (Rendering & FFI)
-├── DEPENDENCY: Rust lexer/parser/VM → C Core rendering pipeline
-├── DEPENDENCY: C Core layout → Graphics rendering
-├── Rust: Exception handling + array/object methods + closures
-├── C Core: Rendering pipeline + color parsing + text rendering
-└── Graphics: Rendering integration + profiling
++-- DEPENDENCY: Rust lexer/parser/VM -> C Core rendering pipeline
++-- DEPENDENCY: C Core layout -> Graphics rendering
++-- Rust: Exception handling + array/object methods + closures
++-- C Core: Rendering pipeline + color parsing + text rendering
++-- Graphics: Rendering integration + profiling
 
 Week 11-12: ALL TEAMS (Testing & Polish)
-├── Comprehensive Test262 run
-├── Fuzzing (AFL++)
-├── Performance profiling
-├── Code cleanup + lint validation
-└── Documentation update
++-- Comprehensive Test262 run
++-- Fuzzing (AFL++)
++-- Performance profiling
++-- Code cleanup + lint validation
++-- Documentation update
 
 CRITICAL DEPENDENCIES:
-1. Rust lexer (Week 1-2) ← No blocker
-2. C Core tokenizer (Week 1-4) ← No blocker
-3. Graphics window init (Week 1) ← No blocker
-4. Rust parser (Week 3-4) ← Blocks Rust team sequentially (no cross-team blocker)
-5. C Core DOM (Week 5-6) ← Blocks C Core sequentially
-6. Rust VM (Week 5-6) ← Blocks Rust team sequentially
-7. Layout engine (Week 7-8) ← Blocks rendering integration (Week 9)
-8. Rendering pipeline (Week 9-10) ← Depends on layout + graphics
+1. Rust lexer (Week 1-2) <- No blocker
+2. C Core tokenizer (Week 1-4) <- No blocker
+3. Graphics window init (Week 1) <- No blocker
+4. Rust parser (Week 3-4) <- Blocks Rust team sequentially (no cross-team blocker)
+5. C Core DOM (Week 5-6) <- Blocks C Core sequentially
+6. Rust VM (Week 5-6) <- Blocks Rust team sequentially
+7. Layout engine (Week 7-8) <- Blocks rendering integration (Week 9)
+8. Rendering pipeline (Week 9-10) <- Depends on layout + graphics
 
 RESULT: Zero cross-team blockers in Week 1-8. All teams can start immediately.
 Integration in Week 9 can proceed as planned (no slip risk).
@@ -284,11 +284,11 @@ Integration in Week 9 can proceed as planned (no slip risk).
 | All | 11-12 | All weeks 1-10 | Tested, optimized, documented |
 
 **Go/No-Go Criteria for Week 1 Start**:
-- ✅ All specifications frozen (5 complete, no TODOs)
-- ✅ Teams assigned (8-10 people identified)
-- ✅ No external blockers (all Phase 2 work complete)
-- ✅ Infrastructure ready (CMake, git, CI/CD pipeline designed)
-- ✅ Acceptance criteria defined (quantified targets per milestone)
+- [x] All specifications frozen (5 complete, no TODOs)
+- [x] Teams assigned (8-10 people identified)
+- [x] No external blockers (all Phase 2 work complete)
+- [x] Infrastructure ready (CMake, git, CI/CD pipeline designed)
+- [x] Acceptance criteria defined (quantified targets per milestone)
 
 **RESULT**: Phase 3 Week 1 can begin immediately. No delays needed.
 
@@ -508,7 +508,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - name: Verify Test262 ≥95%
+    - name: Verify Test262 >=95%
       run: ./scripts/verify-test262-95.sh
 
     - name: Verify zero warnings
@@ -548,27 +548,27 @@ echo "[pre-commit] Running checks..."
 
 # Rust
 cd silksurf-js
-cargo fmt --check || (echo "❌ Rust format failed"; exit 1)
-cargo clippy --all-targets -- -D warnings || (echo "❌ Rust lint failed"; exit 1)
-cargo test --lib || (echo "❌ Rust tests failed"; exit 1)
+cargo fmt --check || (echo "[FAIL] Rust format failed"; exit 1)
+cargo clippy --all-targets -- -D warnings || (echo "[FAIL] Rust lint failed"; exit 1)
+cargo test --lib || (echo "[FAIL] Rust tests failed"; exit 1)
 cd ..
 
 # C Core
 cd silksurf-core
 mkdir -p build && cd build
 cmake .. -DCMAKE_C_FLAGS="-Wall -Wextra -Werror" > /dev/null 2>&1
-make 2>&1 | grep -i warning && (echo "❌ C warnings found"; exit 1) || true
-ctest > /dev/null 2>&1 || (echo "❌ C tests failed"; exit 1)
+make 2>&1 | grep -i warning && (echo "[FAIL] C warnings found"; exit 1) || true
+ctest > /dev/null 2>&1 || (echo "[FAIL] C tests failed"; exit 1)
 cd ../..
 
 # Graphics
 cd silksurf-gui
 mkdir -p build && cd build
 cmake .. -DCMAKE_C_FLAGS="-Wall -Wextra -Werror" > /dev/null 2>&1
-make 2>&1 | grep -i warning && (echo "❌ GUI warnings found"; exit 1) || true
+make 2>&1 | grep -i warning && (echo "[FAIL] GUI warnings found"; exit 1) || true
 cd ../..
 
-echo "✅ All pre-commit checks passed"
+echo "[x] All pre-commit checks passed"
 ```
 
 ### Testing Strategy
@@ -583,8 +583,8 @@ echo "✅ All pre-commit checks passed"
 - Damage tracking: rect merging, overlap detection, union bounds
 
 **Integration Tests** (run weekly):
-- End-to-end: HTML → CSS → DOM → Layout → Render
-- FFI: Rust ↔ C boundary validation, type safety
+- End-to-end: HTML -> CSS -> DOM -> Layout -> Render
+- FFI: Rust <-> C boundary validation, type safety
 - Performance: lexer throughput, parser speed, layout time
 - Memory: leaks on Top 100 websites, sustained <200MB
 
@@ -654,7 +654,7 @@ GO/NO-GO CHECKLIST (PHASE 3 READINESS)
 
 ### Go/No-Go Recommendation
 
-**RESULT: 🟢 GO FOR PHASE 3 KICKOFF**
+**RESULT: [OK] GO FOR PHASE 3 KICKOFF**
 
 - All gates GREEN
 - Zero technical blockers
@@ -716,22 +716,22 @@ RISK ASSESSMENT & MITIGATION
 SIGN-OFF & RECOMMENDATION
 ================================================================================
 
-**Phase 2 Completion**: ✅ FINAL (Task 20 of 20 complete)
+**Phase 2 Completion**: [x] FINAL (Task 20 of 20 complete)
 
-**Architecture Status**: ✅ FROZEN
+**Architecture Status**: [x] FROZEN
 - Cleanroom boundary enforced
 - All specifications complete (no gaps, no TODOs)
 - NO SHORTCUTS policy validated
 - Change control policy established
 
-**Phase 3 Readiness**: ✅ GO
+**Phase 3 Readiness**: [x] GO
 - Teams identified and parallelizable
 - Dependency graph mapped (zero critical blockers)
 - CI/CD pipeline designed (GitHub Actions, ctest, Test262, fuzzing)
 - Acceptance criteria quantified and measurable
 - Go/No-Go checklist: ALL GREEN
 
-**Recommendation**: 🟢 **APPROVE PHASE 3 KICKOFF IMMEDIATELY**
+**Recommendation**: [OK] **APPROVE PHASE 3 KICKOFF IMMEDIATELY**
 
 Proceed with:
 1. Team formation (8-10 people assigned to roles)
@@ -749,7 +749,7 @@ cleanroom design specifications with zero technical debt.
 - Zero warnings (treat as errors)
 - Zero memory leaks (Valgrind clean)
 - Zero crashes (fuzzing 1000+ cases)
-- Test262 ≥95% (automated weekly)
+- Test262 >=95% (automated weekly)
 - Performance baselines recorded (before/after)
 
 ================================================================================
@@ -758,6 +758,6 @@ END OF PHASE 3 SCOPE & READINESS
 
 **Prepared by**: Claude Code
 **Reviewed against**: CLAUDE.md (NO SHORTCUTS policy)
-**Validation**: ✅ PASS (Phase 2 complete, Phase 3 ready)
+**Validation**: [x] PASS (Phase 2 complete, Phase 3 ready)
 **Date**: 2025-12-31
 **Next**: Phase 3 Week 1 implementation begins (no delay)

@@ -10,7 +10,7 @@
 
 Integrate native CSS cascade engine with selector matching to complete the CSS pipeline:
 - **Input**: DOM element + stylesheets
-- **Process**: Match rules → Apply cascade → Compute final values
+- **Process**: Match rules -> Apply cascade -> Compute final values
 - **Output**: Computed style
 
 Replace LibCSS's integrated cascade with our native implementation while keeping selector matching.
@@ -21,34 +21,34 @@ Replace LibCSS's integrated cascade with our native implementation while keeping
 
 ```
 LibCSS Flow (Current):
-┌─ Selector Matching ──┐
-│  (Find matching rules) │
-└───────────────────────┘
-           ↓
-┌─ LibCSS Cascade ──┐  ← We're replacing THIS
-│  (Apply cascade)   │
-└────────────────────┘
-           ↓
-┌─ Computed Values ──┐
-│  (Extract results)  │
-└────────────────────┘
++- Selector Matching --+
+|  (Find matching rules) |
++-----------------------+
+           v
++- LibCSS Cascade --+  <- We're replacing THIS
+|  (Apply cascade)   |
++--------------------+
+           v
++- Computed Values --+
+|  (Extract results)  |
++--------------------+
 ```
 
 ```
 Native Flow (Phase 2):
-┌─ Selector Matching ──────┐
-│  (Find matching rules)    │  ← Keep LibCSS
-└──────────────────────────┘
-           ↓
-┌─ Native Cascade ────────┐
-│  (Apply cascade)         │  ← Replace with our engine
-│  ✓ Per-property errors   │
-│  ✓ Spec-compliant        │
-└─────────────────────────┘
-           ↓
-┌─ Public API Converter ──┐
-│  (silk_computed_style_t) │  ← Already implemented (Phase 1)
-└────────────────────────┘
++- Selector Matching ------+
+|  (Find matching rules)    |  <- Keep LibCSS
++--------------------------+
+           v
++- Native Cascade --------+
+|  (Apply cascade)         |  <- Replace with our engine
+|  [x] Per-property errors   |
+|  [x] Spec-compliant        |
++-------------------------+
+           v
++- Public API Converter --+
+|  (silk_computed_style_t) |  <- Already implemented (Phase 1)
++------------------------+
 ```
 
 ---
@@ -113,7 +113,7 @@ for (each matched libcss rule) {
 
 **Current Flow**:
 ```c
-err = css_select_style(...);  // ← Triggers cascade
+err = css_select_style(...);  // <- Triggers cascade
 // Extract from libcss results
 ```
 
@@ -173,16 +173,16 @@ css_convert_to_silk_style(&computed_native, out_style);
 - Handler callbacks for DOM traversal (node_name, node_classes, etc.)
 
 **What We Replace**:
-- `css_select_style()` → custom wrapper with fallback
-- Internal cascade algorithm → `css_cascade_for_element()`
-- Computed style format → our `css_computed_style` + converter
+- `css_select_style()` -> custom wrapper with fallback
+- Internal cascade algorithm -> `css_cascade_for_element()`
+- Computed style format -> our `css_computed_style` + converter
 
 ### Property Mapping
 
 Create mapping table between LibCSS and Native property IDs:
 
 ```c
-// libcss enum → our enum
+// libcss enum -> our enum
 typedef struct {
     uint32_t libcss_id;
     css_property_id native_id;

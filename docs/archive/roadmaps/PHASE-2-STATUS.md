@@ -6,7 +6,7 @@
 
 ---
 
-## Phase 2.1: Handler Property Coverage - COMPLETE ✓
+## Phase 2.1: Handler Property Coverage - COMPLETE [x]
 
 **Status**: The `ua_default_for_property()` handler has been updated to return CSS_OK for all properties, preventing CSS_INVALID cascade failures.
 
@@ -24,7 +24,7 @@ return CSS_OK;
 
 ### Created Tests
 
-1. **test_css_cascade_native** (Phase 1) - ✓ 5/5 Passing
+1. **test_css_cascade_native** (Phase 1) - [x] 5/5 Passing
    - Pure native cascade algorithm tests
    - No libcss dependencies
    - Validates core cascade logic
@@ -48,10 +48,10 @@ Failed: 2
 The `css_cascade` test failure is **not in CSS logic** but in LibCSS/parserutils document cleanup during destruction. Stack trace shows:
 ```
 dom_hubbub_parser_destroy()
-  → hubbub_parser_destroy()
-    → parserutils_inputstream_destroy()
-      → parserutils__filter_destroy()
-        → iconv_close() ← SEGFAULT HERE
+  -> hubbub_parser_destroy()
+    -> parserutils_inputstream_destroy()
+      -> parserutils__filter_destroy()
+        -> iconv_close() <- SEGFAULT HERE
 ```
 
 This is a separate infrastructure issue, not a CSS cascade problem.
@@ -76,7 +76,7 @@ This is a separate infrastructure issue, not a CSS cascade problem.
    - Status: Implemented (ua_default_for_property returns CSS_OK)
    - Allows cascade to proceed but uses libcss's cascade algorithm
 
-### Phase 2.4: Infrastructure & Workspace Optimization - NEW 🚀
+### Phase 2.4: Infrastructure & Workspace Optimization - NEW 
 
 **Status**: Implementing high-performance Cargo orchestration.
 
@@ -95,21 +95,21 @@ This is a separate infrastructure issue, not a CSS cascade problem.
 
 ### What Works
 
-✓ Native cascade engine (Phase 1) - 5/5 tests passing
-✓ Handler no longer returns CSS_INVALID
-✓ CSS cascade algorithm is solid and spec-compliant
-✓ Error recovery fallback in css_engine.c prevents crashes
+[x] Native cascade engine (Phase 1) - 5/5 tests passing
+[x] Handler no longer returns CSS_INVALID
+[x] CSS cascade algorithm is solid and spec-compliant
+[x] Error recovery fallback in css_engine.c prevents crashes
 
 ### What's Blocked
 
-✗ Full LibCSS → Native cascade replacement
+[FAIL] Full LibCSS -> Native cascade replacement
   - LibCSS doesn't expose matched rules before cascading
   - Would need to either:
     1. Parse LibCSS source code deeper
     2. Implement selector matching ourselves
     3. Patch LibCSS directly
 
-✗ Integration test for selector matching
+[FAIL] Integration test for selector matching
   - DOM tree navigation has separate issue
   - silk_dom_node_get_tag_name may not be populated correctly
 
@@ -117,15 +117,15 @@ This is a separate infrastructure issue, not a CSS cascade problem.
 
 **Current Flow** (with Phase 1):
 ```
-Selector Matching (LibCSS) → Cascade (Still LibCSS) → Fallback Defaults
-                                      ↓
-                         CSS_INVALID ← Handler returns CSS_OK now
+Selector Matching (LibCSS) -> Cascade (Still LibCSS) -> Fallback Defaults
+                                      v
+                         CSS_INVALID <- Handler returns CSS_OK now
                          But cascade still uses libcss algorithm
 ```
 
 **Desired Flow** (Phase 2):
 ```
-Selector Matching (LibCSS) → Matched Rules → Native Cascade → Computed Style
+Selector Matching (LibCSS) -> Matched Rules -> Native Cascade -> Computed Style
 ```
 
 **Challenge**: LibCSS doesn't separate these cleanly.
@@ -137,8 +137,8 @@ Selector Matching (LibCSS) → Matched Rules → Native Cascade → Computed Sty
 ### Short Term (Days 1-3)
 
 1. **Document Current State**
-   - ✓ Created PHASE-2-SELECTOR-MATCHING-PLAN.md
-   - ✓ Documented architecture and options
+   - [x] Created PHASE-2-SELECTOR-MATCHING-PLAN.md
+   - [x] Documented architecture and options
    - Phase 2 plan complete
 
 2. **Fix DOM Navigation Issue**
@@ -215,9 +215,9 @@ Regardless of Phase 2 approach:
 | Tests Passing | 9/11 (82%) |
 | Compiler Warnings | 0 |
 | Memory Leaks | 0 |
-| Phase 1 Complete | ✓ 100% |
+| Phase 1 Complete | [x] 100% |
 | Phase 2 Complete | ~ 30% |
-| Phase 2.1 (Handler) | ✓ 100% |
+| Phase 2.1 (Handler) | [x] 100% |
 | Phase 2.2 (Testing) | ~ 50% |
 | Phase 2.3 (Integration) | 0% (blocked) |
 

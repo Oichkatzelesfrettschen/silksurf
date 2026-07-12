@@ -1,6 +1,6 @@
 # Rust Crate Audit (Performance + Roles)
 
-This audit summarizes each Rust crate’s role, key characteristics, and where
+This audit summarizes each Rust crate's role, key characteristics, and where
 performance-focused dependencies are already in use.
 
 ## Workspace Root

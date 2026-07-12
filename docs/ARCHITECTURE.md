@@ -16,7 +16,7 @@ data ownership boundaries:
 - `silksurf-css`: CSS tokenizer/parser + selector matching + computed styles.
 - `silksurf-layout`: layout tree/boxes from DOM + computed styles (fixed-point).
 - `silksurf-render`: display list + raster output.
-- `silksurf-engine`: orchestration pipeline (parse → style → layout → render).
+- `silksurf-engine`: orchestration pipeline (parse -> style -> layout -> render).
 - `silksurf-js`: JS runtime surface and task/microtask queue integration.
 - `silksurf-net` / `silksurf-tls`: fetch and TLS plumbing.
 - `silksurf-app` / `silksurf-gui`: CLI entry and UI shell.

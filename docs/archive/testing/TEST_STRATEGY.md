@@ -220,8 +220,8 @@ To achieve our goal of **maximum HTML5/CSS compliance**, we will integrate indus
 SilkSurf HTML5 Compliance Report - 2025-12-30
 ================================================
 html5lib Tokenizer Tests: 1,234/1,500 (82.3%)
-  test1.test: 145/150 (96.7%) ✓
-  test2.test: 134/145 (92.4%) ✓
+  test1.test: 145/150 (96.7%) [x]
+  test2.test: 134/145 (92.4%) [x]
   test3.test: 98/120 (81.7%)
   test4.test: 87/115 (75.7%)
   entities.test: 245/280 (87.5%)
@@ -298,22 +298,22 @@ Use a lightweight JSON parser:
 ## Acceptance Criteria
 
 ### Week 2 (Phase 4c)
-- ✅ Test harness implemented
-- ✅ Can load and parse JSON test files
-- ✅ Can run test1.test
-- ⏳ >0% pass rate
+- [x] Test harness implemented
+- [x] Can load and parse JSON test files
+- [x] Can run test1.test
+- [PENDING] >0% pass rate
 
 ### Week 4 (Phase 4c end)
-- ⏳ >70% pass rate on test1-test4
-- ⏳ Basic entities working
+- [PENDING] >70% pass rate on test1-test4
+- [PENDING] Basic entities working
 
 ### Week 10 (Phase 4d end)
-- ⏳ >85% overall tokenizer pass rate
-- ⏳ Full entity support (>90% on entity tests)
+- [PENDING] >85% overall tokenizer pass rate
+- [PENDING] Full entity support (>90% on entity tests)
 
 ### Week 24 (Phase 4h end)
-- ⏳ >80% CSS test pass rate
-- ⏳ Compliance dashboard operational
+- [PENDING] >80% CSS test pass rate
+- [PENDING] Compliance dashboard operational
 
 ---
 

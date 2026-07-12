@@ -6,7 +6,7 @@
 
 ## Executive Summary
 
-**Verdict**: ⚠️ **AGGRESSIVE BUT ACHIEVABLE** with caveats
+**Verdict**: WARNING **AGGRESSIVE BUT ACHIEVABLE** with caveats
 
 The 26-week timeline for 70,000-95,000 LOC is **5-14x faster than industry average** but achievable given:
 - Clear specifications (HTML5/CSS specs are detailed)
@@ -90,7 +90,7 @@ The 26-week timeline for 70,000-95,000 LOC is **5-14x faster than industry avera
 - Entity decoding (2,231 named entities)
 - Unicode handling
 
-**Feasibility**: ⚠️ **TIGHT BUT ACHIEVABLE**
+**Feasibility**: WARNING **TIGHT BUT ACHIEVABLE**
 - State machine is repetitive (many states similar)
 - Can study Ladybird's HTMLTokenizer.cpp for patterns
 - Entity table can be code-generated from spec
@@ -116,7 +116,7 @@ The 26-week timeline for 70,000-95,000 LOC is **5-14x faster than industry avera
 - Adoption agency algorithm (notoriously complex)
 - Foster parenting for tables
 
-**Feasibility**: 🔴 **MOST AGGRESSIVE PHASE**
+**Feasibility**: [BLOCKED] **MOST AGGRESSIVE PHASE**
 - This is the bottleneck phase
 - Adoption agency alone could take 1-2 weeks
 - Table handling is intricate
@@ -149,7 +149,7 @@ The 26-week timeline for 70,000-95,000 LOC is **5-14x faster than industry avera
 - W3C DOM Level 2 Core is clear spec
 - Arena allocation simplifies memory
 
-**Feasibility**: ✅ **REASONABLE**
+**Feasibility**: [x] **REASONABLE**
 - DOM is simpler than parser
 - Can leverage arena allocator from existing code
 - W3C spec is very detailed
@@ -170,7 +170,7 @@ The 26-week timeline for 70,000-95,000 LOC is **5-14x faster than industry avera
 - Fewer states than HTML tokenizer
 - Numbers, strings, identifiers are straightforward
 
-**Feasibility**: ✅ **CONSERVATIVE ESTIMATE**
+**Feasibility**: [x] **CONSERVATIVE ESTIMATE**
 - Most relaxed pace in roadmap
 - Can use this as buffer time if earlier phases slip
 
@@ -188,7 +188,7 @@ The 26-week timeline for 70,000-95,000 LOC is **5-14x faster than industry avera
 - Media queries add complexity
 - At-rules need careful handling
 
-**Feasibility**: ✅ **REASONABLE**
+**Feasibility**: [x] **REASONABLE**
 - CSS specs are very detailed
 - Can study Servo's CSS parser design
 - Selectors are well-defined
@@ -209,7 +209,7 @@ The 26-week timeline for 70,000-95,000 LOC is **5-14x faster than industry avera
 - Specificity calculation is straightforward
 - Inheritance is simple propagation
 
-**Feasibility**: ✅ **CONSERVATIVE**
+**Feasibility**: [x] **CONSERVATIVE**
 - Most relaxed pace
 - Cascade is conceptually simple
 - Just needs careful implementation
@@ -228,7 +228,7 @@ The 26-week timeline for 70,000-95,000 LOC is **5-14x faster than industry avera
 - Memory leak detection
 - Compliance test debugging
 
-**Feasibility**: ✅ **ADEQUATE TIME**
+**Feasibility**: [x] **ADEQUATE TIME**
 - 2 weeks is realistic for integration
 - Most components already tested individually
 
@@ -278,7 +278,7 @@ The 26-week timeline for 70,000-95,000 LOC is **5-14x faster than industry avera
 
 ---
 
-## Scope Justification: 25k → 95k LOC
+## Scope Justification: 25k -> 95k LOC
 
 ### Original Estimate (ARCHITECTURE_ANALYSIS.md)
 - HTML Tokenizer: 3,000 LOC (12 states)
@@ -355,20 +355,20 @@ The 26-week timeline for 70,000-95,000 LOC is **5-14x faster than industry avera
 ## Go/No-Go Decision Criteria
 
 ### GREEN LIGHT (Proceed with 26-week plan)
-✅ Reference implementations available for study
-✅ Specifications are detailed and clear
-✅ Learning from Phase 4a/4b failures
-✅ Focused scope (no external dependencies)
-✅ Incremental testing throughout
-✅ Acceptable risk profile
+[x] Reference implementations available for study
+[x] Specifications are detailed and clear
+[x] Learning from Phase 4a/4b failures
+[x] Focused scope (no external dependencies)
+[x] Incremental testing throughout
+[x] Acceptable risk profile
 
 ### YELLOW LIGHT (Proceed with caution)
-⚠️ Parser phase is aggressive (667-1000 LOC/day)
-⚠️ Compliance testing may reveal issues
-⚠️ 2-7x faster than industry average for well-specified work
+WARNING Parser phase is aggressive (667-1000 LOC/day)
+WARNING Compliance testing may reveal issues
+WARNING 2-7x faster than industry average for well-specified work
 
 ### RED LIGHT (Do not proceed)
-🔴 NONE - no blocking issues identified
+[BLOCKED] NONE - no blocking issues identified
 
 ---
 
@@ -432,7 +432,7 @@ The 26-week timeline for 70,000-95,000 LOC is **5-14x faster than industry avera
 ## Conclusion
 
 **The 26-week timeline is aggressive but achievable** with:
-- Disciplined prioritization (MVP → Quality → Nice-to-have)
+- Disciplined prioritization (MVP -> Quality -> Nice-to-have)
 - Continuous testing and integration
 - Reference to Ladybird/Servo for design patterns
 - Willingness to defer Priority 3 features if needed
@@ -449,7 +449,7 @@ The 26-week timeline for 70,000-95,000 LOC is **5-14x faster than industry avera
 - Mitigation: Deep study of Ladybird, incremental testing
 - Contingency: 2-4 week buffer, scope reduction options
 
-**Verdict**: ✅ **RECOMMEND PROCEED** with vigilance on Parser phase
+**Verdict**: [x] **RECOMMEND PROCEED** with vigilance on Parser phase
 
 ---
 

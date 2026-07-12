@@ -12,10 +12,10 @@
 ## Revised Scope Based on Requirements
 
 ### User Requirements (from 2025-12-30 scoping session):
-1. ✅ **Maximum compliance** - implement as much of HTML5/CSS specs as possible
-2. ✅ **Hybrid approach** - core components sequentially, features vertically
-3. ✅ **Comprehensive testing** - unit + integration + compliance tests
-4. ✅ **Lenient/recovery mode** - match browser error recovery behavior
+1. [x] **Maximum compliance** - implement as much of HTML5/CSS specs as possible
+2. [x] **Hybrid approach** - core components sequentially, features vertically
+3. [x] **Comprehensive testing** - unit + integration + compliance tests
+4. [x] **Lenient/recovery mode** - match browser error recovery behavior
 
 ### Impact on Original Architecture Estimate:
 
@@ -39,13 +39,13 @@
 ### Overview: 20-24 Weeks (5-6 Months)
 
 Instead of 14 weeks for simplified implementation, full compliance needs:
-- **Phase 4c (Tokenizer)**: 3-4 weeks → Full HTML5 tokenizer with all states
-- **Phase 4d (Parser)**: 5-6 weeks → Full HTML5 parser with all insertion modes
-- **Phase 4e (DOM)**: 2-3 weeks → Complete W3C DOM implementation
-- **Phase 4f (CSS Tokenizer)**: 2 weeks → Full CSS syntax tokenizer
-- **Phase 4g (CSS Parser)**: 4-5 weeks → Complete CSS parser with all selectors/properties
-- **Phase 4h (CSS Cascade)**: 3-4 weeks → Full cascade algorithm
-- **Phase 4i (Integration)**: 2-3 weeks → Full system integration and testing
+- **Phase 4c (Tokenizer)**: 3-4 weeks -> Full HTML5 tokenizer with all states
+- **Phase 4d (Parser)**: 5-6 weeks -> Full HTML5 parser with all insertion modes
+- **Phase 4e (DOM)**: 2-3 weeks -> Complete W3C DOM implementation
+- **Phase 4f (CSS Tokenizer)**: 2 weeks -> Full CSS syntax tokenizer
+- **Phase 4g (CSS Parser)**: 4-5 weeks -> Complete CSS parser with all selectors/properties
+- **Phase 4h (CSS Cascade)**: 3-4 weeks -> Full cascade algorithm
+- **Phase 4i (Integration)**: 2-3 weeks -> Full system integration and testing
 
 ---
 
@@ -161,12 +161,12 @@ static const silk_html_entity_t entities[] = {
 - [ ] Test: Full test_document_simple.html tokenization
 
 **Success Criteria for Phase 4c**:
-- ✅ All 60-70 tokenizer states implemented
-- ✅ Character reference decoding works for common entities
-- ✅ Error recovery matches HTML5 spec for common cases
-- ✅ 95%+ unit test coverage
-- ✅ Can tokenize real-world HTML without crashes
-- ✅ Performance: < 5ms for 10KB document
+- [x] All 60-70 tokenizer states implemented
+- [x] Character reference decoding works for common entities
+- [x] Error recovery matches HTML5 spec for common cases
+- [x] 95%+ unit test coverage
+- [x] Can tokenize real-world HTML without crashes
+- [x] Performance: < 5ms for 10KB document
 
 ---
 
@@ -327,12 +327,12 @@ void run_adoption_agency_algorithm(silk_html_parser_t *parser,
 - [ ] Test: Parse Wikipedia homepage HTML
 
 **Success Criteria for Phase 4d**:
-- ✅ All 21 insertion modes implemented
-- ✅ Adoption agency algorithm works correctly
-- ✅ Can parse complex real-world HTML
-- ✅ 90%+ unit test coverage
-- ✅ Passes core HTML5 parser compliance tests
-- ✅ Performance: < 20ms for 50KB document
+- [x] All 21 insertion modes implemented
+- [x] Adoption agency algorithm works correctly
+- [x] Can parse complex real-world HTML
+- [x] 90%+ unit test coverage
+- [x] Passes core HTML5 parser compliance tests
+- [x] Performance: < 20ms for 50KB document
 
 ---
 
@@ -429,15 +429,15 @@ typedef struct silk_dom_node {
 - [ ] Add W3C DOM compliance tests (subset)
 - [ ] Test DOM with parser integration
 - [ ] Benchmark DOM operations
-- [ ] Test: Full HTML parse → DOM tree → query
+- [ ] Test: Full HTML parse -> DOM tree -> query
 
 **Success Criteria for Phase 4e**:
-- ✅ All core node types implemented
-- ✅ Tree operations work correctly
-- ✅ Element/attribute methods functional
-- ✅ 95%+ unit test coverage
-- ✅ Passes core W3C DOM compliance tests
-- ✅ Performance: < 1ms for 1000 node tree manipulation
+- [x] All core node types implemented
+- [x] Tree operations work correctly
+- [x] Element/attribute methods functional
+- [x] 95%+ unit test coverage
+- [x] Passes core W3C DOM compliance tests
+- [x] Performance: < 1ms for 1000 node tree manipulation
 
 ---
 
@@ -504,11 +504,11 @@ typedef enum {
 - [ ] Test: Tokenize Bootstrap CSS
 
 **Success Criteria for Phase 4f**:
-- ✅ All CSS token types implemented
-- ✅ Handles CSS 3 syntax correctly
-- ✅ Error recovery works
-- ✅ 95%+ test coverage
-- ✅ Performance: < 5ms for 100KB CSS file
+- [x] All CSS token types implemented
+- [x] Handles CSS 3 syntax correctly
+- [x] Error recovery works
+- [x] 95%+ test coverage
+- [x] Performance: < 5ms for 100KB CSS file
 
 ---
 
@@ -590,12 +590,12 @@ typedef struct {
 - [ ] Test: Parse large CSS frameworks
 
 **Success Criteria for Phase 4g**:
-- ✅ All selector types implemented
-- ✅ All common CSS properties parsed
-- ✅ Media queries work
-- ✅ 90%+ test coverage
-- ✅ Passes core CSS parser compliance tests
-- ✅ Performance: < 20ms for 500KB CSS file
+- [x] All selector types implemented
+- [x] All common CSS properties parsed
+- [x] Media queries work
+- [x] 90%+ test coverage
+- [x] Passes core CSS parser compliance tests
+- [x] Performance: < 20ms for 500KB CSS file
 
 ---
 
@@ -635,7 +635,7 @@ int compare_specificity(silk_css_specificity_t *s1,
 ### 4h.2: Cascade Algorithm (Week 21-22)
 **LOC Target**: ~2,000
 
-- [ ] Implement origin cascade (UA → Author → Inline)
+- [ ] Implement origin cascade (UA -> Author -> Inline)
 - [ ] Implement specificity cascade
 - [ ] Implement source order cascade
 - [ ] Handle !important cascade inversion
@@ -670,15 +670,15 @@ int compare_specificity(silk_css_specificity_t *s1,
 - [ ] Add cascade compliance tests
 - [ ] Test with complex stylesheets
 - [ ] Benchmark cascade performance
-- [ ] Test: Full HTML+CSS → computed styles pipeline
+- [ ] Test: Full HTML+CSS -> computed styles pipeline
 
 **Success Criteria for Phase 4h**:
-- ✅ Specificity calculated correctly for all selectors
-- ✅ Cascade algorithm matches CSS spec
-- ✅ Inheritance works for all properties
-- ✅ Computed values correct
-- ✅ 95%+ test coverage
-- ✅ Performance: < 10ms for 1000 elements with complex CSS
+- [x] Specificity calculated correctly for all selectors
+- [x] Cascade algorithm matches CSS spec
+- [x] Inheritance works for all properties
+- [x] Computed values correct
+- [x] 95%+ test coverage
+- [x] Performance: < 10ms for 1000 elements with complex CSS
 
 ---
 
@@ -688,8 +688,8 @@ int compare_specificity(silk_css_specificity_t *s1,
 ### Goal: End-to-end system integration and validation
 
 ### 4i.1: System Integration (Week 25)
-- [ ] Integrate tokenizer → parser → DOM pipeline
-- [ ] Integrate CSS parser → cascade → computed styles
+- [ ] Integrate tokenizer -> parser -> DOM pipeline
+- [ ] Integrate CSS parser -> cascade -> computed styles
 - [ ] Connect HTML parser with CSS engine
 - [ ] Test full document rendering pipeline
 - [ ] Fix integration bugs
@@ -723,13 +723,13 @@ int compare_specificity(silk_css_specificity_t *s1,
 - [ ] Verify stability under stress
 
 **Final Success Criteria**:
-- ✅ 85%+ HTML5 compliance test pass rate
-- ✅ 85%+ CSS compliance test pass rate
-- ✅ 90%+ W3C DOM compliance
-- ✅ No memory leaks (valgrind clean)
-- ✅ Can parse Wikipedia homepage without errors
-- ✅ Performance targets met for all components
-- ✅ No crashes on real-world HTML/CSS
+- [x] 85%+ HTML5 compliance test pass rate
+- [x] 85%+ CSS compliance test pass rate
+- [x] 90%+ W3C DOM compliance
+- [x] No memory leaks (valgrind clean)
+- [x] Can parse Wikipedia homepage without errors
+- [x] Performance targets met for all components
+- [x] No crashes on real-world HTML/CSS
 
 ---
 
@@ -819,30 +819,30 @@ int compare_specificity(silk_css_specificity_t *s1,
 ## Success Metrics
 
 ### Code Quality:
-- ✅ 90%+ unit test coverage
-- ✅ 85%+ compliance test pass rate
-- ✅ Zero memory leaks
-- ✅ Zero compiler warnings
-- ✅ All public APIs documented
+- [x] 90%+ unit test coverage
+- [x] 85%+ compliance test pass rate
+- [x] Zero memory leaks
+- [x] Zero compiler warnings
+- [x] All public APIs documented
 
 ### Performance:
-- ✅ Tokenizer: < 5ms for 10KB HTML
-- ✅ Parser: < 20ms for 50KB HTML
-- ✅ CSS Parser: < 20ms for 500KB CSS
-- ✅ Cascade: < 10ms for 1000 elements
-- ✅ Total: < 50ms for typical web page
+- [x] Tokenizer: < 5ms for 10KB HTML
+- [x] Parser: < 20ms for 50KB HTML
+- [x] CSS Parser: < 20ms for 500KB CSS
+- [x] Cascade: < 10ms for 1000 elements
+- [x] Total: < 50ms for typical web page
 
 ### Compliance:
-- ✅ 85%+ HTML5 parsing tests
-- ✅ 85%+ CSS parsing tests
-- ✅ 90%+ W3C DOM tests
-- ✅ Can render real-world sites correctly
+- [x] 85%+ HTML5 parsing tests
+- [x] 85%+ CSS parsing tests
+- [x] 90%+ W3C DOM tests
+- [x] Can render real-world sites correctly
 
 ### Maintainability:
-- ✅ Clear module boundaries
-- ✅ Comprehensive documentation
-- ✅ Self-contained (no external libs)
-- ✅ Readable code (< 100 LOC per function avg)
+- [x] Clear module boundaries
+- [x] Comprehensive documentation
+- [x] Self-contained (no external libs)
+- [x] Readable code (< 100 LOC per function avg)
 
 ---
 
@@ -870,9 +870,9 @@ int compare_specificity(silk_css_specificity_t *s1,
 
 ## Next Steps
 
-1. ✅ **User approval**: Review and approve this roadmap
-2. ✅ **Environment setup**: Ensure build system ready
-3. ✅ **Begin Phase 4c.1**: Start HTML5 tokenizer foundation (Week 1)
+1. [x] **User approval**: Review and approve this roadmap
+2. [x] **Environment setup**: Ensure build system ready
+3. [x] **Begin Phase 4c.1**: Start HTML5 tokenizer foundation (Week 1)
 
 ---
 

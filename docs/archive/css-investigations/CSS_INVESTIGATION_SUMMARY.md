@@ -219,7 +219,7 @@ From `examples/example1.c` in libcss source:
 
 ## Conclusion
 
-The CSS_INVALID error is **not a bug in silksurf's implementation**—it is a **natural consequence of using libcss minimally**. LibCSS was designed for complete browser implementations where the handler provides comprehensive property defaults.
+The CSS_INVALID error is **not a bug in silksurf's implementation**--it is a **natural consequence of using libcss minimally**. LibCSS was designed for complete browser implementations where the handler provides comprehensive property defaults.
 
 **Two paths forward**:
 

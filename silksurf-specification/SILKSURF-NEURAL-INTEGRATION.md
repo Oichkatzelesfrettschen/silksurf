@@ -667,7 +667,7 @@ Acceptable margin: <1ms per frame
 PART 5: INTEGRATION CHECKLIST
 ================================================================================
 
-- [ ] Train LSTM model on Top 1M corpus (accuracy ≥88%)
+- [ ] Train LSTM model on Top 1M corpus (accuracy >=88%)
 - [ ] Quantize model to int8 (<1MB)
 - [ ] Integrate with HTML5 tokenizer
 - [ ] Integrate with CSS tokenizer

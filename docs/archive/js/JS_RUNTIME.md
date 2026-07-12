@@ -36,8 +36,8 @@ deterministic, and safe to drive from the engine.
 - `verification/`: bytecode/VM validation helpers.
 
 ## JS Data Flow (Current)
-Source bytes → `lexer` tokens → `parser` AST → `bytecode` chunk → `vm` execute
-→ optional snapshot via `vm::snapshot` (mmap when enabled).
+Source bytes -> `lexer` tokens -> `parser` AST -> `bytecode` chunk -> `vm` execute
+-> optional snapshot via `vm::snapshot` (mmap when enabled).
 
 ## Data Contracts
 - `Dom` and `NodeId` are the only host handles; JS should not retain borrowed

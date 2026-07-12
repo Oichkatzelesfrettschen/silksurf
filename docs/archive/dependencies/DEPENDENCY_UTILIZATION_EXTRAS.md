@@ -5,7 +5,7 @@ Generated: 2025-12-31 23:11 UTC
 
 ## Audit Notes
 - `silksurf-extras/*` is reference-only and not compiled by the workspace.
-- Feature/macro usage is heuristic; validate against each crate’s `Cargo.toml`.
+- Feature/macro usage is heuristic; validate against each crate's `Cargo.toml`.
 
 ## boa_benches
 Path: `silksurf-extras/boa/benches`
