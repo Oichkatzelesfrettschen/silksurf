@@ -51,9 +51,10 @@ throughput question.
 - The V8 baseline runs in a bare `vm` sandbox (self/window aliases
   only); boa runs with the full SilkContext host surface. The comparison
   bounds engine speed, not host-object overhead.
-- The render probe covers mount and one commit; hooks, reconciliation
-  under updates, and React's synthetic event delegation (root-installed
-  listeners receiving bridge events) are unproven.
+- The render probe covers mount, one commit, a delegated click, and one
+  state-driven re-render. Larger reconciliation under repeated updates, and
+  the DOM-visible commit of that re-render (blocked on
+  element-property-reflection), remain unproven.
 
 ## Reproducer
 
@@ -70,21 +71,42 @@ Bundle hashes at measurement time (sha256):
 `a9705d...` lodash 4.17.21, `845c52...` moment 2.30.1 (full hashes in
 the session evidence; bundles are not vendored -- no network in tests).
 
+## React event delegation lands on stable wrapper identity
+
+The bridge caches one JS wrapper per node keyed by `nodeId`
+(`NODE_WRAPPER_REGISTRY` in `dom_bridge.rs`), so `getElementById(x)`, the
+`createElement` result, and the event target all resolve to the same object.
+React stamps `__reactFiber$<key>` and `__reactProps$<key>` on the host node at
+commit and reads them back at dispatch; a fresh wrapper per access stranded
+those expandos on a dead object and delegation dropped every event.
+
+Measured against the `--click inc` counter probe (React 18.3.1 `useState`
+counter, `createRoot(document.body)`, delegated `onClick`):
+
+- The button node carries both expandos after commit
+  (`__reactFiber$egh376mbn1n`, `__reactProps$egh376mbn1n`), reachable through
+  `getElementById('inc')`.
+- The delegated click listener registers on the root container
+  (`__silksurfListenerTypeCounts.click == 2`: one bubble, one capture on the
+  body node).
+- A trusted click at the button fires the delegated handler
+  (`onClick` runs) and advances state: `Counter` re-renders with
+  `count == 1` (render count goes 1 -> 2).
+
+Before the cache, the same probe left the handler uncalled and the component at
+its initial render.
+
 ## Follow-up surface (feeds the deferral wave)
 
-- stable-node-wrapper-identity (ROOT CAUSE, measured): the interactive
-  probe (`--click`) shows React committing a hooks component
-  (`useState` counter renders) while a trusted click leaves state
-  untouched. React locates the fiber for an event by reading the
-  expando it stamped on the target DOM node object at commit; the
-  bridge builds a fresh wrapper per access, so the stamp lives on a
-  dead object and delegation drops the event. The fix is a JS-side
-  wrapper cache keyed by nodeId so `getElementById(x)` returns the
-  same object across accesses and expando properties persist. This
-  subsumes react-synthetic-event-bridge.
-- element-property-reflection: React writes `el.id = ...` and
-  `textNode.nodeValue = ...` as property assignments; wrapper data
-  properties accept the write without reaching the Dom. Audit which
-  reflected properties frameworks assign and back them with accessors.
+- element-property-reflection (ROOT CAUSE for the visible counter, measured):
+  after the click, React re-renders with `count == 1` but the on-screen text
+  stays `clicks:0`. React commits the text change by assigning the span's text
+  node `nodeValue`/`data`; the wrapper accepts the write as a data property
+  without reaching the Dom, so the paint tree never sees it. This is now the
+  single blocker between the working event loop and a visibly updating counter.
+  Fix: back the mutable reflected properties (`nodeValue`, `data`,
+  `textContent` on text nodes, `id`, `className`) with accessors that write
+  through to the Dom, mirroring the existing `value`/`textContent` element
+  accessors.
 - interaction-latency-probe: measure the keystroke-to-commit path once
-  the synthetic-event bridge lands.
+  element-property-reflection makes the commit observable.
