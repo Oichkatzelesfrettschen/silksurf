@@ -113,13 +113,25 @@ snapshot properties to accessors also erases the read-staleness the wrapper
 cache introduced -- a cached wrapper now reflects later `setAttribute` writes.
 
 With this in place the full `--click inc` probe passes: a trusted click drives
-the counter to a visibly committed `clicks:1` in `document.body.textContent`
-(was `clicks:0`, the re-render's text never reaching the paint tree). The
-React counter -- mount, delegated event, hooks state, re-render, and
-DOM-visible commit -- now works end to end on the local-spa rung.
+the counter to a committed `clicks:1` in `document.body.textContent` (was
+`clicks:0`, the re-render's text never reaching Dom state). This is a
+JS/DOM-bridge result: the probe drives a synthetic Dom, synthesizes the click
+through `dispatch_dom_event`, and reads committed Dom text. Mount, delegated
+event, hooks state, re-render, and the Dom-visible commit all work over the
+bridge.
+
+The running-app path is a separate, still-unproven evidence class: network
+fetch, HTML parse, the GUI input synthesis in `silksurf-app/src/js_events.rs`,
+dirty-node paint, and native present are not exercised by the probe.
+Substantiating the local-spa rung means loading a counter page through the
+real app (`make gui-probe`) and confirming the click repaints, not just that
+Dom text mutates.
 
 ## Follow-up surface (feeds the deferral wave)
 
+- local-spa-rung-gui-probe: load a React counter page through the running app
+  and confirm the click drives a visible repaint, closing the gap between the
+  bridge result and the ladder's local-spa acceptance.
 - interaction-latency-probe: measure the keystroke-to-commit path now that the
   commit is observable, separating boa execution time from bridge overhead.
 - broader reconciliation: the probe covers one state-driven commit; list

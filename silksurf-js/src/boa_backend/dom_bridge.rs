@@ -1018,8 +1018,10 @@ fn node_value_get_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFu
 
 /// `nodeValue`/`data` setter. React commits a text update by assigning the text
 /// node `nodeValue`/`data`; `set_text_content` rewrites the Text node in place
-/// and marks it dirty, so the paint tree observes the new text. Assignments on
-/// non-text nodes are a no-op, matching `nodeValue` being null on elements.
+/// and marks it dirty, so the paint tree observes the new text. The write is
+/// gated to Text nodes: `nodeValue` assignment is ignored on elements per the
+/// DOM spec, and `set_text_content` would otherwise replace an element's whole
+/// subtree with a single text node.
 fn node_value_set_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
     let arc = Arc::clone(dom_arc);
     // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
@@ -1032,7 +1034,13 @@ fn node_value_set_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFu
                 .transpose()?
                 .unwrap_or_default();
             let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
-            let _ = dom.set_text_content(node_id, text);
+            let is_text = dom
+                .node(node_id)
+                .map(|n| matches!(n.kind(), NodeKind::Text { .. }))
+                .unwrap_or(false);
+            if is_text {
+                let _ = dom.set_text_content(node_id, text);
+            }
             Ok(JsValue::undefined())
         })
     }
@@ -2679,6 +2687,22 @@ mod tests {
              if (document.getElementById('greeting').textContent !== 'via-data') { \
                throw new Error('Dom text not updated'); \
              }",
+        )
+        .expect("eval should succeed");
+    }
+
+    #[test]
+    fn node_value_write_on_element_leaves_children_intact() {
+        let (arc, _root) = simple_dom();
+        let mut ctx = SilkContext::with_dom(&arc);
+        // nodeValue assignment on an element is a DOM-spec no-op; the setter
+        // must not fall through to set_text_content, which would replace the
+        // element subtree with a single text node.
+        ctx.eval(
+            "var el = document.getElementById('greeting'); \
+             el.nodeValue = 'wiped'; \
+             if (el.textContent !== 'Hello, world!') { throw new Error('element subtree clobbered'); } \
+             if (el.firstChild === null) { throw new Error('text child destroyed'); }",
         )
         .expect("eval should succeed");
     }

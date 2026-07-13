@@ -233,10 +233,13 @@ share files with the workstreams above and should land opportunistically:
   through Dom::set_text_content (React commits text by assigning them),
   id/className read and write the id/class attributes. React routes
   className/id through setAttribute (no property assignment in the
-  bundle), so text was the sole gap. Measured: the full --click inc
-  probe now drives the counter to a visibly committed clicks:1 in
-  document.body.textContent (was clicks:0). Also erases the read
+  bundle), so text was the sole gap. Measured over the JS/DOM bridge:
+  the full --click inc probe drives the counter to a committed clicks:1
+  in document.body.textContent (was clicks:0). Also erases the read
   staleness stable-node-wrapper-identity introduced on cached wrappers.
+  The running-app repaint path (js_events.rs input synthesis ->
+  dirty-node paint -> present) is a separate evidence class; the
+  local-spa rung still needs a make gui-probe against a counter page.
 - **cdn-challenge-reality-spike** -- TLS fingerprint (JA3/JA4) and
   challenge-JS survival against a Cloudflare-fronted test property;
   rustls default fingerprints may be challenged regardless of engine
