@@ -228,15 +228,15 @@ share files with the workstreams above and should land opportunistically:
   count 1 (was: handler never called, state stuck at 0). Subsumes
   react-synthetic-event-bridge; details in
   docs/findings/boa-react-bundle-throughput.md.
-- element-property-reflection -- frameworks assign el.id and
-  textNode.nodeValue as properties; wrapper data properties absorb the
-  write without reaching the Dom. Now the sole blocker for a visibly
-  updating React counter: the click-driven re-render commits its text
-  through a nodeValue assignment the Dom never sees (measured). Back
-  reflected properties (nodeValue, data, id, className) with
-  write-through accessors (finding follow-up); this also restores live
-  reads on cached wrappers, which stable-node-wrapper-identity froze at
-  first-access value for id/className/nodeValue.
+- **element-property-reflection** -- LANDED 2026-07-12. nodeValue, data,
+  id, and className are live wrapper accessors: nodeValue/data write
+  through Dom::set_text_content (React commits text by assigning them),
+  id/className read and write the id/class attributes. React routes
+  className/id through setAttribute (no property assignment in the
+  bundle), so text was the sole gap. Measured: the full --click inc
+  probe now drives the counter to a visibly committed clicks:1 in
+  document.body.textContent (was clicks:0). Also erases the read
+  staleness stable-node-wrapper-identity introduced on cached wrappers.
 - **cdn-challenge-reality-spike** -- TLS fingerprint (JA3/JA4) and
   challenge-JS survival against a Cloudflare-fronted test property;
   rustls default fingerprints may be challenged regardless of engine
