@@ -234,7 +234,9 @@ share files with the workstreams above and should land opportunistically:
   updating React counter: the click-driven re-render commits its text
   through a nodeValue assignment the Dom never sees (measured). Back
   reflected properties (nodeValue, data, id, className) with
-  write-through accessors (finding follow-up).
+  write-through accessors (finding follow-up); this also restores live
+  reads on cached wrappers, which stable-node-wrapper-identity froze at
+  first-access value for id/className/nodeValue.
 - **cdn-challenge-reality-spike** -- TLS fingerprint (JA3/JA4) and
   challenge-JS survival against a Cloudflare-fronted test property;
   rustls default fingerprints may be challenged regardless of engine

@@ -93,8 +93,16 @@ counter, `createRoot(document.body)`, delegated `onClick`):
   (`onClick` runs) and advances state: `Counter` re-renders with
   `count == 1` (render count goes 1 -> 2).
 
-Before the cache, the same probe left the handler uncalled and the component at
-its initial render.
+Counterfactual (same corrected probe, wrapper cache reverted to the
+pre-cache `dom_bridge.rs`): the trusted click leaves `onClickFired == 0` and
+the component at its initial render. Reverting only the cache isolates it as
+the cause; the probe's click-check fix is held constant across both runs.
+
+The cache freezes the static snapshot properties (`id`, `className`,
+`nodeValue`) at first-access value, so a cached wrapper reports stale values
+after a later `setAttribute` where a fresh wrapper re-snapshotted live. No
+current test exercises that path; element-property-reflection removes the
+regression by converting those properties to Dom-backed accessors.
 
 ## Follow-up surface (feeds the deferral wave)
 
