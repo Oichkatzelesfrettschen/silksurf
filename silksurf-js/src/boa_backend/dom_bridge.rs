@@ -416,6 +416,41 @@ fn make_getter(ctx: &mut Context, f: NativeFunction) -> JsFunction {
 
 // ---- node -> JS object -----------------------------------------------------
 
+/// Hidden global caching one JS wrapper per DOM node, keyed by `nodeId`.
+///
+/// Wrapper identity must persist across accesses. Frameworks stamp expando
+/// properties on the node object -- React writes its fiber pointer at commit
+/// and reads it back at event dispatch -- so `getElementById(x)`, the
+/// `createElement` result, and the event target must all be the same object.
+/// A fresh wrapper per access strands the expando on a dead object and drops
+/// delegated events.
+///
+/// The key never remaps: `Dom::push_node` assigns `NodeId(nodes.len())` and
+/// never recycles, so a nodeId denotes one node for the Dom's lifetime, even
+/// across detach and reattach. No wrapper is evicted on removal; the arena
+/// keeps the node, and React reattaches the same node expecting its expando to
+/// survive. Each `SilkContext::with_dom` builds a fresh Context, so the
+/// registry is per-Dom and never spans arenas.
+const NODE_WRAPPER_REGISTRY: &str = "__silksurfNodeWrappers";
+
+fn wrapper_key(node_id: NodeId) -> JsString {
+    JsString::from(node_id.raw().to_string().as_str())
+}
+
+/// Return the wrapper built for `node_id` earlier in this realm, if any.
+fn cached_wrapper(node_id: NodeId, ctx: &mut Context) -> Option<JsValue> {
+    let registry = event_dispatch::hidden_global_object(NODE_WRAPPER_REGISTRY, ctx).ok()?;
+    let existing = registry.get(wrapper_key(node_id), ctx).ok()?;
+    existing.as_object().is_some().then_some(existing)
+}
+
+/// Publish the freshly built wrapper so later accesses share its identity.
+fn store_wrapper(node_id: NodeId, wrapper: &JsValue, ctx: &mut Context) {
+    if let Ok(registry) = event_dispatch::hidden_global_object(NODE_WRAPPER_REGISTRY, ctx) {
+        let _ = registry.set(wrapper_key(node_id), wrapper.clone(), false, ctx);
+    }
+}
+
 /// Build a JS object for a single DOM node.
 ///
 /// Static properties snapshot the node at wrapper creation time.
@@ -424,12 +459,18 @@ fn make_getter(ctx: &mut Context, f: NativeFunction) -> JsFunction {
 ///
 /// Mutation methods acquire and release the DOM lock on each call.
 ///
+/// A per-node wrapper cache (`NODE_WRAPPER_REGISTRY`) makes the returned object
+/// stable across accesses, so expando properties persist.
+///
 /// Callers pass no held DOM lock into this function.
 pub(super) fn node_to_js_object(
     dom_arc: &Arc<Mutex<Dom>>,
     node_id: NodeId,
     ctx: &mut Context,
 ) -> JsValue {
+    if let Some(cached) = cached_wrapper(node_id, ctx) {
+        return cached;
+    }
     let snap = node_snapshot(dom_arc, node_id);
     let accessors = node_accessors(dom_arc, node_id, ctx);
     let methods = node_methods(dom_arc, node_id);
@@ -439,7 +480,7 @@ pub(super) fn node_to_js_object(
 
     // ---- assemble the JS object ---------------------------------------------
 
-    ObjectInitializer::new(ctx)
+    let wrapper = ObjectInitializer::new(ctx)
         // -- static snapshot properties --
         .property(
             js_string!("tagName"),
@@ -573,8 +614,10 @@ pub(super) fn node_to_js_object(
         )
         // -- canvas 2D context (returns null for non-canvas elements) --
         .function(getcontext_native(dom_arc, node_id), js_string!("getContext"), 1)
-        .build()
-        .into()
+        .build();
+    let wrapper: JsValue = wrapper.into();
+    store_wrapper(node_id, &wrapper, ctx);
+    wrapper
 }
 
 struct NodeAccessors {
@@ -2478,6 +2521,79 @@ mod tests {
              if (hits[0].nodeId !== document.getElementById('inner').nodeId) { \
                throw new Error('scoped target'); \
              }",
+        )
+        .expect("eval should succeed");
+    }
+
+    #[test]
+    fn repeated_lookups_return_the_same_wrapper_object() {
+        let (arc, _root) = simple_dom();
+        let mut ctx = SilkContext::with_dom(&arc);
+        ctx.eval(
+            "var a = document.getElementById('greeting'); \
+             var b = document.getElementById('greeting'); \
+             var c = document.querySelector('#greeting'); \
+             if (a !== b) { throw new Error('getElementById identity'); } \
+             if (a !== c) { throw new Error('querySelector identity'); }",
+        )
+        .expect("eval should succeed");
+    }
+
+    #[test]
+    fn expando_properties_survive_across_lookups() {
+        let (arc, _root) = simple_dom();
+        let mut ctx = SilkContext::with_dom(&arc);
+        // A framework stamps a hidden fiber pointer on the node object during
+        // commit and reads it back at event dispatch; the wrapper must carry it
+        // to the next lookup for delegation to resolve the handler.
+        ctx.eval(
+            "document.getElementById('greeting').__reactFiber = { tag: 5 }; \
+             var again = document.getElementById('greeting'); \
+             if (!again.__reactFiber || again.__reactFiber.tag !== 5) { \
+               throw new Error('expando lost across lookup'); \
+             }",
+        )
+        .expect("eval should succeed");
+    }
+
+    #[test]
+    fn created_node_keeps_identity_after_insertion() {
+        let (arc, _root) = simple_dom();
+        let mut ctx = SilkContext::with_dom(&arc);
+        // React stamps the fiber on the createElement result, appends it, then
+        // reaches the node again through the tree at event dispatch.
+        ctx.eval(
+            "var parent = document.getElementById('greeting'); \
+             var child = document.createElement('button'); \
+             child.__reactFiber = 42; \
+             parent.appendChild(child); \
+             var seen = parent.children[parent.children.length - 1]; \
+             if (seen !== child) { throw new Error('created-node identity'); } \
+             if (seen.__reactFiber !== 42) { throw new Error('created-node expando'); }",
+        )
+        .expect("eval should succeed");
+    }
+
+    #[test]
+    fn dispatch_target_shares_identity_with_lookup() {
+        let (arc, _root) = simple_dom();
+        let mut ctx = SilkContext::with_dom(&arc);
+        ctx.eval(
+            "var el = document.getElementById('greeting'); \
+             el.__reactFiber = 'stamped'; \
+             el.addEventListener('click', function (event) { \
+               globalThis._targetMatches = event.target === el \
+                 && event.target.__reactFiber === 'stamped'; \
+             }); \
+             globalThis._targetMatches = false;",
+        )
+        .expect("eval should succeed");
+        let target = document_greeting(&arc.lock().unwrap());
+        let event = crate::boa_backend::SyntheticEvent::new("click", true, true);
+        ctx.dispatch_dom_event(target, &event)
+            .expect("dispatch should succeed");
+        ctx.eval(
+            "if (!globalThis._targetMatches) { throw new Error('target identity at dispatch'); }",
         )
         .expect("eval should succeed");
     }
