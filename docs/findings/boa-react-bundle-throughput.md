@@ -98,23 +98,30 @@ pre-cache `dom_bridge.rs`): the trusted click leaves `onClickFired == 0` and
 the component at its initial render. Reverting only the cache isolates it as
 the cause; the probe's click-check fix is held constant across both runs.
 
-The cache freezes the static snapshot properties (`id`, `className`,
-`nodeValue`) at first-access value, so a cached wrapper reports stale values
-after a later `setAttribute` where a fresh wrapper re-snapshotted live. No
-current test exercises that path; element-property-reflection removes the
-regression by converting those properties to Dom-backed accessors.
+## element-property-reflection commits the re-render to the Dom
+
+Grepping the react-dom bundle for the properties React assigns during commit
+shows `.nodeValue=` (2 sites) and `.data=` (3 sites) for text, and zero
+`.className=`/`.id=` property assignments -- React routes `className`/`id`
+through `setAttribute`, which the bridge already writes through. So the text
+commit was the sole gap: `nodeValue`, `data`, `id`, and `className` are now
+live accessors on the wrapper. `nodeValue`/`data` read the node's current
+character data and write through `Dom::set_text_content` (rewrites the Text
+node in place and marks it dirty); `id`/`className` read and write the `id`
+and `class` attributes. Converting `id`/`className`/`nodeValue` from static
+snapshot properties to accessors also erases the read-staleness the wrapper
+cache introduced -- a cached wrapper now reflects later `setAttribute` writes.
+
+With this in place the full `--click inc` probe passes: a trusted click drives
+the counter to a visibly committed `clicks:1` in `document.body.textContent`
+(was `clicks:0`, the re-render's text never reaching the paint tree). The
+React counter -- mount, delegated event, hooks state, re-render, and
+DOM-visible commit -- now works end to end on the local-spa rung.
 
 ## Follow-up surface (feeds the deferral wave)
 
-- element-property-reflection (ROOT CAUSE for the visible counter, measured):
-  after the click, React re-renders with `count == 1` but the on-screen text
-  stays `clicks:0`. React commits the text change by assigning the span's text
-  node `nodeValue`/`data`; the wrapper accepts the write as a data property
-  without reaching the Dom, so the paint tree never sees it. This is now the
-  single blocker between the working event loop and a visibly updating counter.
-  Fix: back the mutable reflected properties (`nodeValue`, `data`,
-  `textContent` on text nodes, `id`, `className`) with accessors that write
-  through to the Dom, mirroring the existing `value`/`textContent` element
-  accessors.
-- interaction-latency-probe: measure the keystroke-to-commit path once
-  element-property-reflection makes the commit observable.
+- interaction-latency-probe: measure the keystroke-to-commit path now that the
+  commit is observable, separating boa execution time from bridge overhead.
+- broader reconciliation: the probe covers one state-driven commit; list
+  reordering with keys, attribute-only updates, and unmount/remount under
+  repeated updates are unproven.

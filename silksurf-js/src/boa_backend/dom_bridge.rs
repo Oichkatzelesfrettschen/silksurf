@@ -230,26 +230,23 @@ fn node_query_selector_native(
 
 // ---- node info snapshot (dom must be held by caller) -----------------------
 
+/// The immutable-per-node properties that stay static on the wrapper. Mutable
+/// properties (`nodeValue`, `data`, `id`, `className`) are live accessors so a
+/// cached wrapper reflects later Dom writes instead of a first-access snapshot.
 struct NodeSnapshot {
     tag_name: String,
     node_name: String,
     node_type: u32,
-    node_value: String,
-    id_val: String,
-    class_val: String,
 }
 
 fn snapshot_node(dom: &Dom, node_id: NodeId) -> NodeSnapshot {
     if let Ok(n) = dom.node(node_id) {
         match n.kind() {
-            NodeKind::Text { text } => {
+            NodeKind::Text { .. } => {
                 return NodeSnapshot {
                     tag_name: String::new(),
                     node_name: "#text".into(),
                     node_type: 3,
-                    node_value: text.clone(),
-                    id_val: String::new(),
-                    class_val: String::new(),
                 };
             }
             NodeKind::Document => {
@@ -257,19 +254,13 @@ fn snapshot_node(dom: &Dom, node_id: NodeId) -> NodeSnapshot {
                     tag_name: String::new(),
                     node_name: "#document".into(),
                     node_type: 9,
-                    node_value: String::new(),
-                    id_val: String::new(),
-                    class_val: String::new(),
                 };
             }
-            NodeKind::Comment { data: comment_text } => {
+            NodeKind::Comment { .. } => {
                 return NodeSnapshot {
                     tag_name: String::new(),
                     node_name: "#comment".into(),
                     node_type: 8,
-                    node_value: comment_text.clone(),
-                    id_val: String::new(),
-                    class_val: String::new(),
                 };
             }
             _ => {}
@@ -281,29 +272,24 @@ fn snapshot_node(dom: &Dom, node_id: NodeId) -> NodeSnapshot {
         .flatten()
         .map(str::to_uppercase)
         .unwrap_or_default();
-    let (id_v, cls_v) = if let Ok(attrs) = dom.attributes(node_id) {
-        let id_v = attrs
-            .iter()
-            .find(|a| a.name.as_str() == "id")
-            .map(|a| a.value.as_str().to_string())
-            .unwrap_or_default();
-        let cls_v = attrs
-            .iter()
-            .find(|a| a.name.as_str() == "class")
-            .map(|a| a.value.as_str().to_string())
-            .unwrap_or_default();
-        (id_v, cls_v)
-    } else {
-        (String::new(), String::new())
-    };
     NodeSnapshot {
         node_name: tag.clone(),
         tag_name: tag,
         node_type: 1,
-        node_value: String::new(),
-        id_val: id_v,
-        class_val: cls_v,
     }
+}
+
+/// The own character data of a Text or Comment node; empty for other kinds.
+/// `nodeValue`/`data` reads route here so a cached wrapper stays live.
+fn own_character_data(dom: &Dom, node_id: NodeId) -> String {
+    if let Ok(n) = dom.node(node_id) {
+        match n.kind() {
+            NodeKind::Text { text } => return text.clone(),
+            NodeKind::Comment { data: comment_text } => return comment_text.clone(),
+            _ => {}
+        }
+    }
+    String::new()
 }
 
 fn is_form_control_node(dom: &Dom, node_id: NodeId) -> bool {
@@ -493,25 +479,36 @@ pub(super) fn node_to_js_object(
             Attribute::all(),
         )
         .property(js_string!("nodeType"), snap.node_type, Attribute::all())
-        .property(
-            js_string!("nodeValue"),
-            JsString::from(snap.node_value.as_str()),
-            Attribute::all(),
-        )
-        .property(
-            js_string!("id"),
-            JsString::from(snap.id_val.as_str()),
-            Attribute::all(),
-        )
-        .property(
-            js_string!("className"),
-            JsString::from(snap.class_val.as_str()),
-            Attribute::all(),
-        )
         .property(js_string!("style"), style, Attribute::all())
         .property(js_string!("dataset"), dataset, Attribute::all())
         .property(js_string!("nodeId"), node_id.raw() as u32, Attribute::all())
         // -- live accessor properties --
+        // nodeValue/data/id/className mutate after the wrapper is cached, so
+        // they read and write the Dom rather than freezing a first-access value.
+        .accessor(
+            js_string!("nodeValue"),
+            Some(accessors.node_value_get),
+            Some(accessors.node_value_set),
+            Attribute::CONFIGURABLE | Attribute::ENUMERABLE,
+        )
+        .accessor(
+            js_string!("data"),
+            Some(accessors.data_get),
+            Some(accessors.data_set),
+            Attribute::CONFIGURABLE | Attribute::ENUMERABLE,
+        )
+        .accessor(
+            js_string!("id"),
+            Some(accessors.id_get),
+            Some(accessors.id_set),
+            Attribute::CONFIGURABLE | Attribute::ENUMERABLE,
+        )
+        .accessor(
+            js_string!("className"),
+            Some(accessors.class_name_get),
+            Some(accessors.class_name_set),
+            Attribute::CONFIGURABLE | Attribute::ENUMERABLE,
+        )
         .accessor(
             js_string!("ownerDocument"),
             Some(accessors.owner_document),
@@ -637,6 +634,14 @@ struct NodeAccessors {
     value_set: JsFunction,
     src_get: JsFunction,
     src_set: JsFunction,
+    node_value_get: JsFunction,
+    node_value_set: JsFunction,
+    data_get: JsFunction,
+    data_set: JsFunction,
+    id_get: JsFunction,
+    id_set: JsFunction,
+    class_name_get: JsFunction,
+    class_name_set: JsFunction,
 }
 
 struct NodeMethods {
@@ -695,6 +700,14 @@ fn node_accessors(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId, ctx: &mut Context)
         value_set: make_getter(ctx, value_set_native(dom_arc, node_id)),
         src_get: make_getter(ctx, attribute_get_native(dom_arc, node_id, "src")),
         src_set: make_getter(ctx, attribute_set_native(dom_arc, node_id, "src")),
+        node_value_get: make_getter(ctx, node_value_get_native(dom_arc, node_id)),
+        node_value_set: make_getter(ctx, node_value_set_native(dom_arc, node_id)),
+        data_get: make_getter(ctx, node_value_get_native(dom_arc, node_id)),
+        data_set: make_getter(ctx, node_value_set_native(dom_arc, node_id)),
+        id_get: make_getter(ctx, attribute_get_native(dom_arc, node_id, "id")),
+        id_set: make_getter(ctx, attribute_set_native(dom_arc, node_id, "id")),
+        class_name_get: make_getter(ctx, attribute_get_native(dom_arc, node_id, "class")),
+        class_name_set: make_getter(ctx, attribute_set_native(dom_arc, node_id, "class")),
     }
 }
 
@@ -969,6 +982,45 @@ fn text_content_get_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> Native
 }
 
 fn text_content_set_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
+
+    unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let text = args
+                .first()
+                .map(|value| value.to_string(ctx).map(|s| s.to_std_string_lossy()))
+                .transpose()?
+                .unwrap_or_default();
+            let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+            let _ = dom.set_text_content(node_id, text);
+            Ok(JsValue::undefined())
+        })
+    }
+}
+
+/// `nodeValue`/`data` getter. React reads the committed text back through
+/// `node.data`; the wrapper reports the node's current character data rather
+/// than a snapshot frozen at first access.
+fn node_value_get_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
+
+    unsafe {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
+            let dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+            Ok(JsValue::from(JsString::from(
+                own_character_data(&dom, node_id).as_str(),
+            )))
+        })
+    }
+}
+
+/// `nodeValue`/`data` setter. React commits a text update by assigning the text
+/// node `nodeValue`/`data`; `set_text_content` rewrites the Text node in place
+/// and marks it dirty, so the paint tree observes the new text. Assignments on
+/// non-text nodes are a no-op, matching `nodeValue` being null on elements.
+fn node_value_set_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
     let arc = Arc::clone(dom_arc);
     // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
 
@@ -2594,6 +2646,84 @@ mod tests {
             .expect("dispatch should succeed");
         ctx.eval(
             "if (!globalThis._targetMatches) { throw new Error('target identity at dispatch'); }",
+        )
+        .expect("eval should succeed");
+    }
+
+    #[test]
+    fn node_value_write_updates_the_text_node() {
+        let (arc, _root) = simple_dom();
+        let mut ctx = SilkContext::with_dom(&arc);
+        // React commits text by assigning the text node's nodeValue/data; the
+        // write must reach the Dom, and a re-read must reflect it live.
+        ctx.eval(
+            "var text = document.getElementById('greeting').firstChild; \
+             if (text.nodeValue !== 'Hello, world!') { throw new Error('initial nodeValue'); } \
+             text.nodeValue = 'clicks:1'; \
+             if (text.data !== 'clicks:1') { throw new Error('data getter stale'); } \
+             if (document.getElementById('greeting').textContent !== 'clicks:1') { \
+               throw new Error('Dom text not updated'); \
+             }",
+        )
+        .expect("eval should succeed");
+    }
+
+    #[test]
+    fn data_write_updates_the_text_node() {
+        let (arc, _root) = simple_dom();
+        let mut ctx = SilkContext::with_dom(&arc);
+        ctx.eval(
+            "var text = document.getElementById('greeting').firstChild; \
+             text.data = 'via-data'; \
+             if (text.nodeValue !== 'via-data') { throw new Error('nodeValue getter stale'); } \
+             if (document.getElementById('greeting').textContent !== 'via-data') { \
+               throw new Error('Dom text not updated'); \
+             }",
+        )
+        .expect("eval should succeed");
+    }
+
+    #[test]
+    fn id_write_reaches_the_dom_and_reads_live() {
+        let (arc, _root) = simple_dom();
+        let mut ctx = SilkContext::with_dom(&arc);
+        // The cached wrapper must reflect an id change, and getElementById must
+        // resolve the new id (write-through to the id attribute).
+        ctx.eval(
+            "var el = document.getElementById('greeting'); \
+             el.id = 'renamed'; \
+             if (el.id !== 'renamed') { throw new Error('id getter stale'); } \
+             if (document.getElementById('renamed') === null) { throw new Error('id not in Dom'); } \
+             if (document.getElementById('greeting') !== null) { throw new Error('old id lingers'); }",
+        )
+        .expect("eval should succeed");
+    }
+
+    #[test]
+    fn class_name_write_reaches_the_dom_and_reads_live() {
+        let (arc, _root) = simple_dom();
+        let mut ctx = SilkContext::with_dom(&arc);
+        ctx.eval(
+            "var el = document.getElementById('greeting'); \
+             el.className = 'promoted'; \
+             if (el.className !== 'promoted') { throw new Error('className getter stale'); } \
+             if (document.querySelector('.promoted') === null) { throw new Error('class not in Dom'); }",
+        )
+        .expect("eval should succeed");
+    }
+
+    #[test]
+    fn cached_wrapper_reflects_attribute_change_via_setattribute() {
+        let (arc, _root) = simple_dom();
+        let mut ctx = SilkContext::with_dom(&arc);
+        // The staleness regression the wrapper cache introduced: a cached
+        // wrapper reads id/className live rather than freezing them.
+        ctx.eval(
+            "var el = document.getElementById('greeting'); \
+             el.setAttribute('id', 'changed'); \
+             el.setAttribute('class', 'newclass'); \
+             if (el.id !== 'changed') { throw new Error('id read stale'); } \
+             if (el.className !== 'newclass') { throw new Error('className read stale'); }",
         )
         .expect("eval should succeed");
     }
