@@ -46,8 +46,12 @@ throughput question.
 ## Falsifiers and scope
 
 - Timings are single-run wall clock on one host; run-to-run spread on
-  react-dom was 70-98 ms. A hyperfine sweep tightens these when a
-  regression gate needs them.
+  react-dom was 70-98 ms. A 20-run sweep with order statistics ran
+  2026-07-16 under a documented busy host
+  (docs/findings/react-interaction-commit-latency.md, Data): boa
+  medians there run 2.5-3x these values while V8 moved far less, so
+  treat this table as the quiet-host reference and the sweep as the
+  busy-host bound plus distribution data.
 - The V8 baseline runs in a bare `vm` sandbox (self/window aliases
   only); boa runs with the full SilkContext host surface. The comparison
   bounds engine speed, not host-object overhead.
@@ -132,8 +136,10 @@ Dom text mutates.
 - local-spa-rung-gui-probe: load a React counter page through the running app
   and confirm the click drives a visible repaint, closing the gap between the
   bridge result and the ladder's local-spa acceptance.
-- interaction-latency-probe: measure the keystroke-to-commit path now that the
-  commit is observable, separating boa execution time from bridge overhead.
+- interaction-latency-probe: RUN 2026-07-16. bundle_probe --click-repeat
+  times 100 dispatch-to-commit cycles at p50 0.76 ms / p95 1.15 ms;
+  verdict, methodology, and retained data in
+  docs/findings/react-interaction-commit-latency.md.
 - broader reconciliation: the probe covers one state-driven commit; list
   reordering with keys, attribute-only updates, and unmount/remount under
   repeated updates are unproven.

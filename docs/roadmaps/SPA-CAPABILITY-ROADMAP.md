@@ -217,8 +217,12 @@ share files with the workstreams above and should land opportunistically:
   commits into the silksurf DOM (after ownerDocument and DOM-interface
   constructor stubs landed); boa evaluates minified framework code at
   roughly 6-16x V8 time (~1.3-1.9 MB/s), so a multi-megabyte payload
-  costs seconds of initial eval. Correctness does not gate the rung;
-  interaction latency remains unmeasured.
+  costs seconds of initial eval. Correctness does not gate the rung.
+  Interaction latency MEASURED 2026-07-16: 100 dispatch-to-commit
+  cycles at p50 0.76 ms / p95 1.15 ms over the bridge, insensitive to
+  host load (eval is the memory-bound phase; the commit path is not);
+  docs/findings/react-interaction-commit-latency.md carries the
+  distribution, methodology, and retained CSV data.
 - **stable-node-wrapper-identity** -- LANDED 2026-07-12. The bridge
   caches one JS wrapper per node keyed by nodeId
   (NODE_WRAPPER_REGISTRY in dom_bridge.rs), so getElementById, the
