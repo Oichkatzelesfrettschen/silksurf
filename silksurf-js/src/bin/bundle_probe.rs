@@ -11,6 +11,13 @@
  * Output is one JSON object per line: file, bytes, eval_ms, ok. The
  * SPA-capability roadmap's boa-bundle-throughput-spike consumes these
  * numbers to decide whether the chatgpt.com rung needs upstream boa work.
+ *
+ * --click <id> dispatches one trusted click at the element carrying <id>
+ * after the last bundle loads; --click-repeat <n> dispatches n clicks and
+ * times each dispatch-to-idle cycle, emitting one JSON line per click plus
+ * an order-statistics summary. The per-click check may carry a `{n}`
+ * placeholder that receives the 1-based click count, so a counter page can
+ * assert the committed DOM after every click.
  */
 
 use std::sync::{Arc, Mutex};
@@ -54,8 +61,8 @@ fn dom_backed_context() -> SilkContext {
     SilkContext::with_dom(&Arc::new(Mutex::new(dom)))
 }
 
-/// Filter probe flags out of argv, leaving the `file[=check]` specs. `--click`
-/// consumes the following argument as its target id.
+/// Filter probe flags out of argv, leaving the `file[=check]` specs.
+/// `--click` and `--click-repeat` each consume the following argument.
 fn collect_specs(args: &[String]) -> Vec<&String> {
     let mut skip_next = false;
     args.iter()
@@ -64,7 +71,7 @@ fn collect_specs(args: &[String]) -> Vec<&String> {
                 skip_next = false;
                 return false;
             }
-            if *arg == "--click" {
+            if *arg == "--click" || *arg == "--click-repeat" {
                 skip_next = true;
                 return false;
             }
@@ -75,8 +82,10 @@ fn collect_specs(args: &[String]) -> Vec<&String> {
 
 /// Drain microtask and host-callback queues until idle or a two-second deadline.
 /// Framework schedulers defer renders through setTimeout and microtasks, so a
-/// probe must pump before reading the committed DOM.
-fn pump_host_queues(ctx: &mut SilkContext) {
+/// probe must pump before reading the committed DOM. `spin` polls without
+/// sleeping: the 1 ms sleep granularity would dominate a sub-millisecond
+/// interaction-latency sample.
+fn pump_host_queues(ctx: &mut SilkContext, spin: bool) {
     let deadline = Instant::now() + std::time::Duration::from_millis(2000);
     loop {
         ctx.run_pending_jobs();
@@ -87,14 +96,15 @@ fn pump_host_queues(ctx: &mut SilkContext) {
         if !ctx.has_pending_host_callbacks() || Instant::now() >= deadline {
             break;
         }
-        std::thread::sleep(std::time::Duration::from_millis(1));
+        if !spin {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
     }
 }
 
-/// Dispatch a trusted click at the element carrying `id` (root-delegated
-/// framework handlers receive it through capture/bubble), pump the scheduled
-/// re-render, then run the post-click `check`. Returns whether the check held.
-fn dispatch_click(ctx: &mut SilkContext, id: &str, check: Option<&str>) -> bool {
+/// Resolve the element carrying `id` to its bridge NodeId, or None when the
+/// page has no such element.
+fn resolve_click_target(ctx: &mut SilkContext, id: &str) -> Option<silksurf_dom::NodeId> {
     let target_expr = format!(
         "(function () {{ var el = document.getElementById('{id}'); return el ? el.nodeId : -1; }})()"
     );
@@ -104,15 +114,25 @@ fn dispatch_click(ctx: &mut SilkContext, id: &str, check: Option<&str>) -> bool 
         .eval("if (globalThis.__clickTarget < 0) { throw new Error('click target missing'); }")
         .is_err()
     {
-        return false;
+        return None;
     }
     let raw = read_global_u32(ctx, "__clickTarget");
+    Some(silksurf_dom::NodeId::from_raw(raw as usize))
+}
+
+/// Dispatch a trusted click at the element carrying `id` (root-delegated
+/// framework handlers receive it through capture/bubble), pump the scheduled
+/// re-render, then run the post-click `check`. Returns whether the check held.
+fn dispatch_click(ctx: &mut SilkContext, id: &str, check: Option<&str>) -> bool {
+    let Some(node) = resolve_click_target(ctx, id) else {
+        return false;
+    };
     let event = silksurf_js::SyntheticEvent::new("click", true, true);
-    if let Err(err) = ctx.dispatch_dom_event(silksurf_dom::NodeId::from_raw(raw as usize), &event) {
+    if let Err(err) = ctx.dispatch_dom_event(node, &event) {
         eprintln!("bundle_probe: click dispatch: {err}");
         return false;
     }
-    pump_host_queues(ctx);
+    pump_host_queues(ctx, false);
     if let Some(check) = check
         && let Err(err) = ctx.eval(check)
     {
@@ -121,6 +141,81 @@ fn dispatch_click(ctx: &mut SilkContext, id: &str, check: Option<&str>) -> bool 
         return false;
     }
     true
+}
+
+/// Dispatch `repeat` trusted clicks at `id`, timing each cycle from event
+/// dispatch through the host-scheduler pump that lets the framework commit.
+/// The target re-resolves before each timed section so wrapper lookup cost
+/// stays outside the sample. The per-iteration check receives the 1-based
+/// click count through a `{n}` placeholder. Emits one JSON line per click
+/// and a summary line with order statistics.
+fn measure_click_latency(
+    ctx: &mut SilkContext,
+    id: &str,
+    repeat: u32,
+    check: Option<&str>,
+) -> bool {
+    let mut samples: Vec<f64> = Vec::with_capacity(repeat as usize);
+    for iteration in 1..=repeat {
+        let Some(node) = resolve_click_target(ctx, id) else {
+            eprintln!("bundle_probe: click target lost at iteration {iteration}");
+            return false;
+        };
+        let event = silksurf_js::SyntheticEvent::new("click", true, true);
+        let start = Instant::now();
+        if let Err(err) = ctx.dispatch_dom_event(node, &event) {
+            eprintln!("bundle_probe: click dispatch at iteration {iteration}: {err}");
+            return false;
+        }
+        pump_host_queues(ctx, true);
+        let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
+        if let Some(check) = check {
+            let expr = check.replace("{n}", &iteration.to_string());
+            if let Err(err) = ctx.eval(&expr) {
+                let head: String = err.chars().take(300).collect();
+                eprintln!("bundle_probe: post-click check {iteration}: {head}");
+                return false;
+            }
+        }
+        println!("{{\"click_iter\":{iteration},\"latency_ms\":{latency_ms:.3}}}");
+        samples.push(latency_ms);
+    }
+    print_latency_summary(id, &samples);
+    true
+}
+
+/// Order statistic at `fraction` of the way through `sorted` (nearest rank).
+fn percentile(sorted: &[f64], fraction: f64) -> f64 {
+    if sorted.is_empty() {
+        return 0.0;
+    }
+    let last = sorted.len() - 1;
+    let index = (fraction * last as f64).round() as usize;
+    sorted[index.min(last)]
+}
+
+/// One JSON summary line over the per-click latency samples.
+fn print_latency_summary(id: &str, samples: &[f64]) {
+    if samples.is_empty() {
+        return;
+    }
+    let mut sorted = samples.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    let mean = sorted.iter().sum::<f64>() / sorted.len() as f64;
+    println!(
+        "{{\"click_target\":\"{id}\",\"iterations\":{},\"latency_ms\":{{\"min\":{:.3},\"p50\":{:.3},\"mean\":{mean:.3},\"p95\":{:.3},\"max\":{:.3}}}}}",
+        sorted.len(),
+        percentile(&sorted, 0.0),
+        percentile(&sorted, 0.5),
+        percentile(&sorted, 0.95),
+        percentile(&sorted, 1.0),
+    );
+}
+
+/// Click request parsed from --click and --click-repeat.
+struct ClickPlan {
+    target_id: String,
+    repeat: u32,
 }
 
 /// Evaluate one bundle spec in `ctx`: time the eval, optionally pump deferred
@@ -133,7 +228,7 @@ fn run_spec(
     path: &str,
     check: Option<&str>,
     pump: bool,
-    click: Option<&str>,
+    click: Option<&ClickPlan>,
 ) -> Option<(usize, f64, bool)> {
     let source = match std::fs::read_to_string(path) {
         Ok(source) => source,
@@ -145,7 +240,7 @@ fn run_spec(
     let start = Instant::now();
     let eval_result = ctx.eval(&source);
     if pump && eval_result.is_ok() {
-        pump_host_queues(ctx);
+        pump_host_queues(ctx, false);
     }
     let eval_ms = start.elapsed().as_secs_f64() * 1000.0;
     let mut ok = eval_result.is_ok();
@@ -164,8 +259,12 @@ fn run_spec(
         }
         ok = checked.is_ok();
     }
-    if ok && let Some(id) = click {
-        ok = dispatch_click(ctx, id, check);
+    if ok && let Some(plan) = click {
+        ok = if plan.repeat > 1 {
+            measure_click_latency(ctx, &plan.target_id, plan.repeat, check)
+        } else {
+            dispatch_click(ctx, &plan.target_id, check)
+        };
     }
     Some((source.len(), eval_ms, ok))
 }
@@ -179,10 +278,21 @@ fn main() {
         .iter()
         .position(|arg| arg == "--click")
         .and_then(|i| args.get(i + 1).cloned());
+    let click_repeat: u32 = args
+        .iter()
+        .position(|arg| arg == "--click-repeat")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(1);
+    let click_plan = click_id.map(|target_id| ClickPlan {
+        target_id,
+        repeat: click_repeat.max(1),
+    });
     let specs = collect_specs(&args);
     if specs.is_empty() {
         eprintln!(
-            "usage: bundle_probe [--shared] [--dom] [--pump] [--click id] <file[=check_expr]>..."
+            "usage: bundle_probe [--shared] [--dom] [--pump] [--click id] \
+             [--click-repeat n] <file[=check_expr]>..."
         );
         std::process::exit(2);
     }
@@ -211,8 +321,8 @@ fn main() {
             }
         };
         // Only the last spec receives the click; earlier bundles just load.
-        let click = click_id
-            .as_deref()
+        let click = click_plan
+            .as_ref()
             .filter(|_| last_spec.as_deref() == Some(spec.as_str()));
         match run_spec(ctx, path, check, pump, click) {
             Some((bytes, eval_ms, ok)) => {
