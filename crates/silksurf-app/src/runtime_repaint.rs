@@ -197,6 +197,7 @@ pub(crate) fn repaint_runtime_dirty_nodes(
 
     let old_fused = std::mem::replace(&mut runtime.fused, new_fused);
     runtime.fused_workspace.recycle_result_storage(old_fused);
+    trace_runtime_fused_repaint(dirty_nodes.len(), redraw_mode);
     Some(redraw_mode)
 }
 
@@ -345,6 +346,19 @@ pub(crate) fn trace_runtime_text_repaint(dirty_count: usize, damage: Rect) {
         "[SilkSurf] Runtime text repaint: dirty_nodes={} damage=({}, {}, {}, {})",
         dirty_count, damage.x, damage.y, damage.width, damage.height
     );
+}
+
+// The fused relayout branch of repaint_runtime_dirty_nodes runs when the dirty
+// set escapes the retained text-only fast path: an element attribute change, a
+// keyed child reorder, or a subtree replace all reach here. dirty_nodes_damage_
+// rect returns None for a non-text/non-input dirty node, so the layout-affecting
+// case presents mode Full. The marker names the branch so a probe can assert the
+// fused path ran and the fast path did not.
+pub(crate) fn trace_runtime_fused_repaint(dirty_count: usize, mode: BrowserRedrawMode) {
+    if std::env::var_os("SILKSURF_TRACE_RUNTIME_TEXT").is_none() {
+        return;
+    }
+    eprintln!("[SilkSurf] Runtime fused repaint: dirty_nodes={dirty_count} mode={mode:?}");
 }
 
 pub(crate) fn dirty_text_node_content(
