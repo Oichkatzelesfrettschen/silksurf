@@ -133,9 +133,12 @@ Dom text mutates.
 
 ## Follow-up surface (feeds the deferral wave)
 
-- local-spa-rung-gui-probe: load a React counter page through the running app
-  and confirm the click drives a visible repaint, closing the gap between the
-  bridge result and the ladder's local-spa acceptance.
+- local-spa-rung-gui-probe: CLOSED 2026-07-17
+  (docs/findings/local-spa-click-repaint-gui-probe.md). make
+  gui-probe-page-click synthesizes a trusted click into the live Wayland
+  surface; dispatch_native_click runs the page's JS handler and the app
+  presents a damage frame for the mutated counter text, so the running-app
+  repaint path now stands as its own evidence class.
 - interaction-latency-probe: RUN 2026-07-16. bundle_probe --click-repeat
   times 100 dispatch-to-commit cycles at p50 0.76 ms / p95 1.15 ms;
   verdict, methodology, and retained data in
