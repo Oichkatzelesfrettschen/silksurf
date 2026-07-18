@@ -119,7 +119,11 @@ Eval-throughput sweep (same session): `docs/findings/data/boa-eval-throughput-sw
   input_to_present ~100 us).
 - One component, one state hook, a two-node commit. List
   reconciliation with keys, attribute-only updates, and deep trees
-  scale the reconcile phase; those need their own probe pages.
+  scale the reconcile phase; the running-app fused relayout for a keyed
+  reorder, an attribute rewrite, and a subtree replace is proven
+  2026-07-18 in
+  `docs/findings/local-spa-fused-reconcile-gui-probe.md` (mode Full at
+  input_to_present ~190-260 us).
 - The spin pump burns a core while waiting; on the GUI path the winit
   wake deadline replaces it, so app-observed latency adds scheduler
   and present time on top of these numbers.
