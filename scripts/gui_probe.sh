@@ -12,7 +12,7 @@ cd "${REPO_ROOT}"
 
 usage() {
     cat <<'EOF'
-Usage: scripts/gui_probe.sh [--release|--debug|--o0] [--backend auto|wayland|x11] [--presenter auto|shm|softbuffer] [--shm] [--fixture ai-chat|form-submit|post-submit|page-click] [--probe smoke|address|address-caret|chrome|browser-home|hover|page-input|page-click|runtime-text|form-submit|reload|scroll|stop] [--runs N] [--timeout-seconds N] [--max-input-ns N] [--max-any-input-ns N] [--max-buffer-ns N] [--max-any-buffer-ns N] [--max-render-ns N] [--max-overhead-ns N] [--max-total-ns N] [--max-focus-total-ns N] [--trace-app-frame] [URL]
+Usage: scripts/gui_probe.sh [--release|--debug|--o0] [--backend auto|wayland|x11] [--presenter auto|shm|softbuffer] [--shm] [--fixture ai-chat|form-submit|post-submit|page-click|attr-reconcile|reorder-reconcile|subtree-reconcile] [--probe smoke|address|address-caret|chrome|browser-home|hover|page-input|page-click|page-reconcile|runtime-text|form-submit|reload|scroll|stop] [--runs N] [--timeout-seconds N] [--max-input-ns N] [--max-any-input-ns N] [--max-buffer-ns N] [--max-any-buffer-ns N] [--max-render-ns N] [--max-overhead-ns N] [--max-total-ns N] [--max-focus-total-ns N] [--trace-app-frame] [URL]
 
 Runs the silksurf winit GUI probe with SILKSURF_PROBE_EXIT_AFTER_INPUT=1.
 The process exits successfully only after the final synthetic address input
@@ -25,8 +25,8 @@ Options:
   --backend VALUE        Select auto, wayland, or x11. Default: auto.
   --presenter VALUE      Select auto, shm, or softbuffer. Default: auto.
   --shm                  Select the Wayland SHM presenter.
-  --fixture VALUE        Serve a local probe fixture. Supported: ai-chat, form-submit, post-submit, page-click.
-  --probe VALUE          Select smoke, address, address-caret, chrome, browser-home, hover, page-input, page-click, runtime-text, form-submit, reload, scroll, or stop input sequence. Default: address.
+  --fixture VALUE        Serve a local probe fixture. Supported: ai-chat, form-submit, post-submit, page-click, attr-reconcile, reorder-reconcile, subtree-reconcile.
+  --probe VALUE          Select smoke, address, address-caret, chrome, browser-home, hover, page-input, page-click, page-reconcile, runtime-text, form-submit, reload, scroll, or stop input sequence. Default: address.
   --runs N               Run the probe N times after building. Default: 1.
   --timeout-seconds N    Kill one app run after N seconds. Default: 10.
   --max-input-ns N       Fail when final_input_to_present_ns is greater than N.
@@ -283,17 +283,17 @@ case "${wayland_presenter}" in
 esac
 
 case "${fixture}" in
-    ""|ai-chat|form-submit|post-submit|page-click) ;;
+    ""|ai-chat|form-submit|post-submit|page-click|attr-reconcile|reorder-reconcile|subtree-reconcile) ;;
     *)
-        echo "gui_probe: fixture must be ai-chat, form-submit, post-submit, or page-click" >&2
+        echo "gui_probe: fixture must be ai-chat, form-submit, post-submit, page-click, attr-reconcile, reorder-reconcile, or subtree-reconcile" >&2
         exit 2
         ;;
 esac
 
 case "${probe}" in
-    smoke|address|address-caret|chrome|browser-home|hover|page-input|page-click|runtime-text|form-submit|reload|scroll|stop) ;;
+    smoke|address|address-caret|chrome|browser-home|hover|page-input|page-click|page-reconcile|runtime-text|form-submit|reload|scroll|stop) ;;
     *)
-        echo "gui_probe: probe must be smoke, address, address-caret, chrome, browser-home, hover, page-input, page-click, runtime-text, form-submit, reload, scroll, or stop" >&2
+        echo "gui_probe: probe must be smoke, address, address-caret, chrome, browser-home, hover, page-input, page-click, page-reconcile, runtime-text, form-submit, reload, scroll, or stop" >&2
         exit 2
         ;;
 esac
@@ -327,6 +327,13 @@ if [ "${probe}" = "runtime-text" ] && [ "${fixture}" != "ai-chat" ]; then
 fi
 if [ "${probe}" = "page-click" ] && [ "${fixture}" != "page-click" ]; then
     echo "gui_probe: --probe page-click requires --fixture page-click" >&2
+    exit 2
+fi
+if [ "${probe}" = "page-reconcile" ] \
+    && [ "${fixture}" != "attr-reconcile" ] \
+    && [ "${fixture}" != "reorder-reconcile" ] \
+    && [ "${fixture}" != "subtree-reconcile" ]; then
+    echo "gui_probe: --probe page-reconcile requires --fixture attr-reconcile, reorder-reconcile, or subtree-reconcile" >&2
     exit 2
 fi
 
@@ -463,10 +470,10 @@ env_args=(
     "SILKSURF_PROBE_EXIT_AFTER_INPUT=1"
     "SILKSURF_WAYLAND_PRESENTER=${wayland_presenter}"
 )
-if [ "${trace_app_frame}" -eq 1 ] || [ "${probe}" = "scroll" ] || [ "${probe}" = "runtime-text" ] || [ "${probe}" = "page-click" ]; then
+if [ "${trace_app_frame}" -eq 1 ] || [ "${probe}" = "scroll" ] || [ "${probe}" = "runtime-text" ] || [ "${probe}" = "page-click" ] || [ "${probe}" = "page-reconcile" ]; then
     env_args+=("SILKSURF_TRACE_APP_FRAME=1")
 fi
-if [ "${probe}" = "runtime-text" ] || [ "${probe}" = "page-click" ]; then
+if [ "${probe}" = "runtime-text" ] || [ "${probe}" = "page-click" ] || [ "${probe}" = "page-reconcile" ]; then
     env_args+=("SILKSURF_TRACE_RUNTIME_TEXT=1")
 fi
 if [ "${fixture}" = "ai-chat" ] && [ "${probe}" = "page-input" ]; then
@@ -739,6 +746,120 @@ write_page_click_fixture() {
 EOF
 }
 
+write_attr_reconcile_fixture() {
+    local fixture_dir="$1"
+
+    mkdir -p "${fixture_dir}"
+    # A trusted click drives dispatch_native_click into the button's JS handler,
+    # which rewrites the card element's class attribute. The dirty node is an
+    # element, not text, so repaint_runtime_dirty_nodes rejects the retained
+    # text-only fast path and runs a fused relayout. The expanded rule changes
+    # the card height and background, so the fused present carries a visible
+    # delta. The tap target spans the top of the page below the 44 px chrome
+    # strip so probe coordinate (200, 200) lands inside it.
+    cat >"${fixture_dir}/index.html" <<'EOF'
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>SilkSurf Attribute Reconcile Fixture</title>
+  <style>
+    body { margin: 0; font-family: system-ui, sans-serif; }
+    #tap { display: block; width: 100%; height: 200px; font-size: 40px; }
+    .card { display: block; height: 80px; background: #dddddd; font-size: 28px; }
+    .card.expanded { height: 220px; background: #3366cc; color: #ffffff; }
+  </style>
+</head>
+<body>
+  <button id="tap">tap</button>
+  <div id="card" class="card">card</div>
+  <script>
+    document.getElementById('tap').addEventListener('click', function () {
+      document.getElementById('card').className = 'card expanded';
+    });
+  </script>
+</body>
+</html>
+EOF
+}
+
+write_reorder_reconcile_fixture() {
+    local fixture_dir="$1"
+
+    mkdir -p "${fixture_dir}"
+    # The click handler detaches the first list item and reappends it at the end,
+    # a keyed reorder. remove_child and append_child both dirty the list parent,
+    # an element node, so the fast path is rejected and a fused relayout runs.
+    # The visible order permutes alpha to the bottom. append_child rejects an
+    # already-parented node, so the handler removes before it reappends.
+    cat >"${fixture_dir}/index.html" <<'EOF'
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>SilkSurf Reorder Reconcile Fixture</title>
+  <style>
+    body { margin: 0; font-family: system-ui, sans-serif; }
+    #tap { display: block; width: 100%; height: 200px; font-size: 40px; }
+    #list { font-size: 28px; }
+    #list li { height: 48px; }
+  </style>
+</head>
+<body>
+  <button id="tap">tap</button>
+  <ul id="list">
+    <li id="item-a">alpha</li>
+    <li id="item-b">bravo</li>
+    <li id="item-c">charlie</li>
+  </ul>
+  <script>
+    document.getElementById('tap').addEventListener('click', function () {
+      var list = document.getElementById('list');
+      var first = document.getElementById('item-a');
+      list.removeChild(first);
+      list.appendChild(first);
+    });
+  </script>
+</body>
+</html>
+EOF
+}
+
+write_subtree_reconcile_fixture() {
+    local fixture_dir="$1"
+
+    mkdir -p "${fixture_dir}"
+    # The click handler assigns innerHTML on the panel. inner_html_set removes the
+    # existing children and reparses the fragment into fresh element nodes, a
+    # subtree replace. The parent dirties as an element, so the fast path is
+    # rejected and a fused relayout runs. The replaced markup is visibly
+    # different from the original.
+    cat >"${fixture_dir}/index.html" <<'EOF'
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>SilkSurf Subtree Reconcile Fixture</title>
+  <style>
+    body { margin: 0; font-family: system-ui, sans-serif; }
+    #tap { display: block; width: 100%; height: 200px; font-size: 40px; }
+    #panel { font-size: 28px; padding: 16px; }
+  </style>
+</head>
+<body>
+  <button id="tap">tap</button>
+  <div id="panel"><p>original subtree content</p></div>
+  <script>
+    document.getElementById('tap').addEventListener('click', function () {
+      document.getElementById('panel').innerHTML =
+        '<p>replaced subtree content</p><p>second replaced line</p>';
+    });
+  </script>
+</body>
+</html>
+EOF
+}
+
 start_fixture_server() {
     local fixture_name="$1"
     local fixture_dir="${work_dir}/${fixture_name}"
@@ -757,6 +878,15 @@ start_fixture_server() {
             ;;
         page-click)
             write_page_click_fixture "${fixture_dir}"
+            ;;
+        attr-reconcile)
+            write_attr_reconcile_fixture "${fixture_dir}"
+            ;;
+        reorder-reconcile)
+            write_reorder_reconcile_fixture "${fixture_dir}"
+            ;;
+        subtree-reconcile)
+            write_subtree_reconcile_fixture "${fixture_dir}"
             ;;
     esac
     fixture_server_log_file="${log_file}"
@@ -1309,6 +1439,21 @@ run_probe_once() {
         printf '%s\n' "${final_timing}"
         return 0
     fi
+    if [ "${probe}" = "page-reconcile" ]; then
+        check_page_reconcile_probe_log "${log_file}"
+        final_timing="$(extract_final_timing "${log_file}" "app frame: .*mode Full")"
+        if [ -z "${final_timing}" ]; then
+            echo "gui_probe: missing page reconcile full frame timing" >&2
+            exit 1
+        fi
+        check_max_metric "${final_timing}" final_buffer_ns "${max_buffer_ns}"
+        check_max_metric "${final_timing}" final_render_ns "${max_render_ns}"
+        check_max_metric "${final_timing}" final_overhead_ns "${max_overhead_ns}"
+        check_max_metric "${final_timing}" final_total_ns "${max_total_ns}"
+        record_metrics "${run_index}" "${final_timing}"
+        printf '%s\n' "${final_timing}"
+        return 0
+    fi
     if [ "${probe}" = "form-submit" ]; then
         check_form_submit_probe_log "${log_file}"
         return 0
@@ -1657,7 +1802,7 @@ check_runtime_text_probe_log() {
         echo "gui_probe: runtime text mutation did not drain host callbacks" >&2
         exit 1
     fi
-    if awk '/Runtime text repaint:/ { armed = 1; next } armed && /fused total:/ { found = 1 } END { exit(found ? 0 : 1) }' "${log_file}"; then
+    if grep -Fq "Runtime fused repaint:" "${log_file}"; then
         echo "gui_probe: runtime text repaint ran fused layout after fast path" >&2
         exit 1
     fi
@@ -1690,6 +1835,43 @@ check_page_click_probe_log() {
     fi
 
     echo "gui_probe: page click repaint OK"
+}
+
+check_page_reconcile_probe_log() {
+    local log_file="$1"
+
+    case "${fixture}" in
+        attr-reconcile|reorder-reconcile|subtree-reconcile) ;;
+        *)
+            echo "gui_probe: page-reconcile probe requires a reconcile fixture" >&2
+            exit 1
+            ;;
+    esac
+    if ! grep -Fq "probe input: PrimaryClick { x: 200.0, y: 200.0 }" "${log_file}"; then
+        echo "gui_probe: missing page-reconcile probe input" >&2
+        exit 1
+    fi
+    # The load-bearing claim: the click mutation routes through the fused
+    # relayout branch, not the retained text-only fast path. The fused marker
+    # must appear and the text marker must not.
+    if ! grep -Fq "Runtime fused repaint:" "${log_file}"; then
+        echo "gui_probe: page reconcile mutation did not run the fused repaint branch" >&2
+        exit 1
+    fi
+    if grep -Fq "Runtime text repaint:" "${log_file}"; then
+        echo "gui_probe: page reconcile mutation took the text-only fast path" >&2
+        exit 1
+    fi
+    if ! grep -Fq "Runtime fused repaint: dirty_nodes=" "${log_file}"; then
+        echo "gui_probe: page reconcile fused repaint reported no dirty nodes" >&2
+        exit 1
+    fi
+    if ! grep -Eq "Runtime fused repaint: .* mode=Full" "${log_file}"; then
+        echo "gui_probe: page reconcile fused repaint did not present mode Full" >&2
+        exit 1
+    fi
+
+    echo "gui_probe: page reconcile fused repaint OK"
 }
 
 check_form_submit_probe_log() {
