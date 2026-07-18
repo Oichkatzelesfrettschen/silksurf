@@ -113,8 +113,10 @@ Eval-throughput sweep (same session): `docs/findings/data/boa-eval-throughput-sw
 - The probe drives a synthetic Dom through `dispatch_dom_event`; the
   running-app path (GUI input synthesis in
   `crates/silksurf-app/src/js_events.rs`, dirty-node paint, native
-  present) is a separate evidence class and stays open as
-  local-spa-rung-gui-probe.
+  present) is a separate evidence class, proven 2026-07-17 in
+  `docs/findings/local-spa-click-repaint-gui-probe.md` (a synthesized
+  Wayland-surface click drives a damage-frame repaint at
+  input_to_present ~100 us).
 - One component, one state hook, a two-node commit. List
   reconciliation with keys, attribute-only updates, and deep trees
   scale the reconcile phase; those need their own probe pages.
