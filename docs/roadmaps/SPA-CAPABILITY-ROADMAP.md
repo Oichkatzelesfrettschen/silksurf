@@ -241,9 +241,14 @@ share files with the workstreams above and should land opportunistically:
   the full --click inc probe drives the counter to a committed clicks:1
   in document.body.textContent (was clicks:0). Also erases the read
   staleness stable-node-wrapper-identity introduced on cached wrappers.
-  The running-app repaint path (js_events.rs input synthesis ->
-  dirty-node paint -> present) is a separate evidence class; the
-  local-spa rung still needs a make gui-probe against a counter page.
+  Running-app repaint CLOSED 2026-07-17
+  (docs/findings/local-spa-click-repaint-gui-probe.md): make
+  gui-probe-page-click synthesizes a trusted PrimaryClick into the live
+  Wayland surface; dispatch_native_click runs the page's JS click
+  handler, the counter text mutation takes the retained repaint path,
+  and the app presents a Damage(Rect) frame at input_to_present ~100 us.
+  The GUI input-synthesis -> dirty-node paint -> present class is now
+  proven, not just the bridge Dom mutation.
 - **cdn-challenge-reality-spike** -- TLS fingerprint (JA3/JA4) and
   challenge-JS survival against a Cloudflare-fronted test property;
   rustls default fingerprints may be challenged regardless of engine
