@@ -1452,6 +1452,19 @@ impl WinitInputProbe {
                 exit_after_finish: probe_exit_after_finish_enabled(),
                 exit_frame_delay: 0,
             }),
+            // The reconcile fixtures park the same full-width tap target below
+            // the chrome strip, so the page-click coordinates drive each JS
+            // handler into an attribute, reorder, or subtree mutation that
+            // repaints through the fused relayout branch.
+            Some("page-reconcile") => Some(Self {
+                steps: PAGE_CLICK_INPUT_PROBE_STEPS.to_vec(),
+                wait_after_step: wait_after_each_step(PAGE_CLICK_INPUT_PROBE_STEPS.len()),
+                next_index: 0,
+                waiting_for_redraw: true,
+                armed: false,
+                exit_after_finish: probe_exit_after_finish_enabled(),
+                exit_frame_delay: 0,
+            }),
             Some("form-submit") => Some(Self {
                 steps: FORM_SUBMIT_PROBE_STEPS.to_vec(),
                 wait_after_step: wait_after_each_step(FORM_SUBMIT_PROBE_STEPS.len()),

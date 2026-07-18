@@ -248,7 +248,16 @@ share files with the workstreams above and should land opportunistically:
   handler, the counter text mutation takes the retained repaint path,
   and the app presents a Damage(Rect) frame at input_to_present ~100 us.
   The GUI input-synthesis -> dirty-node paint -> present class is now
-  proven, not just the bridge Dom mutation.
+  proven, not just the bridge Dom mutation. Fused-relayout reconcile
+  CLOSED 2026-07-18
+  (docs/findings/local-spa-fused-reconcile-gui-probe.md): make
+  gui-probe-attr-reconcile, gui-probe-reorder-reconcile, and
+  gui-probe-subtree-reconcile drive an attribute rewrite, a keyed list
+  reorder, and a subtree replace. Each escapes the retained text-only fast
+  path, so repaint_runtime_dirty_nodes reruns fused style/layout/paint and
+  presents mode Full at input_to_present ~190-260 us. A Runtime fused
+  repaint: dirty_nodes=N trace names the branch (N = 1, 3, 9); the probe
+  asserts it fires while the text-only marker does not.
 - **cdn-challenge-reality-spike** -- TLS fingerprint (JA3/JA4) and
   challenge-JS survival against a Cloudflare-fronted test property;
   rustls default fingerprints may be challenged regardless of engine
