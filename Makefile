@@ -19,6 +19,7 @@
 #   make gui-probe -- run the live winit GUI probe when a display is present
 #   make gui-probe-o0 -- run the live GUI probe with opt-level 0
 #   make gui-probe-o0-ai-chat -- run the O0 AI-chat page-input canary
+#   make gui-probe-page-click -- run the click-to-repaint canary (local-spa rung)
 #   make conformance-html-css -- run the HTML/CSS harness subset
 #   make verify-conformance-sources -- verify retained HTML/CSS source bytes
 #   make fetch-conformance-sources -- refresh retained HTML/CSS source bundle
@@ -68,7 +69,7 @@ BOLT_OPTS     ?= -reorder-blocks=ext-tsp -reorder-functions=cdsort \
 # Rust targets (primary)
 # ---------------------------------------------------------------------------
 
-.PHONY: check test full fmt doc clean clean-cargo clean-build-artifacts hooks cross miri fuzz bench gui-probe gui-probe-o0 gui-probe-o0-ai-chat conformance conformance-html-css verify-conformance-sources fetch-conformance-sources fetch-conformance-test-corpora release
+.PHONY: check test full fmt doc clean clean-cargo clean-build-artifacts hooks cross miri fuzz bench gui-probe gui-probe-o0 gui-probe-o0-ai-chat gui-probe-page-click conformance conformance-html-css verify-conformance-sources fetch-conformance-sources fetch-conformance-test-corpora release
 
 # Fast gate: format check + clippy -D warnings + lint helpers.
 # Wired into pre-commit hook.
@@ -171,6 +172,7 @@ bench:
 GUI_PROBE_ARGS ?= --release --backend auto
 GUI_PROBE_O0_ARGS ?= --o0 --backend auto
 GUI_PROBE_O0_AI_CHAT_ARGS ?= --o0 --backend auto --presenter auto --fixture ai-chat --probe page-input --runs 3 --timeout-seconds 60
+GUI_PROBE_PAGE_CLICK_ARGS ?= --release --backend auto --presenter auto --fixture page-click --probe page-click --runs 3 --timeout-seconds 60
 
 # Live GUI smoke. This target requires a working Wayland or X11 session.
 gui-probe:
@@ -183,6 +185,11 @@ gui-probe-o0:
 # O0 browser-latency canary for the AI-chat fixture.
 gui-probe-o0-ai-chat:
 	scripts/gui_probe.sh $(GUI_PROBE_O0_AI_CHAT_ARGS)
+
+# Click-to-repaint canary: a trusted page click drives a JS handler that
+# mutates the DOM and the running app presents a damage frame (local-spa rung).
+gui-probe-page-click:
+	scripts/gui_probe.sh $(GUI_PROBE_PAGE_CLICK_ARGS)
 
 # Run the published conformance harness set.
 conformance:
