@@ -1336,6 +1336,11 @@ const CHROME_INPUT_PROBE_STEPS: &[WinitInput] = &[
     WinitInput::PrimaryClick { x: 15.0, y: 22.0 },
 ];
 const BROWSER_HOME_INPUT_PROBE_STEPS: &[WinitInput] = &[WinitInput::BrowserHome];
+// A single page-region click. The page-click fixture parks a full-width tap
+// target below the 44 px chrome strip, so (200, 200) lands inside it and
+// dispatch_native_click routes the trusted click to the page's JS handler.
+const PAGE_CLICK_INPUT_PROBE_STEPS: &[WinitInput] =
+    &[WinitInput::PrimaryClick { x: 200.0, y: 200.0 }];
 const PAGE_INPUT_PROBE_STEPS: &[WinitInput] =
     &[WinitInput::FocusNextPageInput, WinitInput::TextInput('!')];
 const FORM_SUBMIT_PROBE_STEPS: &[WinitInput] = &[
@@ -1437,6 +1442,15 @@ impl WinitInputProbe {
                 armed: false,
                 exit_after_finish: probe_exit_after_finish_enabled(),
                 exit_frame_delay: 1,
+            }),
+            Some("page-click") => Some(Self {
+                steps: PAGE_CLICK_INPUT_PROBE_STEPS.to_vec(),
+                wait_after_step: wait_after_each_step(PAGE_CLICK_INPUT_PROBE_STEPS.len()),
+                next_index: 0,
+                waiting_for_redraw: true,
+                armed: false,
+                exit_after_finish: probe_exit_after_finish_enabled(),
+                exit_frame_delay: 0,
             }),
             Some("form-submit") => Some(Self {
                 steps: FORM_SUBMIT_PROBE_STEPS.to_vec(),

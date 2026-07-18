@@ -12,7 +12,7 @@ cd "${REPO_ROOT}"
 
 usage() {
     cat <<'EOF'
-Usage: scripts/gui_probe.sh [--release|--debug|--o0] [--backend auto|wayland|x11] [--presenter auto|shm|softbuffer] [--shm] [--fixture ai-chat|form-submit|post-submit] [--probe smoke|address|address-caret|chrome|browser-home|hover|page-input|runtime-text|form-submit|reload|scroll|stop] [--runs N] [--timeout-seconds N] [--max-input-ns N] [--max-any-input-ns N] [--max-buffer-ns N] [--max-any-buffer-ns N] [--max-render-ns N] [--max-overhead-ns N] [--max-total-ns N] [--max-focus-total-ns N] [--trace-app-frame] [URL]
+Usage: scripts/gui_probe.sh [--release|--debug|--o0] [--backend auto|wayland|x11] [--presenter auto|shm|softbuffer] [--shm] [--fixture ai-chat|form-submit|post-submit|page-click] [--probe smoke|address|address-caret|chrome|browser-home|hover|page-input|page-click|runtime-text|form-submit|reload|scroll|stop] [--runs N] [--timeout-seconds N] [--max-input-ns N] [--max-any-input-ns N] [--max-buffer-ns N] [--max-any-buffer-ns N] [--max-render-ns N] [--max-overhead-ns N] [--max-total-ns N] [--max-focus-total-ns N] [--trace-app-frame] [URL]
 
 Runs the silksurf winit GUI probe with SILKSURF_PROBE_EXIT_AFTER_INPUT=1.
 The process exits successfully only after the final synthetic address input
@@ -25,8 +25,8 @@ Options:
   --backend VALUE        Select auto, wayland, or x11. Default: auto.
   --presenter VALUE      Select auto, shm, or softbuffer. Default: auto.
   --shm                  Select the Wayland SHM presenter.
-  --fixture VALUE        Serve a local probe fixture. Supported: ai-chat, form-submit, post-submit.
-  --probe VALUE          Select smoke, address, address-caret, chrome, browser-home, hover, page-input, runtime-text, form-submit, reload, scroll, or stop input sequence. Default: address.
+  --fixture VALUE        Serve a local probe fixture. Supported: ai-chat, form-submit, post-submit, page-click.
+  --probe VALUE          Select smoke, address, address-caret, chrome, browser-home, hover, page-input, page-click, runtime-text, form-submit, reload, scroll, or stop input sequence. Default: address.
   --runs N               Run the probe N times after building. Default: 1.
   --timeout-seconds N    Kill one app run after N seconds. Default: 10.
   --max-input-ns N       Fail when final_input_to_present_ns is greater than N.
@@ -283,17 +283,17 @@ case "${wayland_presenter}" in
 esac
 
 case "${fixture}" in
-    ""|ai-chat|form-submit|post-submit) ;;
+    ""|ai-chat|form-submit|post-submit|page-click) ;;
     *)
-        echo "gui_probe: fixture must be ai-chat, form-submit, or post-submit" >&2
+        echo "gui_probe: fixture must be ai-chat, form-submit, post-submit, or page-click" >&2
         exit 2
         ;;
 esac
 
 case "${probe}" in
-    smoke|address|address-caret|chrome|browser-home|hover|page-input|runtime-text|form-submit|reload|scroll|stop) ;;
+    smoke|address|address-caret|chrome|browser-home|hover|page-input|page-click|runtime-text|form-submit|reload|scroll|stop) ;;
     *)
-        echo "gui_probe: probe must be smoke, address, address-caret, chrome, browser-home, hover, page-input, runtime-text, form-submit, reload, scroll, or stop" >&2
+        echo "gui_probe: probe must be smoke, address, address-caret, chrome, browser-home, hover, page-input, page-click, runtime-text, form-submit, reload, scroll, or stop" >&2
         exit 2
         ;;
 esac
@@ -323,6 +323,10 @@ if [ "${probe}" = "hover" ] && [ "${fixture}" != "ai-chat" ]; then
 fi
 if [ "${probe}" = "runtime-text" ] && [ "${fixture}" != "ai-chat" ]; then
     echo "gui_probe: --probe runtime-text requires --fixture ai-chat" >&2
+    exit 2
+fi
+if [ "${probe}" = "page-click" ] && [ "${fixture}" != "page-click" ]; then
+    echo "gui_probe: --probe page-click requires --fixture page-click" >&2
     exit 2
 fi
 
@@ -459,10 +463,10 @@ env_args=(
     "SILKSURF_PROBE_EXIT_AFTER_INPUT=1"
     "SILKSURF_WAYLAND_PRESENTER=${wayland_presenter}"
 )
-if [ "${trace_app_frame}" -eq 1 ] || [ "${probe}" = "scroll" ] || [ "${probe}" = "runtime-text" ]; then
+if [ "${trace_app_frame}" -eq 1 ] || [ "${probe}" = "scroll" ] || [ "${probe}" = "runtime-text" ] || [ "${probe}" = "page-click" ]; then
     env_args+=("SILKSURF_TRACE_APP_FRAME=1")
 fi
-if [ "${probe}" = "runtime-text" ]; then
+if [ "${probe}" = "runtime-text" ] || [ "${probe}" = "page-click" ]; then
     env_args+=("SILKSURF_TRACE_RUNTIME_TEXT=1")
 fi
 if [ "${fixture}" = "ai-chat" ] && [ "${probe}" = "page-input" ]; then
@@ -698,6 +702,43 @@ button { margin: 8px; }
 EOF
 }
 
+write_page_click_fixture() {
+    local fixture_dir="$1"
+
+    mkdir -p "${fixture_dir}"
+    # A trusted page-region click drives dispatch_native_click, which fires the
+    # button's JS click handler. The handler mutates a fixed-width counter text
+    # node ('clicks:0' -> 'clicks:1', same length), so the app takes the
+    # retained text-only repaint path and presents a damage frame. The tap
+    # target spans the top of the page below the 44 px chrome strip so probe
+    # coordinate (200, 200) lands inside it.
+    cat >"${fixture_dir}/index.html" <<'EOF'
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>SilkSurf Page Click Fixture</title>
+  <style>
+    body { margin: 0; font-family: system-ui, sans-serif; }
+    #tap { display: block; width: 100%; height: 320px; font-size: 40px; }
+    #out { display: block; font-size: 32px; padding: 16px; }
+  </style>
+</head>
+<body>
+  <button id="tap">tap</button>
+  <p id="out">clicks:0</p>
+  <script>
+    var taps = 0;
+    document.getElementById('tap').addEventListener('click', function () {
+      taps = taps + 1;
+      document.getElementById('out').firstChild.textContent = 'clicks:' + taps;
+    });
+  </script>
+</body>
+</html>
+EOF
+}
+
 start_fixture_server() {
     local fixture_name="$1"
     local fixture_dir="${work_dir}/${fixture_name}"
@@ -713,6 +754,9 @@ start_fixture_server() {
             ;;
         post-submit)
             write_post_submit_fixture "${fixture_dir}"
+            ;;
+        page-click)
+            write_page_click_fixture "${fixture_dir}"
             ;;
     esac
     fixture_server_log_file="${log_file}"
@@ -1250,6 +1294,21 @@ run_probe_once() {
         printf '%s\n' "${final_timing}"
         return 0
     fi
+    if [ "${probe}" = "page-click" ]; then
+        check_page_click_probe_log "${log_file}"
+        final_timing="$(extract_final_timing "${log_file}" "app frame: .*mode Damage")"
+        if [ -z "${final_timing}" ]; then
+            echo "gui_probe: missing page click damage frame timing" >&2
+            exit 1
+        fi
+        check_max_metric "${final_timing}" final_buffer_ns "${max_buffer_ns}"
+        check_max_metric "${final_timing}" final_render_ns "${max_render_ns}"
+        check_max_metric "${final_timing}" final_overhead_ns "${max_overhead_ns}"
+        check_max_metric "${final_timing}" final_total_ns "${max_total_ns}"
+        record_metrics "${run_index}" "${final_timing}"
+        printf '%s\n' "${final_timing}"
+        return 0
+    fi
     if [ "${probe}" = "form-submit" ]; then
         check_form_submit_probe_log "${log_file}"
         return 0
@@ -1608,6 +1667,29 @@ check_runtime_text_probe_log() {
     fi
 
     echo "gui_probe: runtime text repaint OK"
+}
+
+check_page_click_probe_log() {
+    local log_file="$1"
+
+    if [ "${fixture}" != "page-click" ]; then
+        echo "gui_probe: page-click probe requires --fixture page-click" >&2
+        exit 1
+    fi
+    if ! grep -Fq "probe input: PrimaryClick { x: 200.0, y: 200.0 }" "${log_file}"; then
+        echo "gui_probe: missing page-click probe input" >&2
+        exit 1
+    fi
+    if ! grep -Fq "Runtime text repaint: dirty_nodes=1" "${log_file}"; then
+        echo "gui_probe: page click handler mutation did not repaint the counter text" >&2
+        exit 1
+    fi
+    if ! grep -Fq "mode Damage(Rect" "${log_file}"; then
+        echo "gui_probe: page click repaint did not present damage" >&2
+        exit 1
+    fi
+
+    echo "gui_probe: page click repaint OK"
 }
 
 check_form_submit_probe_log() {
