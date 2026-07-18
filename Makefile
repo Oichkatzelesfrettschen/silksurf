@@ -20,6 +20,9 @@
 #   make gui-probe-o0 -- run the live GUI probe with opt-level 0
 #   make gui-probe-o0-ai-chat -- run the O0 AI-chat page-input canary
 #   make gui-probe-page-click -- run the click-to-repaint canary (local-spa rung)
+#   make gui-probe-attr-reconcile -- run the attribute fused-relayout canary
+#   make gui-probe-reorder-reconcile -- run the keyed-reorder fused-relayout canary
+#   make gui-probe-subtree-reconcile -- run the subtree-replace fused-relayout canary
 #   make conformance-html-css -- run the HTML/CSS harness subset
 #   make verify-conformance-sources -- verify retained HTML/CSS source bytes
 #   make fetch-conformance-sources -- refresh retained HTML/CSS source bundle
@@ -69,7 +72,7 @@ BOLT_OPTS     ?= -reorder-blocks=ext-tsp -reorder-functions=cdsort \
 # Rust targets (primary)
 # ---------------------------------------------------------------------------
 
-.PHONY: check test full fmt doc clean clean-cargo clean-build-artifacts hooks cross miri fuzz bench gui-probe gui-probe-o0 gui-probe-o0-ai-chat gui-probe-page-click conformance conformance-html-css verify-conformance-sources fetch-conformance-sources fetch-conformance-test-corpora release
+.PHONY: check test full fmt doc clean clean-cargo clean-build-artifacts hooks cross miri fuzz bench gui-probe gui-probe-o0 gui-probe-o0-ai-chat gui-probe-page-click gui-probe-attr-reconcile gui-probe-reorder-reconcile gui-probe-subtree-reconcile conformance conformance-html-css verify-conformance-sources fetch-conformance-sources fetch-conformance-test-corpora release
 
 # Fast gate: format check + clippy -D warnings + lint helpers.
 # Wired into pre-commit hook.
@@ -173,6 +176,9 @@ GUI_PROBE_ARGS ?= --release --backend auto
 GUI_PROBE_O0_ARGS ?= --o0 --backend auto
 GUI_PROBE_O0_AI_CHAT_ARGS ?= --o0 --backend auto --presenter auto --fixture ai-chat --probe page-input --runs 3 --timeout-seconds 60
 GUI_PROBE_PAGE_CLICK_ARGS ?= --release --backend auto --presenter auto --fixture page-click --probe page-click --runs 3 --timeout-seconds 60
+GUI_PROBE_ATTR_RECONCILE_ARGS ?= --release --backend auto --presenter auto --fixture attr-reconcile --probe page-reconcile --runs 3 --timeout-seconds 60
+GUI_PROBE_REORDER_RECONCILE_ARGS ?= --release --backend auto --presenter auto --fixture reorder-reconcile --probe page-reconcile --runs 3 --timeout-seconds 60
+GUI_PROBE_SUBTREE_RECONCILE_ARGS ?= --release --backend auto --presenter auto --fixture subtree-reconcile --probe page-reconcile --runs 3 --timeout-seconds 60
 
 # Live GUI smoke. This target requires a working Wayland or X11 session.
 gui-probe:
@@ -190,6 +196,19 @@ gui-probe-o0-ai-chat:
 # mutates the DOM and the running app presents a damage frame (local-spa rung).
 gui-probe-page-click:
 	scripts/gui_probe.sh $(GUI_PROBE_PAGE_CLICK_ARGS)
+
+# Fused-relayout reconcile canaries: a trusted page click drives a JS handler
+# whose mutation escapes the retained text-only fast path -- an attribute
+# rewrite, a keyed list reorder, or a subtree replace -- and the running app
+# presents a full frame through repaint_runtime_dirty_nodes (local-spa rung).
+gui-probe-attr-reconcile:
+	scripts/gui_probe.sh $(GUI_PROBE_ATTR_RECONCILE_ARGS)
+
+gui-probe-reorder-reconcile:
+	scripts/gui_probe.sh $(GUI_PROBE_REORDER_RECONCILE_ARGS)
+
+gui-probe-subtree-reconcile:
+	scripts/gui_probe.sh $(GUI_PROBE_SUBTREE_RECONCILE_ARGS)
 
 # Run the published conformance harness set.
 conformance:

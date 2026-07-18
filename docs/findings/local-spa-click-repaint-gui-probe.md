@@ -92,9 +92,11 @@ the one-time cold-surface bring-up.
 ## Falsifiers and scope
 
 - One click, one text node, same-width mutation: the retained fast path. A
-  keyed list reorder, an attribute-only update, or a subtree replace routes
-  through the fused-layout branch of `repaint_runtime_dirty_nodes` and needs
-  its own probe page.
+  keyed list reorder, an attribute-only update, and a subtree replace route
+  through the fused-layout branch of `repaint_runtime_dirty_nodes`; each is
+  proven 2026-07-18 on its own probe page in
+  `docs/findings/local-spa-fused-reconcile-gui-probe.md` (mode Full at
+  input_to_present ~190-260 us).
 - `input_to_present` is the minimal-damage case (one text line). Larger
   damage rects add raster area to `render` and `draw`.
 - The bridge finding times 100 dispatch-to-commit cycles with order

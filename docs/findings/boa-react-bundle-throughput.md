@@ -143,6 +143,10 @@ Dom text mutates.
   times 100 dispatch-to-commit cycles at p50 0.76 ms / p95 1.15 ms;
   verdict, methodology, and retained data in
   docs/findings/react-interaction-commit-latency.md.
-- broader reconciliation: the probe covers one state-driven commit; list
-  reordering with keys, attribute-only updates, and unmount/remount under
-  repeated updates are unproven.
+- broader reconciliation: RUN 2026-07-18. The running-app fused relayout
+  for a keyed list reorder, an attribute-only update, and a subtree
+  replace is proven in
+  docs/findings/local-spa-fused-reconcile-gui-probe.md: each escapes the
+  retained text-only fast path and presents mode Full at input_to_present
+  ~190-260 us. Unmount/remount churn under repeated updates remains
+  unproven.
