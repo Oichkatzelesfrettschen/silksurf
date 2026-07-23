@@ -75,6 +75,11 @@ def main() -> int:
     require_text(errors, "docs/STATUS.md", "69.38%")
     require_text(
         errors,
+        "crates/silksurf-net/README.md",
+        "Persistent WebSocket transport",
+    )
+    require_text(
+        errors,
         "docs/roadmaps/BROWSER-FUNCTIONALIZATION-ACTION-PLAN.md",
         "Decision gates",
     )
@@ -92,6 +97,9 @@ def main() -> int:
         "crates/silksurf-app/README.md": (
             "one-line stub",
             "eventually, P6",
+        ),
+        "crates/silksurf-net/README.md": (
+            "persistent async browser sockets",
         ),
     }
     for path, needles in stale_claims.items():
