@@ -165,18 +165,19 @@ graph TD
   APP --> ENGINE[silksurf-engine]
   APP --> JS[silksurf-js]
   APP --> NET[silksurf-net]
+  APP --> IMAGE[silksurf-image]
   ENGINE --> HTML[silksurf-html]
   ENGINE --> CSS[silksurf-css]
   ENGINE --> DOM[silksurf-dom]
   ENGINE --> LAYOUT[silksurf-layout]
   ENGINE --> RENDER[silksurf-render]
   LAYOUT --> TEXT[silksurf-text]
+  RENDER --> TEXT
   NET --> TLS[silksurf-tls]
   JS --> DOM
   JS --> CSS
   JS --> HTML
   JS --> NET
-  RENDER --> IMAGE[silksurf-image]
 ```
 
 This is the load-bearing architectural flow, not a complete Cargo-edge dump.
