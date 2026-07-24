@@ -24,6 +24,7 @@ pub(crate) enum NativeEngineProcessError {
     Io(io::Error),
     Protocol(ProtocolError),
     MissingPipe(&'static str),
+    MissingChildHandle,
     UnexpectedDirection,
     UnexpectedEvent(&'static str),
     UnsupportedCommand(&'static str),
@@ -36,16 +37,22 @@ impl fmt::Display for NativeEngineProcessError {
             Self::Io(error) => write!(formatter, "I/O error: {error}"),
             Self::Protocol(error) => write!(formatter, "protocol error: {error}"),
             Self::MissingPipe(name) => write!(formatter, "child process has no {name} pipe"),
-            Self::UnexpectedDirection => {
-                formatter.write_str("received an event on the command stream or a command on the event stream")
-            }
+            Self::MissingChildHandle => formatter.write_str("child process handle is absent"),
+            Self::UnexpectedDirection => formatter.write_str(
+                "received an event on the command stream or a command on the event stream",
+            ),
             Self::UnexpectedEvent(expected) => {
                 write!(formatter, "received an unexpected event; expected {expected}")
             }
             Self::UnsupportedCommand(command) => {
-                write!(formatter, "native engine worker command is not bound yet: {command}")
+                write!(
+                    formatter,
+                    "native engine worker command is not bound yet: {command}"
+                )
             }
-            Self::ChildFailed(code) => write!(formatter, "native engine worker exited with {code:?}"),
+            Self::ChildFailed(code) => {
+                write!(formatter, "native engine worker exited with {code:?}")
+            }
         }
     }
 }
@@ -76,10 +83,16 @@ impl From<ProtocolError> for NativeEngineProcessError {
 /// Returns an exit code when an internal mode matched, or `None` for the normal
 /// browser entry point.
 pub(crate) fn run_internal_engine_process_mode(args: &[String]) -> Option<i32> {
-    if args.iter().any(|argument| argument == NATIVE_ENGINE_WORKER_FLAG) {
+    if args
+        .iter()
+        .any(|argument| argument == NATIVE_ENGINE_WORKER_FLAG)
+    {
         return Some(run_worker_stdio());
     }
-    if args.iter().any(|argument| argument == NATIVE_ENGINE_PROBE_FLAG) {
+    if args
+        .iter()
+        .any(|argument| argument == NATIVE_ENGINE_PROBE_FLAG)
+    {
         return Some(run_supervisor_probe());
     }
     None
@@ -207,7 +220,7 @@ impl NativeEngineProcess {
         let mut child = self
             .child
             .take()
-            .ok_or(NativeEngineProcessError::MissingPipe("child"))?;
+            .ok_or(NativeEngineProcessError::MissingChildHandle)?;
         Ok(child.wait()?)
     }
 }
@@ -262,7 +275,11 @@ fn run_native_engine_worker<R: Read, W: Write>(
                 close_all_views(writer, &mut views)?;
                 return Ok(());
             }
-            other => return Err(NativeEngineProcessError::UnsupportedCommand(command_name(&other))),
+            other => {
+                return Err(NativeEngineProcessError::UnsupportedCommand(command_name(
+                    &other,
+                )));
+            }
         }
     }
     Ok(())
@@ -280,7 +297,7 @@ fn close_all_views<W: Write>(
     Ok(())
 }
 
-const fn command_name(command: &ProtocolCommand) -> &'static str {
+fn command_name(command: &ProtocolCommand) -> &'static str {
     match command {
         ProtocolCommand::CreateView { .. } => "CreateView",
         ProtocolCommand::CloseView { .. } => "CloseView",
