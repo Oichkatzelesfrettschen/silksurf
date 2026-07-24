@@ -9,6 +9,10 @@
 # emoji pasted from a rendering surface, and they break greps, diffs, and
 # terminal review. The 2026-07 normalization sweep brought authored docs
 # to zero non-ASCII bytes; this gate keeps them there.
+#
+# This is the final authored-documentation gate invoked by `make check`.
+# After byte-level validation it runs the canonical status-consistency check,
+# which compares current prose against manifests and scorecards.
 
 set -eu
 
@@ -36,3 +40,4 @@ if [ "$fail" -ne 0 ]; then
 fi
 
 echo "lint_ascii: OK ($checked authored markdown files are ASCII-clean)"
+python3 scripts/check_status_consistency.py
