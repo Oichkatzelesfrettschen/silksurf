@@ -15,6 +15,12 @@ pub mod testing;
 /// scheme-plus-site keys are built from. See [`psl::registrable_domain`].
 pub mod psl;
 
+/// Process-neutral, view-oriented shell/engine message protocol (v1). Types,
+/// wire codec, and lifecycle state machines for the boundary specified in
+/// `docs/design/ENGINE-PROTOCOL-V1.md` (AD-027). See
+/// [`engine_protocol::Message`].
+pub mod engine_protocol;
+
 pub use arena::SilkArena;
 pub use error::{SilkError, SilkResult};
 pub use interner::{Atom, SilkInterner, should_intern_identifier};
