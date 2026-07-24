@@ -1638,6 +1638,103 @@ Linux (ADR-010) remains the long-term target.
 
 ---
 
+## AD-027: Engine Protocol v1 -- Process-Neutral Shell/Engine Boundary
+
+**Status**: Accepted (control plane specified and implemented; frame transport
+deferred to the extraction spike)
+**Date**: 2026-07-23
+**Deciders**: Browser functionalization program (issue #50, P1)
+
+### Context
+
+The shell and the page runtime share one process. `BrowserState` holds the
+chrome, history, and focused input directly beside `BrowserPageRuntime`, which
+owns the DOM, `SilkContext`, layout, display list, and pixel buffers. A page
+hang or exploit is therefore a shell hang or exploit. AD-022 named site
+isolation as a deferred concern and pointed at a "future process-model ADR";
+the "Future ADRs" list reserved AD-012 for "Multi-Process Architecture." Neither
+was written. The verified audit (issue #50) confirmed there is no engine-process
+boundary and no message contract.
+
+The program must also keep the compatibility-backend verdict open: WPE, Wry,
+Servo, and CEF are candidates (DG-1..DG-3), and none of them can be forced
+through a boundary that leaks SilkSurf's `Dom`, `NodeId`, Boa values, CSS
+structures, Taffy nodes, or display-list entries.
+
+### Decision
+
+Introduce engine protocol v1: a process-neutral, view-oriented message contract
+in `silksurf_core::engine_protocol`, specified in
+`docs/design/ENGINE-PROTOCOL-V1.md`. The boundary carries browser-view
+operations only -- create/close view, navigate/reload/stop, resize/visibility,
+input, permission/download/file-chooser/new-view requests, load-state and
+metadata events, and a frame handle plus damage. It never carries engine
+internals.
+
+The protocol separates a control plane from a frame plane. The control plane
+(commands, events, input) is fully serialized, decoded, and validated by this
+crate now; malformed control messages are rejected with a typed `ProtocolError`
+and never panic the receiver. The frame plane is an abstract `FrameHandle`
+carrying a view id, a monotonic `FrameGeneration`, and an opaque transport
+token plus a byte length; the concrete transport (sealed shared memory first,
+DMA-BUF later) is bound at the native-runtime extraction spike (issue #53).
+
+Version negotiation uses `ProtocolVersion { major, minor }`: majors are
+incompatible by construction, and the agreed version is the highest common
+minor within a shared major. Capabilities negotiate as an intersection; an
+unmet capability is answered with `Event::CapabilityMismatch`, not a panic.
+Lifecycle state machines for engine, view, and frame validate transitions
+through explicit tables and return `IllegalTransition` rather than mutating on
+an illegal edge.
+
+The module homes in `silksurf-core` because both `silksurf-app` and
+`silksurf-engine` already depend on it, so the protocol reaches both sides
+without dragging engine internals into the shell. It is a split candidate: once
+#53 measures ownership, it extracts to `silksurf-engine-protocol`. No new crate
+topology is frozen by this ADR.
+
+### Rationale
+
+- Control-plane-first (not envelope-first) makes the anti-panic property real:
+  the malformed-message tests exercise body decode, which is the exact path
+  #53's "protocol errors cannot panic the shell" invariant depends on.
+- Abstracting only the frame handle avoids committing to a wire format that
+  #53's transport choice may discard, while still fixing the generation and
+  release ownership that prevents a stale engine from overwriting a presented
+  frame.
+- A `u64`-newtype id space and a length-prefixed, discriminant-tagged envelope
+  give unknown-message skip-ahead for forward minor compatibility and bounded
+  decode for hostile input.
+
+### Consequences
+
+Positive: the shell/engine contract exists and is testable before any process
+is spawned; the backend verdict stays open because the contract is
+engine-neutral; AD-022's deferred process-model boundary has a concrete first
+realization.
+
+Negative: no process is extracted yet (issue #53), so the isolation benefit is
+not yet delivered; the frame transport is unspecified until #53 measures it.
+
+### Alternatives Considered
+
+- A generic `BrowserEngine` trait exposing DOM/CSS/JS/layout objects -- rejected
+  because it forces incompatible engines into a lowest-common-denominator
+  pseudo-browser model and leaks internals the boundary exists to hide.
+- Deferring all message-body serialization to #53 behind an opaque envelope --
+  rejected because an envelope with no decoded bodies cannot test the anti-panic
+  property, which is the boundary's whole purpose.
+
+### See
+
+  * `docs/design/ENGINE-PROTOCOL-V1.md` -- full message and state-machine spec
+  * `crates/silksurf-core/src/engine_protocol/` -- implementation
+  * AD-022 -- Privacy and Site Isolation Skeleton (deferred the process model)
+  * issue #50 -- browser functionalization program; #52 (this spec), #53
+    (native-runtime extraction and frame transport)
+
+---
+
 ## Decision Log
 
 | ID | Title | Status | Date | Impact |
@@ -1663,6 +1760,7 @@ Linux (ADR-010) remains the long-term target.
 | AD-024 | Legacy C Tree Retirement | Accepted | 2026-07-09 | High |
 | AD-025 | boa_engine Confirmed; Hand-Written VM Removed | Accepted | 2026-07-09 | High |
 | AD-026 | Page-Content Accessibility Tree Deferred | Accepted | 2026-07-11 | Medium |
+| AD-027 | Engine Protocol v1 -- Process-Neutral Shell/Engine Boundary | Accepted | 2026-07-23 | High |
 
 ---
 
@@ -1671,7 +1769,9 @@ Linux (ADR-010) remains the long-term target.
 Planned (renumbered after the 2026-04-30 batch):
 
   * AD-011: Wayland Support Strategy
-  * AD-012: Multi-Process Architecture (browser vs renderer processes)
+  * AD-012: Multi-Process Architecture (browser vs renderer processes) --
+    first realized by AD-027 (engine protocol v1); process extraction tracked
+    in issue #53
   * AD-013: Extension API Design
   * AD-014: Network Stack (libcurl vs custom)
   * AD-015: Image Decoding (libpng/libjpeg vs custom)
