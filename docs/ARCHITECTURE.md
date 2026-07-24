@@ -1,92 +1,196 @@
 # SilkSurf Architecture
 
-**Status**: Phase 3 (Implementation) in progress
-**Next**: Phase 4 (Performance + Integration)
-**Toolchain**: nightly-2026-04-05 (rustc 1.96.0-nightly), MSRV 1.94.0
+**Status:** integrated single-process browser prototype  
+**Next architectural gate:** process-neutral engine protocol and backend spikes  
+**Toolchain:** stable Rust 1.94.1, pinned exactly
 
----
+The active Rust tree already integrates networking, HTML, CSS, JavaScript,
+layout, rendering, native input, and window presentation. The principal
+architectural limitation is no longer subsystem wiring; it is that page-owned
+state and browser-shell state still share one process and one single-view state
+machine.
 
-## Rust Module Boundaries & Data Flow (Current)
-SilkSurf's Rust workspace is split into single-responsibility crates with clear
-data ownership boundaries:
-- `silksurf-core`: arena allocation + interner + small-string storage.
-- `silksurf-html`: HTML tokenizer + tree builder -> `silksurf-dom` nodes.
-- `silksurf-dom`: DOM node storage and traversal (IDs + enums, no rendering),
-  with mutation batching + dirty-node tracking for incremental style recompute.
-- `silksurf-css`: CSS tokenizer/parser + selector matching + computed styles.
-- `silksurf-layout`: layout tree/boxes from DOM + computed styles (fixed-point).
-- `silksurf-render`: display list + raster output.
-- `silksurf-engine`: orchestration pipeline (parse -> style -> layout -> render).
-- `silksurf-js`: JS runtime surface and task/microtask queue integration.
-- `silksurf-net` / `silksurf-tls`: fetch and TLS plumbing.
-- `silksurf-app` / `silksurf-gui`: CLI entry and UI shell.
+See `docs/STATUS.md` for the canonical evidence summary and
+`docs/roadmaps/BROWSER-FUNCTIONALIZATION-ACTION-PLAN.md` for the ordered program.
 
-Data flow (current):
-HTML bytes -> tokenizer -> tree builder -> DOM (`NodeId`, `TagName`,
-`AttributeName`, `SmallString`, selective id/class interning) -> CSS stylesheet
-(`SelectorIdent`, tag/id/class index) -> computed styles via `StyleCache`
--> layout tree (`LayoutBox` + `SilkArena` children) -> display list (optionally
-tiled for damage regions) -> raster/GUI. JS tasks (via `JsRuntime`) mutate the DOM
-through batched updates and trigger style/layout invalidation; incremental render
-flows through `EnginePipeline::render_document_incremental_from_dom`.
-Network fetch feeds HTML/CSS/JS inputs.
+## Crate ownership
 
-Fused pipeline (hot path, `FusedWorkspace::run()`):
-DOM -> `LayoutNeighborTable::rebuild()` (BFS topology) +
-`CascadeView::rebuild()` (40-byte SoA entries + flat SelectorIdent array) ->
-single BFS pass: cascade via `CascadeView` (no `dom.node()`) + layout + display
-list push. Same-DOM re-renders skip both rebuilds via `Dom::generation()` check.
-Lock-free atom resolution via `Dom::resolve_fast()` (monotonic `resolve_table`).
-See `docs/PERFORMANCE.md` for measured latencies.
+- `silksurf-core`: arenas, interning, compact shared types, canonical errors.
+- `silksurf-html`: html5ever tree construction and fragment parsing.
+- `silksurf-dom`: DOM storage, traversal, mutation batching, generations, dirty
+  nodes, and accessibility snapshots.
+- `silksurf-css`: tokenization, parsing, selectors, cascade, computed style,
+  media evaluation, and style indices/views.
+- `silksurf-layout`: Taffy integration, inline/text layout, bidi and line-break
+  support.
+- `silksurf-text`: measurement, shaping, font fallback, and glyph rasterization.
+- `silksurf-render`: display lists, spatial buckets, damage rasterization,
+  tiny-skia fallback, and direct pixel paths.
+- `silksurf-engine`: document parsing/render orchestration, fused
+  style-layout-paint, and speculative/cache integration.
+- `silksurf-net`: HTTP clients, redirects, content decoding, cookies, cache,
+  WebSocket and EventSource transport.
+- `silksurf-tls`: rustls configuration and diagnostic loading surfaces.
+- `silksurf-image`: image decoding.
+- `silksurf-gui`: winit event delivery and Wayland/X11 presenters, with optional
+  legacy XCB support.
+- `silksurf-app`: browser chrome, navigation workers, page assembly, input
+  routing, runtime pumping, retained frame composition, and presentation.
+- `silksurf-js`: `SilkContext`, Boa integration, DOM/events, timers, fetch,
+  sockets, storage, crypto, history intents, and test262 tooling.
 
-JS runtime integration surface: `crates/silksurf-engine/src/js.rs` defines the
-host boundary (`bind_dom`, `evaluate`, `enqueue_task`, `run_microtasks`). The
-engine owns scheduling and reflow triggers; see `docs/JS_ENGINE.md`.
+## Current load and render path
 
-## Integration Plan (Open)
-- Wire `silksurf-js` into `silksurf-engine` under the `js` feature.
-- Define minimal host bindings (DOM query/mutation, task queue).
-- Wire `silksurf-net`/`silksurf-tls` behind feature flags and document fetch flow.
-
-## Crate Dependency Graph (Rust)
-```mermaid
-graph TD
-  silksurf-app --> silksurf-engine
-  silksurf-css --> silksurf-core
-  silksurf-css --> silksurf-dom
-  silksurf-dom --> silksurf-core
-  silksurf-engine --> silksurf-core
-  silksurf-engine --> silksurf-css
-  silksurf-engine --> silksurf-dom
-  silksurf-engine --> silksurf-gui
-  silksurf-engine --> silksurf-html
-  silksurf-engine --> silksurf-js
-  silksurf-engine --> silksurf-layout
-  silksurf-engine --> silksurf-net
-  silksurf-engine --> silksurf-render
-  silksurf-engine --> silksurf-tls
-  silksurf-html --> silksurf-dom
-  silksurf-layout --> silksurf-core
-  silksurf-layout --> silksurf-css
-  silksurf-layout --> silksurf-dom
-  silksurf-net --> silksurf-tls
-  silksurf-render --> silksurf-css
-  silksurf-render --> silksurf-dom
-  silksurf-render --> silksurf-layout
+```text
+BrowserNavigationRequest
+  -> navigation worker
+  -> silksurf-net / silksurf-tls / response cache
+  -> HTML bytes
+  -> html5ever TreeSink -> silksurf-dom
+  -> inline/external CSS and script/module collection
+  -> SilkContext over the live shared DOM
+  -> script evaluation + jobs + host callback drains
+  -> retained FusedWorkspace / StyleIndex
+  -> style + Taffy layout + display-list paint
+  -> viewport raster or bounded damage update
+  -> retained Wayland SHM / softbuffer presentation
 ```
 
-See `docs/JS_ENGINE.md` for the JS runtime embedding surface and perf plan.
-See `docs/DEPENDENCIES.md` for crate roles and dependency rationale.
-See `docs/PERFORMANCE.md` for hot paths and perf roadmap.
-See `docs/NETWORK_TLS.md` for the fetch/TLS layer configuration.
-See `docs/TOOLCHAIN.md` for build and tooling guidance.
-See `docs/LOGGING.md` for logging and error reporting expectations.
-See `docs/SECURITY.md` for TLS and secret-handling guidance.
-See `docs/TESTING.md` for test strategy and fuzzing.
+Native input follows the reverse integration path:
 
-Legacy C sections below are historical reference while migrating to Rust.
+```text
+winit input
+  -> chrome/page hit test and focus state
+  -> DOM event synthesis through SilkContext
+  -> JavaScript handler / microtasks / host callbacks
+  -> dirty-node extraction
+  -> retained text update or fused relayout
+  -> damage frame submission
+```
 
----
+## Current process topology
 
-## Legacy C Architecture
-See `docs/archive/legacy/ARCHITECTURE_C.md` for the historical C baseline.
+The browser shell and page engine are presently one process:
+
+```text
+silksurf-app process
+  BrowserState
+    browser chrome and navigation state
+    optional BrowserPageRuntime
+      Arc<Mutex<Dom>>
+      SilkContext / boa_engine
+      Stylesheet + StyleIndex
+      FusedResult + FusedWorkspace
+      DisplayList + images + raster scratch
+  winit event loop and native presenter
+```
+
+This topology is efficient for controlled fixtures, but it is not a security or
+reliability boundary. A page hang, resource-exhaustion bug, or unsafe/FFI defect
+can affect the shell. It also couples the current shell directly to native-engine
+implementation types, blocking interchangeable compatibility backends.
+
+## Event and wake model
+
+The active GUI path is event-driven. Winit uses `ControlFlow::Wait`; navigation,
+host callbacks, and other off-loop work wake the event loop through a
+`WinitWakeHandle`/event-loop proxy. The previously documented 10 ms in-flight
+poll is not part of the current GUI path and is not an open architecture item.
+
+## Current integration status
+
+| Surface | Status |
+|---|---|
+| HTML/CSS/layout/render pipeline | integrated |
+| `silksurf-js`/`SilkContext` in the application | integrated |
+| network/TLS/cache in navigation and resources | integrated |
+| native pointer/keyboard -> JavaScript events | integrated for current supported controls/events |
+| JavaScript mutation -> retained/fused repaint | integrated and probe-backed |
+| same-document history intents and persistent local storage | partial |
+| complete loader/lifecycle/task-source semantics | open |
+| multi-tab/multi-window shell | open |
+| renderer process boundary and sandbox | open |
+| compatibility-engine backend protocol | open |
+
+The abstraction in `crates/silksurf-engine/src/js.rs` is not the complete
+production application path. `silksurf-app` currently instantiates
+`silksurf_js::SilkContext` directly and owns runtime scheduling and repaint
+integration.
+
+## Target shell/engine boundary
+
+The next boundary is view-oriented and process-neutral. It must not expose DOM,
+CSS, JavaScript, or layout implementation types.
+
+Commands include:
+
+- create/close view,
+- navigate/reload/stop,
+- resize and visibility,
+- pointer/keyboard/IME input,
+- permission decisions,
+- lifecycle and shutdown.
+
+Events include:
+
+- frame handle plus damage and generation,
+- title/URL/load-state changes,
+- permission/download/new-view requests,
+- console/diagnostic metrics,
+- crash/hang notification.
+
+Frame transport should prefer platform-native handles where available and
+sealed shared memory as the fallback. Ownership requires explicit generations,
+release acknowledgement, and stale-engine protection.
+
+## Decision gates before a backend verdict
+
+The program evaluates, rather than assumes, the final compatibility stack:
+
+1. move the existing native runtime behind the protocol and measure process/
+   frame overhead,
+2. run a WPE WebKit Linux/Wayland embedding spike,
+3. run comparable Wry, Servo, and CEF feasibility/footprint probes,
+4. record a backend ADR assigning primary, fallback, experimental, or rejected
+   roles.
+
+Crate decomposition follows measured ownership after these spikes; the project
+must not pre-commit to an arbitrary crate count.
+
+## Conceptual dependency flow
+
+```mermaid
+graph TD
+  APP[silksurf-app shell] --> GUI[silksurf-gui]
+  APP --> ENGINE[silksurf-engine]
+  APP --> JS[silksurf-js]
+  APP --> NET[silksurf-net]
+  APP --> IMAGE[silksurf-image]
+  ENGINE --> HTML[silksurf-html]
+  ENGINE --> CSS[silksurf-css]
+  ENGINE --> DOM[silksurf-dom]
+  ENGINE --> LAYOUT[silksurf-layout]
+  ENGINE --> RENDER[silksurf-render]
+  LAYOUT --> TEXT[silksurf-text]
+  RENDER --> TEXT
+  NET --> TLS[silksurf-tls]
+  JS --> DOM
+  JS --> CSS
+  JS --> HTML
+  JS --> NET
+```
+
+This is the load-bearing architectural flow, not a complete Cargo-edge dump.
+
+## Related documents
+
+- `docs/STATUS.md`
+- `docs/JS_ENGINE.md`
+- `docs/PERFORMANCE.md`
+- `docs/NETWORK_TLS.md`
+- `docs/design/THREAT-MODEL.md`
+- `docs/design/ARCHITECTURE-DECISIONS.md`
+- `docs/roadmaps/BROWSER-FUNCTIONALIZATION-ACTION-PLAN.md`
+- `docs/TESTING.md`
+
+Historical C architecture is archived in `docs/archive/legacy/ARCHITECTURE_C.md`.

@@ -1,37 +1,87 @@
 # silksurf-app
 
-The user-facing CLI binary for silksurf. Wires the engine pipeline,
-networking, TLS, JS runtime, and the (in-progress) GUI into one entry
-point.
+`silksurf-app` is the integrated user-facing SilkSurf browser application. It
+owns browser chrome, navigation, resource assembly, JavaScript/runtime pumping,
+input routing, retained page state, and native presentation.
+
+## Runtime modes
+
+### Windowed browser (default)
+
+```sh
+cargo run -p silksurf-app -- https://example.com
+```
+
+The default path loads the URL, builds a live DOM, executes supported scripts
+through `silksurf_js::SilkContext`, lays out and paints the page, opens a winit
+window, and routes native input and host callbacks through incremental repaint.
+Wayland and X11 are supported through the winit backend; presenter selection is
+handled by `silksurf-gui`.
+
+### Headless static render
+
+```sh
+cargo run -p silksurf-app -- --headless https://example.com
+```
+
+This runs a one-shot fetch/parse/script/layout/raster pipeline and exits.
+
+### Legacy XCB probe
+
+`--window` uses the optional `xcb-backend` feature and is retained as an
+isolated legacy presenter probe. It is not the default browser path.
+
+## Common flags
+
+```text
+--headless
+--display-backend=auto|wayland|x11
+--speculative / -s
+--tls-ca-file <path>
+--platform-verifier
+--insecure / -k
+```
+
+Use `make gui-probe` and the focused `gui-probe-*` targets for scripted live
+Wayland/X11 evidence.
+
+## Current capabilities
+
+The application integrates:
+
+- asynchronous navigation workers and stop/reload/history controls,
+- external CSS, scripts, modules within current caps, and decoded images,
+- shared partitioned cookies between HTTP and `document.cookie`,
+- Boa-backed page JavaScript and host callbacks,
+- native pointer/keyboard dispatch into page event listeners,
+- focused text controls,
+- scrolling and retained viewport caches,
+- same-box text damage and fused relayout/repaint,
+- Wayland SHM and softbuffer presentation paths,
+- optional accessibility snapshot generation.
+
+## Current limitations
+
+The app remains a single-view shell. `BrowserState` holds one page runtime,
+history vector, focused input, and frame. The page DOM, JavaScript context,
+layout state, display list, and raster scratch share the browser process; there
+is no renderer crash/sandbox boundary yet.
+
+Tabs, windows, profiles, downloads, permissions, file chooser, full
+selection/clipboard/IME behavior, session restore, and compatibility-engine
+backends belong to the browser functionalization program in
+`docs/roadmaps/BROWSER-FUNCTIONALIZATION-ACTION-PLAN.md` and issue #50.
 
 ## Binaries
 
-  * **`silksurf-app`** -- the engine entry point. Loads a URL,
-    parses HTML/CSS, runs JS, builds the layout tree, rasterizes,
-    and either dumps the framebuffer or (eventually, P6) opens an
-    XCB window. Speculative rendering and persistent on-disk cache
-    are wired in; second-run cache hit is ~9 us.
-  * **`tls-probe`** -- 982-line TLS handshake diagnostic with DANE
-    TLSA probe, X.509 chain display, and explicit RCA for the four
-    canonical UnknownIssuer failure classes. See
-    `docs/development/RUNBOOK-TLS-PROBE.md`.
+- `silksurf-app` -- integrated browser/headless renderer
+- `tls-probe` -- TLS/DANE/X.509 diagnostic, behind `tls-probe`
+- `h2-fetch-probe` -- HTTP/2 diagnostic client
 
-## Flags
+## Related documents
 
-```sh
-silksurf-app <url>                       # render to framebuffer
-silksurf-app --speculative <url>         # enable speculative pre-render
-silksurf-app --tls-ca-file <path> <url>  # supply extra CA certs at runtime
-```
-
-## Status
-
-Headless render works end-to-end. GUI mode (window-open + paint) is
-queued in roadmap P6 (`crates/silksurf-gui` is currently a one-line stub
-backed by ADR-010 XCB-only Linux-first).
-
-## See Also
-
-  * `/docs/ARCHITECTURE.md` -- pipeline overview
-  * `/docs/PERFORMANCE.md` -- measured 9.5 us steady-state path
-  * `/docs/development/RUNBOOK-TLS-PROBE.md` -- TLS diagnosis
+- `docs/STATUS.md`
+- `docs/ARCHITECTURE.md`
+- `docs/JS_ENGINE.md`
+- `docs/PERFORMANCE.md`
+- `docs/development/RUNBOOK-TLS-PROBE.md`
