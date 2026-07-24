@@ -139,10 +139,10 @@ fn supervisor_probe() -> Result<(), NativeEngineProcessError> {
             scale_permille: 1000,
         },
     })?;
-    expect_view_created(engine.receive()?, view)?;
+    expect_view_created(&engine.receive()?, view)?;
 
     engine.send(ProtocolCommand::CloseView { view })?;
-    expect_view_closed(engine.receive()?, view)?;
+    expect_view_closed(&engine.receive()?, view)?;
 
     let status = engine.shutdown()?;
     if !status.success() {
@@ -151,16 +151,16 @@ fn supervisor_probe() -> Result<(), NativeEngineProcessError> {
     Ok(())
 }
 
-fn expect_view_created(event: Event, expected: ViewId) -> Result<(), NativeEngineProcessError> {
+fn expect_view_created(event: &Event, expected: ViewId) -> Result<(), NativeEngineProcessError> {
     match event {
-        Event::ViewCreated { view } if view == expected => Ok(()),
+        Event::ViewCreated { view } if *view == expected => Ok(()),
         _ => Err(NativeEngineProcessError::UnexpectedEvent("ViewCreated")),
     }
 }
 
-fn expect_view_closed(event: Event, expected: ViewId) -> Result<(), NativeEngineProcessError> {
+fn expect_view_closed(event: &Event, expected: ViewId) -> Result<(), NativeEngineProcessError> {
     match event {
-        Event::ViewClosed { view } if view == expected => Ok(()),
+        Event::ViewClosed { view } if *view == expected => Ok(()),
         _ => Err(NativeEngineProcessError::UnexpectedEvent("ViewClosed")),
     }
 }
