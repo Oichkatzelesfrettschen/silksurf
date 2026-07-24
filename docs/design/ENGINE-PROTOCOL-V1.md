@@ -40,7 +40,8 @@ different transport lifetimes.
 All identifiers are opaque `u64` newtypes. They are meaningful only to the
 allocator that mints them; the peer treats them as tokens.
 
-- `EngineInstanceId` -- one running engine process.
+- `EngineInstanceId` -- one running engine process. It is connection-implicit:
+  the shell tracks it per engine connection, and no message body carries it.
 - `ViewId` -- one browsing view (future tab) inside an engine.
 - `ProfileId` -- one persistent profile (cookies, storage, history root).
 - `RequestId` -- one outstanding request/response pair (permission, download,
@@ -113,6 +114,12 @@ Coordinates are physical device pixels relative to the view origin.
 - `CapabilityMismatch { view, needed }`
 - `Metrics { view, sample }` -- `EngineMetrics`
 
+A protocol error is not a distinct event. A malformed message decodes to a
+`ProtocolError` (below) at the receiver; when it warrants tearing down the
+view, the receiver escalates it to `Crashed { reason: ProtocolViolation }`.
+Keeping the decode result and the teardown event separate lets a receiver
+reject one bad message without necessarily killing the view.
+
 ## Wire framing
 
 Every control message is a length-prefixed envelope. The header is fixed at
@@ -140,7 +147,6 @@ receiver:
 - `MAX_MESSAGE_BYTES` bounds the envelope body.
 - `MAX_STRING_BYTES` bounds any single string (URL, title, status, text).
 - `MAX_DAMAGE_RECTS` bounds the `FrameReady` damage list.
-- `MAX_VEC_LEN` bounds any other length-prefixed sequence.
 
 A length that exceeds its limit is a decode error, not an allocation.
 

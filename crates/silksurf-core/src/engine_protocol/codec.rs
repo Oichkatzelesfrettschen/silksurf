@@ -18,9 +18,6 @@ pub const MAX_STRING_BYTES: usize = 64 * 1024;
 /// Upper bound on the `FrameReady` damage list.
 pub const MAX_DAMAGE_RECTS: usize = 4096;
 
-/// Upper bound on any other length-prefixed sequence.
-pub const MAX_VEC_LEN: usize = 65_536;
-
 /// Every rejection at the protocol boundary. Returned instead of panicking so
 /// a page engine cannot crash the shell with a malformed message.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

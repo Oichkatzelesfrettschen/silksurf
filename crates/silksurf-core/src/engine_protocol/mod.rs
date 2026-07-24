@@ -25,9 +25,7 @@ pub mod message;
 pub mod version;
 pub mod wire;
 
-pub use codec::{
-    MAX_DAMAGE_RECTS, MAX_MESSAGE_BYTES, MAX_STRING_BYTES, MAX_VEC_LEN, ProtocolError,
-};
+pub use codec::{MAX_DAMAGE_RECTS, MAX_MESSAGE_BYTES, MAX_STRING_BYTES, ProtocolError};
 pub use ids::{EngineInstanceId, FrameGeneration, ProfileId, RequestId, ViewId};
 pub use lifecycle::{EngineState, FrameState, IllegalTransition, ViewState};
 pub use message::{
