@@ -37,4 +37,4 @@ pub use version::{
     Capabilities, Endpoint, Negotiated, ProtocolVersion, VersionError, VersionRange, negotiate,
     negotiate_version,
 };
-pub use wire::{Message, WIRE_VERSION};
+pub use wire::{ENVELOPE_HEADER_BYTES, Message, WIRE_VERSION, envelope_body_len};
