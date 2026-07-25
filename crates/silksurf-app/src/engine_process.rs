@@ -276,8 +276,14 @@ impl QueueCharge {
         }
     }
 
+    /// Saturates rather than wrapping, so a double release costs one event's
+    /// budget instead of rejecting every later event as a byte overflow.
     fn release(&self, bytes: usize) {
-        self.outstanding.fetch_sub(bytes, Ordering::AcqRel);
+        let _ = self
+            .outstanding
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |held| {
+                Some(held.saturating_sub(bytes))
+            });
     }
 }
 
