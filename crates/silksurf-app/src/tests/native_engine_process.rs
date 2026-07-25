@@ -163,6 +163,76 @@ fn runtime_actor_builds_and_owns_a_navigated_page() {
 }
 
 #[test]
+fn framed_command_reader_feeds_the_runtime_actor() {
+    let view = ViewId::new(70);
+    let (command_reader, mut command_writer) = io::pipe().expect("command pipe");
+    let (event_reader, mut event_writer) = io::pipe().expect("event pipe");
+    let (sender, receiver) = mpsc::sync_channel(WORKER_QUEUE_DEPTH);
+    let command_sender = sender.clone();
+    let command_reader = thread::spawn(move || {
+        let mut command_reader = command_reader;
+        read_commands_until_closed(&mut command_reader, &command_sender);
+    });
+    let actor = thread::spawn(move || {
+        run_runtime_actor(receiver, sender, &mut event_writer, fixture_loader())
+    });
+    let mut ingress = EventIngress::spawn(event_reader);
+
+    for command in [
+        create_view(view),
+        ProtocolCommand::Navigate {
+            view,
+            request: NavigationRequest {
+                url: "about:blank#framed".to_string(),
+            },
+        },
+    ] {
+        write_engine_message(&mut command_writer, &Message::Command(command))
+            .expect("framed command");
+    }
+
+    for expected in [
+        Event::ViewCreated { view },
+        Event::LoadStateChanged {
+            view,
+            state: LoadState::Started,
+        },
+        Event::UrlChanged {
+            view,
+            url: "about:blank#framed".to_string(),
+        },
+        Event::LoadStateChanged {
+            view,
+            state: LoadState::Committed,
+        },
+        Event::LoadStateChanged {
+            view,
+            state: LoadState::Interactive,
+        },
+        Event::LoadStateChanged {
+            view,
+            state: LoadState::Complete,
+        },
+    ] {
+        assert_eq!(receive(&ingress), expected);
+    }
+
+    write_engine_message(
+        &mut command_writer,
+        &Message::Command(ProtocolCommand::Shutdown),
+    )
+    .expect("shutdown command");
+    drop(command_writer);
+    assert_eq!(receive(&ingress), Event::ViewClosed { view });
+    actor
+        .join()
+        .expect("actor thread")
+        .expect("actor completes");
+    command_reader.join().expect("command reader thread");
+    ingress.join();
+}
+
+#[test]
 fn navigation_fetch_panic_releases_the_single_worker_slot() {
     let view = ViewId::new(8);
     let attempts = Arc::new(AtomicUsize::new(0));
