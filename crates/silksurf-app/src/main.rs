@@ -41,6 +41,7 @@ mod app_options;
 mod argb_raster;
 mod browser_types;
 mod dom_hit_test;
+mod engine_process;
 mod input;
 mod js_events;
 mod page_build;
@@ -256,6 +257,11 @@ fn main() {
     install_observability();
 
     let args: Vec<String> = std::env::args().collect();
+    // The engine worker re-execs this binary, so the process modes claim their
+    // flags before parse_app_options, which ignores unrecognized `-` arguments.
+    if let Some(exit_code) = engine_process::run_internal_engine_process_mode(&args) {
+        std::process::exit(exit_code);
+    }
     let mut options = match parse_app_options(&args) {
         Ok(options) => options,
         Err(message) => {
