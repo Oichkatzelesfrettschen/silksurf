@@ -11,12 +11,11 @@
 //! `InputEvent` -- is fully serialized, decoded, and validated here; a
 //! malformed control message decodes to a typed `ProtocolError` and never
 //! panics the receiver. The frame plane -- `FrameHandle` -- is an abstract
-//! descriptor; its concrete transport (sealed shared memory first, DMA-BUF
-//! later) is bound at the native-runtime extraction spike (issue #53).
+//! descriptor naming a sealed shared-memory or DMA-BUF transport, which a
+//! receiver binds through `recvmsg` rather than through `Message::decode`.
 //!
 //! This module homes in `silksurf-core` because both the shell and the native
-//! engine already depend on it. It is a split candidate: once #53 measures
-//! ownership it extracts to a dedicated `silksurf-engine-protocol` crate.
+//! engine already depend on it.
 
 pub mod codec;
 pub mod ids;
