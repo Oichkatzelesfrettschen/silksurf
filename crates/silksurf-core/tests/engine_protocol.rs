@@ -7,12 +7,12 @@
 //! lifecycle transitions follow the tables in AD-027.
 
 use silksurf_core::engine_protocol::{
-    Capabilities, Command, CrashReason, CursorKind, DamageRect, Endpoint, EngineMetrics,
-    EngineState, Event, FrameGeneration, FrameHandle, FrameState, FrameTransport, ImeKind,
-    InputEvent, KeyKind, LoadState, Message, Modifiers, MouseButton, NavigationRequest,
+    Capabilities, Command, CrashReason, CursorKind, DamageRect, ENVELOPE_HEADER_BYTES, Endpoint,
+    EngineMetrics, EngineState, Event, FrameGeneration, FrameHandle, FrameState, FrameTransport,
+    ImeKind, InputEvent, KeyKind, LoadState, Message, Modifiers, MouseButton, NavigationRequest,
     PermissionDecision, PermissionKind, PointerKind, ProfileId, ProtocolError, ProtocolVersion,
-    RequestId, VersionError, VersionRange, ViewId, ViewState, WIRE_VERSION, negotiate,
-    negotiate_version,
+    RequestId, VersionError, VersionRange, ViewId, ViewState, WIRE_VERSION, envelope_body_len,
+    negotiate, negotiate_version,
 };
 
 const MAGIC0: u8 = 0x53;
@@ -299,6 +299,59 @@ fn unknown_event_type_is_rejected() {
         Message::decode(&bytes),
         Err(ProtocolError::UnknownMessageType(0x0100))
     );
+}
+
+#[test]
+fn envelope_body_len_splits_every_encoded_message_at_the_header() {
+    // A streaming transport reads ENVELOPE_HEADER_BYTES, sizes the body from
+    // envelope_body_len, then reassembles. Both halves must account for every
+    // byte the encoder produced, for commands and events alike.
+    let encoded = sample_commands()
+        .into_iter()
+        .map(Message::Command)
+        .chain(sample_events().into_iter().map(Message::Event));
+    for message in encoded {
+        let bytes = message.encode().expect("sample message encodes");
+        assert!(bytes.len() >= ENVELOPE_HEADER_BYTES);
+        let header: [u8; ENVELOPE_HEADER_BYTES] = bytes[..ENVELOPE_HEADER_BYTES]
+            .try_into()
+            .expect("header prefix has the declared width");
+        let body_len = envelope_body_len(&header).expect("encoded header validates");
+        assert_eq!(
+            ENVELOPE_HEADER_BYTES + body_len,
+            bytes.len(),
+            "header plus declared body must cover the envelope for {message:?}"
+        );
+    }
+}
+
+#[test]
+fn envelope_body_len_rejects_a_foreign_header() {
+    let header = [0u8; ENVELOPE_HEADER_BYTES];
+    assert!(matches!(
+        envelope_body_len(&header),
+        Err(ProtocolError::BadMagic)
+    ));
+}
+
+#[test]
+fn envelope_body_len_bounds_the_body_before_allocation() {
+    let header = [
+        MAGIC0,
+        MAGIC0,
+        WIRE_VERSION,
+        0,
+        0,
+        3,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+    ];
+    assert!(matches!(
+        envelope_body_len(&header),
+        Err(ProtocolError::MessageTooLarge { .. })
+    ));
 }
 
 #[test]
