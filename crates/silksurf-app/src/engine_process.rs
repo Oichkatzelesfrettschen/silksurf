@@ -10,6 +10,7 @@ use std::process::{
     Child, ChildStdin, ChildStdout, Command as ProcessCommand, ExitStatus, Stdio,
 };
 
+use crate::browser_types::{FRAME_HEIGHT, FRAME_WIDTH};
 use silksurf_core::engine_protocol::{
     Command as ProtocolCommand, CrashReason, Event, Message, ProfileId, ProtocolError, ViewId,
     Viewport, MAX_MESSAGE_BYTES,
