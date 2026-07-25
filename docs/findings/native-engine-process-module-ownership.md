@@ -65,11 +65,19 @@ command. Neither side fills a pipe while the other is also writing, so one
 thread per process suffices and the current control messages cannot deadlock.
 
 That invariant is what unsolicited events break. `Event::FrameReady`,
-`Event::Crashed`, and `Event::Hang` all originate at the engine, and
-`MAX_MESSAGE_BYTES` is 1 MiB against a 64 KiB Linux pipe buffer, so a worker
-writing an event while the parent writes a command wedges both. The
-event-reader thread is named in a TODO at `receive` rather than built here,
-because the slice that emits those events is the slice that needs it.
+`Event::Crashed`, and `Event::Hang` all originate at the engine, so enabling
+any of them retires the argument above and makes deadlock reachable. It
+becomes deterministic once one event exceeds the free pipe capacity or enough
+queued events fill it: a maximal `FrameReady` carries `MAX_DAMAGE_RECTS`
+(4096) rectangles at sixteen bytes each, which is 65_536 bytes before the
+frame handle, the length prefix, and the envelope, against a 64 KiB Linux
+pipe buffer. `MAX_STRING_BYTES` puts `UrlChanged` and `TitleChanged` in the
+same range, and `MAX_MESSAGE_BYTES` allows 1 MiB. A single small `Crashed`
+event fits and does not wedge anything by itself; repeated asynchronous
+events reach the same backpressure failure.
+
+The event-reader thread is named in a TODO at `receive` rather than built
+here, because the slice that emits those events is the slice that needs it.
 
 `NativeEngineProcess::shutdown` calls `Child::wait` with no deadline, so a
 wedged worker holds the shell. `Event::Hang` carries `elapsed_ms` and is where
@@ -77,8 +85,10 @@ that budget belongs; the TODO at `shutdown` names it.
 
 ## Falsifiers
 
-- A worker that emits an event without a preceding command falsifies the
-  half-duplex invariant and makes the reader thread load-bearing at once.
-- A control message above 64 KiB does the same without any protocol change.
+- A worker that emits an event without a preceding command retires the
+  half-duplex invariant and makes the reader thread load-bearing at once,
+  whether or not that first event is small enough to fit the pipe.
+- A single control message above the free pipe capacity turns the reachable
+  deadlock into a deterministic one, with no protocol change.
 - Restoring a second binary that re-execs itself reopens the flag-ownership
   defect, so any new process mode belongs on the browser binary.
