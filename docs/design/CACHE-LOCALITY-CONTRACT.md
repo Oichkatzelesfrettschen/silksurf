@@ -144,6 +144,11 @@ those events. `read_engine_envelope` reports the exact size that framed each
 message, so the charge is a measured wire quantity rather than `size_of` a
 decoded `Event`, whose owned payload lives outside the enum.
 
+One protocol-maximum envelope is a liveness floor rather than a locality figure:
+it is the smallest budget under which every decodable message still crosses. A
+reduction toward the foreground working set waits on measured event sizes from
+worker-owned navigation, which produces the first real distribution.
+
 The first byte-budget rule is:
 
 - one protocol-maximum envelope always fits;
