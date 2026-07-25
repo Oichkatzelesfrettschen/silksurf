@@ -57,6 +57,42 @@ class LocalityProbeTests(unittest.TestCase):
         self.assertEqual(counters["instructions"], 2500)
         self.assertIsNone(counters["cache-misses"])
 
+    def test_derivations_key_on_the_base_event_name(self) -> None:
+        counters = locality_probe.parse_perf_stat(
+            "1000\t\tcycles:u\t100.00\t100.00\n"
+            "2500\t\tinstructions:u\t100.00\t100.00\n"
+            "40\t\tcache-misses:u\t100.00\t100.00\n"
+            "400\t\tcache-references:u\t100.00\t100.00\n"
+        )
+        summary = locality_probe.summarize_samples(
+            [{"elapsed_ns": 1, "process": {}, "counters": counters}]
+        )
+        self.assertEqual(summary["instructions_per_cycle"]["median"], 2.5)
+        self.assertEqual(summary["cache_miss_ratio"]["median"], 0.1)
+        self.assertEqual(summary["unavailable_derivations"], {})
+
+    def test_absent_counters_name_the_missing_event(self) -> None:
+        summary = locality_probe.summarize_samples(
+            [{"elapsed_ns": 1, "process": {}, "counters": {"cycles": 1000}}]
+        )
+        self.assertIsNone(summary["instructions_per_cycle"])
+        self.assertIn("instructions", summary["unavailable_derivations"]["instructions_per_cycle"])
+
+    def test_user_only_scheduler_events_record_as_unobservable(self) -> None:
+        measured, unobservable = locality_probe.partition_counters(
+            {
+                "context-switches:u": 0,
+                "cpu-migrations:u": 0,
+                "context-switches": 12,
+                "page-faults:u": 103,
+            }
+        )
+        self.assertNotIn("context-switches:u", measured)
+        self.assertNotIn("cpu-migrations:u", measured)
+        self.assertEqual(measured["context-switches"], 12)
+        self.assertEqual(measured["page-faults:u"], 103)
+        self.assertIn("cpu-migrations:u", unobservable)
+
     def test_nearest_rank(self) -> None:
         values = [1, 2, 3, 4, 5]
         self.assertEqual(locality_probe.nearest_rank(values, 50), 3.0)
