@@ -9,7 +9,15 @@ conflict, the narrower file controls only inside its subtree.
 
 ## Hard Rules
 
-- Keep checked-in text ASCII unless a file already requires another encoding.
+- Checked-in text is emoji-free. An emoji carries no information its word does
+  not, and it breaks greps, widens diffs, and renders as a box or a double-width
+  cell wherever the glyph is missing. Typographic substitutes stay out on the
+  same grounds: straight quotes over curly ones, `--` over an em dash, `...` over
+  an ellipsis glyph. Symbols that carry meaning stay in -- mathematical
+  operators, Greek letters, arrows in state transitions, box-drawing in diagrams,
+  the degree and micro signs, and CJK such as the `.公司` public suffix
+  `crates/silksurf-core/src/psl.rs` handles. A name keeps the spelling its owner
+  uses. `scripts/lint_text_hygiene.sh` enforces this over authored markdown.
 - Rust source follows rustfmt. Do not hand-align Rust against prose taste.
 - Treat warnings as defects. Touched Rust code builds with warnings denied.
 - Keep changes surgical. Do not reformat unrelated files.
@@ -282,7 +290,7 @@ carries component and mechanism only; issue and PR links ride in trailers.
 The body makes the invariant, the change, and the evidence reviewable in one
 to five sentences: name the root cause or constraint, name the fix, cite the
 spec rule, function, or crate boundary when load-bearing, and state test
-movement plainly. Commit prose is plain ASCII, declarative present tense,
+movement plainly. Commit prose is emoji-free, declarative present tense,
 American English. A body that reads like a worklog -- nested bullets from a
 coarse squash, several sub-components -- means the commits were not granular
 enough: split them or compress to the aggregate mechanism.
