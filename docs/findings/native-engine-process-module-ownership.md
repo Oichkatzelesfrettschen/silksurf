@@ -1,7 +1,7 @@
 # Native-Engine Process Module Ownership in the Browser Binary
 
 **Date**: 2026-07-25
-**Last verified**: 2026-07-25
+**Last verified**: 2026-07-25 (half-duplex constraint retired the same day)
 **Evidence class**: crate source (rank 4) plus workspace test oracle (rank 2).
 No live-run or GUI-frame evidence; the control plane carries no frame bytes.
 **Mechanism**: `crates/silksurf-app/src/engine_process.rs` holds the shell side
@@ -57,7 +57,13 @@ descriptor, and descriptor passing needs `recvmsg` with a control-message
 buffer; `Read::read` cannot receive a descriptor. The durable shared artifact
 is the header layout, not the loop.
 
-## The transport is half-duplex by construction
+## The transport was half-duplex by construction
+
+Retired 2026-07-25 by `EventIngress`, which owns the event pipe on its own
+thread behind a bounded queue with nonblocking insertion. The reasoning below
+is what forced that ordering: asynchronous event ingress precedes worker-owned
+navigation, because navigation is the first producer of unsolicited events.
+
 
 The parent writes one command and blocks in `NativeEngineProcess::receive`
 until the matching event arrives; the worker writes only in response to a
@@ -76,12 +82,9 @@ same range, and `MAX_MESSAGE_BYTES` allows 1 MiB. A single small `Crashed`
 event fits and does not wedge anything by itself; repeated asynchronous
 events reach the same backpressure failure.
 
-The event-reader thread is named in a TODO at `receive` rather than built
-here, because the slice that emits those events is the slice that needs it.
-
-`NativeEngineProcess::shutdown` calls `Child::wait` with no deadline, so a
-wedged worker holds the shell. `Event::Hang` carries `elapsed_ms` and is where
-that budget belongs; the TODO at `shutdown` names it.
+`NativeEngineProcess::shutdown` called `Child::wait` with no deadline, so a
+wedged worker held the shell. `shutdown_within` now polls `try_wait` and
+escalates to `Child::kill` at the deadline, reaping on every path.
 
 ## Falsifiers
 
