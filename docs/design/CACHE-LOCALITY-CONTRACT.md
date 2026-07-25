@@ -138,8 +138,11 @@ event pipe. The winit thread drains typed events without blocking.
 
 A count bound alone does not bound memory. `EVENT_QUEUE_DEPTH = 256` can retain
 many large `FrameReady`, `UrlChanged`, or `TitleChanged` events, each legal near
-the protocol's message or string limit. Before worker-owned navigation emits
-those events, ingress gains a wire-byte budget in addition to its count budget.
+the protocol's message or string limit. Ingress therefore carries a wire-byte
+budget alongside its count budget, landed before worker-owned navigation emits
+those events. `read_engine_envelope` reports the exact size that framed each
+message, so the charge is a measured wire quantity rather than `size_of` a
+decoded `Event`, whose owned payload lives outside the enum.
 
 The first byte-budget rule is:
 
