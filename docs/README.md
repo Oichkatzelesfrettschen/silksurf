@@ -19,6 +19,8 @@ security, testing, and cleanroom guidance. Historical material lives under
 - `docs/JS_ENGINE.md`: production Boa integration, host surface, limitations,
   conformance, and performance scope.
 - `docs/design/ARCHITECTURE-DECISIONS.md`: ADR ledger.
+- `docs/design/CACHE-LOCALITY-CONTRACT.md`: native foreground working-set,
+  process, queue, frame-plane, and measurement contract.
 - `docs/design/THREAT-MODEL.md`: current security boundaries and gaps.
 
 ## Performance and tooling
