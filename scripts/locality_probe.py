@@ -185,21 +185,87 @@ def summarize_numeric(values: Iterable[float | int]) -> dict[str, float] | None:
     }
 
 
-def probe_perf(events: tuple[str, ...]) -> tuple[bool, str | None]:
+def probe_perf(events: tuple[str, ...]) -> tuple[tuple[str, ...], dict[str, str]]:
     executable = shutil.which("perf")
     if executable is None:
-        return False, "perf not found in PATH"
-    result = subprocess.run(
-        [executable, "stat", "--no-big-num", "-x", "\t", "-e", events[0], "--", "true"],
-        check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    if result.returncode == 0:
-        return True, None
-    reason = result.stderr.strip().splitlines()
-    return False, reason[-1] if reason else f"perf probe exited {result.returncode}"
+        return (), {event: "perf not found in PATH" for event in events}
+
+    supported: list[str] = []
+    unavailable: dict[str, str] = {}
+    for event in events:
+        result = subprocess.run(
+            [executable, "stat", "--no-big-num", "-x", "\t", "-e", event, "--", "true"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if result.returncode == 0:
+            supported.append(event)
+            continue
+        reason = result.stderr.strip().splitlines()
+        unavailable[event] = reason[-1] if reason else f"perf probe exited {result.returncode}"
+    return tuple(supported), unavailable
+
+
+def command_output(command: list[str]) -> str | None:
+    try:
+        result = subprocess.run(
+            command,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def git_metadata() -> dict[str, Any] | None:
+    root = command_output(["git", "rev-parse", "--show-toplevel"])
+    if root is None:
+        return None
+    commit = command_output(["git", "-C", root, "rev-parse", "HEAD"])
+    branch = command_output(["git", "-C", root, "branch", "--show-current"])
+    status = command_output(["git", "-C", root, "status", "--porcelain"])
+    return {
+        "root": root,
+        "commit": commit,
+        "branch": branch,
+        "dirty": bool(status),
+    }
+
+
+def cpu_model() -> str | None:
+    cpuinfo = read_text(Path("/proc/cpuinfo"))
+    if cpuinfo is None:
+        return None
+    for line in cpuinfo.splitlines():
+        if line.startswith("model name") and ":" in line:
+            return line.split(":", 1)[1].strip()
+    return None
+
+
+def cpu_governors() -> list[str]:
+    governors = {
+        value
+        for path in Path("/sys/devices/system/cpu").glob("cpu[0-9]*/cpufreq/scaling_governor")
+        if (value := read_text(path)) is not None
+    }
+    return sorted(governors)
+
+
+def process_affinity() -> list[int] | None:
+    getter = getattr(os, "sched_getaffinity", None)
+    if getter is None:
+        return None
+    try:
+        return sorted(getter(0))
+    except OSError:
+        return None
 
 
 def command_environment() -> dict[str, str]:
@@ -353,13 +419,21 @@ def main(argv: list[str] | None = None) -> int:
     if not events:
         parser.error("--events must name at least one event")
 
-    perf_available, perf_reason = probe_perf(events)
-    if args.perf == "on" and not perf_available:
-        parser.error(f"perf counters requested but unavailable: {perf_reason}")
-    use_perf = args.perf != "off" and perf_available
+    if args.perf == "off":
+        supported_events: tuple[str, ...] = ()
+        unavailable_events = {event: "disabled by --perf off" for event in events}
+    else:
+        supported_events, unavailable_events = probe_perf(events)
+    if args.perf == "on" and unavailable_events:
+        details = "; ".join(f"{event}: {reason}" for event, reason in unavailable_events.items())
+        parser.error(f"requested perf events are unavailable: {details}")
+    use_perf = args.perf != "off" and bool(supported_events)
 
     topology = read_cache_topology()
-    samples = [run_sample(command, events, use_perf, index + 1) for index in range(args.repeat)]
+    samples = [
+        run_sample(command, supported_events, use_perf, index + 1)
+        for index in range(args.repeat)
+    ]
     failed_samples = [sample for sample in samples if sample["return_code"] != 0]
 
     budget_path = args.budget if args.budget.exists() else None
@@ -369,19 +443,26 @@ def main(argv: list[str] | None = None) -> int:
         "timestamp_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
         "command": command,
         "environment": command_environment(),
+        "git": git_metadata(),
         "host": {
             "platform": platform.platform(),
             "machine": platform.machine(),
+            "cpu_model": cpu_model(),
             "logical_cpus": os.cpu_count(),
+            "process_affinity": process_affinity(),
+            "load_average": list(os.getloadavg()) if hasattr(os, "getloadavg") else None,
+            "cpu_governors": cpu_governors(),
+            "perf_event_paranoid": read_text(Path("/proc/sys/kernel/perf_event_paranoid")),
             "cache_topology": topology,
             "last_level_cache_bytes": last_level_cache_bytes(topology),
         },
         "perf": {
             "policy": args.perf,
-            "available": perf_available,
+            "available": bool(supported_events),
             "used": use_perf,
-            "unavailable_reason": perf_reason,
-            "events": list(events),
+            "requested_events": list(events),
+            "used_events": list(supported_events) if use_perf else [],
+            "unavailable_events": unavailable_events,
         },
         "budget": load_budget(budget_path),
         "samples": samples,
