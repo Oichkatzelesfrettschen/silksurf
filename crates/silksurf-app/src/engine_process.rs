@@ -1063,5 +1063,6 @@ fn read_exact_protocol<R: Read>(
 }
 
 #[cfg(test)]
-#[path = "tests/native_engine_process.rs"]
-mod tests;
+mod tests {
+    include!("tests/native_engine_process.rs");
+}
