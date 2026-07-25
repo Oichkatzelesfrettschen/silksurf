@@ -1,7 +1,20 @@
-// Module split from the browser binary. This file owns the first DG-1
-// process boundary: bounded protocol framing over child stdin/stdout, an
-// internal worker mode, and a lifecycle probe. Page-runtime and frame-plane
-// ownership move here in later slices of issue #53.
+//! Shell side of the engine protocol v1 control plane over a child process.
+//!
+//! The browser binary is both shell and engine: `NativeEngineProcess::spawn`
+//! re-execs `std::env::current_exe()` with `--silksurf-native-engine-worker`,
+//! and `run_internal_engine_process_mode` claims that flag before
+//! `parse_app_options` sees it. Framed protocol-v1 envelopes carry commands
+//! down the child's stdin and events back up its stdout;
+//! `silksurf_core::engine_protocol` owns the envelope layout and every bound.
+//!
+//! The transport is half-duplex by construction: the parent writes one
+//! command and blocks in `receive` until the matching event arrives, and the
+//! worker writes only in response to a command. Neither side fills a pipe
+//! while the other is also writing, so a single thread per process suffices.
+//!
+//! The frame plane stays out. `Event::FrameReady` describes a `FrameHandle`
+//! whose transport is a shared-memory descriptor, and descriptor passing
+//! needs `recvmsg` with a control-message buffer rather than these pipes.
 
 use std::collections::HashSet;
 use std::fmt;
@@ -203,6 +216,12 @@ impl NativeEngineProcess {
         write_engine_message(writer, &Message::Command(command))
     }
 
+    // TODO: receive blocks the caller until the worker answers, which holds
+    //       only while the worker writes in response to a command. Delivering
+    //       unsolicited FrameReady, Crashed, and Hang events needs an
+    //       event-reader thread feeding a channel, because a pipe buffer that
+    //       fills in both directions at once wedges parent and worker
+    //       together. Tracking: docs/design/ENGINE-PROTOCOL-V1.md.
     fn receive(&mut self) -> Result<Event, NativeEngineProcessError> {
         match read_engine_message(&mut self.event_reader)? {
             Some(Message::Event(event)) => Ok(event),
@@ -215,6 +234,10 @@ impl NativeEngineProcess {
         }
     }
 
+    // TODO: shutdown waits on the child without a deadline, so a wedged worker
+    //       holds the shell. Escalating to Child::kill needs a budget the
+    //       protocol leaves open; Event::Hang carries elapsed_ms and is where
+    //       that budget belongs. Tracking: NativeEngineProcess::shutdown.
     fn shutdown(mut self) -> Result<ExitStatus, NativeEngineProcessError> {
         self.send(ProtocolCommand::Shutdown)?;
         self.command_writer.take();
