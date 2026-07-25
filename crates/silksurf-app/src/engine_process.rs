@@ -6,17 +6,14 @@
 use std::collections::HashSet;
 use std::fmt;
 use std::io::{self, BufReader, Read, Write};
-use std::process::{
-    Child, ChildStdin, ChildStdout, Command as ProcessCommand, ExitStatus, Stdio,
-};
+use std::process::{Child, ChildStdin, ChildStdout, Command as ProcessCommand, ExitStatus, Stdio};
 
 use crate::browser_types::{FRAME_HEIGHT, FRAME_WIDTH};
 use silksurf_core::engine_protocol::{
-    Command as ProtocolCommand, CrashReason, Event, Message, ProfileId, ProtocolError, ViewId,
-    Viewport, MAX_MESSAGE_BYTES,
+    Command as ProtocolCommand, CrashReason, ENVELOPE_HEADER_BYTES, Event, Message, ProfileId,
+    ProtocolError, ViewId, Viewport, envelope_body_len,
 };
 
-const ENVELOPE_HEADER_BYTES: usize = 10;
 const NATIVE_ENGINE_WORKER_FLAG: &str = "--silksurf-native-engine-worker";
 const NATIVE_ENGINE_PROBE_FLAG: &str = "--silksurf-native-engine-supervisor-probe";
 
@@ -43,7 +40,10 @@ impl fmt::Display for NativeEngineProcessError {
                 "received an event on the command stream or a command on the event stream",
             ),
             Self::UnexpectedEvent(expected) => {
-                write!(formatter, "received an unexpected event; expected {expected}")
+                write!(
+                    formatter,
+                    "received an unexpected event; expected {expected}"
+                )
             }
             Self::UnsupportedCommand(command) => {
                 write!(
@@ -334,15 +334,7 @@ fn read_engine_message<R: Read>(
     let Some(header) = read_header(reader)? else {
         return Ok(None);
     };
-    let body_len = u32::from_be_bytes([header[6], header[7], header[8], header[9]]) as usize;
-    if body_len > MAX_MESSAGE_BYTES {
-        return Err(ProtocolError::MessageTooLarge {
-            len: body_len,
-            max: MAX_MESSAGE_BYTES,
-        }
-        .into());
-    }
-
+    let body_len = envelope_body_len(&header)?;
     let mut body = vec![0u8; body_len];
     read_exact_protocol(reader, &mut body)?;
     let mut envelope = Vec::with_capacity(ENVELOPE_HEADER_BYTES + body_len);

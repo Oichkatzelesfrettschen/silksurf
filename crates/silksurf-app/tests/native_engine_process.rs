@@ -35,5 +35,8 @@ fn worker_flag_claims_the_process_before_browser_option_parsing() {
         "worker exited with {:?}",
         output.status.code()
     );
-    assert!(output.stdout.is_empty(), "worker emitted unrequested events");
+    assert!(
+        output.stdout.is_empty(),
+        "worker emitted unrequested events"
+    );
 }

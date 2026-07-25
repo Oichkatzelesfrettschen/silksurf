@@ -22,6 +22,41 @@ const MAGIC: [u8; 2] = [0x53, 0x53];
 const KIND_COMMAND: u8 = 0;
 const KIND_EVENT: u8 = 1;
 
+/// Envelope header size: magic, wire version, kind, message type, body length.
+pub const ENVELOPE_HEADER_BYTES: usize = MAGIC.len() + 1 + 1 + 2 + 4;
+
+/// Validates an envelope header and returns the declared body length, bounded
+/// by `MAX_MESSAGE_BYTES`.
+///
+/// A transport that reads the header before the body sizes its body read from
+/// this rather than from the byte offsets, which live here alone. Rejecting a
+/// bad magic or an oversized length here keeps a foreign stream from reaching
+/// the body allocation.
+///
+/// # Errors
+///
+/// Returns `BadMagic`, `UnsupportedWireVersion`, or `MessageTooLarge`.
+pub fn envelope_body_len(header: &[u8; ENVELOPE_HEADER_BYTES]) -> Result<usize, ProtocolError> {
+    let mut reader = ByteReader::new(header);
+    if [reader.get_u8()?, reader.get_u8()?] != MAGIC {
+        return Err(ProtocolError::BadMagic);
+    }
+    let wire = reader.get_u8()?;
+    if wire != WIRE_VERSION {
+        return Err(ProtocolError::UnsupportedWireVersion(wire));
+    }
+    let _kind = reader.get_u8()?;
+    let _message_type = reader.get_u16()?;
+    let body_len = reader.get_u32()? as usize;
+    if body_len > MAX_MESSAGE_BYTES {
+        return Err(ProtocolError::MessageTooLarge {
+            len: body_len,
+            max: MAX_MESSAGE_BYTES,
+        });
+    }
+    Ok(body_len)
+}
+
 mod cmd {
     pub const CREATE_VIEW: u16 = 1;
     pub const CLOSE_VIEW: u16 = 2;
