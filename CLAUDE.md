@@ -16,7 +16,8 @@ copied doctrine drifts into conflicting instructions.
 ## Build and test entry points
 
 - Fast gate: `make check` (rustfmt, clippy -D warnings, lint_unwrap,
-  lint_unsafe, lint_glossary, lint_doc_links, lint_cleanroom, lint_ascii)
+  lint_unsafe, lint_glossary, lint_doc_links, lint_cleanroom,
+  lint_text_hygiene)
 - Test: `make test` (workspace tests, warnings denied)
 - Full gate: `make full` (check + test + cargo deny + rustdoc); required
   before merge-ready claims
