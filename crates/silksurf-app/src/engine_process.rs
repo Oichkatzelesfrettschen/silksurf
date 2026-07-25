@@ -13,7 +13,10 @@
 //! encode to 65_536 bytes against a 64 KiB Linux pipe. Insertion into the
 //! queue is nonblocking, because a reader thread that blocks on a full
 //! channel moves that same deadlock from the pipe into the queue; an overflow
-//! ends the transport and the supervisor kills the worker.
+//! ends the transport and the supervisor kills the worker. The queue bounds
+//! both the number of queued events and the wire bytes they retain, because
+//! `Event` owns strings and rectangle vectors that a count bound leaves
+//! unbounded.
 //!
 //! The worker still writes stdout from its command loop. A second producer
 //! arrives with `BrowserPageRuntime`, and that slice adds the event-writer
@@ -27,6 +30,7 @@ use std::collections::HashSet;
 use std::fmt;
 use std::io::{self, BufReader, Read, Write};
 use std::process::{Child, Command as ProcessCommand, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TryRecvError, TrySendError};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
@@ -34,8 +38,8 @@ use std::time::{Duration, Instant};
 
 use crate::browser_types::{FRAME_HEIGHT, FRAME_WIDTH};
 use silksurf_core::engine_protocol::{
-    Command as ProtocolCommand, CrashReason, ENVELOPE_HEADER_BYTES, Event, Message, ProfileId,
-    ProtocolError, ViewId, Viewport, envelope_body_len,
+    Command as ProtocolCommand, CrashReason, ENVELOPE_HEADER_BYTES, Event, MAX_MESSAGE_BYTES,
+    Message, ProfileId, ProtocolError, ViewId, Viewport, envelope_body_len,
 };
 
 const NATIVE_ENGINE_WORKER_FLAG: &str = "--silksurf-native-engine-worker";
@@ -43,6 +47,15 @@ const NATIVE_ENGINE_PROBE_FLAG: &str = "--silksurf-native-engine-supervisor-prob
 
 /// Queued events the shell may fall behind by before the transport fails.
 const EVENT_QUEUE_DEPTH: usize = 256;
+
+/// Owned wire bytes the event queue retains before the transport fails.
+///
+/// A count bound alone does not bound the working set: `Event` carries owned
+/// strings and damage-rectangle vectors, so `EVENT_QUEUE_DEPTH` maximal
+/// `FrameReady` events retain megabytes while the queue reports 256 entries.
+/// One maximum legal envelope fits, which keeps every decodable message
+/// deliverable, and a backlog of several does not.
+const EVENT_QUEUE_BYTE_BUDGET: usize = ENVELOPE_HEADER_BYTES + MAX_MESSAGE_BYTES;
 
 /// Grace period between `Shutdown` and `Child::kill`.
 const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(5);
@@ -65,6 +78,7 @@ pub(crate) enum NativeEngineProcessError {
     ChildFailed(Option<i32>),
     EventStreamClosed,
     EventQueueOverflow,
+    EventQueueByteOverflow,
     ReceiveTimeout(Duration),
 }
 
@@ -97,6 +111,10 @@ impl fmt::Display for NativeEngineProcessError {
             Self::EventQueueOverflow => write!(
                 formatter,
                 "shell fell more than {EVENT_QUEUE_DEPTH} events behind the native engine"
+            ),
+            Self::EventQueueByteOverflow => write!(
+                formatter,
+                "queued native engine events exceed {EVENT_QUEUE_BYTE_BUDGET} wire bytes"
             ),
             Self::ReceiveTimeout(deadline) => {
                 write!(formatter, "no native engine event within {deadline:?}")
@@ -220,8 +238,52 @@ fn expect_view_closed(event: &Event, expected: ViewId) -> Result<(), NativeEngin
 /// arriving in the event direction, and on queue overflow. It records the
 /// cause before dropping its sender, so a receiver that observes the closed
 /// channel always finds the reason already published.
+struct QueuedEvent {
+    event: Event,
+    wire_bytes: usize,
+}
+
+/// Outstanding wire bytes held by queued events.
+///
+/// The reader reserves before it inserts and the receiver releases on removal,
+/// so the counter tracks what the queue retains rather than what crossed the
+/// pipe. Reservation is a compare-exchange loop, which keeps the budget exact
+/// against a receiver draining concurrently on another thread.
+#[derive(Default)]
+struct QueueCharge {
+    outstanding: AtomicUsize,
+}
+
+impl QueueCharge {
+    fn reserve(&self, bytes: usize) -> bool {
+        let mut held = self.outstanding.load(Ordering::Acquire);
+        loop {
+            let Some(next) = held
+                .checked_add(bytes)
+                .filter(|sum| *sum <= EVENT_QUEUE_BYTE_BUDGET)
+            else {
+                return false;
+            };
+            match self.outstanding.compare_exchange_weak(
+                held,
+                next,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return true,
+                Err(observed) => held = observed,
+            }
+        }
+    }
+
+    fn release(&self, bytes: usize) {
+        self.outstanding.fetch_sub(bytes, Ordering::AcqRel);
+    }
+}
+
 struct EventIngress {
-    events: Receiver<Event>,
+    events: Receiver<QueuedEvent>,
+    charge: Arc<QueueCharge>,
     failure: Arc<Mutex<Option<NativeEngineProcessError>>>,
     reader: Option<JoinHandle<()>>,
 }
@@ -230,19 +292,29 @@ impl EventIngress {
     fn spawn<R: Read + Send + 'static>(source: R) -> Self {
         let (sender, events) = mpsc::sync_channel(EVENT_QUEUE_DEPTH);
         let failure = Arc::new(Mutex::new(None));
+        let charge = Arc::new(QueueCharge::default());
         let reader_failure = Arc::clone(&failure);
-        let reader =
-            thread::spawn(move || read_events_until_closed(source, &sender, &reader_failure));
+        let reader_charge = Arc::clone(&charge);
+        let reader = thread::spawn(move || {
+            read_events_until_closed(source, &sender, &reader_charge, &reader_failure);
+        });
         Self {
             events,
+            charge,
             failure,
             reader: Some(reader),
         }
     }
 
+    /// Releases the dequeued event's reservation before handing it to the shell.
+    fn release(&self, queued: QueuedEvent) -> Event {
+        self.charge.release(queued.wire_bytes);
+        queued.event
+    }
+
     fn receive_timeout(&self, deadline: Duration) -> Result<Event, NativeEngineProcessError> {
         match self.events.recv_timeout(deadline) {
-            Ok(event) => Ok(event),
+            Ok(queued) => Ok(self.release(queued)),
             Err(RecvTimeoutError::Timeout) => {
                 Err(NativeEngineProcessError::ReceiveTimeout(deadline))
             }
@@ -258,7 +330,7 @@ impl EventIngress {
     )]
     fn try_receive(&self) -> Result<Option<Event>, NativeEngineProcessError> {
         match self.events.try_recv() {
-            Ok(event) => Ok(Some(event)),
+            Ok(queued) => Ok(Some(self.release(queued))),
             Err(TryRecvError::Empty) => Ok(None),
             Err(TryRecvError::Disconnected) => Err(self.terminal_failure()),
         }
@@ -286,19 +358,35 @@ impl EventIngress {
 
 fn read_events_until_closed<R: Read>(
     source: R,
-    sender: &SyncSender<Event>,
+    sender: &SyncSender<QueuedEvent>,
+    charge: &Arc<QueueCharge>,
     failure: &Arc<Mutex<Option<NativeEngineProcessError>>>,
 ) {
     let mut source = BufReader::new(source);
     loop {
-        let outcome = match read_engine_message(&mut source) {
-            Ok(Some(Message::Event(event))) => match sender.try_send(event) {
-                Ok(()) => continue,
-                // Blocking here would move the pipe deadlock into the queue.
-                Err(TrySendError::Full(_)) => NativeEngineProcessError::EventQueueOverflow,
-                Err(TrySendError::Disconnected(_)) => return,
-            },
-            Ok(Some(Message::Command(_))) => NativeEngineProcessError::UnexpectedDirection,
+        let outcome = match read_engine_envelope(&mut source) {
+            Ok(Some((Message::Event(event), wire_bytes))) => {
+                // The charge is reserved before insertion and released by the
+                // path that drops the event, so a rejected send leaves the
+                // budget as it found it.
+                if charge.reserve(wire_bytes) {
+                    match sender.try_send(QueuedEvent { event, wire_bytes }) {
+                        Ok(()) => continue,
+                        // Blocking here would move the pipe deadlock into the queue.
+                        Err(TrySendError::Full(queued)) => {
+                            charge.release(queued.wire_bytes);
+                            NativeEngineProcessError::EventQueueOverflow
+                        }
+                        Err(TrySendError::Disconnected(queued)) => {
+                            charge.release(queued.wire_bytes);
+                            return;
+                        }
+                    }
+                } else {
+                    NativeEngineProcessError::EventQueueByteOverflow
+                }
+            }
+            Ok(Some((Message::Command(_), _))) => NativeEngineProcessError::UnexpectedDirection,
             Ok(None) => return,
             Err(error) => error,
         };
@@ -509,16 +597,29 @@ fn write_engine_message<W: Write>(
 fn read_engine_message<R: Read>(
     reader: &mut R,
 ) -> Result<Option<Message>, NativeEngineProcessError> {
+    Ok(read_engine_envelope(reader)?.map(|(message, _)| message))
+}
+
+/// Reads one envelope and reports the exact wire size that carried it.
+///
+/// `envelope_body_len` bounds the body before allocation, so the returned size
+/// never exceeds `ENVELOPE_HEADER_BYTES + MAX_MESSAGE_BYTES`. A queue charges
+/// against this measured size rather than against `size_of` a decoded `Event`,
+/// whose owned strings and rectangle vectors live outside the enum.
+fn read_engine_envelope<R: Read>(
+    reader: &mut R,
+) -> Result<Option<(Message, usize)>, NativeEngineProcessError> {
     let Some(header) = read_header(reader)? else {
         return Ok(None);
     };
     let body_len = envelope_body_len(&header)?;
     let mut body = vec![0u8; body_len];
     read_exact_protocol(reader, &mut body)?;
-    let mut envelope = Vec::with_capacity(ENVELOPE_HEADER_BYTES + body_len);
+    let wire_bytes = ENVELOPE_HEADER_BYTES + body_len;
+    let mut envelope = Vec::with_capacity(wire_bytes);
     envelope.extend_from_slice(&header);
     envelope.extend_from_slice(&body);
-    Ok(Some(Message::decode(&envelope)?))
+    Ok(Some((Message::decode(&envelope)?, wire_bytes)))
 }
 
 fn read_header<R: Read>(
@@ -613,6 +714,7 @@ mod tests {
 
     use silksurf_core::engine_protocol::{
         DamageRect, FrameGeneration, FrameHandle, FrameTransport, MAX_DAMAGE_RECTS,
+        MAX_STRING_BYTES,
     };
 
     const TEST_DEADLINE: Duration = Duration::from_secs(10);
@@ -642,6 +744,109 @@ mod tests {
 
     fn encoded(event: Event) -> Vec<u8> {
         Message::Event(event).encode().expect("event encodes")
+    }
+
+    /// A `TitleChanged` at the string cap: legal on its own, and sixteen of
+    /// them exceed the queue's wire budget while the count queue holds 256.
+    fn maximal_title_changed(view: ViewId) -> Event {
+        Event::TitleChanged {
+            view,
+            title: "t".repeat(MAX_STRING_BYTES),
+        }
+    }
+
+    #[test]
+    fn one_maximal_event_fits_the_queue_byte_budget() {
+        let view = ViewId::new(7);
+        let (reader, mut writer) = io::pipe().expect("pipe");
+        let ingress = EventIngress::spawn(reader);
+
+        let bytes = encoded(maximal_frame_ready(view));
+        assert!(bytes.len() <= EVENT_QUEUE_BYTE_BUDGET);
+        let engine_side = thread::spawn(move || {
+            writer.write_all(&bytes).expect("write");
+        });
+
+        assert!(matches!(
+            ingress.receive_timeout(TEST_DEADLINE).expect("event"),
+            Event::FrameReady { .. }
+        ));
+        engine_side.join().expect("engine writer thread");
+    }
+
+    #[test]
+    fn cumulative_wire_bytes_overflow_while_the_count_queue_has_room() {
+        let view = ViewId::new(8);
+        let bytes = encoded(maximal_title_changed(view));
+        let capacity = EVENT_QUEUE_BYTE_BUDGET / bytes.len();
+        assert!(
+            capacity < EVENT_QUEUE_DEPTH,
+            "the byte budget must bind before the count budget, got {capacity}"
+        );
+
+        let (reader, mut writer) = io::pipe().expect("pipe");
+        let ingress = EventIngress::spawn(reader);
+        // Writing stops at EPIPE once the reader fails closed and drops its end.
+        let engine_side = thread::spawn(move || {
+            for _ in 0..(2 * capacity) {
+                if writer.write_all(&bytes).is_err() {
+                    break;
+                }
+            }
+        });
+        // The shell drains nothing yet, so no release restores budget mid-fill
+        // and the backlog reaches the byte bound rather than racing it.
+        thread::sleep(Duration::from_millis(200));
+
+        let mut delivered = 0usize;
+        let terminal = loop {
+            match ingress.receive_timeout(TEST_DEADLINE) {
+                Ok(_) => delivered += 1,
+                Err(error) => break error,
+            }
+        };
+        engine_side.join().expect("engine writer thread");
+        assert!(
+            delivered < EVENT_QUEUE_DEPTH,
+            "the count queue still had room at {delivered} of {EVENT_QUEUE_DEPTH}"
+        );
+        assert!(
+            matches!(terminal, NativeEngineProcessError::EventQueueByteOverflow),
+            "byte overflow must stay distinct from count overflow and EOF: {terminal:?}"
+        );
+    }
+
+    #[test]
+    fn dequeue_releases_the_exact_wire_charge() {
+        let view = ViewId::new(9);
+        let charge = QueueCharge::default();
+        assert!(charge.reserve(EVENT_QUEUE_BYTE_BUDGET));
+        assert!(!charge.reserve(1), "a full budget admits nothing further");
+        charge.release(EVENT_QUEUE_BYTE_BUDGET);
+        assert!(charge.reserve(EVENT_QUEUE_BYTE_BUDGET));
+
+        // The same accounting drives the queue: draining every event restores
+        // the whole budget, so a slow shell that catches up keeps the transport.
+        let bytes = encoded(maximal_title_changed(view));
+        let rounds = 3 * (EVENT_QUEUE_BYTE_BUDGET / bytes.len());
+        let (reader, mut writer) = io::pipe().expect("pipe");
+        let ingress = EventIngress::spawn(reader);
+        let engine_side = thread::spawn(move || {
+            for _ in 0..rounds {
+                writer.write_all(&bytes).expect("write");
+            }
+        });
+
+        for index in 0..rounds {
+            assert!(
+                matches!(
+                    ingress.receive_timeout(TEST_DEADLINE),
+                    Ok(Event::TitleChanged { .. })
+                ),
+                "event {index} of {rounds} must arrive once the charge is released"
+            );
+        }
+        engine_side.join().expect("engine writer thread");
     }
 
     #[test]
