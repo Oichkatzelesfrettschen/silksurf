@@ -1,12 +1,43 @@
 {
-  "schema_version": 1,
-  "status": "hypothesis-not-gate",
+  "schema_version": 2,
+  "status": "adaptive-hypothesis-not-gate",
   "scope": "native foreground mode",
   "cache_model": {
-    "target_last_level_cache_bytes": 33554432,
-    "target_foreground_hot_set_bytes": 20971520,
-    "interference_slack_bytes": 12582912,
-    "statement": "The foreground code and data working set targets 20 MiB on a 32 MiB LLC, leaving 12 MiB for associativity loss and competing activity. This is unproved until a rank-1 locality sweep measures it."
+    "policy": "measure-knee-then-select-mode",
+    "fixed_capacity_target_bytes": null,
+    "fixed_hot_set_target_bytes": null,
+    "capacity_is_runtime_input": true,
+    "effective_capacity_sources": [
+      "measured last-level-cache topology",
+      "explicit cache partition or allocation when available",
+      "CPU affinity and cache-sharing topology",
+      "controlled workload sweep"
+    ],
+    "modes": [
+      {
+        "name": "whole-pipeline",
+        "condition": "The measured foreground knee plus interference reserve fits the effective cache share.",
+        "behavior": "Retain the latency-critical parser, style, layout, paint, scheduler, and active-view state together."
+      },
+      {
+        "name": "phase-local",
+        "condition": "The full foreground knee does not fit, but one pipeline phase and its live inputs do.",
+        "behavior": "Bound retained derived state and let parse, style, layout, and paint displace one another deliberately."
+      },
+      {
+        "name": "streaming",
+        "condition": "Even a phase-local set exceeds the effective cache share or memory-pressure policy.",
+        "behavior": "Chunk traversal, serialize inactive state, reduce memoization, and preserve viewport-bounded work."
+      }
+    ],
+    "measurement_capacity_points_bytes": [
+      8388608,
+      16777216,
+      33554432,
+      67108864,
+      100663296
+    ],
+    "statement": "No cache capacity is a product requirement. The listed capacities are experimental points used to locate workload-specific latency and miss-rate knees; runtime policy follows measured available capacity rather than a marketing number."
   },
   "covered": [
     "browser chrome event and damage paths",
@@ -29,16 +60,18 @@
     "cycles and instructions",
     "cache references and cache misses",
     "context switches and CPU migrations",
-    "minor and major page faults"
+    "minor and major page faults",
+    "reported and effective last-level-cache capacity"
   ],
   "optional_hardware_measurements": [
     "LLC loads and LLC load misses",
     "L1 data-cache load misses",
     "frontend and backend stall cycles",
-    "memory bandwidth"
+    "memory bandwidth",
+    "cache-allocation or resctrl partition identity"
   ],
   "gates": {
     "enabled": false,
-    "reason": "Counter semantics and cache topology vary by host, and no controlled working-set sweep has established portable thresholds."
+    "reason": "Counter semantics, effective cache share, and workload knees vary by host. No controlled sweep has established mode-selection thresholds."
   }
 }
