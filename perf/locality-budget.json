@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "status": "hypothesis-not-gate",
+  "scope": "native foreground mode",
+  "cache_model": {
+    "target_last_level_cache_bytes": 33554432,
+    "target_foreground_hot_set_bytes": 20971520,
+    "interference_slack_bytes": 12582912,
+    "statement": "The foreground code and data working set targets 20 MiB on a 32 MiB LLC, leaving 12 MiB for associativity loss and competing activity. This is unproved until a rank-1 locality sweep measures it."
+  },
+  "covered": [
+    "browser chrome event and damage paths",
+    "one active native-engine view",
+    "HTML, CSS, layout, paint, and scheduler hot state",
+    "control-plane queues and metadata",
+    "bounded JavaScript runtime core used by the foreground page"
+  ],
+  "excluded": [
+    "decoded image and media payloads",
+    "GPU textures and compositor-owned surfaces",
+    "disk and operating-system page caches",
+    "inactive or serialized views",
+    "large page JavaScript heaps and WebAssembly memories",
+    "optional compatibility-engine processes"
+  ],
+  "required_measurements": [
+    "wall time distribution",
+    "maximum resident set size",
+    "cycles and instructions",
+    "cache references and cache misses",
+    "context switches and CPU migrations",
+    "minor and major page faults"
+  ],
+  "optional_hardware_measurements": [
+    "LLC loads and LLC load misses",
+    "L1 data-cache load misses",
+    "frontend and backend stall cycles",
+    "memory bandwidth"
+  ],
+  "gates": {
+    "enabled": false,
+    "reason": "Counter semantics and cache topology vary by host, and no controlled working-set sweep has established portable thresholds."
+  }
+}
