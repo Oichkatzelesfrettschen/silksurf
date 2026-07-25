@@ -1,6 +1,6 @@
 # Cache-Locality Contract
 
-**Status**: design hypothesis with an executable measurement lane
+**Status**: adaptive design hypothesis with an executable measurement lane
 **Scope**: SilkSurf native foreground mode
 **Authority**: `perf/locality-budget.json`, `scripts/locality_probe.py`, and retained workload measurements
 
@@ -11,30 +11,55 @@ JavaScript, DOM, style, layout, and paint state. Brokers mediate network, files,
 and other privileged resources. A frame plane transfers pixels independently
 from the control plane.
 
-This separation preserves security boundaries while keeping the foreground path
-small. Process count, crate count, executable size, RSS, and cache residency are
-different quantities and are measured separately.
+This separation preserves security and recovery boundaries while keeping the
+foreground path small. Process count, crate count, executable size, mapped
+bytes, RSS, private dirty memory, and cache residency are different quantities
+and are measured separately.
 
-## Meaning of cache-local
+## Cache capacity is an input
 
-The 32 MiB objective applies to a latency-critical working set, not to the
-installed browser, mapped address space, total RSS, decoded media, or every open
-view.
+SilkSurf has no fixed 32 MiB cache requirement. The earlier 20 MiB hot-set on a
+32 MiB LLC formulation came from a product concept, not from a measured knee,
+and therefore does not govern implementation.
 
-The initial hypothesis is:
+Cache-local means that the runtime discovers or records the effective cache
+capacity available to the foreground workload, measures how its latency and
+miss behavior scale, and selects the smallest execution mode that preserves
+responsiveness. A nominal LLC size from sysfs is an upper bound, not an exclusive
+allocation. Affinity, chiplet topology, cache allocation technology, resctrl,
+virtualization, other threads, the kernel, and competing processes all reduce
+or fragment the effective share.
 
-- target LLC capacity: 32 MiB;
-- target foreground hot code and data: 20 MiB;
-- interference and associativity slack: 12 MiB.
+The measurement lane uses 8, 16, 32, 64, and 96 MiB as experimental points.
+They are sweep coordinates, not product classes or gates. A different host or
+workload may place its useful knee elsewhere.
 
-A working set equal to nominal cache capacity is not a residency design. Set
-conflicts, prefetching, kernel activity, other processes, and shared-core users
-consume effective capacity. The 20 MiB target therefore leaves more than one
-third of a 32 MiB LLC outside the foreground budget.
+## Adaptive execution modes
 
-No current measurement proves that SilkSurf meets this target. The values in
-`perf/locality-budget.json` are hypotheses and remain outside `make full` until a
-controlled sweep establishes host-specific and cross-host thresholds.
+The native engine has three locality modes.
+
+### Whole-pipeline mode
+
+The measured foreground knee plus an interference reserve fits the effective
+cache share. Parser, style, layout, paint, scheduler, and active-view state may
+remain retained together when retention costs less than recomputation.
+
+### Phase-local mode
+
+The whole foreground set does not fit, but one pipeline phase and its live
+inputs do. Parse, style, layout, and paint displace one another deliberately.
+Derived state is retained only when a measurement shows that it reduces total
+misses, bandwidth, and interaction latency.
+
+### Streaming mode
+
+Even a phase-local set exceeds the effective cache share or memory-pressure
+policy. Traversals become chunked, inactive state is serialized or discarded,
+memoization shrinks, and the visible viewport remains the bounded unit of work.
+
+Mode selection is currently a measured design rule rather than an implemented
+runtime switch. No mode threshold enters `make full` until controlled sweeps
+establish its variance and falsifiers.
 
 ## Covered and excluded state
 
@@ -55,6 +80,10 @@ The contract excludes:
 - large page JavaScript heaps and WebAssembly memories;
 - optional WPE, Wry, Servo, or CEF compatibility processes.
 
+Excluded state is not free. It remains subject to RSS, bandwidth, eviction, and
+lifecycle measurements; it simply does not define whether the foreground
+pipeline itself is cache-local.
+
 Compatibility backends receive their own measurements. Their presence does not
 weaken or redefine the native-mode contract.
 
@@ -69,13 +98,12 @@ The current tree already contains mechanisms that fit this model:
 - viewport-backed rasterization keeps full-document pixels out of the active
   frame;
 - Wayland retained buffers preserve clean pixels across bounded damage;
-- engine protocol v1 separates small control messages from future shared frame
-  buffers;
+- engine protocol v1 separates control messages from shared frame buffers;
 - `EventIngress` drains asynchronous events on its own thread and fails closed
-  when the count-bounded queue overflows.
+  when its count or wire-byte budget overflows.
 
 These mechanisms reduce work and allocation. They do not by themselves prove a
-bounded working set or low cache-miss rate.
+bounded working set or a useful cache-residency knee.
 
 ## Process model
 
@@ -102,15 +130,14 @@ frame handles; the engine alone stores DOM, JavaScript, style, layout, display
 list, and raster scratch.
 
 One process per tab is not the default policy. The first functional shell uses
-one foreground native worker and freezes or serializes inactive native views.
-Future isolation assigns processes by measured trust and failure boundaries,
-with a bounded worker pool and explicit eviction. A compatibility engine remains
+one resident foreground native view. Inactive native views freeze, serialize,
+or move to a bounded worker pool only after measured trust and restoration
+requirements justify the additional resident state. A compatibility engine is
 an opt-in process outside the native locality contract.
 
 ## Worker ownership and thread shape
 
-The worker preserves cache affinity by giving `BrowserPageRuntime` one owner.
-The next navigation slice uses this shape:
+`BrowserPageRuntime` has one owner. The navigation path uses this shape:
 
 ```text
 blocking command-reader thread
@@ -126,43 +153,32 @@ runtime actor and sole stdout event writer
     damage production
 ```
 
-The runtime actor serializes every event. It replaces the proposed second
-stdout producer rather than adding a third event-writer thread. Background
-fetch work may run elsewhere, but completion returns to the runtime actor before
-DOM, JavaScript, layout, or paint state changes.
+The command reader keeps `Stop` and `Shutdown` readable while a network load is
+in flight. Fetch work may run elsewhere, but completion returns to the runtime
+actor before DOM, JavaScript, layout, or paint state changes. The runtime actor
+serializes every event, which prevents multiple producers from interleaving
+protocol envelopes and avoids another event-writer queue.
 
-The shell's `EventIngress` reader thread remains the single owner of the child
-event pipe. The winit thread drains typed events without blocking.
+The shell's `EventIngress` thread remains the single owner of the child event
+pipe. The winit thread drains typed events without blocking.
 
 ## Queue and control-plane bounds
 
-A count bound alone does not bound memory. `EVENT_QUEUE_DEPTH = 256` can retain
-many large `FrameReady`, `UrlChanged`, or `TitleChanged` events, each legal near
-the protocol's message or string limit. Ingress therefore carries a wire-byte
-budget alongside its count budget, landed before worker-owned navigation emits
-those events. `read_engine_envelope` reports the exact size that framed each
-message, so the charge is a measured wire quantity rather than `size_of` a
-decoded `Event`, whose owned payload lives outside the enum.
+A count bound alone does not bound memory. `EventIngress` therefore carries an
+exact encoded-wire charge with every queued event. Reservation occurs before
+insertion, dequeue releases the exact charge, rejected sends undo their
+reservation, and overflow records a typed cause before disconnection.
 
-One protocol-maximum envelope is a liveness floor rather than a locality figure:
-it is the smallest budget under which every decodable message still crosses. A
-reduction toward the foreground working set waits on measured event sizes from
-worker-owned navigation, which produces the first real distribution.
+`EVENT_QUEUE_BYTE_BUDGET` equals one protocol-maximum envelope. That value is a
+liveness floor: it is the smallest budget under which every decodable message
+can cross. It is not a cache-locality target. Fifteen maximum-size title events
+can consume the budget while the 256-entry count queue still has room.
 
-The first byte-budget rule is:
+Worker-owned navigation produces the first real event-size distribution. That
+evidence determines whether field-specific limits, coalescing, or a smaller
+backlog improve locality without rejecting legitimate traffic.
 
-- one protocol-maximum envelope always fits;
-- cumulative queued wire bytes never exceed one protocol-maximum envelope;
-- reservation occurs before queue insertion;
-- dequeue releases the exact recorded wire-byte charge;
-- overflow records a typed cause before the sender disconnects;
-- the supervisor terminates the worker on the next transport operation.
-
-This is a correctness and locality bound, not a statement that 1 MiB control
-messages are desirable. Later field-specific limits may reduce URLs, titles,
-status strings, and damage metadata independently.
-
-Control events also follow coalescing rules:
+Control events follow these intended coalescing rules:
 
 - a newer title, URL, cursor, status, progress, or metrics sample supersedes an
   older undelivered value for the same view;
@@ -182,9 +198,9 @@ a bounded reusable pool. A Unix-domain socketpair transfers the descriptor with
 length, and bounded damage. The shell maps and presents that storage without an
 intermediate full-frame copy, then returns ownership with `ReleaseFrame`.
 
-The pool size follows measured compositor release latency. Four buffers are not
-a universal rule. The smallest pool that avoids producer stalls under the
-selected presenter is the correct pool.
+Pool size follows measured compositor release latency and the selected locality
+mode. Four buffers are not a universal rule. The smallest pool that avoids
+producer stalls under the active presenter is the correct pool.
 
 Full-document pixel buffers stay prohibited. Document height remains metadata
 for scrolling and hit testing; pixels cover only the visible viewport and
@@ -205,54 +221,56 @@ Hot traversals choose representations from access patterns:
 
 A smaller source type or binary is not automatically a smaller working set.
 Measurements decide whether compression, recomputation, or retention wins for a
-specific path.
+specific path and cache capacity.
 
 ## JavaScript boundary
 
-`silksurf-js` delegates ECMAScript execution to `boa_engine`. The current
-retained evidence shows interactive React commits are much cheaper than initial
-multi-megabyte bundle evaluation. Native mode therefore optimizes foreground
-responsiveness and bounded state before peak JavaScript benchmark throughput.
+`silksurf-js` delegates ECMAScript execution to `boa_engine`. Retained evidence
+shows interactive React commits are much cheaper than initial multi-megabyte
+bundle evaluation. Native mode therefore optimizes foreground responsiveness
+and bounded state before peak JavaScript benchmark throughput.
 
 A future compiler tier follows two constraints:
 
-- generated code has a hard code-cache budget and eviction policy;
+- generated code has a hard code-cache budget and eviction policy selected from
+  the effective cache share;
 - the interpreter remains the bounded fallback.
 
 No optimizing JIT belongs on the critical path until bundle traces demonstrate
 that its additional code and metadata reduce total misses and interaction cost.
-
-Native AI-chat mode bypasses production website bundles entirely and uses the
-same viewport, retained-rendering, and bounded-state rules.
+Native AI-chat mode bypasses production website bundles and uses the same
+viewport, retained-rendering, and bounded-state rules.
 
 ## Measurement lane
 
 `scripts/locality_probe.py` runs one workload repeatedly and records:
 
-- monotonic wall time;
+- monotonic wall time and workload exit status;
 - maximum RSS;
 - minor and major faults;
 - voluntary and involuntary context switches;
 - Linux cache topology from sysfs;
 - cycles, instructions, generic cache references and misses, branches, branch
-  misses, migrations, and faults when `perf` is available.
+  misses, migrations, and faults when `perf` exposes them.
 
 The probe records counter availability and kernel-policy failures rather than
-silently dropping them. `perf_event_paranoid` at 2 restricts counting to user
-mode, so `perf stat` names every event with a `:u` modifier; derivations key on
-the base name and hold across paranoid levels. That same restriction makes
-`context-switches` and `cpu-migrations` read zero for every workload, because
-the kernel charges both to the scheduler, so the record files them as
-unobservable with their cause and the rusage counts from `/usr/bin/time` carry
-the quantity instead. A derivation that no counter supports names the missing
-event rather than resolving to a bare null.
+silently dropping them. Privilege modifiers are stripped only for derivation
+lookup, so `cycles` and `cycles:u` produce the same record shape. Scheduler
+events under a user-only modifier are recorded as unobservable instead of false
+zeros; rusage carries context-switch counts.
 
-Generic cache counters do not identify a working-set size, so controlled sweeps
-vary active document state and compare the miss-rate and latency knees against
-the host's LLC topology. Host LLC capacity is measured, not assumed: the
-development host reports 96 MiB, well above the 32 MiB class the hypothesis
-targets, so a sweep on it bounds instruction and miss behavior without testing
-the 32 MiB knee.
+The first valid `bench_pipeline` run used the required `parallel-render` feature.
+Five runs on the development host recorded median IPC 1.47, generic cache-miss
+ratio 0.197, maximum RSS 10,184 KiB, median elapsed time 998 ms, and about 9.9
+billion instructions. The host reports a 96 MiB LLC. Those values validate the
+measurement lane and bound that workload on that host; they do not locate a
+capacity knee.
+
+Generic cache counters do not identify working-set size. Controlled sweeps vary
+active state and effective cache allocation, then compare latency and miss-rate
+knees against the observed cache topology. A 96 MiB host can participate in the
+sweep, but it cannot by itself establish behavior at 8, 16, or 32 MiB. Those
+points require hosts with those capacities or a verified cache partition.
 
 Initial workloads are:
 
@@ -264,16 +282,14 @@ Initial workloads are:
 6. 100, 1,000, and 10,000-turn native transcript virtualization;
 7. worker startup, navigation, frame submission, crash detection, and restart.
 
-Each record names the commit, build profile, CPU topology, governor, competing
-load, command, and fixture. The commit identifies the tree; the checkout path
-stays out of the record because it is host-local. A workload run that exits
-nonzero marks the record failed and exits the probe nonzero, so a stored record
-never reads as a measurement of a command that did not run. A threshold becomes
-a gate only after repeated rank-1 measurements establish its variance and
-falsifiers.
+Each retained record names the commit, build profile, cache topology, governor,
+affinity, competing load, command, fixture, and counter availability. A workload
+run that exits nonzero marks the record failed and makes the probe exit nonzero.
+A mode threshold becomes a gate only after repeated rank-1 measurements
+establish its variance and falsifiers.
 
-Example, against a binary built ahead of the probe so the record measures the
-workload rather than cargo:
+Example, against a binary built before the probe so the record measures the
+workload rather than Cargo:
 
 ```sh
 cargo build --release -p silksurf-engine --bin bench_pipeline \
@@ -287,18 +303,18 @@ python3 scripts/locality_probe.py \
 
 ## Sequencing with native-runtime extraction
 
-The locality work changes the next issue #53 slices without changing their
-acceptance criteria:
+The cache-adaptive work changes implementation choices without changing issue
+#53's acceptance criteria:
 
 ```text
 asynchronous EventIngress and bounded shutdown       landed
-locality contract and measurement lane               this landing
-byte-accounted event backlog                          next transport refinement
+event-queue wire-byte accounting                      landed
+cache-adaptive locality contract                      this landing
 worker command reader plus single runtime actor       worker-owned navigation
 worker-owned BrowserPageRuntime                       page state extraction
 sealed memfd frame pool plus SCM_RIGHTS                frame plane
 input, incremental damage, crash recovery             DG-1 completion
-controlled working-set and miss-rate sweeps           DG-1 evidence
+controlled capacity and state-size sweeps             mode-selection evidence
 ```
 
 Backend comparison remains useful, but it does not define the default product.
@@ -309,15 +325,18 @@ are measured fallbacks for sites outside the native coverage envelope.
 
 The contract changes when evidence shows any of the following:
 
-- the 20 MiB target has no latency or miss-rate knee on representative hosts;
-- process separation duplicates enough private hot state to cost more than the
+- no stable latency or miss-rate knee appears as effective cache capacity varies;
+- a single adaptive mode performs as well as all three across representative
+  hosts and workloads;
+- process separation duplicates enough private hot state to cost more than its
   security and recovery boundary saves;
-- phase-local recomputation beats retained state under the same workload;
+- phase-local recomputation loses to retained state at every measured capacity;
 - an optional compatibility engine matches the native working set and latency;
 - one foreground worker cannot satisfy required trust-domain isolation;
-- queue or frame metadata consumes a material fraction of the foreground budget;
+- queue or frame metadata consumes a material fraction of the measured knee;
 - JavaScript code and heap dominate foreground misses after transcript and DOM
   virtualization.
 
-Until those measurements exist, cache-local is an explicit, testable design
-hypothesis rather than a marketing claim.
+Cache-local remains an explicit, testable, capacity-adaptive design hypothesis.
+A marketing cache number never becomes an implementation invariant without a
+measured mechanism behind it.
