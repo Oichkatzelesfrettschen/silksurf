@@ -16,7 +16,6 @@
 //! metadata; sealed memfd transfer uses a Unix-domain socket and `SCM_RIGHTS`
 //! outside this pipe transport.
 
-use std::collections::HashMap;
 use std::fmt;
 use std::io::{self, BufReader, Read, Write};
 use std::process::{Child, Command as ProcessCommand, ExitStatus, Stdio};
@@ -521,6 +520,7 @@ enum WorkerMessage {
 
 struct NativeEngineView {
     profile: ProfileId,
+    render_config: BrowserRenderConfig,
     viewport: Viewport,
     requested_url: Option<String>,
     navigation_generation: u64,
@@ -530,9 +530,14 @@ struct NativeEngineView {
 }
 
 impl NativeEngineView {
-    fn new(profile: ProfileId, viewport: Viewport) -> Self {
+    fn new(
+        profile: ProfileId,
+        render_config: BrowserRenderConfig,
+        viewport: Viewport,
+    ) -> Self {
         Self {
             profile,
+            render_config,
             viewport,
             requested_url: None,
             navigation_generation: 0,
@@ -564,8 +569,7 @@ impl NativeEngineView {
 }
 
 struct NativeEngineWorker {
-    views: HashMap<ViewId, NativeEngineView>,
-    profiles: HashMap<ProfileId, BrowserRenderConfig>,
+    views: Vec<(ViewId, NativeEngineView)>,
     image_cache: Arc<Mutex<ImageResourceCache>>,
     sender: SyncSender<WorkerMessage>,
     loader: NavigationLoader,
@@ -575,13 +579,24 @@ struct NativeEngineWorker {
 impl NativeEngineWorker {
     fn new(sender: SyncSender<WorkerMessage>, loader: NavigationLoader) -> Self {
         Self {
-            views: HashMap::with_capacity(1),
-            profiles: HashMap::with_capacity(1),
+            views: Vec::with_capacity(1),
             image_cache: Arc::new(Mutex::new(ImageResourceCache::new())),
             sender,
             loader,
             inflight_navigations: 0,
         }
+    }
+
+    fn view(&self, id: ViewId) -> Option<&NativeEngineView> {
+        self.views
+            .iter()
+            .find_map(|(view, entry)| (*view == id).then_some(entry))
+    }
+
+    fn view_mut(&mut self, id: ViewId) -> Option<&mut NativeEngineView> {
+        self.views
+            .iter_mut()
+            .find_map(|(view, entry)| (*view == id).then_some(entry))
     }
 
     fn handle_command<W: Write>(
@@ -601,7 +616,7 @@ impl NativeEngineWorker {
                 Ok(true)
             }
             ProtocolCommand::Reload { view } => {
-                let Some(url) = self.views.get(&view).and_then(NativeEngineView::reload_url) else {
+                let Some(url) = self.view(view).and_then(NativeEngineView::reload_url) else {
                     return self.protocol_violation(view, writer);
                 };
                 self.start_navigation(view, url, writer)?;
@@ -628,12 +643,20 @@ impl NativeEngineWorker {
         viewport: Viewport,
         writer: &mut W,
     ) -> Result<bool, NativeEngineProcessError> {
-        if self.views.contains_key(&view) {
+        if self.view(view).is_some() {
             return self.protocol_violation(view, writer);
         }
-        self.profiles.entry(profile).or_default();
-        self.views
-            .insert(view, NativeEngineView::new(profile, viewport));
+        let render_config = self
+            .views
+            .iter()
+            .find_map(|(_, entry)| {
+                (entry.profile == profile).then(|| entry.render_config.clone())
+            })
+            .unwrap_or_default();
+        self.views.push((
+            view,
+            NativeEngineView::new(profile, render_config, viewport),
+        ));
         write_event(writer, Event::ViewCreated { view })?;
         Ok(true)
     }
@@ -643,16 +666,14 @@ impl NativeEngineWorker {
         view: ViewId,
         writer: &mut W,
     ) -> Result<bool, NativeEngineProcessError> {
-        let Some(closed) = self.views.remove(&view) else {
+        let Some(index) = self
+            .views
+            .iter()
+            .position(|(candidate, _)| *candidate == view)
+        else {
             return self.protocol_violation(view, writer);
         };
-        if !self
-            .views
-            .values()
-            .any(|entry| entry.profile == closed.profile)
-        {
-            self.profiles.remove(&closed.profile);
-        }
+        drop(self.views.swap_remove(index));
         write_event(writer, Event::ViewClosed { view })?;
         Ok(true)
     }
@@ -663,6 +684,10 @@ impl NativeEngineWorker {
         url: String,
         writer: &mut W,
     ) -> Result<(), NativeEngineProcessError> {
+        if self.view(view).is_none() {
+            self.protocol_violation(view, writer)?;
+            return Ok(());
+        }
         if self.inflight_navigations >= MAX_INFLIGHT_NAVIGATIONS {
             write_event(
                 writer,
@@ -673,16 +698,14 @@ impl NativeEngineWorker {
             )?;
             return Ok(());
         }
-        let Some(entry) = self.views.get_mut(&view) else {
-            self.protocol_violation(view, writer)?;
+        let Some(entry) = self.view_mut(view) else {
             return Ok(());
         };
         entry.navigation_generation = entry.navigation_generation.saturating_add(1);
         let generation = entry.navigation_generation;
         entry.active_navigation = Some(generation);
         entry.requested_url = Some(url.clone());
-        let profile = entry.profile;
-        let config = self.profiles.get(&profile).cloned().unwrap_or_default();
+        let config = entry.render_config.clone();
 
         write_event(
             writer,
@@ -719,7 +742,7 @@ impl NativeEngineWorker {
         view: ViewId,
         writer: &mut W,
     ) -> Result<bool, NativeEngineProcessError> {
-        let Some(entry) = self.views.get_mut(&view) else {
+        let Some(entry) = self.view_mut(view) else {
             return self.protocol_violation(view, writer);
         };
         if entry.active_navigation.take().is_some() {
@@ -749,7 +772,7 @@ impl NativeEngineWorker {
         writer: &mut W,
     ) -> Result<(), NativeEngineProcessError> {
         self.inflight_navigations = self.inflight_navigations.saturating_sub(1);
-        let Some(entry) = self.views.get_mut(&view) else {
+        let Some(entry) = self.view_mut(view) else {
             return Ok(());
         };
         if entry.active_navigation != Some(generation) {
@@ -827,13 +850,10 @@ impl NativeEngineWorker {
         &mut self,
         writer: &mut W,
     ) -> Result<(), NativeEngineProcessError> {
-        let mut views: Vec<ViewId> = self.views.keys().copied().collect();
-        views.sort_unstable_by_key(|view| view.get());
-        for view in views {
-            let _ = self.views.remove(&view);
+        self.views.sort_unstable_by_key(|(view, _)| view.get());
+        for (view, _) in self.views.drain(..) {
             write_event(writer, Event::ViewClosed { view })?;
         }
-        self.profiles.clear();
         Ok(())
     }
 }
