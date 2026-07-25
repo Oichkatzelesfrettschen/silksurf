@@ -1,7 +1,6 @@
 use super::*;
 
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Barrier};
+use std::sync::Barrier;
 
 use crate::browser_types::BrowserPagePayload;
 use silksurf_core::engine_protocol::{
@@ -354,6 +353,7 @@ fn replacement_navigation_reuses_the_previous_viewport_buffers() {
 
     let mut view = NativeEngineView::new(
         ProfileId::new(1),
+        BrowserRenderConfig::default(),
         Viewport {
             width: FRAME_WIDTH,
             height: FRAME_HEIGHT,
