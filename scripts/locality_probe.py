@@ -26,7 +26,7 @@ import time
 from pathlib import Path
 from typing import Any, Iterable
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DEFAULT_EVENTS = (
     "cycles",
     "instructions",
@@ -47,6 +47,12 @@ GNU_TIME_FIELDS = {
     "Involuntary context switches": "involuntary_context_switches",
 }
 UNAVAILABLE_COUNTER_VALUES = {"<not counted>", "<not supported>", "not counted", "not supported"}
+EVENT_MODIFIER_RE = re.compile(r":[ukhHGISDpPe]+$")
+# The kernel charges a context switch and a migration to the scheduler, so a
+# user-mode modifier makes both count zero for every workload. GNU time reports
+# the same quantities from rusage without a privilege condition.
+SCHEDULER_EVENTS = {"context-switches", "cpu-migrations"}
+USER_ONLY_MODIFIERS = frozenset("u")
 
 
 def parse_size_bytes(value: str) -> int:
@@ -161,6 +167,48 @@ def parse_perf_stat(text: str) -> dict[str, int | float | None]:
     return counters
 
 
+def base_event_name(event: str) -> str:
+    """Strips the privilege and precision modifiers perf appends to an event name.
+
+    `perf stat` echoes `instructions:u` when `perf_event_paranoid` restricts
+    counting to user mode, and `instructions` when it does not. Derivations key
+    on the base name so the same record shape holds across both hosts.
+    """
+
+    return EVENT_MODIFIER_RE.sub("", event.strip())
+
+
+def event_modifiers(event: str) -> str:
+    match = EVENT_MODIFIER_RE.search(event.strip())
+    return match.group(0)[1:] if match else ""
+
+
+def partition_counters(
+    counters: dict[str, int | float | None],
+) -> tuple[dict[str, int | float | None], dict[str, str]]:
+    """Splits parsed counters into measurements and structurally blind events.
+
+    A scheduler event counted under a user-only modifier reads zero for every
+    workload, so it records as unobservable with its cause rather than as a
+    measured zero.
+    """
+
+    measured: dict[str, int | float | None] = {}
+    unobservable: dict[str, str] = {}
+    for event, value in counters.items():
+        modifiers = set(event_modifiers(event))
+        blind = base_event_name(event) in SCHEDULER_EVENTS and modifiers <= USER_ONLY_MODIFIERS
+        if blind and modifiers:
+            unobservable[event] = (
+                "scheduler event counted under a user-only modifier reads zero; "
+                "see process.voluntary_context_switches and "
+                "process.involuntary_context_switches"
+            )
+            continue
+        measured[event] = value
+    return measured, unobservable
+
+
 def nearest_rank(values: Iterable[float | int], percentile: float) -> float | None:
     ordered = sorted(float(value) for value in values)
     if not ordered:
@@ -231,8 +279,9 @@ def git_metadata() -> dict[str, Any] | None:
     commit = command_output(["git", "-C", root, "rev-parse", "HEAD"])
     branch = command_output(["git", "-C", root, "branch", "--show-current"])
     status = command_output(["git", "-C", root, "status", "--porcelain"])
+    # The checkout path is host-local, so the record carries the commit identity
+    # that reproduces the tree instead.
     return {
-        "root": root,
         "commit": commit,
         "branch": branch,
         "dirty": bool(status),
@@ -320,13 +369,15 @@ def run_sample(
 
         time_text = time_path.read_text(encoding="utf-8") if time_path.exists() else ""
         perf_text = perf_path.read_text(encoding="utf-8") if perf_path.exists() else ""
-        counters = parse_perf_stat(perf_text) if use_perf else {}
+        parsed = parse_perf_stat(perf_text) if use_perf else {}
+        counters, unobservable = partition_counters(parsed)
         return {
             "sample": sample_index,
             "return_code": result.returncode,
             "elapsed_ns": elapsed_ns,
             "process": parse_gnu_time(time_text),
             "counters": counters,
+            "unobservable_counters": unobservable,
         }
 
 
@@ -334,6 +385,17 @@ def ratio(numerator: int | float | None, denominator: int | float | None) -> flo
     if numerator is None or denominator in (None, 0):
         return None
     return float(numerator) / float(denominator)
+
+
+def counter_by_base(
+    counters: dict[str, int | float | None], event: str
+) -> int | float | None:
+    """Looks a counter up by base name, ignoring the modifiers perf appended."""
+
+    for name, value in counters.items():
+        if base_event_name(name) == event:
+            return value
+    return None
 
 
 def summarize_samples(samples: list[dict[str, Any]]) -> dict[str, Any]:
@@ -353,20 +415,31 @@ def summarize_samples(samples: list[dict[str, Any]]) -> dict[str, Any]:
         counter_summary[name] = summarize_numeric(materialized)
     summary["counters"] = counter_summary
 
-    miss_ratios = [
-        ratio(sample["counters"].get("cache-misses"), sample["counters"].get("cache-references"))
-        for sample in samples
-    ]
-    summary["cache_miss_ratio"] = summarize_numeric(
-        value for value in miss_ratios if value is not None
-    )
-    ipc_values = [
-        ratio(sample["counters"].get("instructions"), sample["counters"].get("cycles"))
-        for sample in samples
-    ]
-    summary["instructions_per_cycle"] = summarize_numeric(
-        value for value in ipc_values if value is not None
-    )
+    unavailable: dict[str, str] = {}
+    for derived, numerator, denominator in (
+        ("cache_miss_ratio", "cache-misses", "cache-references"),
+        ("instructions_per_cycle", "instructions", "cycles"),
+    ):
+        values = [
+            ratio(
+                counter_by_base(sample["counters"], numerator),
+                counter_by_base(sample["counters"], denominator),
+            )
+            for sample in samples
+        ]
+        summary[derived] = summarize_numeric(value for value in values if value is not None)
+        if summary[derived] is None:
+            missing = [
+                event
+                for event in (numerator, denominator)
+                if all(counter_by_base(sample["counters"], event) is None for sample in samples)
+            ]
+            unavailable[derived] = (
+                f"no sample carries {' and '.join(missing)}"
+                if missing
+                else "every sample divides by zero"
+            )
+    summary["unavailable_derivations"] = unavailable
     return summary
 
 
@@ -440,6 +513,13 @@ def main(argv: list[str] | None = None) -> int:
     record = {
         "schema_version": SCHEMA_VERSION,
         "name": args.name,
+        # A retained record outlives the exit status of the run that produced it,
+        # so the workload outcome rides in the record itself.
+        "workload": {
+            "status": "failed" if failed_samples else "ok",
+            "sample_count": len(samples),
+            "failed_sample_count": len(failed_samples),
+        },
         "timestamp_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
         "command": command,
         "environment": command_environment(),

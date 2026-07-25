@@ -230,9 +230,21 @@ same viewport, retained-rendering, and bounded-state rules.
   misses, migrations, and faults when `perf` is available.
 
 The probe records counter availability and kernel-policy failures rather than
-silently dropping them. Generic cache counters do not identify a working-set
-size, so controlled sweeps vary active document state and compare the miss-rate
-and latency knees against the host's LLC topology.
+silently dropping them. `perf_event_paranoid` at 2 restricts counting to user
+mode, so `perf stat` names every event with a `:u` modifier; derivations key on
+the base name and hold across paranoid levels. That same restriction makes
+`context-switches` and `cpu-migrations` read zero for every workload, because
+the kernel charges both to the scheduler, so the record files them as
+unobservable with their cause and the rusage counts from `/usr/bin/time` carry
+the quantity instead. A derivation that no counter supports names the missing
+event rather than resolving to a bare null.
+
+Generic cache counters do not identify a working-set size, so controlled sweeps
+vary active document state and compare the miss-rate and latency knees against
+the host's LLC topology. Host LLC capacity is measured, not assumed: the
+development host reports 96 MiB, well above the 32 MiB class the hypothesis
+targets, so a sweep on it bounds instruction and miss behavior without testing
+the 32 MiB knee.
 
 Initial workloads are:
 
@@ -245,17 +257,24 @@ Initial workloads are:
 7. worker startup, navigation, frame submission, crash detection, and restart.
 
 Each record names the commit, build profile, CPU topology, governor, competing
-load, command, and fixture. A threshold becomes a gate only after repeated
-rank-1 measurements establish its variance and falsifiers.
+load, command, and fixture. The commit identifies the tree; the checkout path
+stays out of the record because it is host-local. A workload run that exits
+nonzero marks the record failed and exits the probe nonzero, so a stored record
+never reads as a measurement of a command that did not run. A threshold becomes
+a gate only after repeated rank-1 measurements establish its variance and
+falsifiers.
 
-Example:
+Example, against a binary built ahead of the probe so the record measures the
+workload rather than cargo:
 
 ```sh
+cargo build --release -p silksurf-engine --bin bench_pipeline \
+  --features parallel-render
 python3 scripts/locality_probe.py \
   --name fused-pipeline \
   --repeat 20 \
   --output perf/results/fused-pipeline-locality.json \
-  -- cargo run --release -p silksurf-engine --bin bench_pipeline
+  -- ./target/release/bench_pipeline
 ```
 
 ## Sequencing with native-runtime extraction
