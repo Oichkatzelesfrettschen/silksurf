@@ -16,6 +16,13 @@ conflict, the narrower file controls only inside its subtree.
 - Use `docker compose`, never legacy `docker-compose`.
 - Do not commit secrets, local absolute paths, private hostnames, or generated
   machine-only state.
+- Paths in checked-in work are repository-relative or PATH-resolved tool names.
+  Discover the repository root with `repo_root=$(git rev-parse --show-toplevel)`.
+- Hazardous or experimental paths open on an exact opt-in value. Unset, empty,
+  and zero-valued gates stay closed.
+- A load-bearing claim binds to a named source: crate, module, function, spec
+  rule, test case, or measurement. Provenance detail rides in the commit
+  message and the finding.
 
 ## Source Comments and Durable Prose
 
@@ -42,9 +49,148 @@ numbers, PR chronology, reviewer notes, agent notes, and "finish later" prose
 in source comments. Put history and tradeoffs in commit messages, PR
 descriptions, or design docs.
 
-Use durable names for branches, commits, docs, bundles, tests, and findings.
-Name the target, mechanism, and evidence or outcome. Do not use phase, wave,
-mission, sprint, session, agent, or chronology labels as primary names.
+### Stating mechanism as fact
+
+State what a thing is and does, in positive declarative form, third-person
+present tense: `the paint list drops subtrees whose computed display resolves
+to none`. Name the mechanism and let the binding constraint stand as fact;
+correctness follows from the mechanism, so the reviewer assumes it and
+correctness claims and contrast framing fall away.
+
+A boundary takes its positive dual. Write the restriction (`debug builds
+only`), the named home (`chronology lives in the commit message`), or the
+mechanism itself (`the caller retains the allocation`; `this glyph cache
+resolves only through the shaped-run path`; `fetch resolvers park in the
+GC-rooted registry and drain at microtask checkpoint`). A stacked absence
+collapses to the positive fact its members share -- `a repaint that fits the
+damage rect completes in one pass`. Each positive form entails the absence a
+negation would state, so the specimen stays off the page. A hard-stop safety
+or security boundary keeps its prohibition, where that is the whole content.
+
+Uncertainty names the mechanism and the guarded, disabled, or falsifiable
+path. Reproduced-but-unspecified behavior names where it was observed;
+conjecture is marked (`appears to`) or removed.
+
+### Comment class and placement
+
+Four decisions generate a comment: semantic role, evidence class, language
+form, and placement. The role fixes which facts the comment carries; an API
+contract, a cross-crate invariant, a one-line layout fact, and an unsafe-code
+proof have different information shapes and share no template.
+
+- Semantic role: contract (behavior, ownership, lifetime, error conditions),
+  translation (spec rule to data structure), local invariant, engine or
+  platform quirk, representation (buffer layout, state transition), safety
+  proof, or module-scope navigation.
+- Evidence class: specified behavior takes the plain indicative; measured
+  behavior names the measurement; conjecture is marked or removed.
+- Language form: Rust doc or line comment, field annotation, or a compact
+  semantic table.
+- Placement: architecture that persists across a module lives at module or
+  type scope; the point of use carries only the local link in the chain; a
+  branch comment states what distinguishes the branch, at the branch.
+
+Rust code uses `//!` for module contracts, `///` for public items and fields,
+`# Safety` / `# Panics` / `# Errors` sections when those obligations exist,
+and `// SAFETY:` immediately before each unsafe operation. A `// SAFETY:`
+comment proves every precondition the operation relies on -- lifetime,
+ownership, aliasing, synchronization. A bare non-nullness claim is an
+incomplete proof:
+
+```rust
+// SAFETY: `surface` outlives the returned slice, and softbuffer holds the
+// only mapping of the buffer for the duration of the borrow.
+```
+
+### Source comment shape
+
+A full mechanism comment orders its facts, and each fact stands on the one
+before it:
+
+1. Load-bearing claim: `Taffy caches the measured text size per generation.`
+2. Authority by name: the crate, function, spec rule, or WPT case. A stable
+   spec section may trail the named rule as disambiguation.
+3. Consequence, with an inline code fragment when clearer than prose.
+4. Test reference when the comment explains a fixed failure.
+5. Env gates or flags, grouped at the end of the block.
+
+Use the smallest applicable subset; most comments carry one or two elements,
+and a comment carrying one fact is one sentence. Default to a one-line
+trailing comment on the load-bearing line over a function-header paragraph.
+One thought per comment: a multi-clause sentence fusing separate steps splits
+into stacked comments. Mechanism controls length -- the count of distinct
+load-bearing facts sets it, and a line threshold does not. Mechanical code
+reads bare.
+
+Prefer a causal connective when one fact forces another, or sequence when the
+order itself is the mechanism (`The parser closes the implied paragraph. Then
+it inserts the block element. Then layout sees a single flow root.`). Either
+beats one passive sentence with three clauses, and both beat imperative
+narration. A compact semantic table or diagram that encodes a buffer layout,
+bit layout, or state transition is content; delimiter lines, banner boxes, and
+wrappers such as `// =====` are decoration.
+
+### TODO comments
+
+A deferred-work comment opens with `TODO:`, `FIXME:`, `XXX:`, or `HACK:`, and
+a new marker comes from that four-item set. It names three mechanism elements:
+
+- missing work: the function, module, spec rule, or crate boundary needing the
+  change;
+- deferral reason: the API, evidence, or platform constraint blocking
+  completion;
+- tracking artifact: a durable function name, spec chapter, roadmap entry, or
+  public issue URL. When no external issue exists, the named function or spec
+  chapter is the tracking artifact.
+
+A TODO body carries mechanism only. Reviewer breadcrumbs, PR-thread
+references, phase labels, AGENTS.md rule citations, and deictic references
+such as `currently` and `this crate` live in the commit message or PR
+description.
+
+### Durable names
+
+Use names from mechanism or content, not chronology, actors, work sessions, or
+review process. This governs branches, commit subjects, PR titles, doc and
+finding filenames, tests, bundles, and checked-in identifiers.
+
+To derive one: read the artifact, state in one line what it does or contains,
+isolate the mechanism and object, then name those.
+
+- `measures React click-to-commit latency` -> `react-interaction-commit-latency`
+- `supervises the native runtime in a child process` ->
+  `native-runtime-supervision`
+
+Forbidden load-bearing identity: waves, phases, missions, agents, worktrees,
+sessions, reviewers, PR numbers, task numbers, and dates that do not describe
+content. Phase and wave terms may appear only as secondary registry metadata,
+such as a `phase:` field in finding frontmatter; that field is their one home.
+
+A name describes what is inside, not the act of collecting, grouping, staging,
+or sequencing. `tranche` names no content and stays out. `set`, `batch`, and
+`group` stay out only as ordinal containers (`set5`, `batch_2`); descriptive
+domain compounds are fine (`batch_size`, `group_map`).
+
+The first commit subject matters because a squash merge reuses it even when
+the PR title was corrected later. Set branch name, first commit subject, and
+PR title before first push.
+
+### Findings and agent-loaded Markdown
+
+Finding documents carry chronology: dated frontmatter, `last_verified`,
+`evidence_class`, dated filenames, ordered predecessors. A PR or issue
+reference pairs with a durable identifier.
+
+- Wrong: `the fix landed via PR #58`
+- Right: `landed in 3af56ff (silksurf_core::engine_protocol wire framing);
+  PR #58 for cross-link`
+
+Markdown loaded by agents uses exactly one H1, heading depth no deeper than
+`###`, frontmatter on programmatically loaded files, language tags on code
+fences, and exact cross-references (`scripts/lint_doc_links.sh` gates the
+links). Rule text is direct positive-declarative statement. Tables appear only
+when columns carry independent comparison value; bullets carry ownership,
+lookup, and rule lists. Slice-loaded text stands without nearby context.
 
 ## Engineering Posture
 
@@ -58,6 +204,74 @@ mission, sprint, session, agent, or chronology labels as primary names.
   consequence, then the evidence.
 - Scope cuts are named, never silent: a deferred piece gets one line in the
   owning roadmap with the mechanism name and the reason.
+- Treat a surprising deviation as evidence, not noise. Preserve it, name it,
+  and decide whether it changes the model.
+- Investigate before asserting. Memory, prior summaries, and recalled context
+  are leads; AGENTS.md and the source are authority.
+
+### Evidence rank
+
+When sources conflict, higher rank controls. An implementation-affecting
+architecture claim needs a rank 1 through 4 source by name; claims without
+that backing are hypotheses.
+
+1. Live run: traced GUI frame, live page interaction, measured latency or RSS.
+2. Test oracle: WPT, test262, and workspace tests, when the oracle is
+   spec-grounded.
+3. Specification: HTML, CSS, ECMA-262, Fetch, URL, and the documents under
+   `silksurf-specification/`.
+4. Crate source and ADRs in `docs/design/ARCHITECTURE-DECISIONS.md`.
+5. Benchmarks and microbenchmarks, which bound CPU work rather than
+   end-to-end behavior.
+6. Documentation and comments, only when consistent with ranks 1 through 5.
+
+Build success, workspace-test success, conformance success, and live-browser
+behavior stay separate evidence classes. A conformance claim rests on a
+conformance run; build-only evidence proves a build.
+
+### Reasoning checks
+
+- Hypothesis tree: list plausible root causes, rank them by evidence cost and
+  likelihood, test the cheapest decisive case first, and prune on
+  falsification.
+- Opposition review: after forming a synthesis, argue the strongest contrary
+  case. If it survives, the finding stays unresolved and names the next
+  evidence needed.
+- Claim audit: before committing a finding, list each implementation claim and
+  the ranked source that backs it.
+- Recorded prediction: a prediction stands after observation. Deviation is the
+  finding, and it opens a new investigation rather than editing the
+  prediction.
+
+Stop and report when a hypothesis survives three independent falsification
+attempts, fails in an unexpected way, requires a non-obvious architecture
+choice, or a measurement contradicts a rank-1 or rank-2 source.
+
+### Synthesis over selection
+
+When merging parallel branches or review findings, preserve all non-refuted
+content; the default resolution is union plus synthesis. Mechanism and
+evidence decide; branch age, chronology, and author do not. Selection applies
+only when the discarded side is empirically refuted or superseded by a
+verified line-level diff with recorded rationale. `git merge -X theirs`,
+`git checkout --theirs`, blanket conflict-marker stripping, and unreviewed
+deletion are not synthesis.
+
+A synthesis improves the material: a stronger mechanism model, a
+cross-reference, a validation matrix, a sharper evidence class, a
+source-grounded invariant, a reusable probe, or a semantic-preserving
+refactor. Merging text without improving the model is not synthesis.
+
+### Agent coordination
+
+Use at most three concurrent subagents. Subagents are read-only evidence
+collectors unless the user authorizes a different role; each carries a bounded
+task, input scope, expected output, and citation requirement. The parent owns
+synthesis, conflict resolution, implementation choices, commit pushes, file
+deletion, build-configuration changes, warning suppression, and final claims.
+
+Agent task tracking is transient working state. Durable state lands in code,
+tests, commit messages, findings, documentation, or retained bundles.
 
 ## Commits and Pull Requests
 
@@ -104,7 +318,7 @@ Trailers:
   the low-resource browser profile.
 - Run rustfmt on touched Rust files.
 - Keep touched Rust functions at cyclomatic complexity 16 or lower. Use
-  `/home/eirikr/.local/bin/lizard -l rust -C 16 <paths>` for touched files.
+  `lizard -l rust -C 16 <paths>` for touched files.
 - Run targeted checks while developing:
 
 ```sh
@@ -153,8 +367,7 @@ instrumentation.
 
 - Use `rg`, `fd`, `cargo tree`, and `cargo machete` for source and dependency
   surface discovery.
-- Use `/home/eirikr/.local/bin/lizard -l rust -C 16` for touched Rust
-  complexity gates.
+- Use `lizard -l rust -C 16` for touched Rust complexity gates.
 - Use `rust-analyzer`, `cargo llvm-lines`, `cargo bloat`, `cargo udeps`,
   `cargo deny`, `scc`, and `cloc` for call-surface, binary, dependency,
   policy, and size pressure.
