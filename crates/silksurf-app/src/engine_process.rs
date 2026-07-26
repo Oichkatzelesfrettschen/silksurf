@@ -519,7 +519,6 @@ enum WorkerMessage {
 }
 
 struct NativeEngineView {
-    profile: ProfileId,
     render_config: BrowserRenderConfig,
     viewport: Viewport,
     requested_url: Option<String>,
@@ -530,13 +529,8 @@ struct NativeEngineView {
 }
 
 impl NativeEngineView {
-    fn new(
-        profile: ProfileId,
-        render_config: BrowserRenderConfig,
-        viewport: Viewport,
-    ) -> Self {
+    fn new(render_config: BrowserRenderConfig, viewport: Viewport) -> Self {
         Self {
-            profile,
             render_config,
             viewport,
             requested_url: None,
@@ -570,6 +564,7 @@ impl NativeEngineView {
 
 struct NativeEngineWorker {
     views: Vec<(ViewId, NativeEngineView)>,
+    profiles: Vec<(ProfileId, BrowserRenderConfig)>,
     image_cache: Arc<Mutex<ImageResourceCache>>,
     sender: SyncSender<WorkerMessage>,
     loader: NavigationLoader,
@@ -580,6 +575,7 @@ impl NativeEngineWorker {
     fn new(sender: SyncSender<WorkerMessage>, loader: NavigationLoader) -> Self {
         Self {
             views: Vec::with_capacity(1),
+            profiles: Vec::with_capacity(1),
             image_cache: Arc::new(Mutex::new(ImageResourceCache::new())),
             sender,
             loader,
@@ -597,6 +593,19 @@ impl NativeEngineWorker {
         self.views
             .iter_mut()
             .find_map(|(view, entry)| (*view == id).then_some(entry))
+    }
+
+    fn profile_config(&mut self, id: ProfileId) -> BrowserRenderConfig {
+        if let Some((_, config)) = self
+            .profiles
+            .iter()
+            .find(|(profile, _)| *profile == id)
+        {
+            return config.clone();
+        }
+        let config = BrowserRenderConfig::default();
+        self.profiles.push((id, config.clone()));
+        config
     }
 
     fn handle_command<W: Write>(
@@ -646,17 +655,9 @@ impl NativeEngineWorker {
         if self.view(view).is_some() {
             return self.protocol_violation(view, writer);
         }
-        let render_config = self
-            .views
-            .iter()
-            .find_map(|(_, entry)| {
-                (entry.profile == profile).then(|| entry.render_config.clone())
-            })
-            .unwrap_or_default();
-        self.views.push((
-            view,
-            NativeEngineView::new(profile, render_config, viewport),
-        ));
+        let render_config = self.profile_config(profile);
+        self.views
+            .push((view, NativeEngineView::new(render_config, viewport)));
         write_event(writer, Event::ViewCreated { view })?;
         Ok(true)
     }
@@ -673,7 +674,7 @@ impl NativeEngineWorker {
         else {
             return self.protocol_violation(view, writer);
         };
-        drop(self.views.swap_remove(index));
+        self.views.swap_remove(index);
         write_event(writer, Event::ViewClosed { view })?;
         Ok(true)
     }
@@ -788,26 +789,19 @@ impl NativeEngineWorker {
             }
         };
         let url = payload.url.clone();
-        write_event(
-            writer,
-            Event::UrlChanged {
-                view,
-                url: url.clone(),
-            },
-        )?;
-        write_event(
-            writer,
-            Event::LoadStateChanged {
-                view,
-                state: LoadState::Committed,
-            },
-        )?;
-
         let height = entry.viewport.height;
         let buffers = entry.take_build_buffers();
         match build_browser_page_with_buffers_for_height(payload, buffers, Some(height)) {
             Ok(page) => {
                 entry.page = Some(page);
+                write_event(writer, Event::UrlChanged { view, url })?;
+                write_event(
+                    writer,
+                    Event::LoadStateChanged {
+                        view,
+                        state: LoadState::Committed,
+                    },
+                )?;
                 write_event(
                     writer,
                     Event::LoadStateChanged {
@@ -854,6 +848,7 @@ impl NativeEngineWorker {
         for (view, _) in self.views.drain(..) {
             write_event(writer, Event::ViewClosed { view })?;
         }
+        self.profiles.clear();
         Ok(())
     }
 }
