@@ -5,7 +5,7 @@
 > reports. `scripts/check_status_consistency.py` checks the machine-verifiable
 > fields against manifests and scorecards.
 
-**Evidence refresh:** 2026-07-26  
+**Evidence refresh:** 2026-07-25  
 **Active branch baseline:** `main` at `f3f19ba` after PR #66  
 **Toolchain:** stable Rust 1.94.1, pinned exactly
 
