@@ -422,7 +422,6 @@ fn replacement_navigation_reuses_the_previous_viewport_buffers() {
     let rgba_capacity = page.runtime.rgba.capacity();
 
     let mut view = NativeEngineView::new(
-        ProfileId::new(1),
         BrowserRenderConfig::default(),
         Viewport {
             width: FRAME_WIDTH,
@@ -436,6 +435,45 @@ fn replacement_navigation_reuses_the_previous_viewport_buffers() {
     assert!(view.page.is_none());
     assert!(buffers.argb.capacity() >= argb_capacity);
     assert!(buffers.rgba.capacity() >= rgba_capacity);
+}
+
+#[test]
+fn profile_configuration_survives_the_last_view_close() {
+    let (sender, _receiver) = mpsc::sync_channel(WORKER_QUEUE_DEPTH);
+    let mut worker = NativeEngineWorker::new(sender, fixture_loader());
+    let profile = ProfileId::new(42);
+    let viewport = Viewport {
+        width: FRAME_WIDTH,
+        height: FRAME_HEIGHT,
+        scale_permille: 1000,
+    };
+    let mut events = Vec::new();
+
+    worker
+        .create_view(ViewId::new(1), profile, viewport, &mut events)
+        .expect("first view");
+    let first_jar = Arc::clone(
+        &worker
+            .view(ViewId::new(1))
+            .expect("first view exists")
+            .render_config
+            .cookie_jar,
+    );
+    worker
+        .close_view(ViewId::new(1), &mut events)
+        .expect("close first view");
+    worker
+        .create_view(ViewId::new(2), profile, viewport, &mut events)
+        .expect("second view");
+    let second_jar = Arc::clone(
+        &worker
+            .view(ViewId::new(2))
+            .expect("second view exists")
+            .render_config
+            .cookie_jar,
+    );
+
+    assert!(Arc::ptr_eq(&first_jar, &second_jar));
 }
 
 #[test]
