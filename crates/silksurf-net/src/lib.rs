@@ -73,7 +73,7 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError};
  * grows past this value the read returns NetError, the connection is
  * dropped, and the caller sees a recoverable failure instead of OOM.
  *
- * See: SNAZZY-WAFFLE roadmap P8.S8 (DoS bounds per crate).
+ * See: docs/design/THREAT-MODEL.md (DoS bounds per subsystem).
  */
 pub const MAX_RESPONSE_BODY_BYTES: usize = 16 * 1024 * 1024;
 
@@ -663,7 +663,7 @@ fn read_response(stream: &mut dyn Read) -> Result<Vec<u8>, NetError> {
             Ok(0) => break,
             Ok(n) => {
                 buf.extend_from_slice(&chunk[..n]);
-                // DoS bound (P8.S8): cap response body at MAX_RESPONSE_BODY_BYTES.
+                // DoS bound: cap response body at MAX_RESPONSE_BODY_BYTES.
                 if buf.len() > MAX_RESPONSE_BODY_BYTES {
                     return Err(NetError::new(format!(
                         "Response exceeds MAX_RESPONSE_BODY_BYTES ({MAX_RESPONSE_BODY_BYTES} bytes)"

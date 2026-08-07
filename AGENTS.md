@@ -207,6 +207,10 @@ lookup, and rule lists. Slice-loaded text stands without nearby context.
   leave core logic behind a TODO.
 - Cleanroom boundary: production code and `silksurf-specification/` never
   depend on `diff-analysis/` (enforced by `scripts/lint_cleanroom.sh`).
+- `silksurf-extras/` and `silksurf-js/test262/` are untracked reference
+  checkouts; they inform behavior and supply no copied code. Implementations
+  derive from `silksurf-specification/` and the documented reasoning in
+  `docs/`.
 - Update specifications and ADRs (`docs/design/ARCHITECTURE-DECISIONS.md`)
   before or with the code they govern. State the mechanism, then the
   consequence, then the evidence.

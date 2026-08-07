@@ -8,8 +8,8 @@
 //! connection.
 //!
 //! Tests that genuinely need a real X server are gated behind the
-//! `test-display` Cargo feature on the consuming crate (none in-tree
-//! today; tracked in P6.S4).
+//! `test-display` Cargo feature on the consuming crate, which no in-tree
+//! crate sets.
 
 use silksurf_gui::{ControlFlow, Event};
 

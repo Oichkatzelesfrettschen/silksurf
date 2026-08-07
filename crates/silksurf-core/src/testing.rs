@@ -9,7 +9,7 @@
 //! unsafe. The PRNG is `xorshift64` with a fixed seed -- adequate for
 //! deterministic test fixtures and explicitly NOT cryptographic.
 //!
-//! See: SNAZZY-WAFFLE roadmap P8.S10 (forensics + repro primitives).
+//! See: docs/roadmaps/DEBT-RECONCILIATION-ROADMAP.md (forensics and repro primitives).
 
 /// Deterministic clock for reproducible test timing.
 ///

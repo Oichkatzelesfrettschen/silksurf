@@ -27,14 +27,16 @@
 //!   2. `silksurf-gui` exposes the tree via AT-SPI on Linux.
 //!   3. Conformance: WAI-ARIA 1.2 + ARIA-in-HTML test suite (TBD).
 //!
-//! Tracked in the SNAZZY-WAFFLE roadmap P8.S5.
+//! Exposure needs an accesskit platform adapter driven from the winit event
+//! loop; docs/conformance/SCORECARD.md carries the current surface.
 
 use silksurf_dom_internal::NodeId;
 
 /// Root of the accessibility tree -- placeholder.
 #[derive(Debug, Default)]
 pub struct AccessibilityTree {
-    /// Per-DOM-node accessibility metadata. Empty until P8.S5 lands.
+    /// Per-DOM-node accessibility metadata. Empty until an accesskit adapter
+    /// consumes it.
     pub nodes: Vec<AccessibilityNode>,
 }
 
@@ -45,8 +47,7 @@ pub struct AccessibilityNode {
     pub role: AccessibilityRole,
 }
 
-/// Subset of WAI-ARIA 1.2 roles. Will expand to the full ~80-role set
-/// when P8.S5 lands.
+/// Subset of WAI-ARIA 1.2 roles. The full set is roughly 80 roles.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum AccessibilityRole {
     Generic,

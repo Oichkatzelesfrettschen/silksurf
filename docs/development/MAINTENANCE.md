@@ -22,7 +22,7 @@
 Read the log; bump deps via `cargo update -p <crate>` and re-run
 `scripts/local_gate.sh full` before pushing.
 
-## Nightly: bench history append (when P3.S2 history runner lands)
+## Nightly: bench history append (when the perf/append_history.py runner lands)
 
 ```cron
 # Every night at 03:00.
@@ -32,7 +32,7 @@ Read the log; bump deps via `cargo update -p <crate>` and re-run
 ```
 
 The current `bench_pipeline` output is human-readable; once the rolling
-NDJSON history schema lands (P3.S2), append into
+NDJSON history schema lands, append into
 `perf/history.ndjson` instead so trend analysis is possible.
 
 ## Monthly: conformance re-run + corpus refresh
