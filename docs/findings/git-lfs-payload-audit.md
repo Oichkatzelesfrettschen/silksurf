@@ -128,18 +128,57 @@ envelope in particular exists to let a reader reproduce a rate from the commit
 that produced it, so rewriting history would falsify the artifacts that record
 it.
 
-## Recommendation
+## Measured rewrite result
 
-Take the tip-level removal and leave history alone. It captures the entire
-clone-cost improvement -- 104.5 MiB to zero for a fresh clone -- at no cost to
-commit identity, and it closes `tool-output-relocation` rather than working
-around it. `build-asan/` is already untracked and ignored; its remaining cost is
-42 MB of pack that a clone pays once.
+The rewrite was built and verified in a scratch clone before any decision.
+`git filter-repo --invert-paths` over `diff-analysis/tools-output/`,
+`build-asan/`, and the stray `.zst` takes `.git` from 45 MB to 26 MB, a 42
+percent reduction. All 350 commits survive -- none becomes empty -- and 308 of
+them take new identities. The tree at HEAD is byte-identical
+(`993fb385e7724ee75c61025a27c8ff1e49e515c3` before and after), so the working
+copy does not move.
 
-If the history must be purged anyway, it is a separate deliberate operation and
-needs a re-anchoring step first: every SHA cited in a scorecard, a finding, or a
-commit trailer maps to its rewritten equivalent, or the citation moves to a tag
-that survives.
+`scripts/reanchor_commit_citations.py` repoints the citations through the
+`commit-map` that rewrite writes: 13 across 12 files, including the three
+`measurement_environment.git.commit` values and the ADR, finding, and baseline
+anchors. Each rewritten SHA resolves in the new history and the old one does
+not, which is the check that the substitution happened rather than the text
+merely changing.
+
+Two limits stay after a force-push. GitHub keeps the pre-rewrite objects alive
+through 65 `refs/pull/*` refs, so the server-side repository size does not drop
+without support intervention; a fresh clone still gets the smaller history,
+because clone fetches branch and tag refs alone. And `Fixes:` trailers inside
+old commit bodies keep naming pre-rewrite SHAs, since a rewrite cannot repoint a
+reference held in the object it rewrites.
+
+## Three ADR anchors already dangle
+
+`docs/design/ARCHITECTURE-DECISIONS.md` anchors four decisions with `codifies
+design from main = <sha>`. Three of them -- `662ddb9` (AD-018), `418ea00`
+(AD-019), and `63e7551` (AD-020) -- are not ancestors of `main`. They resolve
+through the GitHub API, so some pull-request ref still reaches them, and they do
+not resolve in a fresh clone. Only `409356d` is on the main line.
+
+This predates any rewrite and survives one: a SHA outside the rewritten refs
+carries no `commit-map` entry, so the tool reports it rather than guessing a
+substitute. The condition is recorded rather than repaired because repointing
+would change what each ADR claims to codify.
+
+## Sequence taken
+
+The tip-level removal landed first and on its own. It captures the whole
+LFS clone cost -- 104.5 MiB to zero -- at no cost to commit identity, and it
+closes `tool-output-relocation` rather than working around it. What the dumps
+supported was extracted before they left: the size and complexity tables into
+`docs/findings/browser-engine-size-and-complexity-comparison.md`, the boa
+test262 baseline into
+`docs/archive/conformance/boa-upstream-test262-scorecard.json`, 100
+test262-derived seeds into `fuzz/corpus/js_runtime/`, and the small perf reports
+and flamegraphs into `docs/findings/data/`.
+
+The history rewrite follows as a separate, verified operation with its
+re-anchoring step, on the measurement above.
 
 ## Falsifiers
 
