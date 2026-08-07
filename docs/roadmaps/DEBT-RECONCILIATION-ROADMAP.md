@@ -98,6 +98,16 @@ No dependency; runs first.
   docs-link-checker-gate below.
 - **gate-docstring-alignment** -- LANDED. Makefile header and
   local_gate.sh usage both name lint_glossary.
+- **adr-anchor-reachability** -- OPEN. Three of the four `codifies design from
+  main = <sha>` anchors in `docs/design/ARCHITECTURE-DECISIONS.md` name commits
+  that are not ancestors of `main`: `662ddb9` (AD-018), `418ea00` (AD-019), and
+  `63e7551` (AD-020). They resolve through the GitHub API, so a pull-request ref
+  still reaches them, and they do not resolve in a fresh clone. Only `409356d`
+  (AD-017) is on the main line. Repointing changes what each ADR claims to
+  codify, so the resolution needs the decision record rather than a mechanical
+  substitution. Enumerate with `grep -n 'codifies design from'
+  docs/design/ARCHITECTURE-DECISIONS.md` and test each with `git merge-base
+  --is-ancestor <sha> main`.
 - **adr-prefix-normalization** -- OPEN. 20 citations across 11 live files
   spell the ledger `ADR-NNN` where `docs/design/ARCHITECTURE-DECISIONS.md`
   spells it `AD-NNN`. Every number resolves and every markdown anchor is
