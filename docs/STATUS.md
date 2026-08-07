@@ -5,18 +5,18 @@
 > reports. `scripts/check_status_consistency.py` checks the machine-verifiable
 > fields against manifests and scorecards.
 
-**Evidence refresh:** 2026-07-23  
-**Active branch baseline:** `main` after PR #49  
+**Evidence refresh:** 2026-07-25  
+**Active branch baseline:** `main` at `f3f19ba` after PR #66  
 **Toolchain:** stable Rust 1.94.1, pinned exactly
 
 ## Classification
 
-SilkSurf is a functional controlled-content browser prototype and native engine
-research platform. It has a real fetch-to-window application path and proven
-React-class DOM interaction. It is not yet a production-grade arbitrary-web
-browser because the page runtime shares the application process and several
-origin, policy, storage, editing, loader, and compatibility surfaces remain
-incomplete.
+SilkSurf is a functional controlled-content browser prototype, locality-first
+native engine, and browser research platform. It has a real fetch-to-window
+application path and proven React-class DOM interaction. It is not yet a
+production-grade arbitrary-web browser because the default GUI still owns the
+page runtime in-process and several origin, policy, storage, editing, loader,
+compatibility, frame-transport, and recovery surfaces remain incomplete.
 
 ## Active workspace
 
@@ -46,18 +46,33 @@ There is no current 10 ms GUI polling loop to replace.
 
 ## Shell and isolation status
 
-Current shell state is single-view:
+The default GUI shell remains single-view:
 
 - one `BrowserState`,
 - one history vector/index,
 - one focused page input,
-- one optional `BrowserPageRuntime`.
+- one optional in-process `BrowserPageRuntime`.
 
 `BrowserPageRuntime` owns the DOM, `SilkContext`, stylesheet/index, fused
 workspace/results, display list, image state, and raster scratch in the same
-process as browser chrome. Renderer crash/hang isolation, multi-tab state,
-profiles, permissions, downloads, and process supervision are open program
-items.
+process as browser chrome.
+
+The process boundary is no longer absent:
+
+- engine protocol v1 defines bounded, view-oriented commands/events and lifecycle
+  state machines;
+- the browser binary can re-exec itself as a supervised native worker;
+- asynchronous `EventIngress` drains the child event pipe through count and exact
+  wire-byte bounds;
+- queue overflow and malformed envelopes preserve typed failure before
+  disconnection;
+- shutdown has a deadline, kills an unresponsive worker, and reaps every path.
+
+The worker does not yet carry the default GUI page runtime or frame bytes on
+`main`. Worker-owned navigation/runtime construction is in a separate draft;
+sealed frame transfer, input, incremental damage, crash/restart, shell cutover,
+multi-view state, persistent profile ownership, permissions, and downloads
+remain open program items.
 
 ## Conformance evidence
 
@@ -155,9 +170,20 @@ selected retained-render paths. It does not include:
 - display refresh/scanout,
 - arbitrary full-tree layout or repaint.
 
-All performance reports must separate input dispatch, JavaScript/model commit,
-layout, raster, frame submission, compositor-visible presentation, and network
-or service latency.
+Cache locality is capacity-adaptive. No fixed 32 MiB cache or 20 MiB hot-set
+number is an implementation requirement. Nominal/effective cache capacity,
+latency and miss-rate knees, affinity, competing load, RSS, private state, queue
+wire bytes, and frame-pool bytes are separate measurements.
+
+The first valid five-run `bench_pipeline` locality observation used the required
+`parallel-render` feature on a 96 MiB-LLC host and recorded median IPC 1.47,
+generic miss ratio 0.197, maximum RSS 10,184 KiB, median elapsed time 998 ms,
+and about 9.9e9 instructions. It validates the measurement lane on that host; it
+does not establish a smaller-capacity knee.
+
+All performance reports separate input dispatch, JavaScript/model commit,
+layout, raster, frame submission, compositor-visible presentation, network or
+service latency, and counter availability.
 
 ## Known public-web blockers
 
@@ -178,11 +204,13 @@ The native engine still lacks or only partially implements:
 GitHub issue #50 and
 `docs/roadmaps/BROWSER-FUNCTIONALIZATION-ACTION-PLAN.md` define the program:
 
-1. make status and evidence mechanically consistent,
-2. specify and prove a process-neutral engine boundary using the native engine,
-3. run comparable WPE/Wry/Servo/CEF integration spikes before fixing a backend
+1. complete native runtime, frame, input, and recovery extraction behind protocol
+   v1 without mirroring mutable page state in the shell,
+2. select whole-pipeline, phase-local, or streaming native policy from controlled
+   cache-capacity and state-size measurements,
+3. run comparable WPE/Wry/Servo/CEF integration spikes before fixing a fallback
    verdict or crate split,
-4. build a multi-view browser shell and persistent profile substrate,
+4. build a multi-view shell and persistent profile substrate,
 5. build a native virtualized AI-chat mode with bounded mounted state,
-6. mature the native engine independently through upstream WPT, loader semantics,
-   enforcement, and sandboxing.
+6. mature the native engine through upstream WPT, loader semantics, enforcement,
+   sandboxing, and expanded public-web coverage.
