@@ -3,4 +3,11 @@
 # Installed via scripts/install-git-hooks.sh. See docs/development/LOCAL-GATE.md.
 set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
+HOOK_DIR="$(git rev-parse --git-path hooks)"
+
+# A hook the installer displaced runs first, on the same grounds as pre-push.
+if [ -x "${HOOK_DIR}/pre-commit.local" ]; then
+    "${HOOK_DIR}/pre-commit.local" "$@"
+fi
+
 exec make -C "${REPO_ROOT}" check
