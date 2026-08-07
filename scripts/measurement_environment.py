@@ -248,17 +248,24 @@ def capture() -> dict[str, Any]:
     }
 
 
-def inject(path: Path, key: str = "measurement_environment") -> None:
+def inject(
+    path: Path,
+    key: str = "measurement_environment",
+    envelope: dict[str, Any] | None = None,
+) -> None:
     """Adds the envelope to an existing JSON artifact under ``key``.
 
     Harnesses that write their scorecard from Rust gain the envelope this way
-    rather than reimplementing sysfs reads per language.
+    rather than reimplementing sysfs reads per language. Passing an envelope
+    captured before the run keeps `git.dirty` describing the tree the
+    measurement ran against; capturing after the harness has written its
+    scorecard would report the artifact's own write as an uncommitted change.
     """
 
     document = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(document, dict):
         raise ValueError(f"{path}: expected a JSON object, found {type(document).__name__}")
-    document[key] = capture()
+    document[key] = capture() if envelope is None else envelope
     path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
 
 
@@ -278,13 +285,24 @@ def main(argv: list[str] | None = None) -> int:
         default="measurement_environment",
         help="object key --inject writes under (default: measurement_environment)",
     )
+    parser.add_argument(
+        "--from",
+        dest="source",
+        type=Path,
+        metavar="ENVELOPE",
+        help="inject this previously captured envelope instead of capturing now",
+    )
     args = parser.parse_args(argv)
+
+    envelope: dict[str, Any] | None = None
+    if args.source is not None:
+        envelope = json.loads(args.source.read_text(encoding="utf-8"))
 
     for artifact in args.inject:
         if not artifact.is_file():
             print(f"measurement_environment: no such artifact: {artifact}", file=sys.stderr)
             return 1
-        inject(artifact, args.key)
+        inject(artifact, args.key, envelope)
         print(f"measurement_environment: embedded envelope in {artifact}")
 
     if args.output is not None:

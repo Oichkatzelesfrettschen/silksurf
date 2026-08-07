@@ -449,7 +449,7 @@ fn write_scorecard(summary: &Summary) {
     let executed = summary.total - summary.skipped;
     let revision = corpus_revision().unwrap_or_else(|| "unknown".to_string());
     let json = format!(
-        "{{\n  \"runner\": \"html5lib_tree_construction\",\n  \"runner_kind\": \"wpt-tree-construction\",\n  \"corpus\": \"wpt html/syntax/parsing/resources\",\n  \"corpus_revision\": \"{revision}\",\n  \"total\": {},\n  \"executed\": {},\n  \"pass\": {},\n  \"expected_fail\": {},\n  \"skip\": {},\n  \"rate_executed\": {:.4},\n  \"rate_total\": {:.4}\n}}\n",
+        "{{\n  \"runner\": \"html5lib_tree_construction\",\n  \"runner_kind\": \"wpt-tree-construction\",\n  \"corpus\": \"wpt html/syntax/parsing/resources\",\n  \"corpus_revision\": \"{revision}\",\n  \"oracle\": \"the Dom parse_html builds, serialized in html5lib format, equals the corpus #document; a case whose id the expectations file marks expected-fail counts as a recorded gap rather than a pass\",\n  \"total\": {},\n  \"executed\": {},\n  \"pass\": {},\n  \"expected_fail\": {},\n  \"skip\": {},\n  \"rate_executed\": {:.4},\n  \"rate_total\": {:.4}\n}}\n",
         summary.total,
         executed,
         summary.passed,
