@@ -190,7 +190,7 @@ Finding documents carry chronology: dated frontmatter, `last_verified`,
 reference pairs with a durable identifier.
 
 - Wrong: `the fix landed via PR #58`
-- Right: `landed in 3af56ff (silksurf_core::engine_protocol wire framing);
+- Right: `landed in 640166e (silksurf_core::engine_protocol wire framing);
   PR #58 for cross-link`
 
 Markdown loaded by agents uses exactly one H1, heading depth no deeper than

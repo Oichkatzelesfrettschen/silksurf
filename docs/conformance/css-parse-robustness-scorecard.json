@@ -13,7 +13,7 @@
     "schema_version": 1,
     "timestamp_utc": "2026-08-07T03:55:33Z",
     "git": {
-      "commit": "837627284592555bc3db87590b46a87749ffff26",
+      "commit": "6f3beef19ea54e7a89f53fec553435f25fd0efc9",
       "branch": "measurement-provenance-envelope",
       "dirty": false
     },

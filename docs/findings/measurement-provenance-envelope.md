@@ -61,7 +61,7 @@ now captures once before any harness runs and embeds that one envelope in every
 scorecard from the invocation, which is also the truthful grouping: three
 harnesses in one session ran against one host state.
 
-Regenerating the three scorecards from a clean tree at `8376272` reproduced
+Regenerating the three scorecards from a clean tree at `6f3beef` reproduced
 every count exactly -- 3,019 of 6,640 executed, 1,440 of 1,726 executed, and 603
 of 603 accepted, against the same two corpus revisions. That establishes
 determinism across runs on one host at one commit against one corpus, which is

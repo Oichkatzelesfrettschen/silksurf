@@ -86,7 +86,7 @@ path:
 | everything else | 45.2 MiB |
 
 `build-asan/` holds compiled ELF: a 15.1 MB `silksurf` binary and roughly twelve
-2.3 MB test binaries. It appears in two commits and left tracking at `749cecb`
+2.3 MB test binaries. It appears in two commits and left tracking at `8e6d201`
 ("chore: add build-*/ to .gitignore, remove build-asan from tracking"). It is
 absent from the working tree and `.gitignore:6` covers it. It is dead weight in
 the pack and nothing else.
@@ -119,7 +119,7 @@ repository binds identity to SHAs in several load-bearing places:
 - the three conformance scorecards embed `measurement_environment.git.commit`,
   naming the commit that produced each rate;
 - `docs/findings/` cite commits directly, which AGENTS.md requires: "landed in
-  3af56ff (silksurf_core::engine_protocol wire framing)";
+  640166e (silksurf_core::engine_protocol wire framing)";
 - commit trailers use `Fixes:` against earlier commits;
 - 82 merged pull requests on the remote hold the old SHAs.
 
@@ -158,7 +158,7 @@ reference held in the object it rewrites.
 design from main = <sha>`. Three of them -- `662ddb9` (AD-018), `418ea00`
 (AD-019), and `63e7551` (AD-020) -- are not ancestors of `main`. They resolve
 through the GitHub API, so some pull-request ref still reaches them, and they do
-not resolve in a fresh clone. Only `409356d` is on the main line.
+not resolve in a fresh clone. Only `1066d3a` is on the main line.
 
 This predates any rewrite and survives one: a SHA outside the rewritten refs
 carries no `commit-map` entry, so the tool reports it rather than guessing a

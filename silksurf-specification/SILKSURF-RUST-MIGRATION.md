@@ -3,7 +3,7 @@
 > Updated 2026-04-30: expanded from a 70-line plan stub into the
 > spec <-> implementation map. The migration phases (1-8) below are
 > historical; all phases land in the workspace as of `main` =
-> `ac00472`. The current debt-reconciliation roadmap is
+> `69eb48a`. The current debt-reconciliation roadmap is
 > `docs/roadmaps/DEBT-RECONCILIATION-ROADMAP.md`. See
 > `docs/REPO-LAYOUT.md` for the directory inventory.
 

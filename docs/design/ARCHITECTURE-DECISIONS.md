@@ -724,7 +724,7 @@ landed yet; the ADR will be filed when the implementation work begins.
 ## AD-016: Fused Render Pipeline (FusedWorkspace)
 
 **Status**: Accepted
-**Date**: 2026-04-30 (codifies design from `main` = `409356d`)
+**Date**: 2026-04-30 (codifies design from `main` = `1066d3a`)
 **Deciders**: Architecture Team
 
 ### Context

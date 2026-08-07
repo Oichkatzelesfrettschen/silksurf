@@ -27,7 +27,7 @@ The three upstream-corpus scorecards in this directory carry a
 `perf/measurement-environment.schema.json`, captured once before the harnesses
 ran. The current rows come from:
 
-  * commit `837627284592555bc3db87590b46a87749ffff26`, clean working tree
+  * commit `6f3beef19ea54e7a89f53fec553435f25fd0efc9`, clean working tree
   * `rustc 1.94.1 (e408947bf 2026-03-25)`
   * AMD Ryzen 5 5600X3D, 12 logical CPUs, 96 MiB last-level cache
   * Linux 7.1.6 cachyos, glibc 2.44, `performance` scaling governor
