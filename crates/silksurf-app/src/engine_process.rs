@@ -26,8 +26,8 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use crate::browser_types::{
-    BrowserFrameBuffers, BrowserNavigationRequest, BrowserPage, BrowserRenderConfig,
-    FRAME_HEIGHT, FRAME_WIDTH, ImageResourceCache, NavigationResult,
+    BrowserFrameBuffers, BrowserNavigationRequest, BrowserPage, BrowserRenderConfig, FRAME_HEIGHT,
+    FRAME_WIDTH, ImageResourceCache, NavigationResult,
 };
 use crate::{build_browser_page_with_buffers_for_height, load_navigation_payload};
 use silksurf_core::engine_protocol::{
@@ -175,7 +175,12 @@ fn run_worker_stdio() -> i32 {
 
     let stdout = io::stdout();
     let mut writer = stdout.lock();
-    match run_runtime_actor(receiver, sender, &mut writer, production_navigation_loader()) {
+    match run_runtime_actor(
+        receiver,
+        sender,
+        &mut writer,
+        production_navigation_loader(),
+    ) {
         Ok(()) => 0,
         Err(error) => {
             eprintln!("[SilkSurf] native engine worker failed: {error}");
@@ -596,11 +601,7 @@ impl NativeEngineWorker {
     }
 
     fn profile_config(&mut self, id: ProfileId) -> BrowserRenderConfig {
-        if let Some((_, config)) = self
-            .profiles
-            .iter()
-            .find(|(profile, _)| *profile == id)
-        {
+        if let Some((_, config)) = self.profiles.iter().find(|(profile, _)| *profile == id) {
             return config.clone();
         }
         let config = BrowserRenderConfig::default();
@@ -632,9 +633,9 @@ impl NativeEngineWorker {
                 Ok(true)
             }
             ProtocolCommand::Stop { view } => self.stop_navigation(view, writer),
-            command @ (ProtocolCommand::Resize { .. } | ProtocolCommand::SetVisible { .. }) => {
-                Err(NativeEngineProcessError::UnsupportedCommand(command_name(&command)))
-            }
+            command @ (ProtocolCommand::Resize { .. } | ProtocolCommand::SetVisible { .. }) => Err(
+                NativeEngineProcessError::UnsupportedCommand(command_name(&command)),
+            ),
             ProtocolCommand::Shutdown => {
                 self.close_all_views(writer)?;
                 Ok(false)
