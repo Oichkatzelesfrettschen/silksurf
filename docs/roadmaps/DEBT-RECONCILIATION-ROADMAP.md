@@ -711,10 +711,18 @@ it -- bidirectional coupling across the boundary the policy separates.
   boundary (nothing production/spec depends on them), so they are tracked
   hygiene rather than a cleanroom-integrity risk.
 
-- **tool-output-relocation**: diff-analysis/tools-output/ (afl-corpus,
-  semgrep, ctags, doxygen, tokei, infer results) is generated evidence;
-  relocate to an ignored path or a dated evidence area outside the
-  reference tree.
+- **tool-output-relocation** -- LANDED. diff-analysis/tools-output/ left
+  tracking and `/diff-analysis/tools-output/` is ignored; the three
+  git-lfs filter rules in .gitattributes go with it, so a fresh clone
+  pulls no LFS objects where it previously pulled 104.5 MiB
+  (docs/findings/git-lfs-payload-audit.md). What the dumps supported was
+  extracted first: the tokei and lizard tables into
+  docs/findings/browser-engine-size-and-complexity-comparison.md, the boa
+  test262 baseline into
+  docs/archive/conformance/boa-upstream-test262-scorecard.json, 100
+  test262-derived seeds into fuzz/corpus/js_runtime/, and the small perf
+  reports and flamegraphs into docs/findings/data/. Gate: `git lfs
+  ls-files` returns nothing.
 - **generated-artifact-relocation**: move generated visualizations/ and
   logs/ (mcp-puppeteer log, .audit.json) likewise; delete the
   diff-analysis mydatabase.db (stray-database-file-removal).

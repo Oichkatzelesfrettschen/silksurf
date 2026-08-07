@@ -37,11 +37,13 @@ core
 # fuzz/corpus/<target>/ is the cargo-fuzz convention for both committed
 # seeds AND the auto-extended runtime corpus. We track committed seeds
 # (small files for bootstrap) and ignore everything else libfuzzer adds.
-# Pattern: track files matching NN_*.* (numbered seeds we author) and
-# README.md; ignore any other auto-discovered artefact.
+# Pattern: track files matching NN_*.* (numbered seeds we author),
+# test262_NNN.* (seeds derived from test262 cases), and README.md; ignore
+# any other auto-discovered artefact.
 /fuzz/artifacts/
 /fuzz/corpus/*/*
 !/fuzz/corpus/*/[0-9][0-9]_*.*
+!/fuzz/corpus/*/test262_[0-9][0-9][0-9].*
 !/fuzz/corpus/*/README.md
 !/fuzz/corpus/README.md
 /fuzz_out/
@@ -59,9 +61,21 @@ core
 /silksurf-extras/
 /silksurf-js/test262/
 
+## Reference-tool output ------------------------------------------------
+# diff-analysis/tools-output/ holds tokei, lizard, semgrep, and profiler output
+# over the reference checkouts. It is regenerable, nothing reads it, and
+# tracking it cost 104.5 MiB of git-lfs storage
+# (docs/findings/git-lfs-payload-audit.md). The measurements it supported live
+# in docs/findings/browser-engine-size-and-complexity-comparison.md; the
+# hand-written analysis under diff-analysis/ stays tracked.
+/diff-analysis/tools-output/
+
 ## Accidental artifacts --------------------------------------------------
 # `~/` is created by tools that write to "$HOME" without expanding the tilde.
 /~/
+# heaptrack and perf leave captures beside the binary they profiled.
+*.heaptrack.zst
+heaptrack.*.zst
 
 ## TLA+ scratch ----------------------------------------------------------
 # TLC writes state-graph artefacts here; the .tla model itself is tracked.

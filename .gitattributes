@@ -1,4 +1,7 @@
-# Analysis artifacts / large datasets
-diff-analysis/tools-output/** filter=lfs diff=lfs merge=lfs -text
-*.perf.data filter=lfs diff=lfs merge=lfs -text
-*.zst filter=lfs diff=lfs merge=lfs -text
+# git-lfs tracked nothing but generated analysis output under
+# diff-analysis/tools-output/, which docs/findings/git-lfs-payload-audit.md
+# measured at 104.5 MiB and no consumer. The measurements it supported live in
+# docs/findings/browser-engine-size-and-complexity-comparison.md and
+# docs/archive/conformance/boa-upstream-test262-scorecard.json; the raw dumps
+# are regenerable from the reference checkouts. Adding a filter rule back means
+# a fresh clone pays for the objects it matches.
