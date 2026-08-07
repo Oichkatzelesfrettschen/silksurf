@@ -21,7 +21,11 @@ the **committed seed corpus** that the harness starts from.
     !important.
   * `js_runtime/` -- ES5 + ES6 syntax samples covering var/let/const,
     functions, arrays, objects, control flow, classes, template literals,
-    arrow functions, generators.
+    arrow functions, generators, plus 100 `test262_NNN.js` cases carried
+    over from the retired AFL parser corpus. Those are procedurally
+    generated test262 sources covering destructuring binding, async
+    generators, class expressions, and default parameters -- syntax the
+    hand-authored seeds do not reach.
 
 ## Running
 
@@ -37,15 +41,21 @@ cargo +nightly fuzz run html_tokenizer -- -max_total_time=300
 A seed is just a file containing the input bytes. Pick a name that
 sorts naturally (`NN_short_description.ext`) and prefer many small
 seeds (under 1 KB each) over a few large ones -- libfuzzer mutates
-better with diverse short seeds.
+better with diverse short seeds. `.gitignore` tracks exactly the
+`NN_*.*`, `test262_NNN.*`, and `README.md` names, so a seed outside
+those forms stays untracked alongside libfuzzer's runtime additions.
 
 When a previously-uncovered code path is found via fuzzing, copy the
 discovered minimised input from `fuzz/corpus/<target>/` into here so
 the next run starts already covering it.
 
-## Why the corpus is small
+## Corpus size
 
-The current seed counts (~17-20 per target) are the bootstrap baseline.
-Expansion is open -- harvesting from
-html5lib-tests, web-platform-tests, and the test262 corpus once those
-are vendored.
+The HTML and CSS targets carry roughly 17 to 20 hand-authored seeds each,
+the bootstrap baseline. `js_runtime/` carries 120: the 20 hand-authored
+plus 100 test262-derived cases.
+
+Further expansion draws on the upstream corpora
+`scripts/fetch_html_css_test_corpora.sh` clones into the untracked
+`silksurf-extras/` tree. Those checkouts move to upstream HEAD on every
+fetch, so a harvested seed is copied here rather than referenced there.
