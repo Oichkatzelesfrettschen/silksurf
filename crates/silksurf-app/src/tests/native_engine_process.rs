@@ -21,8 +21,8 @@ fn command(command: ProtocolCommand) -> WorkerMessage {
 fn fixture_payload(
     request: BrowserNavigationRequest,
     config: BrowserRenderConfig,
-) -> NavigationResult {
-    Ok(BrowserPagePayload {
+) -> BrowserPagePayload {
+    BrowserPagePayload {
         url: request.url,
         html: "<!doctype html><html><body><p>worker page</p></body></html>".to_string(),
         css_text: "html, body { display: block; } body { margin: 0; }".to_string(),
@@ -31,11 +31,11 @@ fn fixture_payload(
         images: Vec::new(),
         render_config: config,
         parsed_document: None,
-    })
+    }
 }
 
 fn fixture_loader() -> NavigationLoader {
-    Arc::new(|request, config, _image_cache| fixture_payload(request, config))
+    Arc::new(|request, config, _image_cache| Ok(fixture_payload(request, config)))
 }
 
 fn actor_transport(
@@ -238,10 +238,11 @@ fn navigation_fetch_panic_releases_the_single_worker_slot() {
     let attempts = Arc::new(AtomicUsize::new(0));
     let loader_attempts = Arc::clone(&attempts);
     let loader: NavigationLoader = Arc::new(move |request, config, _image_cache| {
-        if loader_attempts.fetch_add(1, Ordering::SeqCst) == 0 {
-            panic!("synthetic navigation fetch panic");
-        }
-        fixture_payload(request, config)
+        // The first fetch panics; the assertion is the injection point, not a
+        // failed expectation. Later fetches prove the worker slot reopened.
+        let attempt = loader_attempts.fetch_add(1, Ordering::SeqCst);
+        assert!(attempt > 0, "synthetic navigation fetch panic");
+        Ok(fixture_payload(request, config))
     });
     let (sender, mut ingress, actor) = actor_transport(loader);
 
@@ -332,7 +333,7 @@ fn stop_discards_a_stale_navigation_completion() {
     let loader_barrier = Arc::clone(&barrier);
     let loader: NavigationLoader = Arc::new(move |request, config, _image_cache| {
         loader_barrier.wait();
-        fixture_payload(request, config)
+        Ok(fixture_payload(request, config))
     });
     let (sender, mut ingress, actor) = actor_transport(loader);
 
@@ -408,8 +409,7 @@ fn stop_discards_a_stale_navigation_completion() {
 #[test]
 fn replacement_navigation_reuses_the_previous_viewport_buffers() {
     let request = BrowserNavigationRequest::get("about:blank#buffers".to_string());
-    let payload = fixture_payload(request, BrowserRenderConfig::default())
-        .expect("fixture payload");
+    let payload = fixture_payload(request, BrowserRenderConfig::default());
     let mut page = build_browser_page_with_buffers_for_height(
         payload,
         BrowserFrameBuffers::default(),

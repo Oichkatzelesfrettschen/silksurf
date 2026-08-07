@@ -914,7 +914,10 @@ fn run_runtime_actor<W: Write>(
     loader: NavigationLoader,
 ) -> Result<(), NativeEngineProcessError> {
     let mut worker = NativeEngineWorker::new(sender, loader);
-    while let Ok(message) = receiver.recv() {
+    // Iterating by value moves the receiver into the actor, so returning drops
+    // the last receiver and the command reader's next `send` fails, which is
+    // how `read_commands_until_closed` learns the actor is gone.
+    for message in receiver {
         match message {
             WorkerMessage::Command(command) => {
                 if !worker.handle_command(command, writer)? {
