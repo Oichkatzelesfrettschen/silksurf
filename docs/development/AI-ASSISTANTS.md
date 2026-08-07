@@ -21,12 +21,12 @@ also contains legacy C sources kept as reference only.
 
 ## Key docs
 - Architecture: `docs/ARCHITECTURE.md`
-- Build and tooling: `docs/BUILD_NOTES.md`, `docs/RUST_TOOLING.md`
-- Perf baselines: `docs/PERF_BASELINES.md`
-- Engine perf roadmap: `docs/ENGINE_PERF_ROADMAP.md`
-- JS perf roadmap: `docs/JS_ENGINE_PERF_ROADMAP.md`
-- Installation requirements: `docs/INSTALLATION_REQUIREMENTS.md`
-- Warning inventory: `docs/WARNINGS_AUDIT.md`
+- Build and tooling: `docs/development/BUILD.md`, `docs/TOOLCHAIN.md`
+- Perf baselines: `docs/PERFORMANCE.md`, `perf/baseline.json`
+- Roadmaps: `docs/roadmaps/SPA-CAPABILITY-ROADMAP.md` (forward),
+  `docs/roadmaps/DEBT-RECONCILIATION-ROADMAP.md` (debt)
+- Current state: `docs/STATUS.md`
+- Conformance: `docs/conformance/SCORECARD.md`
 
 ## Next focus
 - Add incremental style invalidation and pre-sorted rule application.

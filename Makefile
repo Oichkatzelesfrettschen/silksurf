@@ -81,6 +81,11 @@ check:
 	cargo fmt --all -- --check
 	@echo "==> clippy -D warnings"
 	$(RUSTFLAGS_DENY) cargo clippy --workspace --all-targets -- $(CLIPPY_DENY)
+	@echo "==> clippy -D warnings (fuzz)"
+	@# fuzz/ declares its own [workspace], so the --workspace run above never
+	@# reaches it. The fuzz targets drive the same production entry points a
+	@# page load does, so they lint under the same rules.
+	cd fuzz && $(RUSTFLAGS_DENY) cargo clippy --all-targets -- $(CLIPPY_DENY)
 	@if [ -x scripts/lint_unwrap.sh ]; then scripts/lint_unwrap.sh; fi
 	@if [ -x scripts/lint_unsafe.sh ]; then scripts/lint_unsafe.sh; fi
 	@if [ -x scripts/lint_glossary.sh ]; then scripts/lint_glossary.sh; fi

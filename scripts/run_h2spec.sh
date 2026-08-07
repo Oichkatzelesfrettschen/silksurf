@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/run_h2spec.sh -- SNAZZY-WAFFLE P5.S3 h2spec conformance driver.
+# scripts/run_h2spec.sh -- h2spec conformance driver.
 #
 # WHY: HTTP/2 (RFC 9113) is a large stateful protocol. Validating frame
 # semantics, flow control, HPACK encoding, and CONTINUATION sequencing
@@ -65,7 +65,7 @@ fi
 # Step 2: locate or warn about the silksurf h2 server harness.
 # ---------------------------------------------------------------------------
 # silksurf-app does not yet ship a standalone HTTP/2 test server. Until
-# that lands (tracked in SNAZZY-WAFFLE roadmap P5.S3), the operator must
+# that lands (tracked in docs/development/RUNBOOK-H2SPEC.md), the operator must
 # point us at an externally-running HTTP/2 endpoint via $SILKSURF_H2_HOST.
 SERVER_PID=""
 if [ "$H2_HOST" = "localhost" ] && [ -z "${SILKSURF_H2_HOST:-}" ]; then
@@ -90,7 +90,7 @@ this time. Either:
             scripts/run_h2spec.sh
       (this validates the toolchain but NOT silksurf's own h2 stack);
 
-  (b) wait for SNAZZY-WAFFLE P5.S3 to land an in-tree h2 test server
+  (b) wait for an in-tree h2 test server to land
       (tracked in silksurf-specification/SILKSURF-RUST-MIGRATION.md).
 EOF
         exit 2

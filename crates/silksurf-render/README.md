@@ -21,7 +21,7 @@ framebuffer.
 
 `fill_row_sse2` (gated on `is_x86_feature_detected!("sse2")`) does
 4-pixel SIMD writes via `_mm_storeu_si128`. NEON path TBD (roadmap
-P8.S7). All `unsafe` blocks here are documented at
+open). All `unsafe` blocks here are documented at
 `docs/design/UNSAFE-CONTRACTS.md`.
 
 ## Tiles + rayon

@@ -1,6 +1,6 @@
 # silksurf-tls Operations
 
-## Resource bounds (P8.S8)
+## Resource bounds
 
 | Constant                  | Default | Enforcement site                                       | Failure mode                       |
 |---------------------------|---------|---------------------------------------------------------|------------------------------------|
@@ -11,7 +11,7 @@ GAP: rustls itself does not expose a handshake-level timeout API
 The constant is therefore advisory in this crate and enforced at the
 silksurf-net I/O boundary via
 `TcpStream::set_read_timeout(Some(Duration::from_secs(MAX_TLS_HANDSHAKE_SECS)))`.
-Once a richer silksurf-tls handshake driver lands (P5.S4) it should
+Once a richer silksurf-tls handshake driver lands it should
 consume this constant directly via `TlsConfig` builder options.
 
 ## Root store loading order
@@ -53,17 +53,17 @@ Inherited from rustls 0.23 defaults:
 
 ML-KEM hybrid (X25519MLKEM768) is on the rustls roadmap; silksurf-tls
 will pick it up automatically when rustls exposes it as a default. No
-silksurf-tls change required. Tracked in SNAZZY-WAFFLE roadmap as
+silksurf-tls change required. Tracked in docs/roadmaps/DEBT-RECONCILIATION-ROADMAP.md as
 `crypto-agility / PQ` debt stream.
 
 ## OCSP stapling
 
-Not yet enforced. The roadmap P5.S4 work wires RFC 6066 vectors and
+Not yet enforced. Wiring RFC 6066 vectors and
 defines the policy.
 
 ## HSTS
 
-Not yet enforced. The roadmap P5.S4 work wires RFC 6797 behavior into
+Not yet enforced. Wiring RFC 6797 behavior into
 `silksurf-net`.
 
 ## Runtime CA injection

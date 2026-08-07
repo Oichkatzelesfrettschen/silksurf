@@ -1,0 +1,11 @@
+{
+  "runner": "css_harness",
+  "runner_kind": "css-parse-robustness",
+  "oracle": "parse_stylesheet_bytes returns without error or panic; the parsed stylesheet is discarded",
+  "corpus_revision": "1924c6e9784b3c1da4ad5bfcbfeea64b2a886e7b",
+  "total": 871,
+  "executed": 603,
+  "accepted": 603,
+  "skip": 268,
+  "rate_executed": 1.0000
+}

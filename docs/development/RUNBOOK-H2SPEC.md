@@ -58,7 +58,7 @@ Two options.
 
 #### Option A -- silksurf in-tree HTTP/2 server (preferred)
 
-Tracking issue: SNAZZY-WAFFLE roadmap P5.S3.
+Tracking: an in-tree HTTP/2 server target.
 
 Once the in-tree server lands as `cargo run -p silksurf-app --bin
 silksurf-h2-server`, the script auto-spawns it. Until then, the script
@@ -136,6 +136,6 @@ recognise the run-output cadence.
 
   * `docs/conformance/SCORECARD.md` -- aggregated dashboard.
   * `crates/silksurf-net/` -- silksurf's HTTP/2 client (h2 server
-    harness queued P5.S3).
+    harness is open).
   * `silksurf-specification/SILKSURF-RUST-MIGRATION.md` -- cleanroom
     migration tracker; h2spec row.

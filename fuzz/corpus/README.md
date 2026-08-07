@@ -10,7 +10,7 @@ the **committed seed corpus** that the harness starts from.
 
   * `html_tokenizer/` -- minimal HTML inputs covering tag forms, attribute
     forms, comments, doctypes, entities, and a few invalid-byte cases.
-  * `html_tree_builder/` -- well-formed and edge-case documents that
+  * `html_parse/` -- well-formed and edge-case documents that
     exercise insertion modes (table, void elements, foreign content,
     template).
   * `css_tokenizer/` -- bare rules, classes, ids, combinators, attribute
@@ -46,6 +46,6 @@ the next run starts already covering it.
 ## Why the corpus is small
 
 The current seed counts (~17-20 per target) are the bootstrap baseline.
-Expansion is queued in SNAZZY-WAFFLE roadmap P3.S1 -- harvesting from
+Expansion is open -- harvesting from
 html5lib-tests, web-platform-tests, and the test262 corpus once those
 are vendored.

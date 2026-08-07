@@ -496,7 +496,7 @@ unsafe fn fill_row_sse2(row: &mut [u32], pixel: u32) {
 }
 
 /*
- * fill_row_neon -- AArch64 NEON 4-pixel fill (P8.S7).
+ * fill_row_neon -- AArch64 NEON 4-pixel fill.
  *
  * WHY: AArch64 carries mandatory NEON; mirroring the SSE2 path closes the
  * throughput gap on AArch64 Linux / Apple Silicon cross-builds.

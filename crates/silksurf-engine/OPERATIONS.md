@@ -49,5 +49,4 @@ Run `make perf-baselines` to append current values to `perf/history.ndjson`.
 |---|---|---|
 | Max CSS rules per stylesheet | `MAX_CSS_RULES` (silksurf-css) | `crates/silksurf-css/src/lib.rs` |
 | Max HTML tokens per feed | `MAX_TOKENS_PER_FEED` (silksurf-html) | `crates/silksurf-html/src/lib.rs` |
-| Max JS call stack depth | `MAX_CALL_STACK_DEPTH` (silksurf-js) | `silksurf-js/src/vm/mod.rs` |
-| JS yield loop bound | 2^20 steps | `silksurf-js/src/vm/generator.rs` |
+| JS call stack depth and step budget | owned by `boa_engine` since AD-025 retired the hand-written VM; silksurf-js sets no bound of its own | `silksurf-js/src/boa_backend/mod.rs` |

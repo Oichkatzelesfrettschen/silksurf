@@ -26,7 +26,7 @@ See silksurf-dom OPERATIONS.md. The resolution table is in the DOM; core exports
 | Variant | Cause |
 |---|---|
 | `Css(CssError)` | CSS parse failure |
-| `Html(TreeBuildError)` | HTML parse / tree-build failure |
+| `HtmlTreeBuild(String)` | HTML parse / tree-build failure |
 | `Net(NetError)` | Network I/O failure |
 | `Js(String)` | JavaScript runtime error |
 | `Io(std::io::Error)` | File or pipe I/O |
