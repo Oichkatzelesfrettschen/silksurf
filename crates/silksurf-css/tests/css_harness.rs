@@ -332,11 +332,81 @@ fn css_harness_compliance() {
     }
 
     summary.print(&root, &expectations, &options);
+    write_scorecard(&summary);
 
     assert!(
         !summary.has_hard_failures(options.fail_on_xpass),
         "[css-harness] compliance run reported failures"
     );
+}
+
+/// Emit the scorecard for this harness's oracle.
+///
+/// `parse_case` accepts a file when `parse_stylesheet_bytes` returns without
+/// an error or a panic; it discards the parsed stylesheet. The scorecard names
+/// that oracle in the `oracle` field, because the rate measures parser
+/// robustness over the corpus and carries no claim about cascade or computed
+/// -value correctness.
+fn write_scorecard(summary: &HarnessSummary) {
+    let Ok(raw_path) = env::var("CSS_HARNESS_SCORECARD") else {
+        return;
+    };
+    let requested = PathBuf::from(&raw_path);
+    let path = if requested.is_absolute() {
+        requested
+    } else {
+        repo_root().join(requested)
+    };
+    let executed = summary.total.saturating_sub(summary.skipped);
+    let accepted = summary.passed + summary.xfailed;
+    let revision = corpus_revision().unwrap_or_else(|| "unknown".to_string());
+    let json = format!(
+        "{{\n  \"runner\": \"css_harness\",\n  \"runner_kind\": \"css-parse-robustness\",\n  \"oracle\": \"parse_stylesheet_bytes returns without error or panic; the parsed stylesheet is discarded\",\n  \"corpus_revision\": \"{revision}\",\n  \"total\": {},\n  \"executed\": {},\n  \"accepted\": {},\n  \"skip\": {},\n  \"rate_executed\": {:.4}\n}}\n",
+        summary.total,
+        executed,
+        accepted,
+        summary.skipped,
+        ratio(accepted, executed),
+    );
+    if let Err(error) = fs::write(&path, json) {
+        eprintln!(
+            "[css-harness] scorecard write failed for {}: {error}",
+            path.display()
+        );
+    }
+}
+
+/// Read the pinned corpus revision so a scorecard cannot outlive its corpus.
+fn corpus_revision() -> Option<String> {
+    let manifest = repo_root().join("silksurf-extras/html-css-test-corpora-revisions.txt");
+    let raw = fs::read_to_string(manifest).ok()?;
+    raw.lines()
+        .find(|line| line.starts_with("wpt-css-parser-subset "))
+        .and_then(|line| line.split_whitespace().nth(1))
+        .map(str::to_string)
+}
+
+fn ratio(numerator: usize, denominator: usize) -> f64 {
+    if denominator == 0 {
+        return 0.0;
+    }
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "corpus counts stay far below f64 integer precision"
+    )]
+    {
+        numerator as f64 / denominator as f64
+    }
+}
+
+/// CARGO_MANIFEST_DIR points at crates/silksurf-css; the repository root is
+/// two levels above it.
+fn repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .unwrap_or_default()
 }
 
 fn parse_case(input: &[u8]) -> ParseOutcome {
