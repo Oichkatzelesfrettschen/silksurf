@@ -1,7 +1,7 @@
 //! Workspace-wide canonical error type.
 //!
 //! WHY: Per-crate error types (`CssError`, `DomError`, `TokenizeError`,
-//! `TreeBuildError`, `NetError`, `TlsConfigError`, `EngineError`, `JsError`) are
+//! `NetError`, `TlsConfigError`, `EngineError`, `JsError`) are
 //! useful at their crate boundaries but cause `From` proliferation and
 //! `Box<dyn Error>` ergonomics drift at cross-crate boundaries. `SilkError`
 //! is the canonical type that every public API should funnel through at

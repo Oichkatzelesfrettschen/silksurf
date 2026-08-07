@@ -61,11 +61,52 @@ items.
 
 ## Conformance evidence
 
+### HTML tree construction (upstream corpus, production parse path)
+
+- runner kind: `wpt-tree-construction`
+- corpus: WPT `html/syntax/parsing/resources`, the home html5lib moved its
+  tree-construction `.dat` files to
+- result: 1,440 / 1,726 executed = **83.43%**; 1,440 / 1,918 total = **75.08%**
+- path under test: `silksurf_html::parse_html`, the html5ever entry point
+  `silksurf-engine` uses
+- 192 fragment cases count as skipped; `parse_html` is document-mode only
+- 286 recorded gaps sit in
+  `crates/silksurf-html/tests/html5lib-tree-construction.expectations`. Template
+  content (109) and processing instructions (90) account for 199 of them, both
+  reaching the same cause: `silksurf_dom::NodeKind` carries no template-content
+  fragment and no processing-instruction variant, so the adapter in
+  `crates/silksurf-html/src/treesink.rs` drops template children and renders a
+  processing instruction as a comment.
+
+### HTML tokenization (upstream corpus, tooling parse path)
+
+- runner kind: `html5lib-tokenizer`
+- corpus: html5lib-tests `tokenizer`
+- result: 3,019 / 6,640 executed = **45.47%**; 3,019 / 6,806 total = 44.36%
+- path under test: `silksurf_html::Tokenizer`, which serves `wpt_runner` and the
+  CSS harness rather than page loads
+- 166 cases need tokenizer states or a `lastStartTag` the public API does not
+  expose and count as unsupported
+- named character references (2,283) and `test3` state permutations (1,238) lead
+  the 3,621 recorded gaps; the `State` enum carries 8 states against roughly 80
+  in the standard
+
+### CSS parse robustness (upstream corpus)
+
+- runner kind: `css-parse-robustness`
+- corpus: WPT `css/CSS2/syntax`, `css/css-syntax`, `css/selectors/parsing`
+- result: 603 / 603 executed accepted
+- oracle: `parse_stylesheet_bytes` returns without error or panic, and the
+  parsed stylesheet is discarded. The rate measures parser robustness over the
+  corpus; cascade and computed-value correctness stay unmeasured, so this is not
+  a CSS conformance number.
+
 ### Synthetic WPT-style regression harness
 
 - runner kind: `wpt-synthetic`
 - result: **70/70** pass, 0 fail, 0 skip
 - scope: in-tree HTML/CSS/layout/paint/JavaScript-event fixtures
+- role: a regression gate over the fused style-layout-paint pipeline
 - limitation: not the upstream Web Platform Tests corpus; do not quote this as a
   browser interoperability percentage
 

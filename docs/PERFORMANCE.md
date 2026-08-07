@@ -75,9 +75,12 @@ Further compression would require JIT compilation of CSS selectors.
 
 ## Hot Paths (Summary)
 DOM/HTML:
-- HTML tokenizer (`crates/silksurf-html/src/lib.rs`): delimiter-first scans,
-  memchr fast paths, character reference decoding.
-- Tree builder (`crates/silksurf-html/src/tree_builder.rs`): batch node creation.
+- HTML tokenizer (`crates/silksurf-html/src/lib.rs`): delimiter-first scans and
+  memchr fast paths. This tokenizer serves tooling; named character references
+  stay unresolved, which the html5lib tokenizer harness records.
+- Tree construction (`crates/silksurf-html/src/treesink.rs`): html5ever drives
+  the `TreeSink`, which appends into the arena and materializes the resolve
+  table once at `finish`.
 - DOM mutation (`crates/silksurf-dom/src/lib.rs`): batching + dirty-node flush.
 
 CSS:

@@ -34,7 +34,7 @@ Legacy, long-form test plans live in `docs/archive/testing/`.
 ## Fuzzing
 Targets are under `fuzz/`:
 - `cargo fuzz run html_tokenizer`
-- `cargo fuzz run html_tree_builder`
+- `cargo fuzz run html_parse`
 - `cargo fuzz run css_tokenizer`
 - `cargo fuzz run css_parser`
 - `cargo fuzz run js_runtime`

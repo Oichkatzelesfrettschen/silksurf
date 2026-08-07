@@ -71,7 +71,7 @@ scripts/conformance_run.sh         # conformance harness set
 ```
 
 Fuzz targets and corpora live under `fuzz/` (five targets:
-html_tokenizer, html_tree_builder, css_tokenizer, css_parser,
+html_tokenizer, html_parse, css_tokenizer, css_parser,
 js_runtime). Testing strategy: `docs/TESTING.md`. Gate reference:
 `docs/development/LOCAL-GATE.md`.
 

@@ -42,16 +42,28 @@ run_html5lib() {
     if [ -n "${HTML5LIB_TESTS_DIR:-}" ]; then
         echo "    HTML5LIB_TESTS_DIR=$HTML5LIB_TESTS_DIR"
     fi
-    RUSTFLAGS='-D warnings' cargo test -p silksurf-html --test html5lib_harness -- --nocapture
+    HTML5LIB_SCORECARD="$SCORECARD_DIR/html5lib-tokenizer-scorecard.json" \
+    HTML5LIB_FAIL_ON_XPASS=1 \
+    RUSTFLAGS='-D warnings' cargo test -p silksurf-html \
+        --test html5lib_harness -- --nocapture
 }
 
 run_css() {
-    echo "==> css external corpus"
+    echo "==> css external corpus (parse robustness, not conformance)"
     if [ -z "${CSS_TESTS_DIR:-}" ]; then
-        export CSS_TESTS_DIR="$REPO_ROOT/crates/silksurf-css/tests/fixtures/css_harness_corpus"
+        # The upstream WPT subset is the default corpus; the in-tree fixture
+        # directory stands in only when the extras tree is absent.
+        upstream_dir="$REPO_ROOT/silksurf-extras/wpt-css-parser-subset/css"
+        if [ -d "$upstream_dir" ]; then
+            export CSS_TESTS_DIR="$upstream_dir"
+        else
+            export CSS_TESTS_DIR="$REPO_ROOT/crates/silksurf-css/tests/fixtures/css_harness_corpus"
+            echo "    upstream corpus absent; run scripts/fetch_html_css_test_corpora.sh."
+        fi
         echo "    CSS_TESTS_DIR=$CSS_TESTS_DIR"
-        echo "    set CSS_TESTS_DIR=/path/to/css-corpus for a broader sweep."
     fi
+    CSS_HARNESS_SCORECARD="$SCORECARD_DIR/css-parse-robustness-scorecard.json" \
+    CSS_HARNESS_FAIL_ON_XPASS=1 \
     RUSTFLAGS='-D warnings' cargo test -p silksurf-css --test css_harness -- --nocapture
 }
 
@@ -103,6 +115,26 @@ run_h2spec() {
     esac
 }
 
+run_tree_construction() {
+    echo "==> wpt tree construction (upstream corpus, production parse path)"
+    if [ -z "${WPT_HTML_PARSING_DIR:-}" ]; then
+        default_dir="$REPO_ROOT/silksurf-extras/wpt-css-parser-subset/html/syntax/parsing/resources"
+        if [ -d "$default_dir" ]; then
+            export WPT_HTML_PARSING_DIR="$default_dir"
+        else
+            echo "    corpus absent; run scripts/fetch_html_css_test_corpora.sh."
+            echo "    test emits a skip notice rather than a pass."
+        fi
+    fi
+    if [ -n "${WPT_HTML_PARSING_DIR:-}" ]; then
+        echo "    WPT_HTML_PARSING_DIR=$WPT_HTML_PARSING_DIR"
+    fi
+    HTML5LIB_TREE_SCORECARD="$SCORECARD_DIR/html5lib-tree-construction-scorecard.json" \
+    HTML5LIB_TREE_FAIL_ON_XPASS=1 \
+    RUSTFLAGS='-D warnings' cargo test -p silksurf-html \
+        --test html5lib_tree_construction -- --nocapture
+}
+
 run_wpt() {
     echo "==> wpt (synthetic in-tree subset)"
     cargo build --release -p silksurf-engine --bin wpt_runner \
@@ -116,12 +148,13 @@ run_wpt() {
 # Default: run everything available.
 TARGETS=("$@")
 if [ ${#TARGETS[@]} -eq 0 ]; then
-    TARGETS=(html5lib css test262 tls h2spec wpt)
+    TARGETS=(html5lib tree-construction css test262 tls h2spec wpt)
 fi
 
 for target in "${TARGETS[@]}"; do
     case "$target" in
         html5lib) run_html5lib ;;
+        tree-construction) run_tree_construction ;;
         css)      run_css ;;
         test262) run_test262 ;;
         tls)     run_tls ;;

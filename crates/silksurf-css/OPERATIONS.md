@@ -1,6 +1,6 @@
 # silksurf-css Operations
 
-## Resource bounds (P8.S8)
+## Resource bounds
 
 | Constant         | Default  | Enforcement site                                    | Failure mode                       |
 |------------------|----------|------------------------------------------------------|------------------------------------|
