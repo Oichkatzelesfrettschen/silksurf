@@ -99,6 +99,11 @@ check:
 	@if [ -x scripts/lint_doc_links.sh ]; then scripts/lint_doc_links.sh; fi
 	@if [ -x scripts/lint_cleanroom.sh ]; then scripts/lint_cleanroom.sh; fi
 	@if [ -x scripts/lint_text_hygiene.sh ]; then scripts/lint_text_hygiene.sh; fi
+	@# perf/schema.json declared a required field set and additionalProperties
+	@# false that no run enforced, because append_history.py builds each record
+	@# by hand. These two check the published artifacts against their schemas.
+	@python3 scripts/validate_measurement_artifacts.py
+	@python3 -m unittest discover -q -s scripts -p 'test_*.py'
 
 # Workspace tests with -D warnings.
 # Wired into full gate (pre-push hook) via the full target.

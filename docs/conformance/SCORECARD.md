@@ -20,6 +20,26 @@
     each upstream harness skips with a reason when its corpus is absent and
     fails when an operator names a path that does not resolve.
 
+## Measurement environment
+
+The three upstream-corpus scorecards in this directory carry a
+`measurement_environment` object defined by
+`perf/measurement-environment.schema.json`, captured once before the harnesses
+ran. The current rows come from:
+
+  * commit `837627284592555bc3db87590b46a87749ffff26`, clean working tree
+  * `rustc 1.94.1 (e408947bf 2026-03-25)`
+  * AMD Ryzen 5 5600X3D, 12 logical CPUs, 96 MiB last-level cache
+  * Linux 7.1.6 cachyos, glibc 2.44, `performance` scaling governor
+
+Parser conformance rates are deterministic in the corpus and the code, so the
+host does not move them; the record exists because a reader cannot know that
+without it, and because the same envelope carries timing measurements where the
+host does move the number. One host cannot separate host-specific behavior from
+general behavior, which
+`docs/findings/measurement-provenance-envelope.md` records as the standing
+limit.
+
 ## Harness summary
 
 | Harness | Status | Coverage | Last result |

@@ -1,0 +1,96 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/eirikr/silksurf/docs/conformance/scorecard.schema.json",
+  "title": "SilkSurf upstream-corpus conformance scorecard",
+  "description": "Shape of every docs/conformance/*-scorecard.json file, written by a harness under crates/*/tests and completed by scripts/conformance_run.sh. A rate is reproducible only with the corpus revision, the oracle that decides a pass, and the host and toolchain that ran it, so all three are required rather than conventional. scripts/validate_measurement_artifacts.py enforces this file.",
+  "type": "object",
+  "required": [
+    "runner",
+    "runner_kind",
+    "corpus",
+    "corpus_revision",
+    "oracle",
+    "total",
+    "executed",
+    "rate_executed",
+    "measurement_environment"
+  ],
+  "properties": {
+    "runner": {
+      "type": "string",
+      "description": "Harness identifier, matching the test target name under crates/*/tests.",
+      "minLength": 1
+    },
+    "runner_kind": {
+      "type": "string",
+      "description": "What the run measures, distinguishing a conformance rate from a robustness rate or a synthetic regression gate. A reader quoting a number as browser interoperability needs this field to know whether that reading is valid.",
+      "minLength": 1
+    },
+    "corpus": {
+      "type": "string",
+      "description": "Upstream corpus and subtree the run consumed, named the way its project names it.",
+      "minLength": 1
+    },
+    "corpus_revision": {
+      "type": "string",
+      "description": "Full commit SHA of the corpus checkout, matching the pin in silksurf-extras/html-css-test-corpora-revisions.txt. A rate whose corpus moved is a different measurement.",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "oracle": {
+      "type": "string",
+      "description": "What decides a pass, stated so the rate is interpretable without reading the harness. A robustness oracle that only requires the parser to return is not a correctness oracle, and saying so is the difference between an honest number and a misread one.",
+      "minLength": 1
+    },
+    "total": {
+      "type": "integer",
+      "description": "Cases the corpus contains, the denominator of rate_total.",
+      "minimum": 0
+    },
+    "executed": {
+      "type": "integer",
+      "description": "Cases the harness ran, the denominator of rate_executed. total minus skip minus unsupported.",
+      "minimum": 0
+    },
+    "pass": {
+      "type": "integer",
+      "description": "Cases matching the oracle. Recorded gaps are excluded: folding them in would restate every tolerated failure as a handled case.",
+      "minimum": 0
+    },
+    "accepted": {
+      "type": "integer",
+      "description": "Robustness-harness equivalent of pass: inputs the parser consumed without error or panic.",
+      "minimum": 0
+    },
+    "expected_fail": {
+      "type": "integer",
+      "description": "Cases an expectations file records as known gaps. A case that starts passing surfaces as an expectations-file delta rather than as silence.",
+      "minimum": 0
+    },
+    "skip": {
+      "type": "integer",
+      "description": "Cases the harness declines to run because the corpus exercises a mode the entry point does not offer, such as fragment parsing against a document-mode parser.",
+      "minimum": 0
+    },
+    "unsupported": {
+      "type": "integer",
+      "description": "Cases needing harness input the public API does not expose, such as an initial tokenizer state or a last start tag.",
+      "minimum": 0
+    },
+    "rate_executed": {
+      "type": "number",
+      "description": "pass or accepted over executed. The higher of the two published rates; quoting it alone overstates coverage.",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "rate_total": {
+      "type": "number",
+      "description": "pass over total, which charges skipped and unsupported cases against the result.",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "measurement_environment": {
+      "description": "Host, toolchain, and revision provenance. scripts/conformance_run.sh embeds it after the harness writes the counts, so one Python implementation serves every artifact.",
+      "$ref": "../../perf/measurement-environment.schema.json"
+    }
+  }
+}
