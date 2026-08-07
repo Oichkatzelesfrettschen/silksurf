@@ -1,0 +1,14 @@
+{
+  "runner": "html5lib_tokenizer",
+  "runner_kind": "html5lib-tokenizer",
+  "corpus": "html5lib-tests tokenizer",
+  "corpus_revision": "224991ec10db04f056a89eed8b0bd8695fd2950e",
+  "total": 6806,
+  "executed": 6640,
+  "pass": 3019,
+  "expected_fail": 3621,
+  "skip": 0,
+  "unsupported": 166,
+  "rate_executed": 0.4547,
+  "rate_total": 0.4436
+}
