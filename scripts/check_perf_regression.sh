@@ -97,8 +97,9 @@ for source in sources:
 
 if len(entries) < 2:
     # Insufficient history -- one entry means no prior to compare against;
-    # zero means the file exists but is empty (the placeholder created by
-    # P3.S2). Either way, advise and pass.
+    # zero means the file exists but is empty, the shape
+    # perf/append_history.py creates before any run lands. Either way,
+    # advise and pass.
     print(f"check_perf_regression: WARN: only {len(entries)} entry/entries "
           f"in {history_path.name}; need >=2 to compare. Skipping.")
     sys.exit(0)
@@ -107,7 +108,7 @@ latest, previous = entries[-1], entries[-2]
 
 # Pull metrics. They may live at the top level OR nested under
 # "metrics" -- accept both shapes so the script keeps working as
-# perf/append_history.py (P3.S3) firms up the schema.
+# perf/append_history.py firms up the schema against perf/schema.json.
 def get_metric(entry, key):
     if key in entry:
         return entry[key]
@@ -158,8 +159,8 @@ if regressions:
 
 if checked == 0:
     # Two entries exist but neither carries any tracked metric in a form
-    # we recognise. Treat as advisory pass; the schema work in P3.S2/S3
-    # will populate these fields.
+    # we recognise. Treat as advisory pass; perf/schema.json defines the
+    # fields perf/append_history.py must populate.
     print("check_perf_regression: WARN: no tracked metrics found in last "
           "two entries; nothing compared")
     sys.exit(0)

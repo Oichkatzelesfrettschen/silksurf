@@ -19,15 +19,15 @@
 /// Field semantics mirror the XCB wire format: positions are i16 (X11
 /// coordinates), sizes are u32 (after widening from the wire's u16 to
 /// match the rest of the engine which uses u32 for pixel extents),
-/// keysyms and buttons are kept as raw u32/u8 for now -- the keymap
-/// translation layer is a P6.S4 follow-up.
+/// keysyms and buttons are kept as raw u32/u8; an xkbcommon keymap
+/// translation layer is the missing piece.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Event {
     /// Window contents have been exposed and need redraw.
     /// width/height are the exposed-region dimensions.
     Expose { width: u32, height: u32 },
-    /// A key was pressed. `keysym` is the raw X11 keycode for now;
-    /// the keysym translation is queued for P6.S4 (xkbcommon).
+    /// A key was pressed. `keysym` carries the raw X11 keycode; xkbcommon
+    /// translation to a keysym is the missing piece.
     KeyPress { keysym: u32 },
     /// A key was released. Same `keysym` semantics as `KeyPress`.
     KeyRelease { keysym: u32 },
