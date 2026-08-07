@@ -31,10 +31,16 @@ clone_or_update_wpt_subset() {
         rm -rf "$target_dir"
         git clone --depth 1 --filter=blob:none --sparse --branch "$branch" "$repo_url" "$target_dir"
     fi
+    # html5lib retired its own tree-construction/ directory upstream; the
+    # corpus now lives in WPT as .dat files under
+    # html/syntax/parsing/resources/. The sibling html5lib_*.html wrappers
+    # drive those files through testharness.js, so an engine-level runner
+    # reads the .dat files directly.
     git -C "$target_dir" sparse-checkout set \
         css/CSS2/syntax \
         css/css-syntax \
-        css/selectors/parsing
+        css/selectors/parsing \
+        html/syntax/parsing/resources
 }
 
 mkdir -p "$extras_dir"
