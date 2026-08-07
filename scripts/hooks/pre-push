@@ -7,4 +7,13 @@
 #   FUZZ=1 git push
 set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
+HOOK_DIR="$(git rev-parse --git-path hooks)"
+
+# A hook the installer displaced runs first and still receives the ref updates
+# git writes to stdin, which git-lfs reads to decide what to upload. make reads
+# no stdin, so ordering the gate second costs the preserved hook nothing.
+if [ -x "${HOOK_DIR}/pre-push.local" ]; then
+    "${HOOK_DIR}/pre-push.local" "$@"
+fi
+
 exec make -C "${REPO_ROOT}" full MIRI="${MIRI:-0}" FUZZ="${FUZZ:-0}"
