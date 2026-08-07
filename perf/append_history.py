@@ -64,6 +64,10 @@ ENV_OVERRIDES = {
 GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 RUSTC_VERSION_RE = re.compile(r"^rustc\s+(\S+)")
 
+# Order of the --distribution value list, matching the distributions object in
+# perf/schema.json and the keys scripts/locality_probe.py summarize_numeric emits.
+DISTRIBUTION_FIELDS = ("n", "min", "median", "p95", "p99", "max", "mean")
+
 # The four scalar identity fields do not reproduce a timing: the same commit on
 # a different CPU, cache hierarchy, or scaling governor produces a different
 # number. Every record therefore carries the same provenance envelope the
@@ -197,6 +201,50 @@ def validate_idle_cpu_fraction(value: float, source: str) -> float:
     return value
 
 
+def parse_distribution(spec: str) -> tuple[str, Dict[str, float]]:
+    """Parses ``metric=n:min:median:p95:p99:max:mean`` into a schema field.
+
+    A scalar cannot distinguish a regression from run-to-run spread, so a
+    harness that ran more than one iteration reports the spread beside the
+    representative value. `scripts/locality_probe.py` computes exactly these
+    statistics through `summarize_numeric`, using nearest-rank percentiles.
+    """
+
+    name, separator, values = spec.partition("=")
+    if not separator or not name:
+        raise AppendError(f"--distribution expects metric=values, found {spec!r}")
+    fields = values.split(":")
+    if len(fields) != len(DISTRIBUTION_FIELDS):
+        expected = ":".join(DISTRIBUTION_FIELDS)
+        raise AppendError(f"--distribution {name} expects {expected}, found {values!r}")
+    parsed: Dict[str, float] = {}
+    for field, raw in zip(DISTRIBUTION_FIELDS, fields):
+        try:
+            parsed[field] = int(raw) if field == "n" else float(raw)
+        except ValueError as error:
+            raise AppendError(f"--distribution {name}: {field} is not numeric: {raw!r}") from error
+    if parsed["n"] < 1:
+        raise AppendError(f"--distribution {name}: n must be at least 1")
+    if not parsed["min"] <= parsed["median"] <= parsed["max"]:
+        raise AppendError(
+            f"--distribution {name}: min <= median <= max does not hold for {values!r}"
+        )
+    return name, parsed
+
+
+def collect_distributions(specs: list, metrics: Dict[str, float]) -> Dict[str, Any]:
+    """Parses every --distribution spec and rejects one naming an absent metric."""
+
+    distributions: Dict[str, Any] = {}
+    for spec in specs:
+        name, parsed = parse_distribution(spec)
+        if name not in metrics:
+            known = ", ".join(sorted(metrics))
+            raise AppendError(f"--distribution names an absent metric {name!r}; record has {known}")
+        distributions[name] = parsed
+    return distributions
+
+
 def build_record(
     git_sha: str,
     rust_version: str,
@@ -204,6 +252,7 @@ def build_record(
     metrics: Dict[str, float],
     notes: Optional[str],
     idle_cpu_fraction: Optional[float] = None,
+    distributions: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     record: Dict[str, Any] = {
         "git_sha": git_sha,
@@ -213,6 +262,8 @@ def build_record(
         "metrics": metrics,
         "measurement_environment": capture_environment(),
     }
+    if distributions:
+        record["distributions"] = distributions
     if idle_cpu_fraction is not None:
         record["idle_cpu_fraction"] = idle_cpu_fraction
     if notes is not None and notes != "":
@@ -279,6 +330,16 @@ def parse_args(argv: list) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--distribution",
+        action="append",
+        default=[],
+        metavar="METRIC=n:min:median:p95:p99:max:mean",
+        help=(
+            "spread for one metric already present in the record; repeatable. "
+            "scripts/locality_probe.py emits these statistics per sample set."
+        ),
+    )
+    parser.add_argument(
         "--repo-root",
         type=Path,
         default=repo_root_default,
@@ -305,6 +366,7 @@ def main(argv: Optional[list] = None) -> int:
             metrics=metrics,
             notes=args.notes,
             idle_cpu_fraction=idle_cpu_fraction,
+            distributions=collect_distributions(args.distribution, metrics),
         )
         append_ndjson(args.history, record)
     except AppendError as exc:

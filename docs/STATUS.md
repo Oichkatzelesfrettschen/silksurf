@@ -116,6 +116,25 @@ remain open program items.
   corpus; cascade and computed-value correctness stay unmeasured, so this is not
   a CSS conformance number.
 
+### Measurement provenance and its limit
+
+Each of the three scorecards above carries a `measurement_environment` object
+defined by `perf/measurement-environment.schema.json`: the commit and whether
+the tree was clean, the resolved rustc, and the host's CPU model, cache
+topology, governor, affinity, and load. `perf/history.ndjson` and
+`scripts/locality_probe.py` records carry the same object, and
+`scripts/validate_measurement_artifacts.py` fails `make check` when one does not.
+
+Every measurement in this repository comes from one machine: an AMD Ryzen 5
+5600X3D with 12 logical CPUs, a 96 MiB last-level cache, and the `performance`
+governor. Two consequences bound what the numbers support. The parser rates are
+deterministic in the corpus and the code, so the host does not move them. Every
+timing claim in `docs/PERFORMANCE.md` and every latency in `docs/findings/` is a
+measurement of that workload on that machine, and no capacity knee below 96 MiB
+is measurable here against the sweep coordinates
+`perf/locality-budget.json` lists.
+`docs/findings/measurement-provenance-envelope.md` records both.
+
 ### Synthetic WPT-style regression harness
 
 - runner kind: `wpt-synthetic`
