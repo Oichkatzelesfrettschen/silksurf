@@ -361,7 +361,7 @@ fn write_scorecard(summary: &HarnessSummary) {
     let accepted = summary.passed + summary.xfailed;
     let revision = corpus_revision().unwrap_or_else(|| "unknown".to_string());
     let json = format!(
-        "{{\n  \"runner\": \"css_harness\",\n  \"runner_kind\": \"css-parse-robustness\",\n  \"oracle\": \"parse_stylesheet_bytes returns without error or panic; the parsed stylesheet is discarded\",\n  \"corpus_revision\": \"{revision}\",\n  \"total\": {},\n  \"executed\": {},\n  \"accepted\": {},\n  \"skip\": {},\n  \"rate_executed\": {:.4}\n}}\n",
+        "{{\n  \"runner\": \"css_harness\",\n  \"runner_kind\": \"css-parse-robustness\",\n  \"corpus\": \"wpt css/CSS2/syntax, css/css-syntax, css/selectors/parsing\",\n  \"corpus_revision\": \"{revision}\",\n  \"oracle\": \"parse_stylesheet_bytes returns without error or panic; the parsed stylesheet is discarded\",\n  \"total\": {},\n  \"executed\": {},\n  \"accepted\": {},\n  \"skip\": {},\n  \"rate_executed\": {:.4}\n}}\n",
         summary.total,
         executed,
         accepted,

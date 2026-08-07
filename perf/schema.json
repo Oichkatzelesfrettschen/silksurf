@@ -63,6 +63,28 @@
         }
       }
     },
+    "measurement_environment": {
+      "description": "Host, toolchain, and revision provenance, defined by perf/measurement-environment.schema.json and produced by scripts/measurement_environment.py. A timing does not reproduce from git_sha alone: the same commit on a different CPU, cache hierarchy, or scaling governor produces a different number. Absent on records written before the envelope existed; perf/append_history.py emits it on every new record.",
+      "$ref": "measurement-environment.schema.json"
+    },
+    "distributions": {
+      "description": "Per-metric distribution for records whose harness ran more than one iteration. The metrics object carries one representative scalar per key so a trend reader keeps working; this object carries the spread that decides whether a between-commit difference is a change or noise. Keys match keys in metrics.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["n", "min", "median", "max"],
+        "properties": {
+          "n": {"type": "integer", "minimum": 1, "description": "Iterations the distribution summarizes."},
+          "min": {"type": "number", "minimum": 0},
+          "median": {"type": "number", "minimum": 0},
+          "p95": {"type": ["number", "null"], "minimum": 0, "description": "Nearest-rank 95th percentile, as scripts/locality_probe.py computes it."},
+          "p99": {"type": ["number", "null"], "minimum": 0, "description": "Nearest-rank 99th percentile."},
+          "max": {"type": "number", "minimum": 0},
+          "mean": {"type": ["number", "null"], "minimum": 0}
+        }
+      }
+    },
     "idle_cpu_fraction": {
       "type": "number",
       "description": "Fraction of CPU time spent idle over a 5-second sampling window, measured from /proc/stat on Linux. Computed as idle_delta / total_delta where idle_delta = idle_ticks[after] - idle_ticks[before] and total_delta = sum(all_ticks[after]) - sum(all_ticks[before]). Range: 0.0 (fully loaded) to 1.0 (fully idle). Advisory only: modern CPUs use frequency scaling so idle fraction is not a direct energy proxy, but it is a useful load baseline. Absent on older records and on non-Linux hosts.",
