@@ -87,7 +87,8 @@ No dependency; runs first.
 - **phase-roadmap-archival** -- LANDED. Both phase-labeled roadmaps moved
   to docs/archive/roadmaps/ with supersession banners; inbound references
   in BUILD.md, GLOSSARY.md, and ARCHITECTURE-DECISIONS.md repointed; the
-  SNAZZY-WAFFLE item-21 archival claim is now true.
+  item-21 archival claim in docs/archive/roadmaps/SNAZZY-WAFFLE-COMPLETION.md
+  is now true.
 - **cross-reference-link-repair** -- LANDED for the live tree:
   silksurf-specification/README.md rewritten (link fixed to
   diff-analysis/PHASE-2-RESEARCH-SYNTHESIS.md, C-era framing dropped,
