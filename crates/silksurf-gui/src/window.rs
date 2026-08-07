@@ -4,6 +4,16 @@
 //! the X11 connection, drawable, graphics context, close-protocol atoms, and
 //! logical size. present() ships the u32 ARGB buffer through PutImage.
 
+// present() hands the raw bytes of a `[u32]` ARGB buffer to X11 PutImage,
+// which reads them as little-endian BGRA. scripts/cross_build.sh builds
+// x86_64-unknown-linux-gnu and aarch64-unknown-linux-gnu, both little-endian;
+// a big-endian target would present every channel reversed rather than fail.
+#[cfg(target_endian = "big")]
+compile_error!(
+    "silksurf-gui presents ARGB pixels by reinterpreting [u32] as X11 wire bytes, \
+     which requires a little-endian target"
+);
+
 use silksurf_core::SilkError;
 use xcb::Xid;
 use xcb::x;
@@ -224,11 +234,11 @@ impl XcbWindow {
     /// `silksurf_render` framebuffer convention.
     ///
     /// On the X11 wire each pixel is sent little-endian: byte 0 = B,
-    /// byte 1 = G, byte 2 = R, byte 3 = A. This matches the in-memory
-    /// layout of `[u32]` on little-endian hosts; on big-endian hosts
-    /// the bytes would need swapping. `SilkSurf` is `x86_64` / aarch64-LE
-    /// only (both little-endian, see ADR-008), so we do not pay for
-    /// a swap pass here.
+    /// byte 1 = G, byte 2 = R, byte 3 = A. That is the in-memory layout of
+    /// `[u32]` on a little-endian host, so the byte view below reaches
+    /// `PutImage` without a swap pass. The module-scope `compile_error!`
+    /// rejects a big-endian target, where the same reinterpretation would
+    /// present every channel reversed.
     ///
     /// WHY no SHM yet: the unshared `PutImage` path goes through a
     /// single iovec write per call -- libxcb handles BIG-REQUESTS

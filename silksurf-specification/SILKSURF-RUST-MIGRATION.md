@@ -28,8 +28,8 @@
   * Production code lives in `crates/` (Rust) and `silksurf-js/` (JS
     engine). The `silksurf-extras/` directory is vendored reference
     only; not linked into the workspace.
-  * Legacy C is frozen; no new features in `src/` beyond migration
-    needs (see ADR-007).
+  * AD-024 retired the legacy C tree. `src/`, `include/`, and
+    `CMakeLists.txt` left the repository with it; git history holds them.
 
 ## Spec <-> implementation map
 
@@ -38,13 +38,13 @@ implement the design and what status that implementation is in.
 
 | Spec document | Implementing crate(s) | Status | Notes |
 |---------------|------------------------|--------|-------|
-| `SILKSURF-BUILD-SYSTEM-DESIGN.md` | root `Cargo.toml`, `CMakeLists.txt`, `Makefile`, `scripts/local_gate.sh` | partial | Rust workspace fully implemented; CMake legacy harness present per ADR-007; release-distribution work (cargo-dist) queued in roadmap P9. |
-| `SILKSURF-C-CORE-DESIGN.md` | `src/`, `include/`, CMake build | legacy | The C core was the original design; Rust workspace under `crates/` is the active implementation. Deprecate-or-integrate decision pending (ADR-007). |
-| `SILKSURF-JS-DESIGN.md` (1945 lines) | `silksurf-js/` | partial | Lexer + parser + bytecode compiler + register VM + NaN-boxing + GC heap implemented. Missing: try/catch/finally opcodes, async/await execution, generators, Proxy/Reflect, WeakMap/WeakSet, Promise.all/race, fetch from JS. All open. test262 conformance harness is open. |
+| `SILKSURF-BUILD-SYSTEM-DESIGN.md` | root `Cargo.toml`, `Makefile`, `scripts/local_gate.sh` | partial | Cargo and the local gate carry the whole build; AD-024 retired the CMake surface. Release-distribution work (cargo-dist) stays open. |
+| `SILKSURF-C-CORE-DESIGN.md` | (retired) | superseded | AD-024 retired the C core. `crates/` is the sole implementation and git history holds the removed tree. |
+| `SILKSURF-JS-DESIGN.md` (1945 lines) | `silksurf-js/` | superseded | AD-025 confirmed `boa_engine` as the runtime and removed the hand-written lexer, parser, bytecode compiler, register VM, NaN-boxing, and GC heap. `silksurf-js/src/boa_backend/` holds the host surface. The `test262_boa` runner records 99.81% of executed and 69.38% of the total suite. |
 | `SILKSURF-NEURAL-INTEGRATION.md` | (none yet) | experimental | ADR-006 marked experimental; no production code. |
-| `SILKSURF-XCB-GUI-DESIGN.md` (1019 lines) | `crates/silksurf-gui` | stub | Currently a one-line lib.rs. ADR-010 formalises XCB-only Linux-first; implementation queued in roadmap P6. |
+| `SILKSURF-XCB-GUI-DESIGN.md` (1019 lines) | `crates/silksurf-gui` | functional | 3,770 lines across two backends selected by feature. `winit-backend` carries the winit event loop and softbuffer presentation and is what `silksurf-app` links; `xcb-backend` carries the XCB connection and `PutImage` path AD-010 formalised. |
 | HTML5 tokenizer + tree builder | `crates/silksurf-html` | functional | WHATWG happy path. Foreign content (SVG/MathML), table-related insertion modes, template tag pending. Conformance harness runs the WPT tree-construction corpus; see docs/conformance/SCORECARD.md. |
-| CSS tokenizer + parser + cascade + computed values | `crates/silksurf-css` | functional | Hot path = 9.5us steady-state. Three Phase-4.4 SoA TODOs queued in P4 (`ComputedStyle`, `Dimensions`, `DisplayList`). Conformance harness is open. |
+| CSS tokenizer + parser + cascade + computed values | `crates/silksurf-css` | functional | Hot path = 9.5us steady-state. SoA work on `ComputedStyle`, `Dimensions`, and `DisplayList` stays open. `tests/css_harness.rs` measures parse robustness over the upstream WPT CSS subset; cascade and computed-value conformance stay unmeasured. |
 | DOM tree + traversal + interner + mutation tracking | `crates/silksurf-dom` | functional | Lock-free monotonic resolve table + generation-gated rebuild + persistent cache integration all landed (ADR-017 / ADR-018). |
 | Layout + box model | `crates/silksurf-layout` | functional | Block + inline + flex basics. Position absolute/relative/fixed and CSS Grid pending. |
 | Rasterization + display list | `crates/silksurf-render` | functional | Solid-color rectangles. Tile-parallel rasterization with rayon. Image decode, gradient, text rendering pending. NEON SIMD path is open. |
@@ -71,7 +71,7 @@ scripts/local_gate.sh full                       # canonical merge gate
   3. HTML5 tokenizer/parser (cleanroom). **Done.**
   4. CSS tokenizer/parser + cascade + selector matching. **Done.**
   5. Layout + display list + raster backend. **Done** (block/inline/flex; absolute/grid pending).
-  6. JS integration. **Partial** (lexer/parser/compiler/VM; control flow + microtasks + builtins pending; see P7).
+  6. JS integration. **Done** through `boa_engine` per AD-025; the host surface, DOM bridge, and microtask pump live in `silksurf-js/src/boa_backend/`.
   7. Networking + TLS (rustls adapter). **Done** (HTTP/1.1 + HTTP/2; HTTP/3 deferred; OCSP + HSTS pending; see P5).
   8. Performance passes with benchmarks and regression guards. **Ongoing** (9.5us steady state achieved; SoA Phase-4.4 work is open; rolling-history NDJSON in perf/history.ndjson is open).
 
@@ -88,10 +88,8 @@ scripts/local_gate.sh full                       # canonical merge gate
     documented exception: RUSTSEC-2025-0134 rustls-pemfile
     unmaintained -- migration tracked).
   * MSRV = stable 1.94.1, pinned in `rust-toolchain.toml` and every
-    `Cargo.toml` `rust-version`. Bump in lockstep (ADR-008).
+    `Cargo.toml` `rust-version`. Bump in lockstep (AD-008).
   * `cargo doc --workspace --no-deps --document-private-items` clean.
-  * CMake/CTest 16/16 (ADR-007 legacy harness preserved until
-    deprecation decision lands).
 
 ## Reference inputs (cleanroom only)
 
