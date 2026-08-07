@@ -63,9 +63,10 @@ harnesses in one session ran against one host state.
 
 Regenerating the three scorecards from a clean tree at `8376272` reproduced
 every count exactly -- 3,019 of 6,640 executed, 1,440 of 1,726 executed, and 603
-of 603 accepted, against the same two corpus revisions. That reproduction is the
-first evidence in the tree that a published rate is reproducible rather than
-merely recorded.
+of 603 accepted, against the same two corpus revisions. That establishes
+determinism across runs on one host at one commit against one corpus, which is
+the claim the run supports; reproducibility on a second host is untested and
+stays open below.
 
 ## A schema nothing validated
 

@@ -29,8 +29,13 @@ security, testing, and cleanroom guidance. Historical material lives under
   question, and the evidence class behind its verdict.
 - `docs/conformance/SCORECARD.md`: aggregated conformance dashboard over the
   per-harness JSON scorecards in the same directory, produced by
-  `scripts/conformance_run.sh`.
+  `scripts/conformance_run.sh`. `docs/conformance/scorecard.schema.json` is the
+  required shape of those scorecards.
 - `perf/`: benchmark schema, pinned baseline, and append-only history.
+  `perf/measurement-environment.schema.json` defines the provenance envelope
+  every measurement artifact embeds, and
+  `scripts/validate_measurement_artifacts.py` checks both schemas in
+  `make check`.
 
 ## Performance and tooling
 

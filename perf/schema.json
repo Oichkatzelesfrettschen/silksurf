@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://github.com/eirikr/silksurf/perf/schema.json",
   "title": "SilkSurf bench history record",
-  "description": "Schema for one entry (one line) in perf/history.ndjson. The history file is newline-delimited JSON: each line is one independent JSON object that conforms to this schema. Records are append-only and ordered by timestamp.",
+  "description": "Schema for one entry (one line) in perf/history.ndjson. The history file is newline-delimited JSON: each line is one independent JSON object that conforms to this schema. Records are append-only and ordered by timestamp. The $ref below is a repository-relative filename that resolves against this schema's $id; scripts/validate_measurement_artifacts.py registers every schema in the tree under its $id so the reference resolves from disk rather than the network.",
   "type": "object",
   "additionalProperties": false,
   "required": [
