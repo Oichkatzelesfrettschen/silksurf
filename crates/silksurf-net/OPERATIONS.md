@@ -29,7 +29,7 @@ The on-disk schema (`CachedResponseDisk`) is `serde_json`-stable.
 Records have `url`, `status`, `headers`, `body` (base64 if non-UTF-8),
 `etag`, `last_modified`, `cached_at` (RFC 3339).
 
-## Resource bounds (P8.S8)
+## Resource bounds
 
 | Constant                   | Default      | Enforcement site                                  | Failure mode                  |
 |----------------------------|--------------|----------------------------------------------------|-------------------------------|
@@ -43,7 +43,7 @@ are dropped, the connection closed, and the caller sees a recoverable
 `NetError`.
 
 Per-request total-deadline and max-connections caps remain on the
-roadmap (still tracked under P8.S8). Until they land, do not point
+roadmap. Until they land, do not point
 silksurf-app at adversarial hosts.
 
 ## Tokio runtime
@@ -56,7 +56,7 @@ should keep tokio runtime ownership in their own code instead.
 
 ## Logging
 
-Currently silent. The observability work (P8.S6) will add `tracing`
+Currently silent. Observability work will add `tracing`
 spans around fetch, cache lookup, and revalidation; until then, debug
 via the `tls-probe` binary and direct `cargo run` traces.
 

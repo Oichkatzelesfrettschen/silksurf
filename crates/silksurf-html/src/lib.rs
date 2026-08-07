@@ -7,11 +7,8 @@
 
 use memchr::{memchr, memchr2, memchr3};
 
-mod tree_builder;
 pub mod treesink;
 
-pub use tree_builder::TreeBuildError;
-pub use tree_builder::TreeBuilder;
 pub use treesink::{parse_fragment_into, parse_html};
 
 /*
@@ -29,7 +26,7 @@ pub use treesink::{parse_fragment_into, parse_html};
  * truncation, small enough to stay below ~120 MiB of token Vec
  * (Token enum is ~96 B with String payloads on 64-bit).
  *
- * See: SNAZZY-WAFFLE roadmap P8.S8 (DoS bounds per crate).
+ * See: docs/design/THREAT-MODEL.md (DoS bounds per subsystem).
  */
 pub const MAX_TOKENS_PER_FEED: usize = 1_000_000;
 
@@ -120,7 +117,7 @@ impl Tokenizer {
             }
 
             /*
-             * DoS bound (P8.S8): cap tokens emitted per feed() call.
+             * DoS bound: cap tokens emitted per feed() call.
              *
              * Checked once per outer loop iteration (not inside parse_tag's
              * tight inner loops) to keep the hot path branch-free per byte.

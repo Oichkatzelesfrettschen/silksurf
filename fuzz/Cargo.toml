@@ -12,6 +12,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4.10"
 silksurf-css = { path = "../crates/silksurf-css" }
+silksurf-dom = { path = "../crates/silksurf-dom" }
 silksurf-engine = { path = "../crates/silksurf-engine" }
 silksurf-html = { path = "../crates/silksurf-html" }
 
@@ -23,8 +24,8 @@ doc = false
 bench = false
 
 [[bin]]
-name = "html_tree_builder"
-path = "fuzz_targets/html_tree_builder.rs"
+name = "html_parse"
+path = "fuzz_targets/html_parse.rs"
 test = false
 doc = false
 bench = false

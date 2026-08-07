@@ -43,7 +43,7 @@ pub use parser::{
  * Vec<Rule>; at ~256 B per Rule entry (selector + declarations +
  * AtRule blocks) the cap bounds the parsed Stylesheet at ~12.8 MiB.
  *
- * See: SNAZZY-WAFFLE roadmap P8.S8 (DoS bounds per crate).
+ * See: docs/design/THREAT-MODEL.md (DoS bounds per subsystem).
  */
 pub const MAX_CSS_RULES: usize = 50_000;
 pub use selector::{

@@ -18,9 +18,9 @@ or not exposed at the v0.1 surface.
 |--------|--------|------------------|-----|
 | Spoofing | DNS rebinding, IP spoofing | hickory-resolver with DNSSEC | No SNI pinning; revisit if a host enables HSTS preload list |
 | Tampering | MitM on plaintext HTTP | `silksurf-net` defaults to HTTP/2 over TLS 1.3 | No HSTS enforcement yet |
-| Repudiation | n/a (no audit log on requests) | -- | Logging is pending observability work (P8.S6) |
+| Repudiation | n/a (no audit log on requests) | -- | Logging is pending observability work |
 | Info disclosure | Cache directory contains response bodies (`Cache-Control: private` not enforced on disk) | `~/.cache/silksurf/http` is mode 0700 by default | Need disk-encryption-at-rest discipline; document in OPERATIONS |
-| Denial of service | Large response bodies / stalled connections | tokio default timeouts + per-request limits TBD | No max-body-size cap yet -- tracked in P8.S8 |
+| Denial of service | Large response bodies / stalled connections | tokio default timeouts + per-request limits TBD | No max-body-size cap yet -- open |
 | Elevation of priv | n/a -- network code does not exec | -- | -- |
 
 ## Subsystem 2: TLS (`silksurf-tls`)
@@ -30,39 +30,39 @@ or not exposed at the v0.1 surface.
 | Spoofing | Forged server cert | rustls + webpki-roots; optional `rustls-platform-verifier`; `--tls-ca-file` for private CA | OCSP stapling is documented in `docs/NETWORK_TLS.md` but not yet enforced |
 | Tampering | Downgrade to TLS 1.2 / SSL 3 | rustls is TLS 1.2/1.3 only; SSL 3 not present | Force TLS 1.3-only mode TBD |
 | Info disclosure | Leak cipher state on side channel | rustls uses constant-time AES-GCM and ChaCha20-Poly1305 | No side-channel hardening claims beyond the rustls baseline |
-| Denial of service | Handshake bombs | tokio-rustls timeout TBD | Per-handshake budget cap tracked in P8.S8 |
+| Denial of service | Handshake bombs | tokio-rustls timeout TBD | Per-handshake budget cap open |
 
 ## Subsystem 3: HTML / CSS / DOM parsers (`silksurf-html`, `silksurf-css`, `silksurf-dom`)
 
 | STRIDE | Threat | Mitigation today | Gap |
 |--------|--------|------------------|-----|
-| Tampering | Malformed input crashes the parser | All three are fuzzed (libfuzzer-sys + AFL++) | Seed corpus is stub-sized; expand in P3.S1 |
+| Tampering | Malformed input crashes the parser | All three are fuzzed (libfuzzer-sys + AFL++) | Seed corpus is stub-sized |
 | Info disclosure | Selector with regex-like complexity exposes timing channel | No regex anywhere in the parser surface (verified by audit) | -- |
-| Denial of service | Pathological CSS (10k selectors, deep nesting) blows up cascade | No max-rule-count cap | Tracked in P8.S8 |
-| Denial of service | Pathological HTML (deep nesting, mismatched tags) blows up tree builder | TreeBuilder uses a state machine without unbounded recursion | But no max-depth cap; tracked in P8.S8 |
+| Denial of service | Pathological CSS (10k selectors, deep nesting) blows up cascade | No max-rule-count cap | Open |
+| Denial of service | Pathological HTML (deep nesting, mismatched tags) blows up tree construction | html5ever drives tree construction through `silksurf_html::treesink`; `MAX_TOKENS_PER_FEED` bounds the auxiliary tokenizer alone | No max-depth cap on the production path; the bound is html5ever's, unmeasured here. `fuzz/fuzz_targets/html_parse.rs` exercises it |
 
 ## Subsystem 4: Engine pipeline (`silksurf-engine`)
 
 | STRIDE | Threat | Mitigation today | Gap |
 |--------|--------|------------------|-----|
 | Tampering | Cross-DOM atom confusion (forged `Atom` from another interner) | `Atom` is Copy and not signed; `resolve()` panics on out-of-range index | Documented invariant: never share Atoms across `Dom` instances. Add `#[doc(hidden)]` `dom_id` field if needed |
-| Denial of service | Layout pass on pathological tree | No layout-pass timeout | Tracked in P8.S8 |
+| Denial of service | Layout pass on pathological tree | No layout-pass timeout | Open |
 
 ## Subsystem 5: JS runtime (`silksurf-js`)
 
 | STRIDE | Threat | Mitigation today | Gap |
 |--------|--------|------------------|-----|
-| Tampering | Script escapes the bytecode VM | The VM is a custom interpreter with no JIT; no JIT-spray surface | Sandbox boundary not formally specified; treat as untrusted equivalent for v0.1 |
+| Tampering | Script escapes the interpreter | AD-025 delegates execution to `boa_engine`, a register interpreter with no JIT, so no JIT-spray surface | Sandbox boundary not formally specified; the page runtime shares the shell process, so treat as untrusted equivalent |
 | Info disclosure | Side-channel timing of object lookups | Hidden classes and IC are not yet implemented | Cache-side-channel work TBD |
-| Denial of service | Infinite loop / unbounded recursion / runaway alloc | No per-VM step budget; no max-stack-depth cap | Tracked in P8.S8 |
-| Elevation of priv | FFI boundary panic via non-UTF-8 string | **KNOWN BUG** at `silksurf-js/src/ffi.rs:271` -- `unwrap()` inside `unsafe { CStr::from_ptr }.to_str()` panics across the FFI boundary | Tracked in the silksurf-js unsafe/unwrap follow-up batch |
+| Denial of service | Infinite loop / unbounded recursion / runaway alloc | Any budget is boa's; silksurf-js sets none of its own | Open. The test262 runner carries a per-test loop-iteration budget, which the browser path does not |
+| Elevation of priv | GC-managed capture escaping a native closure | Every `NativeFunction::from_closure` site captures owned host handles (`Arc<Mutex<Dom>>`, `NodeId`) rather than GC-managed values, so boa's tracer reaches everything the closure holds | 74 sites, uninspected by `scripts/lint_unsafe.sh`, which excludes `silksurf-js/src`; see `docs/design/UNSAFE-CONTRACTS.md` |
 
 ## Subsystem 6: Render (`silksurf-render`)
 
 | STRIDE | Threat | Mitigation today | Gap |
 |--------|--------|------------------|-----|
 | Tampering | Out-of-bounds blit on pathological display list | Per-tile bounds checks before each `slice::from_raw_parts_mut` (see `docs/design/UNSAFE-CONTRACTS.md` lines 270, 444) | -- |
-| Denial of service | Megapixel rasterization | No render-target size cap | Tracked in P8.S8 |
+| Denial of service | Megapixel rasterization | No render-target size cap | Open |
 | Info disclosure | Information leak via canvas readback | Canvas API not yet implemented | Treat as preventive: audit canvas before exposing |
 
 ## Subsystem 7: Persistent cache (`silksurf-net::cache`)
@@ -122,7 +122,7 @@ These are explicit future work; the v0.1 release notes will name them.
 ## Update cadence
 
 This document should be revisited at every roadmap-wave boundary
-(currently SNAZZY-WAFFLE wave 1-6). When a Subsystem row changes
+(see docs/roadmaps/DEBT-RECONCILIATION-ROADMAP.md). When a Subsystem row changes
 (mitigation lands, new threat surfaces), bump the table and add a note
 in the relevant ADR.
 
