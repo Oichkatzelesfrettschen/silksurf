@@ -1,0 +1,84 @@
+{
+  "runner": "boa_tester",
+  "runner_kind": "boa-upstream-test262",
+  "corpus": "test262",
+  "corpus_revision": "9079aeefcefcd55b0e994fb8bda51e06827337bd",
+  "oracle": "boa_engine's own boa_tester harness runs each test262 case and compares against its metadata expectation; an ignored case is one the harness declines to run",
+  "run_label": "test",
+  "total": 52598,
+  "executed": 50464,
+  "pass": 49385,
+  "skip": 2134,
+  "panic": 0,
+  "rate_executed": 0.9786,
+  "rate_total": 0.9389,
+  "by_edition": {
+    "es5": {
+      "total": 8165,
+      "pass": 8080,
+      "skip": 23,
+      "rate_total": 0.9896
+    },
+    "es6": {
+      "total": 27663,
+      "pass": 27280,
+      "skip": 29,
+      "rate_total": 0.9862
+    },
+    "es7": {
+      "total": 27793,
+      "pass": 27405,
+      "skip": 29,
+      "rate_total": 0.986
+    },
+    "es8": {
+      "total": 28839,
+      "pass": 28439,
+      "skip": 29,
+      "rate_total": 0.9861
+    },
+    "es9": {
+      "total": 33693,
+      "pass": 33111,
+      "skip": 61,
+      "rate_total": 0.9827
+    },
+    "es10": {
+      "total": 33829,
+      "pass": 33247,
+      "skip": 61,
+      "rate_total": 0.9828
+    },
+    "es11": {
+      "total": 35982,
+      "pass": 35256,
+      "skip": 141,
+      "rate_total": 0.9798
+    },
+    "es12": {
+      "total": 36902,
+      "pass": 36025,
+      "skip": 238,
+      "rate_total": 0.9762
+    },
+    "es13": {
+      "total": 42366,
+      "pass": 41476,
+      "skip": 238,
+      "rate_total": 0.979
+    },
+    "es14": {
+      "total": 42776,
+      "pass": 41798,
+      "skip": 283,
+      "rate_total": 0.9771
+    },
+    "es15": {
+      "total": 43751,
+      "pass": 42755,
+      "skip": 283,
+      "rate_total": 0.9772
+    }
+  },
+  "provenance": "Extracted from diff-analysis/tools-output/test262-boa-baseline/{results,latest}.json before that tree left git-lfs tracking. The run is boa's own harness on boa's own corpus checkout, not silksurf's test262_boa runner, so it measures the upstream engine AD-025 adopted rather than silksurf's integration of it."
+}
