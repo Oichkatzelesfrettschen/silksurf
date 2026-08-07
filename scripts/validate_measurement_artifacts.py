@@ -48,16 +48,20 @@ def build_validator(schema_path: Path):
     from referencing import Registry, Resource
 
     schema = load_json(schema_path)
-    directory = (REPO_ROOT / schema_path).parent
 
-    # Sibling schemas resolve by relative filename, which keeps every $ref a
-    # repository path rather than a network fetch.
+    # Every schema in the tree registers under its own $id, and each $ref is a
+    # repository-relative path that resolves against the referring schema's $id.
+    # The registry therefore satisfies every reference from disk without a
+    # network fetch.
     registry = Registry()
-    for sibling in directory.glob("*.schema.json"):
-        document = json.loads(sibling.read_text(encoding="utf-8"))
-        registry = registry.with_resource(
-            sibling.name, Resource.from_contents(document, default_specification=None)
-        )
+    for candidate in sorted(REPO_ROOT.glob("**/*.schema.json")):
+        if any(part in {"target", "vendor", "silksurf-extras"} for part in candidate.parts):
+            continue
+        document = json.loads(candidate.read_text(encoding="utf-8"))
+        identifier = document.get("$id")
+        if identifier is None:
+            continue
+        registry = registry.with_resource(identifier, Resource.from_contents(document))
 
     validator_class = jsonschema.validators.validator_for(schema)
     validator_class.check_schema(schema)
