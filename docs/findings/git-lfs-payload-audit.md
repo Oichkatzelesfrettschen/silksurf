@@ -65,8 +65,13 @@ relocation that has not happened.
 | `.git/lfs` | 102 MB |
 | `.git/objects/pack` | 42 MB |
 | GitHub server-side repository size (LFS excluded) | 41.8 MB |
-| `diff-analysis/` in the working tree | 93 MB |
 | checkout excluding `target/`, `.git/`, `silksurf-extras/`, `vendor/` | 209 MB |
+
+The working tree is not part of that cost. This checkout has no LFS smudge
+filter configured, so every tracked LFS path holds a 129-byte pointer rather
+than content. The 93 MB `du` reports for `diff-analysis/` is almost entirely
+three local `*.perf.data` captures that `.gitignore:23` excludes and git never
+saw.
 
 ## The history weight is not LFS
 
