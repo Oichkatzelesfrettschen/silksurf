@@ -29,6 +29,26 @@ cd "$REPO_ROOT"
 SCORECARD_DIR="docs/conformance"
 mkdir -p "$SCORECARD_DIR"
 
+# A rate reproduces from a corpus revision plus the host and toolchain that
+# produced it. The harnesses write their scorecard from Rust, so the envelope is
+# embedded afterward from the one Python implementation rather than
+# reimplemented per language.
+#
+# The capture happens once, before any harness runs, and every scorecard from
+# this invocation carries it. Capturing per scorecard after its harness wrote it
+# would report the artifact's own write as an uncommitted change, so every
+# published record would read git.dirty true.
+ENVIRONMENT_ENVELOPE="$(mktemp -t silksurf-measurement-environment.XXXXXX.json)"
+trap 'rm -f "$ENVIRONMENT_ENVELOPE"' EXIT
+python3 scripts/measurement_environment.py --output "$ENVIRONMENT_ENVELOPE" >/dev/null
+
+embed_environment() {
+    local scorecard="$1"
+    [ -f "$scorecard" ] || return 0
+    python3 scripts/measurement_environment.py \
+        --from "$ENVIRONMENT_ENVELOPE" --inject "$scorecard" >/dev/null
+}
+
 run_html5lib() {
     echo "==> html5lib tokenizer corpus"
     if [ -z "${HTML5LIB_TESTS_DIR:-}" ]; then
@@ -46,6 +66,7 @@ run_html5lib() {
     HTML5LIB_FAIL_ON_XPASS=1 \
     RUSTFLAGS='-D warnings' cargo test -p silksurf-html \
         --test html5lib_harness -- --nocapture
+    embed_environment "$SCORECARD_DIR/html5lib-tokenizer-scorecard.json"
 }
 
 run_css() {
@@ -65,6 +86,7 @@ run_css() {
     CSS_HARNESS_SCORECARD="$SCORECARD_DIR/css-parse-robustness-scorecard.json" \
     CSS_HARNESS_FAIL_ON_XPASS=1 \
     RUSTFLAGS='-D warnings' cargo test -p silksurf-css --test css_harness -- --nocapture
+    embed_environment "$SCORECARD_DIR/css-parse-robustness-scorecard.json"
 }
 
 run_test262() {
@@ -133,6 +155,7 @@ run_tree_construction() {
     HTML5LIB_TREE_FAIL_ON_XPASS=1 \
     RUSTFLAGS='-D warnings' cargo test -p silksurf-html \
         --test html5lib_tree_construction -- --nocapture
+    embed_environment "$SCORECARD_DIR/html5lib-tree-construction-scorecard.json"
 }
 
 run_wpt() {

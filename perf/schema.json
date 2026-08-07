@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://github.com/eirikr/silksurf/perf/schema.json",
   "title": "SilkSurf bench history record",
-  "description": "Schema for one entry (one line) in perf/history.ndjson. The history file is newline-delimited JSON: each line is one independent JSON object that conforms to this schema. Records are append-only and ordered by timestamp.",
+  "description": "Schema for one entry (one line) in perf/history.ndjson. The history file is newline-delimited JSON: each line is one independent JSON object that conforms to this schema. Records are append-only and ordered by timestamp. The $ref below is a repository-relative filename that resolves against this schema's $id; scripts/validate_measurement_artifacts.py registers every schema in the tree under its $id so the reference resolves from disk rather than the network.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -60,6 +60,28 @@
           "type": "number",
           "description": "Per-iteration time of a full render (pipeline + paint) in microseconds.",
           "minimum": 0
+        }
+      }
+    },
+    "measurement_environment": {
+      "description": "Host, toolchain, and revision provenance, defined by perf/measurement-environment.schema.json and produced by scripts/measurement_environment.py. A timing does not reproduce from git_sha alone: the same commit on a different CPU, cache hierarchy, or scaling governor produces a different number. Absent on records written before the envelope existed; perf/append_history.py emits it on every new record.",
+      "$ref": "measurement-environment.schema.json"
+    },
+    "distributions": {
+      "description": "Per-metric distribution for records whose harness ran more than one iteration. The metrics object carries one representative scalar per key so a trend reader keeps working; this object carries the spread that decides whether a between-commit difference is a change or noise. Keys match keys in metrics.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["n", "min", "median", "max"],
+        "properties": {
+          "n": {"type": "integer", "minimum": 1, "description": "Iterations the distribution summarizes."},
+          "min": {"type": "number", "minimum": 0},
+          "median": {"type": "number", "minimum": 0},
+          "p95": {"type": ["number", "null"], "minimum": 0, "description": "Nearest-rank 95th percentile, as scripts/locality_probe.py computes it."},
+          "p99": {"type": ["number", "null"], "minimum": 0, "description": "Nearest-rank 99th percentile."},
+          "max": {"type": "number", "minimum": 0},
+          "mean": {"type": ["number", "null"], "minimum": 0}
         }
       }
     },

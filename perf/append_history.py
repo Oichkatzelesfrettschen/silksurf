@@ -64,6 +64,13 @@ ENV_OVERRIDES = {
 GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 RUSTC_VERSION_RE = re.compile(r"^rustc\s+(\S+)")
 
+# The four scalar identity fields do not reproduce a timing: the same commit on
+# a different CPU, cache hierarchy, or scaling governor produces a different
+# number. Every record therefore carries the same provenance envelope the
+# conformance scorecards and locality probe embed.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+from measurement_environment import capture as capture_environment  # noqa: E402
+
 
 class AppendError(RuntimeError):
     """Wrapper for any user-facing failure in this script."""
@@ -204,6 +211,7 @@ def build_record(
         "rust_version": rust_version,
         "profile": profile,
         "metrics": metrics,
+        "measurement_environment": capture_environment(),
     }
     if idle_cpu_fraction is not None:
         record["idle_cpu_fraction"] = idle_cpu_fraction
