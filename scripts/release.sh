@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# silksurf release driver (P9.S1).
+# silksurf release driver.
 #
 # WHY: A release is a high-stakes, hard-to-undo action (annotated tags get
 #      promoted to public artifacts and consumed by downstream packagers).

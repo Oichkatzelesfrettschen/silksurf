@@ -5,18 +5,18 @@
 > reports. `scripts/check_status_consistency.py` checks the machine-verifiable
 > fields against manifests and scorecards.
 
-**Evidence refresh:** 2026-07-23  
-**Active branch baseline:** `main` after PR #49  
+**Evidence refresh:** 2026-07-25  
+**Active branch baseline:** `main` at `f3f19ba` after PR #66  
 **Toolchain:** stable Rust 1.94.1, pinned exactly
 
 ## Classification
 
-SilkSurf is a functional controlled-content browser prototype and native engine
-research platform. It has a real fetch-to-window application path and proven
-React-class DOM interaction. It is not yet a production-grade arbitrary-web
-browser because the page runtime shares the application process and several
-origin, policy, storage, editing, loader, and compatibility surfaces remain
-incomplete.
+SilkSurf is a functional controlled-content browser prototype, locality-first
+native engine, and browser research platform. It has a real fetch-to-window
+application path and proven React-class DOM interaction. It is not yet a
+production-grade arbitrary-web browser because the default GUI still owns the
+page runtime in-process and several origin, policy, storage, editing, loader,
+compatibility, frame-transport, and recovery surfaces remain incomplete.
 
 ## Active workspace
 
@@ -46,26 +46,82 @@ There is no current 10 ms GUI polling loop to replace.
 
 ## Shell and isolation status
 
-Current shell state is single-view:
+The default GUI shell remains single-view:
 
 - one `BrowserState`,
 - one history vector/index,
 - one focused page input,
-- one optional `BrowserPageRuntime`.
+- one optional in-process `BrowserPageRuntime`.
 
 `BrowserPageRuntime` owns the DOM, `SilkContext`, stylesheet/index, fused
 workspace/results, display list, image state, and raster scratch in the same
-process as browser chrome. Renderer crash/hang isolation, multi-tab state,
-profiles, permissions, downloads, and process supervision are open program
-items.
+process as browser chrome.
+
+The process boundary is no longer absent:
+
+- engine protocol v1 defines bounded, view-oriented commands/events and lifecycle
+  state machines;
+- the browser binary can re-exec itself as a supervised native worker;
+- asynchronous `EventIngress` drains the child event pipe through count and exact
+  wire-byte bounds;
+- queue overflow and malformed envelopes preserve typed failure before
+  disconnection;
+- shutdown has a deadline, kills an unresponsive worker, and reaps every path.
+
+The worker does not yet carry the default GUI page runtime or frame bytes on
+`main`. Worker-owned navigation/runtime construction is in a separate draft;
+sealed frame transfer, input, incremental damage, crash/restart, shell cutover,
+multi-view state, persistent profile ownership, permissions, and downloads
+remain open program items.
 
 ## Conformance evidence
+
+### HTML tree construction (upstream corpus, production parse path)
+
+- runner kind: `wpt-tree-construction`
+- corpus: WPT `html/syntax/parsing/resources`, the home html5lib moved its
+  tree-construction `.dat` files to
+- result: 1,440 / 1,726 executed = **83.43%**; 1,440 / 1,918 total = **75.08%**
+- path under test: `silksurf_html::parse_html`, the html5ever entry point
+  `silksurf-engine` uses
+- 192 fragment cases count as skipped; `parse_html` is document-mode only
+- 286 recorded gaps sit in
+  `crates/silksurf-html/tests/html5lib-tree-construction.expectations`. Template
+  content (109) and processing instructions (90) account for 199 of them, both
+  reaching the same cause: `silksurf_dom::NodeKind` carries no template-content
+  fragment and no processing-instruction variant, so the adapter in
+  `crates/silksurf-html/src/treesink.rs` drops template children and renders a
+  processing instruction as a comment.
+
+### HTML tokenization (upstream corpus, tooling parse path)
+
+- runner kind: `html5lib-tokenizer`
+- corpus: html5lib-tests `tokenizer`
+- result: 3,019 / 6,640 executed = **45.47%**; 3,019 / 6,806 total = 44.36%
+- path under test: `silksurf_html::Tokenizer`, which serves `wpt_runner` and the
+  CSS harness rather than page loads
+- 166 cases need tokenizer states or a `lastStartTag` the public API does not
+  expose and count as unsupported
+- named character references (2,283) and `test3` state permutations (1,238) lead
+  the 3,621 recorded gaps; the `State` enum carries 8 states against roughly 80
+  in the standard
+
+### CSS parse robustness (upstream corpus)
+
+- runner kind: `css-parse-robustness`
+- corpus: WPT `css/CSS2/syntax`, `css/css-syntax`, `css/selectors/parsing`
+- result: 603 / 603 executed accepted
+- oracle: `parse_stylesheet_bytes` returns without error or panic, and the
+  parsed stylesheet is discarded. The rate measures parser robustness over the
+  corpus; cascade and computed-value correctness stay unmeasured, so this is not
+  a CSS conformance number.
 
 ### Synthetic WPT-style regression harness
 
 - runner kind: `wpt-synthetic`
 - result: **70/70** pass, 0 fail, 0 skip
 - scope: in-tree HTML/CSS/layout/paint/JavaScript-event fixtures
+- role: a regression gate over the fused style-layout-paint pipeline
 - limitation: not the upstream Web Platform Tests corpus; do not quote this as a
   browser interoperability percentage
 
@@ -114,9 +170,20 @@ selected retained-render paths. It does not include:
 - display refresh/scanout,
 - arbitrary full-tree layout or repaint.
 
-All performance reports must separate input dispatch, JavaScript/model commit,
-layout, raster, frame submission, compositor-visible presentation, and network
-or service latency.
+Cache locality is capacity-adaptive. No fixed 32 MiB cache or 20 MiB hot-set
+number is an implementation requirement. Nominal/effective cache capacity,
+latency and miss-rate knees, affinity, competing load, RSS, private state, queue
+wire bytes, and frame-pool bytes are separate measurements.
+
+The first valid five-run `bench_pipeline` locality observation used the required
+`parallel-render` feature on a 96 MiB-LLC host and recorded median IPC 1.47,
+generic miss ratio 0.197, maximum RSS 10,184 KiB, median elapsed time 998 ms,
+and about 9.9e9 instructions. It validates the measurement lane on that host; it
+does not establish a smaller-capacity knee.
+
+All performance reports separate input dispatch, JavaScript/model commit,
+layout, raster, frame submission, compositor-visible presentation, network or
+service latency, and counter availability.
 
 ## Known public-web blockers
 
@@ -137,11 +204,13 @@ The native engine still lacks or only partially implements:
 GitHub issue #50 and
 `docs/roadmaps/BROWSER-FUNCTIONALIZATION-ACTION-PLAN.md` define the program:
 
-1. make status and evidence mechanically consistent,
-2. specify and prove a process-neutral engine boundary using the native engine,
-3. run comparable WPE/Wry/Servo/CEF integration spikes before fixing a backend
+1. complete native runtime, frame, input, and recovery extraction behind protocol
+   v1 without mirroring mutable page state in the shell,
+2. select whole-pipeline, phase-local, or streaming native policy from controlled
+   cache-capacity and state-size measurements,
+3. run comparable WPE/Wry/Servo/CEF integration spikes before fixing a fallback
    verdict or crate split,
-4. build a multi-view browser shell and persistent profile substrate,
+4. build a multi-view shell and persistent profile substrate,
 5. build a native virtualized AI-chat mode with bounded mounted state,
-6. mature the native engine independently through upstream WPT, loader semantics,
-   enforcement, and sandboxing.
+6. mature the native engine through upstream WPT, loader semantics, enforcement,
+   sandboxing, and expanded public-web coverage.

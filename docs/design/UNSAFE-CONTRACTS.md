@@ -46,16 +46,24 @@ clean, loom clean, fuzz clean, manually reviewed).
 
 ### `silksurf-js/src` -- DEFERRED
 
-silksurf-js has ~40 `unsafe` blocks concentrated in `gc/heap.rs`, `ffi.rs`,
-`vm/string.rs`, and the bytecode chunk machinery. Annotating them is its
-own batch (tracked in the SNAZZY-WAFFLE roadmap; the lint currently
-excludes silksurf-js/src for that reason).
+AD-025 removed the hand-written VM, so the GC, bytecode-chunk, and FFI
+`unsafe` surface this section previously described no longer exists. The
+current surface is 74 blocks: 40 in `silksurf-js/src/boa_backend/dom_bridge.rs`,
+26 in `silksurf-js/src/boa_backend/mod.rs`, 7 in
+`silksurf-js/src/boa_backend/css_object.rs`, and 1 in
+`silksurf-js/src/bin/test262_boa.rs`.
 
-The known-suspect site is **`silksurf-js/src/ffi.rs:271`** -- an
-`unwrap()` inside an `unsafe { CStr::from_ptr(version) }.to_str()` chain
-where the failure mode is "FFI caller passed a non-UTF-8 version string."
-The migration must turn that into a defensive return rather than a
-process-aborting panic across the FFI boundary.
+Every one is a `boa_engine::NativeFunction::from_closure` call. That
+constructor is unsafe because boa's garbage collector traces the closure's
+captures: a closure holding a `JsValue` or any other GC-managed handle the
+tracer cannot reach produces a use-after-free. The obligation each site
+discharges is therefore uniform -- the closure captures only owned host
+handles such as `Arc<Mutex<Dom>>` and `NodeId`, never a GC-managed value.
+
+`scripts/lint_unsafe.sh` excludes `silksurf-js/src`, so these 74 blocks are
+outside the annotation gate. Bringing them under it is tractable precisely
+because the obligation is uniform; the exclusion, not the count, is the open
+item.
 
 ## Verification methodology
 
@@ -72,7 +80,7 @@ For each block:
     are gated behind a `cfg(target_arch = "x86_64")` so miri (which
     runs on the test machine) does exercise them when applicable.
   * **Loom.** No loom coverage today. Once `silksurf-core::resolve_table`
-    grows formal concurrent semantics (P8.S12), the relevant atomics
+    grows formal concurrent semantics, the relevant atomics
     will be wrapped in a loom-aware abstraction.
 
 ## Bumping or adding an unsafe block

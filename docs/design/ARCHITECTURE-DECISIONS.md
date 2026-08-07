@@ -208,7 +208,7 @@ Pure XCB (X C Binding) with no high-level toolkit (GTK, Qt).
 
 **References**:
 - `silksurf-specification/SILKSURF-XCB-GUI-DESIGN.md`
-- `/diff-analysis/XCB_GUIDE.md`
+- `docs/XCB_GUIDE.md`
 
 ---
 
@@ -420,7 +420,7 @@ Experimental integration of BPE (Byte Pair Encoding) for lexical optimization an
 
 **References**:
 - `SILKSURF-JS-DESIGN.md` Section 6
-- `silksurf-specification/neural_bpe.md`
+- `silksurf-specification/SILKSURF-NEURAL-INTEGRATION.md`
 
 ---
 
@@ -505,7 +505,7 @@ for (int i = 0; i < regions->count; i++) {
 
 **Status**: Accepted
 **Date**: 2026-04-30
-**Deciders**: SNAZZY-WAFFLE roadmap (P0)
+**Deciders**: Architecture Team
 
 ### Context
 
@@ -574,7 +574,7 @@ nightly-only feature requires a deliberate ADR amendment.
 
 **Status**: Accepted
 **Date**: 2026-04-30
-**Deciders**: SNAZZY-WAFFLE roadmap (P0)
+**Deciders**: Architecture Team
 
 ### Context
 
@@ -628,7 +628,7 @@ fuzz) become opt-in via `MIRI=1` / `FUZZ=1` rather than always-on.
 
 **Status**: Accepted (amends AD-003)
 **Date**: 2026-04-30
-**Deciders**: SNAZZY-WAFFLE roadmap (P0/P6)
+**Deciders**: Architecture Team
 
 ### Context
 
@@ -683,7 +683,7 @@ a Wayland backend lands.
 
 **Status**: Superseded  
 **Disposition**: The original ADR outline for MSRV toolchain formalization was
-consolidated into AD-008 during the SNAZZY-WAFFLE Wave 1 pass. This number is
+consolidated into AD-008. This number is
 reserved to preserve the contiguous registry; the content lives in AD-008.
 
 ---
@@ -725,7 +725,7 @@ landed yet; the ADR will be filed when the implementation work begins.
 
 **Status**: Accepted
 **Date**: 2026-04-30 (codifies design from `main` = `409356d`)
-**Deciders**: SNAZZY-WAFFLE roadmap (P2.S3)
+**Deciders**: Architecture Team
 
 ### Context
 
@@ -784,7 +784,7 @@ cold cost.
 
 **Status**: Accepted
 **Date**: 2026-04-30 (codifies design from `main` = `662ddb9`)
-**Deciders**: SNAZZY-WAFFLE roadmap (P2.S3)
+**Deciders**: Architecture Team
 
 ### Context
 
@@ -798,7 +798,8 @@ overhead, totalling ~168 ns per cascade just on lock traffic.
 Add a per-`Dom` `resolve_table: Vec<SmallString>`, materialised from
 the interner's `values_slice()` at two phase boundaries:
 
-  1. `TreeBuilder::into_dom()` -- after parse completes.
+  1. `silksurf_html::treesink::SilkDomBuilder::finish()` -- after parse
+     completes.
   2. `Dom::end_mutation_batch()` -- after JS / dynamic mutations.
 
 `Dom::resolve_fast(atom)` is a plain array index by `atom.raw()`,
@@ -837,7 +838,7 @@ cascade can see new atoms. Document this discipline.
 
 **Status**: Accepted
 **Date**: 2026-04-30 (codifies design from `main` = `418ea00`)
-**Deciders**: SNAZZY-WAFFLE roadmap (P2.S3)
+**Deciders**: Architecture Team
 
 ### Context
 
@@ -888,7 +889,7 @@ becomes a user concern. Documented in `OPERATIONS.md`.
 
 **Status**: Accepted
 **Date**: 2026-04-30 (codifies design from `main` = `63e7551`)
-**Deciders**: SNAZZY-WAFFLE roadmap (P2.S3)
+**Deciders**: Architecture Team
 
 ### Context
 
@@ -944,8 +945,8 @@ version pin); migration to stable hickory release tracked.
 ## AD-020: Workspace-Wide Canonical Error -- silksurf_core::SilkError
 
 **Status**: Accepted
-**Date**: 2026-04-30 (lands in SNAZZY-WAFFLE Wave 1 Batch 2)
-**Deciders**: SNAZZY-WAFFLE roadmap (P1.S1)
+**Date**: 2026-04-30
+**Deciders**: Architecture Team
 
 ### Context
 
@@ -1010,7 +1011,7 @@ from the lint scope.
 
 **Status**: Accepted (amended 2026-07-11: direct `idna` dep for PSL)
 **Date**: 2026-05-14 (amended 2026-07-11)
-**Deciders**: SNAZZY-WAFFLE roadmap (P8.S4)
+**Deciders**: Architecture Team
 
 ### Context
 
@@ -1110,7 +1111,7 @@ tables are reused, honoring the cleanroom point in the Rationale).
 **Status**: Accepted (skeleton); partition + cookie substrate partially
 implemented 2026-07-11..12 -- see Amendments
 **Date**: 2026-05-14 (amended 2026-07-11, 2026-07-12)
-**Deciders**: SNAZZY-WAFFLE roadmap (P8.S9)
+**Deciders**: Architecture Team
 
 ### Context
 
@@ -1295,7 +1296,7 @@ What is STILL deferred (so partial reads as partial):
   * `crates/silksurf-engine/src/privacy.rs` -- skeleton implementation
   * `docs/design/THREAT-MODEL.md` -- fingerprinting gap, cookie gap
   * AD-012 (future) -- Multi-Process Architecture / site isolation
-  * SNAZZY-WAFFLE P8.S9 -- Privacy/sandboxing stream
+  * Privacy and sandboxing stream
 
 ---
 
@@ -1304,7 +1305,7 @@ What is STILL deferred (so partial reads as partial):
 **Status**: Adopted; full render-pipeline integration deferred to typography phase
 **Date**: 2026-05-14
 **Deciders**: Architecture Team
-**SNAZZY-WAFFLE stream**: P8.S3
+**Stream**: BiDi and line-break adoption
 
 ### Context
 
@@ -1396,7 +1397,7 @@ Negative:
   * `crates/silksurf-layout/tests/typography.rs` -- adoption tests
   * `Cargo.toml` -- `unicode-bidi`, `unicode-linebreak` workspace entries
   * AD-021 -- Internationalization Posture (Minimal Subset, ICU Deferred)
-  * SNAZZY-WAFFLE P8.S3 -- BiDi / line-break adoption stream
+  * BiDi and line-break adoption stream
 
 ---
 
@@ -1604,7 +1605,7 @@ tree deferred)
 accessibility tree, and there is no AT-SPI bridge. The
 `a11y-substrate-scheduling` roadmap item said to schedule it behind the
 security substrate and record the deferral in an ADR if it slips again.
-It has slipped again (P8.S5 unstarted), so this ADR records the deferral.
+It has slipped again, so this ADR records the deferral.
 
 The browser is NOT accessibility-blind at the chrome level: the app ships
 a working AccessKit integration (`crates/silksurf-app/src/accessibility.rs`,
@@ -1782,8 +1783,8 @@ Planned (renumbered after the 2026-04-30 batch):
   * AD-020: Error-Type Unification (`silksurf_core::SilkError`)
 
 The 2026-04-30 batch (AD-008..AD-010) covers foundations + GUI; AD-016..
-AD-020 are queued for the documentation-baseline phase (P2) of the
-SNAZZY-WAFFLE roadmap.
+AD-020 are queued for the documentation-baseline work in
+`docs/roadmaps/DEBT-RECONCILIATION-ROADMAP.md`.
 
 ---
 
@@ -1792,5 +1793,5 @@ SNAZZY-WAFFLE roadmap.
   * `/CLAUDE.md` -- Engineering standards
   * `/CONTRIBUTING.md` -- Onboarding and gate discipline
   * `/docs/development/LOCAL-GATE.md` -- Local-gate reference
-  * `/docs/roadmaps/DEBT-RECONCILIATION-ROADMAP.md -- Debt inventory and reconciliation plan
+  * `/docs/roadmaps/DEBT-RECONCILIATION-ROADMAP.md` -- Debt inventory and reconciliation plan
   * `/silksurf-specification/` -- Technical specifications

@@ -37,10 +37,10 @@ use std::sync::Arc;
  * tcp.set_read_timeout(Some(Duration::from_secs(30))) before draining
  * the handshake. This constant centralises that 30 s value so future
  * changes do not require touching multiple files. Once a richer
- * silksurf-tls handshake driver lands (P5.S4), it should consume this
+ * silksurf-tls handshake driver lands, it should consume this
  * constant directly via TlsConfig builder options.
  *
- * See: SNAZZY-WAFFLE roadmap P8.S8 (DoS bounds per crate).
+ * See: docs/design/THREAT-MODEL.md (DoS bounds per subsystem).
  * See: silksurf-net::BasicClient::fetch for the current enforcement site.
  */
 pub const MAX_TLS_HANDSHAKE_SECS: u64 = 30;
