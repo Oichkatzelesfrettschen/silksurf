@@ -15,7 +15,7 @@ silksurf-render = { path = "../silksurf-render" }
 rustc-hash = { workspace = true }
 mimalloc = { workspace = true }
 serde_json = { workspace = true }
-# Structured spans at the pipeline boundary (P8.S6 -- observability roadmap).
+# Structured spans at the pipeline boundary.
 # Used by lib.rs `render`, `render_document`, and the incremental variants.
 # We instrument coarse boundaries only -- inner-loop code stays span-free to
 # preserve throughput.

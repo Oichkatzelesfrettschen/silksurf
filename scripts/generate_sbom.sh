@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# silksurf SBOM generator (P9.S2).
+# silksurf SBOM generator.
 #
 # WHY: Supply-chain transparency. A CycloneDX SBOM enumerates every crate
 #      version that lands in the released binary, which lets downstream
