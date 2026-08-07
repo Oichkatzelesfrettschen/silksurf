@@ -98,6 +98,22 @@ No dependency; runs first.
   docs-link-checker-gate below.
 - **gate-docstring-alignment** -- LANDED. Makefile header and
   local_gate.sh usage both name lint_glossary.
+- **adr-prefix-normalization** -- OPEN. 20 citations across 11 live files
+  spell the ledger `ADR-NNN` where `docs/design/ARCHITECTURE-DECISIONS.md`
+  spells it `AD-NNN`. Every number resolves and every markdown anchor is
+  correct, so this is prefix drift rather than a phantom citation, and
+  `docs/archive/` keeps its own spelling. Enumerate with
+  `git grep -n 'ADR-[0-9]' -- '*.rs' '*.md' '*.sh' '*.py'
+  ':!docs/archive/**'`. Gate: that command returns only
+  `ARCHITECTURE-DECISIONS.md` and this entry.
+- **mechanism-comment-conversion** -- OPEN. 60 comments across 22 live files
+  open with a `WHY:`, `WHAT:`, or `HOW:` label, the ceremonial block form
+  AGENTS.md replaces with one direct mechanism paragraph. The linters carry
+  it too: `lint_glossary.sh` and `cross_build.sh` both use it in their own
+  headers. Enumerate with `git grep -nE
+  '^[[:space:]]*(//!|//|#)[[:space:]]*(WHY|WHAT|HOW)\b' -- '*.rs' '*.sh'
+  '*.py' ':!docs/archive/**'`. Conversion is a prose rewrite and rides its
+  own change rather than a functional one.
 
 ## repo-hygiene-excision
 
