@@ -1,32 +1,21 @@
-//! Shell side of the engine protocol v1 control plane over a child process.
+//! Supervised native-engine process boundary and worker runtime actor.
 //!
-//! The browser binary is both shell and engine: `NativeEngineProcess::spawn`
-//! re-execs `std::env::current_exe()` with `--silksurf-native-engine-worker`,
-//! and `run_internal_engine_process_mode` claims that flag before
-//! `parse_app_options` sees it. Framed protocol-v1 envelopes carry commands
-//! down the child's stdin and events back up its stdout;
-//! `silksurf_core::engine_protocol` owns the envelope layout and every bound.
+//! The browser binary re-executes itself with `--silksurf-native-engine-worker`.
+//! A command-reader thread owns child stdin and feeds a bounded actor queue. The
+//! runtime actor owns the resident view map, every `BrowserPageRuntime`, and the
+//! sole stdout event serializer. Navigation fetches run on worker threads; their
+//! payloads return to the actor before JavaScript, DOM, layout, paint, or event
+//! state changes. `Stop` and `Shutdown` remain readable during fetch. Page build
+//! stays actor-owned and non-preemptible until the builder exposes checkpoints.
 //!
-//! An `EventIngress` thread owns the event pipe, so the engine may write
-//! whenever it has something to say. Both directions writing at once would
-//! otherwise wedge on a full pipe buffer: `MAX_DAMAGE_RECTS` rectangles alone
-//! encode to 65_536 bytes against a 64 KiB Linux pipe. Insertion into the
-//! queue is nonblocking, because a reader thread that blocks on a full
-//! channel moves that same deadlock from the pipe into the queue; an overflow
-//! ends the transport and the supervisor kills the worker. The queue bounds
-//! both the number of queued events and the wire bytes they retain, because
-//! `Event` owns strings and rectangle vectors that a count bound leaves
-//! unbounded.
+//! The shell side owns child lifecycle and an `EventIngress` thread. Ingress
+//! bounds both queued event count and exact encoded wire bytes, records terminal
+//! failure before disconnecting, and leaves worker termination to the supervisor.
 //!
-//! The worker still writes stdout from its command loop. A second producer
-//! arrives with `BrowserPageRuntime`, and that slice adds the event-writer
-//! thread that serializes them.
-//!
-//! The frame plane stays out. `Event::FrameReady` describes a `FrameHandle`
-//! whose transport is a shared-memory descriptor, and descriptor passing
-//! needs `recvmsg` with a control-message buffer rather than these pipes.
+//! Frame bytes stay outside this control plane. `FrameReady` carries descriptor
+//! metadata; sealed memfd transfer uses a Unix-domain socket and `SCM_RIGHTS`
+//! outside this pipe transport.
 
-use std::collections::HashSet;
 use std::fmt;
 use std::io::{self, BufReader, Read, Write};
 use std::process::{Child, Command as ProcessCommand, ExitStatus, Stdio};
@@ -36,10 +25,15 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use crate::browser_types::{FRAME_HEIGHT, FRAME_WIDTH};
+use crate::browser_types::{
+    BrowserFrameBuffers, BrowserNavigationRequest, BrowserPage, BrowserRenderConfig, FRAME_HEIGHT,
+    FRAME_WIDTH, ImageResourceCache, NavigationResult,
+};
+use crate::{build_browser_page_with_buffers_for_height, load_navigation_payload};
 use silksurf_core::engine_protocol::{
-    Command as ProtocolCommand, CrashReason, ENVELOPE_HEADER_BYTES, Event, MAX_MESSAGE_BYTES,
-    Message, ProfileId, ProtocolError, ViewId, Viewport, envelope_body_len,
+    Command as ProtocolCommand, CrashReason, ENVELOPE_HEADER_BYTES, Event, LoadState,
+    MAX_MESSAGE_BYTES, MAX_STRING_BYTES, Message, ProfileId, ProtocolError, ViewId, Viewport,
+    envelope_body_len,
 };
 
 const NATIVE_ENGINE_WORKER_FLAG: &str = "--silksurf-native-engine-worker";
@@ -48,14 +42,16 @@ const NATIVE_ENGINE_PROBE_FLAG: &str = "--silksurf-native-engine-supervisor-prob
 /// Queued events the shell may fall behind by before the transport fails.
 const EVENT_QUEUE_DEPTH: usize = 256;
 
-/// Owned wire bytes the event queue retains before the transport fails.
-///
-/// A count bound alone does not bound the working set: `Event` carries owned
-/// strings and damage-rectangle vectors, so `EVENT_QUEUE_DEPTH` maximal
-/// `FrameReady` events retain megabytes while the queue reports 256 entries.
-/// One maximum legal envelope fits, which keeps every decodable message
-/// deliverable, and a backlog of several does not.
+/// One protocol-maximum envelope is the liveness floor for event delivery.
 const EVENT_QUEUE_BYTE_BUDGET: usize = ENVELOPE_HEADER_BYTES + MAX_MESSAGE_BYTES;
+
+/// Commands and navigation completions retained inside one native worker.
+const WORKER_QUEUE_DEPTH: usize = 8;
+
+/// The current loader has no mid-flight cancellation, so one worker admits one
+/// fetch at a time. `Stop` invalidates its generation and the slot reopens when
+/// the background fetch returns.
+const MAX_INFLIGHT_NAVIGATIONS: usize = 1;
 
 /// Grace period between `Shutdown` and `Child::kill`.
 const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(5);
@@ -63,7 +59,7 @@ const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(5);
 /// Exit poll interval while a worker drains its command loop.
 const SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
-/// Bound on a blocking `receive`, so a silent worker surfaces as a timeout.
+/// Bound on a blocking shell receive.
 const RECEIVE_DEADLINE: Duration = Duration::from_secs(10);
 
 #[derive(Debug)]
@@ -101,7 +97,7 @@ impl fmt::Display for NativeEngineProcessError {
             Self::UnsupportedCommand(command) => {
                 write!(
                     formatter,
-                    "native engine worker command is not bound yet: {command}"
+                    "native engine worker command is not bound: {command}"
                 )
             }
             Self::ChildFailed(code) => {
@@ -145,9 +141,7 @@ impl From<ProtocolError> for NativeEngineProcessError {
     }
 }
 
-/// Runs one of the internal process-boundary modes before normal CLI parsing.
-/// Returns an exit code when an internal mode matched, or `None` for the normal
-/// browser entry point.
+/// Runs an internal process mode before normal browser option parsing.
 pub(crate) fn run_internal_engine_process_mode(args: &[String]) -> Option<i32> {
     if args
         .iter()
@@ -165,11 +159,28 @@ pub(crate) fn run_internal_engine_process_mode(args: &[String]) -> Option<i32> {
 }
 
 fn run_worker_stdio() -> i32 {
-    let stdin = io::stdin();
+    let (sender, receiver) = mpsc::sync_channel(WORKER_QUEUE_DEPTH);
+    let command_sender = sender.clone();
+    let reader = thread::Builder::new()
+        .name("silksurf-engine-command-reader".to_string())
+        .spawn(move || {
+            let stdin = io::stdin();
+            let mut source = stdin.lock();
+            read_commands_until_closed(&mut source, &command_sender);
+        });
+    if let Err(error) = reader {
+        eprintln!("[SilkSurf] native engine command reader failed: {error}");
+        return 2;
+    }
+
     let stdout = io::stdout();
-    let mut reader = stdin.lock();
     let mut writer = stdout.lock();
-    match run_native_engine_worker(&mut reader, &mut writer) {
+    match run_runtime_actor(
+        receiver,
+        sender,
+        &mut writer,
+        production_navigation_loader(),
+    ) {
         Ok(()) => 0,
         Err(error) => {
             eprintln!("[SilkSurf] native engine worker failed: {error}");
@@ -231,24 +242,12 @@ fn expect_view_closed(event: &Event, expected: ViewId) -> Result<(), NativeEngin
     }
 }
 
-/// Owns the event pipe on a dedicated thread and hands decoded events to the
-/// shell through a bounded queue.
-///
-/// The thread terminates on end of stream, on a decode failure, on a command
-/// arriving in the event direction, and on queue overflow. It records the
-/// cause before dropping its sender, so a receiver that observes the closed
-/// channel always finds the reason already published.
 struct QueuedEvent {
     event: Event,
     wire_bytes: usize,
 }
 
-/// Outstanding wire bytes held by queued events.
-///
-/// The reader reserves before it inserts and the receiver releases on removal,
-/// so the counter tracks what the queue retains rather than what crossed the
-/// pipe. Reservation is a compare-exchange loop, which keeps the budget exact
-/// against a receiver draining concurrently on another thread.
+/// Exact encoded bytes retained by queued events.
 #[derive(Default)]
 struct QueueCharge {
     outstanding: AtomicUsize,
@@ -276,8 +275,6 @@ impl QueueCharge {
         }
     }
 
-    /// Saturates rather than wrapping, so a double release costs one event's
-    /// budget instead of rejecting every later event as a byte overflow.
     fn release(&self, bytes: usize) {
         let _ = self
             .outstanding
@@ -287,6 +284,8 @@ impl QueueCharge {
     }
 }
 
+/// Owns the event pipe and hands decoded events to the shell through bounded
+/// count and wire-byte budgets.
 struct EventIngress {
     events: Receiver<QueuedEvent>,
     charge: Arc<QueueCharge>,
@@ -312,7 +311,6 @@ impl EventIngress {
         }
     }
 
-    /// Releases the dequeued event's reservation before handing it to the shell.
     fn release(&self, queued: QueuedEvent) -> Event {
         self.charge.release(queued.wire_bytes);
         queued.event
@@ -328,11 +326,9 @@ impl EventIngress {
         }
     }
 
-    /// Drains one queued event without blocking. The shell event pump binds
-    /// this when view routing lands; the transport contract is proved here.
     #[cfg_attr(
         not(test),
-        expect(dead_code, reason = "bound by the shell pump with view routing")
+        expect(dead_code, reason = "bound by the shell event pump with view routing")
     )]
     fn try_receive(&self) -> Result<Option<Event>, NativeEngineProcessError> {
         match self.events.try_recv() {
@@ -342,8 +338,6 @@ impl EventIngress {
         }
     }
 
-    /// Reports why the stream ended. The queue drains before the channel
-    /// reports disconnection, so every event delivered precedes this.
     fn terminal_failure(&self) -> NativeEngineProcessError {
         match self.failure.lock() {
             Ok(mut slot) => slot
@@ -353,8 +347,6 @@ impl EventIngress {
         }
     }
 
-    /// Joins the reader thread. The caller reaps the child first, because the
-    /// thread runs until the write end of the event pipe closes.
     fn join(&mut self) {
         if let Some(reader) = self.reader.take() {
             let _ = reader.join();
@@ -372,13 +364,9 @@ fn read_events_until_closed<R: Read>(
     loop {
         let outcome = match read_engine_envelope(&mut source) {
             Ok(Some((Message::Event(event), wire_bytes))) => {
-                // The charge is reserved before insertion and released by the
-                // path that drops the event, so a rejected send leaves the
-                // budget as it found it.
                 if charge.reserve(wire_bytes) {
                     match sender.try_send(QueuedEvent { event, wire_bytes }) {
                         Ok(()) => continue,
-                        // Blocking here would move the pipe deadlock into the queue.
                         Err(TrySendError::Full(queued)) => {
                             charge.release(queued.wire_bytes);
                             NativeEngineProcessError::EventQueueOverflow
@@ -396,10 +384,17 @@ fn read_events_until_closed<R: Read>(
             Ok(None) => return,
             Err(error) => error,
         };
-        if let Ok(mut slot) = failure.lock() {
-            *slot = Some(outcome);
-        }
+        record_terminal_failure(failure, outcome);
         return;
+    }
+}
+
+fn record_terminal_failure(
+    failure: &Arc<Mutex<Option<NativeEngineProcessError>>>,
+    outcome: NativeEngineProcessError,
+) {
+    if let Ok(mut slot) = failure.lock() {
+        *slot = Some(outcome);
     }
 }
 
@@ -428,8 +423,6 @@ impl NativeEngineProcess {
         Ok(Self::adopt(Some(child), command_writer, event_source))
     }
 
-    /// Supervises an already-created transport. `spawn` builds the browser
-    /// worker through this, and a test drives it with pipes.
     fn adopt<W, R>(child: Option<Child>, command_writer: W, event_source: R) -> Self
     where
         W: Write + Send + 'static,
@@ -458,9 +451,6 @@ impl NativeEngineProcess {
         self.shutdown_within(SHUTDOWN_DEADLINE)
     }
 
-    /// Requests shutdown, closes the command stream, and reaps the worker,
-    /// killing it once `deadline` passes so a wedged engine cannot hold the
-    /// shell.
     fn shutdown_within(
         mut self,
         deadline: Duration,
@@ -478,8 +468,6 @@ impl NativeEngineProcess {
     }
 }
 
-/// Waits for `child` to exit, escalating to `Child::kill` at the deadline.
-/// Every path reaps, so a killed worker leaves no zombie.
 fn reap_within(
     child: &mut Child,
     deadline: Duration,
@@ -508,64 +496,442 @@ impl Drop for NativeEngineProcess {
     }
 }
 
-fn run_native_engine_worker<R: Read, W: Write>(
-    reader: &mut R,
-    writer: &mut W,
-) -> Result<(), NativeEngineProcessError> {
-    let mut views = HashSet::new();
-    while let Some(message) = read_engine_message(reader)? {
-        let Message::Command(command) = message else {
-            return Err(NativeEngineProcessError::UnexpectedDirection);
-        };
-        match command {
-            ProtocolCommand::CreateView { view, .. } => {
-                if views.insert(view) {
-                    write_event(writer, Event::ViewCreated { view })?;
-                } else {
-                    write_event(
-                        writer,
-                        Event::Crashed {
-                            view,
-                            reason: CrashReason::ProtocolViolation,
-                        },
-                    )?;
-                }
-            }
-            ProtocolCommand::CloseView { view } => {
-                if views.remove(&view) {
-                    write_event(writer, Event::ViewClosed { view })?;
-                } else {
-                    write_event(
-                        writer,
-                        Event::Crashed {
-                            view,
-                            reason: CrashReason::ProtocolViolation,
-                        },
-                    )?;
-                }
-            }
-            ProtocolCommand::Shutdown => {
-                close_all_views(writer, &mut views)?;
-                return Ok(());
-            }
-            other => {
-                return Err(NativeEngineProcessError::UnsupportedCommand(command_name(
-                    &other,
-                )));
-            }
-        }
-    }
-    Ok(())
+type NavigationLoader = Arc<
+    dyn Fn(
+            BrowserNavigationRequest,
+            BrowserRenderConfig,
+            Arc<Mutex<ImageResourceCache>>,
+        ) -> NavigationResult
+        + Send
+        + Sync,
+>;
+
+fn production_navigation_loader() -> NavigationLoader {
+    Arc::new(|request, config, image_cache| {
+        load_navigation_payload(&request, &config, &image_cache)
+    })
 }
 
-fn close_all_views<W: Write>(
-    writer: &mut W,
-    views: &mut HashSet<ViewId>,
-) -> Result<(), NativeEngineProcessError> {
-    let mut ordered: Vec<ViewId> = views.drain().collect();
-    ordered.sort_unstable_by_key(|view| view.get());
-    for view in ordered {
+enum WorkerMessage {
+    Command(ProtocolCommand),
+    CommandStreamClosed,
+    CommandStreamFailed(NativeEngineProcessError),
+    NavigationComplete {
+        view: ViewId,
+        generation: u64,
+        result: Box<NavigationResult>,
+    },
+}
+
+struct NativeEngineView {
+    render_config: BrowserRenderConfig,
+    viewport: Viewport,
+    requested_url: Option<String>,
+    navigation_generation: u64,
+    active_navigation: Option<u64>,
+    page: Option<BrowserPage>,
+    spare_buffers: BrowserFrameBuffers,
+}
+
+impl NativeEngineView {
+    fn new(render_config: BrowserRenderConfig, viewport: Viewport) -> Self {
+        Self {
+            render_config,
+            viewport,
+            requested_url: None,
+            navigation_generation: 0,
+            active_navigation: None,
+            page: None,
+            spare_buffers: BrowserFrameBuffers::default(),
+        }
+    }
+
+    fn reload_url(&self) -> Option<String> {
+        self.page
+            .as_ref()
+            .map(|page| page.frame.url.clone())
+            .or_else(|| self.requested_url.clone())
+    }
+
+    /// Drops the old runtime before constructing the replacement and reuses its
+    /// large raster allocations. One view therefore never retains two page
+    /// runtimes or two independent viewport-buffer sets during navigation.
+    fn take_build_buffers(&mut self) -> BrowserFrameBuffers {
+        if let Some(BrowserPage { frame, runtime }) = self.page.take() {
+            return BrowserFrameBuffers {
+                rgba: runtime.rgba,
+                argb: frame.argb,
+            };
+        }
+        std::mem::take(&mut self.spare_buffers)
+    }
+}
+
+struct NativeEngineWorker {
+    views: Vec<(ViewId, NativeEngineView)>,
+    profiles: Vec<(ProfileId, BrowserRenderConfig)>,
+    image_cache: Arc<Mutex<ImageResourceCache>>,
+    sender: SyncSender<WorkerMessage>,
+    loader: NavigationLoader,
+    inflight_navigations: usize,
+}
+
+impl NativeEngineWorker {
+    fn new(sender: SyncSender<WorkerMessage>, loader: NavigationLoader) -> Self {
+        Self {
+            views: Vec::with_capacity(1),
+            profiles: Vec::with_capacity(1),
+            image_cache: Arc::new(Mutex::new(ImageResourceCache::new())),
+            sender,
+            loader,
+            inflight_navigations: 0,
+        }
+    }
+
+    fn view(&self, id: ViewId) -> Option<&NativeEngineView> {
+        self.views
+            .iter()
+            .find_map(|(view, entry)| (*view == id).then_some(entry))
+    }
+
+    fn view_mut(&mut self, id: ViewId) -> Option<&mut NativeEngineView> {
+        self.views
+            .iter_mut()
+            .find_map(|(view, entry)| (*view == id).then_some(entry))
+    }
+
+    fn profile_config(&mut self, id: ProfileId) -> BrowserRenderConfig {
+        if let Some((_, config)) = self.profiles.iter().find(|(profile, _)| *profile == id) {
+            return config.clone();
+        }
+        let config = BrowserRenderConfig::default();
+        self.profiles.push((id, config.clone()));
+        config
+    }
+
+    fn handle_command<W: Write>(
+        &mut self,
+        command: ProtocolCommand,
+        writer: &mut W,
+    ) -> Result<bool, NativeEngineProcessError> {
+        match command {
+            ProtocolCommand::CreateView {
+                view,
+                profile,
+                viewport,
+            } => self.create_view(view, profile, viewport, writer),
+            ProtocolCommand::CloseView { view } => self.close_view(view, writer),
+            ProtocolCommand::Navigate { view, request } => {
+                self.start_navigation(view, request.url, writer)?;
+                Ok(true)
+            }
+            ProtocolCommand::Reload { view } => {
+                let Some(url) = self.view(view).and_then(NativeEngineView::reload_url) else {
+                    return self.protocol_violation(view, writer);
+                };
+                self.start_navigation(view, url, writer)?;
+                Ok(true)
+            }
+            ProtocolCommand::Stop { view } => self.stop_navigation(view, writer),
+            command @ (ProtocolCommand::Resize { .. } | ProtocolCommand::SetVisible { .. }) => Err(
+                NativeEngineProcessError::UnsupportedCommand(command_name(&command)),
+            ),
+            ProtocolCommand::Shutdown => {
+                self.close_all_views(writer)?;
+                Ok(false)
+            }
+            other => Err(NativeEngineProcessError::UnsupportedCommand(command_name(
+                &other,
+            ))),
+        }
+    }
+
+    fn create_view<W: Write>(
+        &mut self,
+        view: ViewId,
+        profile: ProfileId,
+        viewport: Viewport,
+        writer: &mut W,
+    ) -> Result<bool, NativeEngineProcessError> {
+        if self.view(view).is_some() {
+            return self.protocol_violation(view, writer);
+        }
+        let render_config = self.profile_config(profile);
+        self.views
+            .push((view, NativeEngineView::new(render_config, viewport)));
+        write_event(writer, Event::ViewCreated { view })?;
+        Ok(true)
+    }
+
+    fn close_view<W: Write>(
+        &mut self,
+        view: ViewId,
+        writer: &mut W,
+    ) -> Result<bool, NativeEngineProcessError> {
+        let Some(index) = self
+            .views
+            .iter()
+            .position(|(candidate, _)| *candidate == view)
+        else {
+            return self.protocol_violation(view, writer);
+        };
+        self.views.swap_remove(index);
         write_event(writer, Event::ViewClosed { view })?;
+        Ok(true)
+    }
+
+    fn start_navigation<W: Write>(
+        &mut self,
+        view: ViewId,
+        url: String,
+        writer: &mut W,
+    ) -> Result<(), NativeEngineProcessError> {
+        if self.view(view).is_none() {
+            self.protocol_violation(view, writer)?;
+            return Ok(());
+        }
+        if self.inflight_navigations >= MAX_INFLIGHT_NAVIGATIONS {
+            write_event(
+                writer,
+                Event::StatusChanged {
+                    view,
+                    status: "navigation worker busy".to_string(),
+                },
+            )?;
+            return Ok(());
+        }
+        let Some(entry) = self.view_mut(view) else {
+            return Ok(());
+        };
+        entry.navigation_generation = entry.navigation_generation.saturating_add(1);
+        let generation = entry.navigation_generation;
+        entry.active_navigation = Some(generation);
+        entry.requested_url = Some(url.clone());
+        let config = entry.render_config.clone();
+
+        write_event(
+            writer,
+            Event::LoadStateChanged {
+                view,
+                state: LoadState::Started,
+            },
+        )?;
+
+        let sender = self.sender.clone();
+        let loader = Arc::clone(&self.loader);
+        let image_cache = Arc::clone(&self.image_cache);
+        let request = BrowserNavigationRequest::get(url);
+        let fetch = thread::Builder::new()
+            .name("silksurf-navigation-fetch".to_string())
+            .spawn(move || {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    loader(request, config, image_cache)
+                }))
+                .unwrap_or_else(|_| Err("navigation fetch panicked".to_string()));
+                let _ = sender.send(WorkerMessage::NavigationComplete {
+                    view,
+                    generation,
+                    result: Box::new(result),
+                });
+            })?;
+        self.inflight_navigations = self.inflight_navigations.saturating_add(1);
+        drop(fetch);
+        Ok(())
+    }
+
+    fn stop_navigation<W: Write>(
+        &mut self,
+        view: ViewId,
+        writer: &mut W,
+    ) -> Result<bool, NativeEngineProcessError> {
+        let Some(entry) = self.view_mut(view) else {
+            return self.protocol_violation(view, writer);
+        };
+        if entry.active_navigation.take().is_some() {
+            write_event(
+                writer,
+                Event::LoadStateChanged {
+                    view,
+                    state: LoadState::Idle,
+                },
+            )?;
+            write_event(
+                writer,
+                Event::StatusChanged {
+                    view,
+                    status: "stopped".to_string(),
+                },
+            )?;
+        }
+        Ok(true)
+    }
+
+    fn handle_navigation_complete<W: Write>(
+        &mut self,
+        view: ViewId,
+        generation: u64,
+        result: NavigationResult,
+        writer: &mut W,
+    ) -> Result<(), NativeEngineProcessError> {
+        self.inflight_navigations = self.inflight_navigations.saturating_sub(1);
+        let Some(entry) = self.view_mut(view) else {
+            return Ok(());
+        };
+        if entry.active_navigation != Some(generation) {
+            return Ok(());
+        }
+        entry.active_navigation = None;
+
+        let payload = match result {
+            Ok(payload) => payload,
+            Err(error) => {
+                write_navigation_failure(writer, view, error)?;
+                return Ok(());
+            }
+        };
+        let url = payload.url.clone();
+        let height = entry.viewport.height;
+        let buffers = entry.take_build_buffers();
+        match build_browser_page_with_buffers_for_height(payload, buffers, Some(height)) {
+            Ok(page) => {
+                entry.page = Some(page);
+                write_event(writer, Event::UrlChanged { view, url })?;
+                write_event(
+                    writer,
+                    Event::LoadStateChanged {
+                        view,
+                        state: LoadState::Committed,
+                    },
+                )?;
+                write_event(
+                    writer,
+                    Event::LoadStateChanged {
+                        view,
+                        state: LoadState::Interactive,
+                    },
+                )?;
+                write_event(
+                    writer,
+                    Event::LoadStateChanged {
+                        view,
+                        state: LoadState::Complete,
+                    },
+                )?;
+            }
+            Err(error) => {
+                entry.spare_buffers = error.buffers;
+                write_navigation_failure(writer, view, error.message)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn protocol_violation<W: Write>(
+        &self,
+        view: ViewId,
+        writer: &mut W,
+    ) -> Result<bool, NativeEngineProcessError> {
+        write_event(
+            writer,
+            Event::Crashed {
+                view,
+                reason: CrashReason::ProtocolViolation,
+            },
+        )?;
+        Ok(true)
+    }
+
+    fn close_all_views<W: Write>(
+        &mut self,
+        writer: &mut W,
+    ) -> Result<(), NativeEngineProcessError> {
+        self.views.sort_unstable_by_key(|(view, _)| view.get());
+        for (view, _) in self.views.drain(..) {
+            write_event(writer, Event::ViewClosed { view })?;
+        }
+        self.profiles.clear();
+        Ok(())
+    }
+}
+
+fn write_navigation_failure<W: Write>(
+    writer: &mut W,
+    view: ViewId,
+    error: String,
+) -> Result<(), NativeEngineProcessError> {
+    write_event(
+        writer,
+        Event::LoadStateChanged {
+            view,
+            state: LoadState::Failed,
+        },
+    )?;
+    write_event(
+        writer,
+        Event::StatusChanged {
+            view,
+            status: bounded_protocol_string(error),
+        },
+    )
+}
+
+fn bounded_protocol_string(mut value: String) -> String {
+    if value.len() <= MAX_STRING_BYTES {
+        return value;
+    }
+    let mut boundary = MAX_STRING_BYTES;
+    while !value.is_char_boundary(boundary) {
+        boundary = boundary.saturating_sub(1);
+    }
+    value.truncate(boundary);
+    value
+}
+
+fn read_commands_until_closed<R: Read>(source: &mut R, sender: &SyncSender<WorkerMessage>) {
+    loop {
+        let message = match read_engine_message(source) {
+            Ok(Some(Message::Command(command))) => WorkerMessage::Command(command),
+            Ok(Some(Message::Event(_))) => {
+                WorkerMessage::CommandStreamFailed(NativeEngineProcessError::UnexpectedDirection)
+            }
+            Ok(None) => WorkerMessage::CommandStreamClosed,
+            Err(error) => WorkerMessage::CommandStreamFailed(error),
+        };
+        let terminal = matches!(
+            message,
+            WorkerMessage::CommandStreamClosed | WorkerMessage::CommandStreamFailed(_)
+        );
+        if sender.send(message).is_err() || terminal {
+            return;
+        }
+    }
+}
+
+fn run_runtime_actor<W: Write>(
+    receiver: Receiver<WorkerMessage>,
+    sender: SyncSender<WorkerMessage>,
+    writer: &mut W,
+    loader: NavigationLoader,
+) -> Result<(), NativeEngineProcessError> {
+    let mut worker = NativeEngineWorker::new(sender, loader);
+    // Iterating by value moves the receiver into the actor, so returning drops
+    // the last receiver and the command reader's next `send` fails, which is
+    // how `read_commands_until_closed` learns the actor is gone.
+    for message in receiver {
+        match message {
+            WorkerMessage::Command(command) => {
+                if !worker.handle_command(command, writer)? {
+                    return Ok(());
+                }
+            }
+            WorkerMessage::CommandStreamClosed => return Ok(()),
+            WorkerMessage::CommandStreamFailed(error) => return Err(error),
+            WorkerMessage::NavigationComplete {
+                view,
+                generation,
+                result,
+            } => worker.handle_navigation_complete(view, generation, *result, writer)?,
+        }
     }
     Ok(())
 }
@@ -586,8 +952,40 @@ fn command_name(command: &ProtocolCommand) -> &'static str {
     }
 }
 
+fn event_name(event: &Event) -> &'static str {
+    match event {
+        Event::ViewCreated { .. } => "ViewCreated",
+        Event::ViewClosed { .. } => "ViewClosed",
+        Event::LoadStateChanged { .. } => "LoadStateChanged",
+        Event::UrlChanged { .. } => "UrlChanged",
+        Event::TitleChanged { .. } => "TitleChanged",
+        Event::CursorChanged { .. } => "CursorChanged",
+        Event::StatusChanged { .. } => "StatusChanged",
+        Event::ProgressChanged { .. } => "ProgressChanged",
+        Event::PermissionRequested { .. } => "PermissionRequested",
+        Event::DownloadRequested { .. } => "DownloadRequested",
+        Event::FileChooserRequested { .. } => "FileChooserRequested",
+        Event::NewViewRequested { .. } => "NewViewRequested",
+        Event::FrameReady { .. } => "FrameReady",
+        Event::Crashed { .. } => "Crashed",
+        Event::Hang { .. } => "Hang",
+        Event::CapabilityMismatch { .. } => "CapabilityMismatch",
+        Event::Metrics { .. } => "Metrics",
+    }
+}
+
 fn write_event<W: Write>(writer: &mut W, event: Event) -> Result<(), NativeEngineProcessError> {
-    write_engine_message(writer, &Message::Event(event))
+    let name = event_name(&event);
+    let bytes = Message::Event(event).encode()?;
+    if std::env::var_os("SILKSURF_TRACE_ENGINE_EVENTS").is_some() {
+        eprintln!(
+            "[SilkSurf] engine event: type={name} wire_bytes={}",
+            bytes.len()
+        );
+    }
+    writer.write_all(&bytes)?;
+    writer.flush()?;
+    Ok(())
 }
 
 fn write_engine_message<W: Write>(
@@ -606,12 +1004,6 @@ fn read_engine_message<R: Read>(
     Ok(read_engine_envelope(reader)?.map(|(message, _)| message))
 }
 
-/// Reads one envelope and reports the exact wire size that carried it.
-///
-/// `envelope_body_len` bounds the body before allocation, so the returned size
-/// never exceeds `ENVELOPE_HEADER_BYTES + MAX_MESSAGE_BYTES`. A queue charges
-/// against this measured size rather than against `size_of` a decoded `Event`,
-/// whose owned strings and rectangle vectors live outside the enum.
 fn read_engine_envelope<R: Read>(
     reader: &mut R,
 ) -> Result<Option<(Message, usize)>, NativeEngineProcessError> {
@@ -671,339 +1063,5 @@ fn read_exact_protocol<R: Read>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    #[test]
-    fn worker_lifecycle_round_trip_uses_bounded_wire_messages() {
-        let view = ViewId::new(7);
-        let commands = [
-            Message::Command(ProtocolCommand::CreateView {
-                view,
-                profile: ProfileId::new(3),
-                viewport: Viewport {
-                    width: 640,
-                    height: 480,
-                    scale_permille: 1000,
-                },
-            }),
-            Message::Command(ProtocolCommand::CloseView { view }),
-            Message::Command(ProtocolCommand::Shutdown),
-        ];
-        let mut input = Vec::new();
-        for command in commands {
-            input.extend(command.encode().unwrap());
-        }
-        let mut output = Vec::new();
-        run_native_engine_worker(&mut input.as_slice(), &mut output).unwrap();
-
-        let mut output = output.as_slice();
-        assert_eq!(
-            read_engine_message(&mut output).unwrap(),
-            Some(Message::Event(Event::ViewCreated { view }))
-        );
-        assert_eq!(
-            read_engine_message(&mut output).unwrap(),
-            Some(Message::Event(Event::ViewClosed { view }))
-        );
-        assert_eq!(read_engine_message(&mut output).unwrap(), None);
-    }
-
-    #[test]
-    fn truncated_stream_is_a_protocol_error() {
-        let bytes = [0x53, 0x53, 1, 0, 0];
-        let error = read_engine_message(&mut bytes.as_slice()).unwrap_err();
-        assert!(matches!(
-            error,
-            NativeEngineProcessError::Protocol(ProtocolError::Truncated { .. })
-        ));
-    }
-
-    use silksurf_core::engine_protocol::{
-        DamageRect, FrameGeneration, FrameHandle, FrameTransport, MAX_DAMAGE_RECTS,
-        MAX_STRING_BYTES,
-    };
-
-    const TEST_DEADLINE: Duration = Duration::from_secs(10);
-
-    /// A `FrameReady` at the damage-rect cap: 4096 rectangles of four `u32`
-    /// each exceed a 64 KiB pipe buffer on its own.
-    fn maximal_frame_ready(view: ViewId) -> Event {
-        Event::FrameReady {
-            frame: FrameHandle {
-                view,
-                generation: FrameGeneration::FIRST,
-                transport: FrameTransport::SharedMemory {
-                    token: 0xFEED,
-                    len: 4096,
-                },
-            },
-            damage: (0..MAX_DAMAGE_RECTS as u32)
-                .map(|index| DamageRect {
-                    x: index,
-                    y: index,
-                    width: 1,
-                    height: 1,
-                })
-                .collect(),
-        }
-    }
-
-    fn encoded(event: Event) -> Vec<u8> {
-        Message::Event(event).encode().expect("event encodes")
-    }
-
-    /// A `TitleChanged` at the string cap: legal on its own, and sixteen of
-    /// them exceed the queue's wire budget while the count queue holds 256.
-    fn maximal_title_changed(view: ViewId) -> Event {
-        Event::TitleChanged {
-            view,
-            title: "t".repeat(MAX_STRING_BYTES),
-        }
-    }
-
-    #[test]
-    fn one_maximal_event_fits_the_queue_byte_budget() {
-        let view = ViewId::new(7);
-        let (reader, mut writer) = io::pipe().expect("pipe");
-        let ingress = EventIngress::spawn(reader);
-
-        let bytes = encoded(maximal_frame_ready(view));
-        assert!(bytes.len() <= EVENT_QUEUE_BYTE_BUDGET);
-        let engine_side = thread::spawn(move || {
-            writer.write_all(&bytes).expect("write");
-        });
-
-        assert!(matches!(
-            ingress.receive_timeout(TEST_DEADLINE).expect("event"),
-            Event::FrameReady { .. }
-        ));
-        engine_side.join().expect("engine writer thread");
-    }
-
-    #[test]
-    fn cumulative_wire_bytes_overflow_while_the_count_queue_has_room() {
-        let view = ViewId::new(8);
-        let bytes = encoded(maximal_title_changed(view));
-        let capacity = EVENT_QUEUE_BYTE_BUDGET / bytes.len();
-        assert!(
-            capacity < EVENT_QUEUE_DEPTH,
-            "the byte budget must bind before the count budget, got {capacity}"
-        );
-
-        let (reader, mut writer) = io::pipe().expect("pipe");
-        let ingress = EventIngress::spawn(reader);
-        // Writing stops at EPIPE once the reader fails closed and drops its end.
-        let engine_side = thread::spawn(move || {
-            for _ in 0..(2 * capacity) {
-                if writer.write_all(&bytes).is_err() {
-                    break;
-                }
-            }
-        });
-        // The shell drains nothing yet, so no release restores budget mid-fill
-        // and the backlog reaches the byte bound rather than racing it.
-        thread::sleep(Duration::from_millis(200));
-
-        let mut delivered = 0usize;
-        let terminal = loop {
-            match ingress.receive_timeout(TEST_DEADLINE) {
-                Ok(_) => delivered += 1,
-                Err(error) => break error,
-            }
-        };
-        engine_side.join().expect("engine writer thread");
-        assert!(
-            delivered < EVENT_QUEUE_DEPTH,
-            "the count queue still had room at {delivered} of {EVENT_QUEUE_DEPTH}"
-        );
-        assert!(
-            matches!(terminal, NativeEngineProcessError::EventQueueByteOverflow),
-            "byte overflow must stay distinct from count overflow and EOF: {terminal:?}"
-        );
-    }
-
-    #[test]
-    fn dequeue_releases_the_exact_wire_charge() {
-        let view = ViewId::new(9);
-        let charge = QueueCharge::default();
-        assert!(charge.reserve(EVENT_QUEUE_BYTE_BUDGET));
-        assert!(!charge.reserve(1), "a full budget admits nothing further");
-        charge.release(EVENT_QUEUE_BYTE_BUDGET);
-        assert!(charge.reserve(EVENT_QUEUE_BYTE_BUDGET));
-
-        // The same accounting drives the queue: draining every event restores
-        // the whole budget, so a slow shell that catches up keeps the transport.
-        let bytes = encoded(maximal_title_changed(view));
-        let rounds = 3 * (EVENT_QUEUE_BYTE_BUDGET / bytes.len());
-        let (reader, mut writer) = io::pipe().expect("pipe");
-        let ingress = EventIngress::spawn(reader);
-        let engine_side = thread::spawn(move || {
-            for _ in 0..rounds {
-                writer.write_all(&bytes).expect("write");
-            }
-        });
-
-        for index in 0..rounds {
-            assert!(
-                matches!(
-                    ingress.receive_timeout(TEST_DEADLINE),
-                    Ok(Event::TitleChanged { .. })
-                ),
-                "event {index} of {rounds} must arrive once the charge is released"
-            );
-        }
-        engine_side.join().expect("engine writer thread");
-    }
-
-    #[test]
-    fn ingress_delivers_unsolicited_events_in_wire_order() {
-        let view = ViewId::new(4);
-        let (reader, mut writer) = io::pipe().expect("pipe");
-        let ingress = EventIngress::spawn(reader);
-
-        let sent: Vec<Event> = (1..=8)
-            .map(|permille| Event::ProgressChanged { view, permille })
-            .collect();
-        for event in &sent {
-            writer.write_all(&encoded(event.clone())).expect("write");
-        }
-        drop(writer);
-
-        for expected in sent {
-            assert_eq!(
-                ingress.receive_timeout(TEST_DEADLINE).expect("event"),
-                expected
-            );
-        }
-    }
-
-    #[test]
-    fn ingress_drains_an_event_larger_than_the_pipe_buffer() {
-        let view = ViewId::new(5);
-        let large = encoded(maximal_frame_ready(view));
-        assert!(
-            large.len() > 64 * 1024,
-            "fixture must exceed a pipe buffer, got {}",
-            large.len()
-        );
-
-        let (event_reader, mut event_writer) = io::pipe().expect("event pipe");
-        let (command_reader, command_writer) = io::pipe().expect("command pipe");
-        let mut engine = NativeEngineProcess::adopt(None, command_writer, event_reader);
-
-        // The engine writes both events before the shell reads either, which
-        // the half-duplex transport could not survive.
-        let follow = encoded(Event::ViewCreated { view });
-        let engine_side = thread::spawn(move || {
-            event_writer.write_all(&large).expect("write large event");
-            event_writer.write_all(&follow).expect("write follow-up");
-        });
-
-        engine
-            .send(ProtocolCommand::CloseView { view })
-            .expect("command still writable while events are in flight");
-        assert!(matches!(
-            engine.receive().expect("large event"),
-            Event::FrameReady { .. }
-        ));
-        assert_eq!(
-            engine.receive().expect("follow-up event"),
-            Event::ViewCreated { view }
-        );
-        engine_side.join().expect("engine writer thread");
-        drop(command_reader);
-    }
-
-    #[test]
-    fn malformed_envelope_ends_the_stream_with_a_typed_error() {
-        let (reader, mut writer) = io::pipe().expect("pipe");
-        let ingress = EventIngress::spawn(reader);
-        writer
-            .write_all(&[0xFF; ENVELOPE_HEADER_BYTES])
-            .expect("write");
-        drop(writer);
-
-        assert!(matches!(
-            ingress.receive_timeout(TEST_DEADLINE).unwrap_err(),
-            NativeEngineProcessError::Protocol(ProtocolError::BadMagic)
-        ));
-    }
-
-    #[test]
-    fn queue_overflow_reports_overflow_rather_than_a_clean_close() {
-        let view = ViewId::new(6);
-        let (reader, mut writer) = io::pipe().expect("pipe");
-        let ingress = EventIngress::spawn(reader);
-
-        // Writing stops at EPIPE, which is the fail-closed path itself: the
-        // reader terminates on overflow and drops the read end.
-        for permille in 0..(EVENT_QUEUE_DEPTH as u16 * 2) {
-            if writer
-                .write_all(&encoded(Event::ProgressChanged { view, permille }))
-                .is_err()
-            {
-                break;
-            }
-        }
-        drop(writer);
-        // Let the reader fill the queue before the shell drains any of it.
-        thread::sleep(Duration::from_millis(200));
-
-        let mut delivered = 0usize;
-        let terminal = loop {
-            match ingress.receive_timeout(TEST_DEADLINE) {
-                Ok(_) => delivered += 1,
-                Err(error) => break error,
-            }
-        };
-        assert!(delivered <= EVENT_QUEUE_DEPTH, "delivered {delivered}");
-        assert!(
-            matches!(terminal, NativeEngineProcessError::EventQueueOverflow),
-            "expected overflow, got {terminal}"
-        );
-    }
-
-    #[test]
-    fn closing_the_event_writer_closes_the_stream_once() {
-        let (reader, writer) = io::pipe().expect("pipe");
-        let mut ingress = EventIngress::spawn(reader);
-        drop(writer);
-
-        // Blocking first, so the reader thread has finished; then the
-        // nonblocking path must report the same close rather than Empty.
-        assert!(matches!(
-            ingress.receive_timeout(TEST_DEADLINE).unwrap_err(),
-            NativeEngineProcessError::EventStreamClosed
-        ));
-        assert!(matches!(
-            ingress.try_receive().unwrap_err(),
-            NativeEngineProcessError::EventStreamClosed
-        ));
-        ingress.join();
-    }
-
-    #[test]
-    fn shutdown_kills_a_worker_that_ignores_it() {
-        let mut child = ProcessCommand::new("sleep")
-            .arg("300")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .expect("sleep must spawn");
-        let command_writer = child.stdin.take().expect("stdin");
-        let event_source = child.stdout.take().expect("stdout");
-        let engine = NativeEngineProcess::adopt(Some(child), command_writer, event_source);
-
-        let start = Instant::now();
-        let status = engine
-            .shutdown_within(Duration::from_millis(200))
-            .expect("supervisor reaps an unresponsive worker");
-        let elapsed = start.elapsed();
-
-        assert!(!status.success(), "killed worker reports {status:?}");
-        assert!(
-            elapsed < Duration::from_secs(5),
-            "shutdown took {elapsed:?}"
-        );
-    }
+    include!("tests/native_engine_process.rs");
 }
