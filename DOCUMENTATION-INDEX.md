@@ -13,5 +13,7 @@ Entry points:
 - `README.md` -- project overview
 - `AGENTS.md` -- authoritative developer/agent instructions
 - `CONTRIBUTING.md` -- onboarding and gate discipline
-- `docs/design/ARCHITECTURE-DECISIONS.md` -- ADR ledger (AD-001..AD-024)
+- `docs/design/ARCHITECTURE-DECISIONS.md` -- ADR ledger (AD-001..AD-027)
 - `docs/roadmaps/DEBT-RECONCILIATION-ROADMAP.md` -- current plan
+- `docs/findings/` -- dated measurement records
+- `docs/conformance/SCORECARD.md` -- conformance dashboard and scorecards

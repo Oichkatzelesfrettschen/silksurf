@@ -23,6 +23,15 @@ security, testing, and cleanroom guidance. Historical material lives under
   process, queue, frame-plane, and measurement contract.
 - `docs/design/THREAT-MODEL.md`: current security boundaries and gaps.
 
+## Measured evidence
+
+- `docs/findings/`: dated measurement records. Each names its mechanism, its
+  question, and the evidence class behind its verdict.
+- `docs/conformance/SCORECARD.md`: aggregated conformance dashboard over the
+  per-harness JSON scorecards in the same directory, produced by
+  `scripts/conformance_run.sh`.
+- `perf/`: benchmark schema, pinned baseline, and append-only history.
+
 ## Performance and tooling
 
 - `docs/PERFORMANCE.md`: hot paths, baselines, guardrails, and retained findings.
