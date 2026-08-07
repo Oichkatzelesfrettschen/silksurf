@@ -413,7 +413,7 @@
 
 ### Lock-free monotonic resolve table
 **Type**: Concurrency pattern
-**Definition**: `Dom::resolve_table` (a `Vec<SmallString>`) is materialized from the interner at two phase boundaries (`TreeBuilder::into_dom()` and `Dom::end_mutation_batch()`). `Dom::resolve_fast(atom)` is a plain array index by `atom.raw()`, zero synchronization. Replaces the prior `RwLock<SilkInterner>` read-lock-per-cascade-call. The interner write path retains the RwLock; the read hot path is lock-free.
+**Definition**: `Dom::resolve_table` (a `Vec<SmallString>`) is materialized from the interner at two phase boundaries (`silksurf_html::treesink::SilkDomBuilder::finish()` and `Dom::end_mutation_batch()`). `Dom::resolve_fast(atom)` is a plain array index by `atom.raw()`, zero synchronization. Replaces the prior `RwLock<SilkInterner>` read-lock-per-cascade-call. The interner write path retains the RwLock; the read hot path is lock-free.
 
 ### resolve_fast
 **Type**: Lock-free atom resolution
@@ -425,7 +425,7 @@
 
 ### Phase-4.4 SoA TODOs
 **Type**: Scheduled performance work
-**Definition**: Three documented-in-code TODOs to convert `ComputedStyle`, `Dimensions` (silksurf-layout), and the `DisplayList` to SoA layout. Tracked in the SNAZZY-WAFFLE roadmap P4. Expected to extend the 9.5us steady-state further by improving cache reuse during the per-node loop.
+**Definition**: Three documented-in-code TODOs to convert `ComputedStyle`, `Dimensions` (silksurf-layout), and the `DisplayList` to SoA layout. Tracked in docs/roadmaps/DEBT-RECONCILIATION-ROADMAP.md. Expected to extend the 9.5us steady-state further by improving cache reuse during the per-node loop.
 
 ### `silksurf_core::SilkError`
 **Type**: Workspace-wide canonical error

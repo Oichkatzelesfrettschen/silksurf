@@ -329,7 +329,9 @@ pub struct Node {
  * a plain array index with zero synchronization.
  *
  * LIFECYCLE: The table is extended (never rebuilt) at two phase boundaries:
- *   1. After TreeBuilder::into_dom() -- initial materialization of all parsed atoms
+ *   1. In silksurf_html::treesink::SilkDomBuilder::finish, which calls
+ *      materialize_resolve_table once html5ever closes the document --
+ *      initial materialization of all parsed atoms
  *   2. After end_mutation_batch() -- extends with any newly interned atoms
  *
  * INVARIANT: resolve_table.len() >= interner.values.len() after materialization.
