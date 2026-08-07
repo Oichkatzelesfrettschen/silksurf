@@ -1,27 +1,42 @@
 # silksurf-gui
 
-Windowing, event loop, and platform integration. **Currently a stub**
-(one doc-comment line in `lib.rs`); implementation queued in
-SNAZZY-WAFFLE roadmap P6.
+Windowing, event loop, and platform integration. SilkSurf renders into a
+CPU-side ARGB framebuffer; this crate opens a window, ships that framebuffer to
+the display server, and pumps input events back into the app.
 
-## Decision
+## Backends
 
-  * **Backend = XCB only, Linux first** (see ADR-010). Wayland, macOS,
-    Windows are explicit future work behind the same backend trait.
+Both backends are feature-gated, and the crate exposes neither by default.
 
-## Planned API
+  * `winit-backend` -- cross-platform event loop with softbuffer pixel
+    presentation over X11 and Wayland, plus a direct Wayland SHM presenter.
+    `crates/silksurf-app` selects this one with `default-features = false`, so
+    it is what a normal build runs. winit owns the window, which keeps the KMS
+    backend out of this runtime surface.
+  * `xcb-backend` -- the legacy Linux/X11 event loop with PutImage
+    presentation, retained behind `silksurf-app`'s `xcb-backend` feature.
+    ADR-010 recorded the original XCB-only, Linux-first decision; the winit
+    path superseded it as the default.
 
-  * `Window` -- platform window handle.
-  * `EventLoop` -- input + redraw event pump.
-  * `Input` -- normalized keyboard / mouse / pointer events.
+## API
 
-## Status
+  * `input` -- normalized keyboard, mouse, and pointer event types, compiled
+    into every configuration so backend tests run without a display.
+  * `window::XcbWindow` and `event_loop::EventLoop` -- the XCB connection,
+    drawable, and synchronous `wait_for_event` pump. Every XCB call lives in
+    these two modules.
+  * `winit_backend::WinitWindow` and its presenter types -- damage rects,
+    retained buffer tags, presented-frame accounting, and `WinitWakeHandle`,
+    which lets host or navigation work wake an event loop parked in
+    `ControlFlow::Wait`.
 
-Empty. The implementation work in P6 will:
+## Testing
 
-  1. Author `crates/silksurf-gui/src/{window,event_loop,input}.rs`.
-  2. Wire `silksurf-app --window` to open an XCB window, attach the
-     renderer's framebuffer via SHM pixmap, and pump the event loop.
-  3. Add screenshot-diff smoke against fixture pages.
+`tests/gui_basics.rs` covers the display-free surface. A test that needs a real
+X server sits behind a `test-display` Cargo feature on the consuming crate,
+which no in-tree crate sets.
 
-See `docs/XCB_GUIDE.md` for the existing XCB conventions.
+## See Also
+
+  * `docs/XCB_GUIDE.md` for XCB conventions
+  * `docs/design/ARCHITECTURE-DECISIONS.md` AD-010 for the backend decision

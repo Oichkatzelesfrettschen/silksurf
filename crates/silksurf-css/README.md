@@ -42,8 +42,8 @@ The 9.5 us steady-state benchmark exercises this entire path (see
 
 ## Status
 
-Functional, fast, and well-fuzzed (`fuzz/css_tokenizer`,
-`fuzz/css_parser`). The speculative post-cascade SoA surfaces
+Functional, fast, and well-fuzzed (`fuzz/fuzz_targets/css_tokenizer.rs`,
+`fuzz/fuzz_targets/css_parser.rs`). The speculative post-cascade SoA surfaces
 (`StyleSoA`, `DimensionsSoA`, `DisplayListBatched`) are removed:
 measured construction cost erased the fused-pipeline win, and
 `CascadeView` already carries the column layout on the cascade hot
