@@ -91,6 +91,13 @@ validate.
 Makefile target and no gate ran. `make check` now runs
 `python3 -m unittest discover -s scripts -p 'test_*.py'`.
 
+The first version of `perf/schema.json`'s `distributions` field reproduced the
+same defect one level down: a schema field with no writer, described in the
+present tense as though it had one. `append_history.py --distribution` is that
+writer. It rejects a spec naming a metric the record does not carry, because
+`distributions` is keyed freely and the schema cannot catch that, and it checks
+`min <= median <= max` on the same grounds.
+
 ## The single-host limit
 
 Every measurement in this repository comes from one machine: an AMD Ryzen 5
