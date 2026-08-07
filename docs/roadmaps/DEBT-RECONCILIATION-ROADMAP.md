@@ -102,8 +102,11 @@ No dependency; runs first.
   main = <sha>` anchors in `docs/design/ARCHITECTURE-DECISIONS.md` name commits
   that are not ancestors of `main`: `662ddb9` (AD-018), `418ea00` (AD-019), and
   `63e7551` (AD-020). They resolve through the GitHub API, so a pull-request ref
-  still reaches them, and they do not resolve in a fresh clone. Only `409356d`
-  (AD-017) is on the main line. Repointing changes what each ADR claims to
+  still reaches them, and they do not resolve in a fresh clone. Only `1066d3a`
+  (AD-017) is on the main line, confirmed 2026-08-07 by `git cat-file -e` and
+  `git merge-base --is-ancestor` against a fresh clone of the pushed remote.
+  `KNOWN_DANGLING` in `scripts/reanchor_commit_citations.py` holds the three as
+  the exemption this entry earns, and resolving this entry empties that dict. Repointing changes what each ADR claims to
   codify, so the resolution needs the decision record rather than a mechanical
   substitution. Enumerate with `grep -n 'codifies design from'
   docs/design/ARCHITECTURE-DECISIONS.md` and test each with `git merge-base
@@ -733,6 +736,26 @@ it -- bidirectional coupling across the boundary the policy separates.
   test262-derived seeds into fuzz/corpus/js_runtime/, and the small perf
   reports and flamegraphs into docs/findings/data/. Gate: `git lfs
   ls-files` returns nothing.
+- **history-object-weight** -- LANDED 2026-08-07. Tip removal leaves the
+  objects in the pack, and the largest were never LFS: 43.0 MiB of
+  compiled ELF under build-asan/ from the retired C tree, plus the
+  pre-LFS diff-analysis/ blobs that made the largest dumps exist twice.
+  `git filter-repo --invert-paths` over those paths took .git from
+  147 MB to 28 MB on this checkout and a fresh clone to 26 MB, preserving
+  352 commits with the HEAD tree byte-identical across the rewrite.
+  Measurement, the prediction-versus-observation table, and the two
+  surviving limits are in docs/findings/git-lfs-payload-audit.md. Gate:
+  `git rev-list --objects --all -- build-asan | wc -l` returns 0 in a
+  fresh clone.
+- **commit-citation-reachability** -- LANDED 2026-08-07. A rewrite
+  changes every commit identity, and this repository binds identity to
+  SHAs in scorecards, findings, ADRs, and perf baselines.
+  `scripts/reanchor_commit_citations.py` repoints them through the
+  filter-repo commit map; `--verify` asks git which hex tokens across
+  tracked authored text resolve to commits, so a citing file absent from
+  the tool's explicit list fails `make check` rather than silently
+  missing the next rewrite. That list had already missed this file, which
+  is how the gap was found.
 - **generated-artifact-relocation**: move generated visualizations/ and
   logs/ (mcp-puppeteer log, .audit.json) likewise; delete the
   diff-analysis mydatabase.db (stray-database-file-removal).

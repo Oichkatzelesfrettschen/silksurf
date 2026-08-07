@@ -31,12 +31,13 @@ return
 ```
 
 Git runs one script per hook name, and `git lfs install` writes `pre-push`,
-`post-checkout`, `post-commit`, and `post-merge`. This repository tracks 155 LFS
-files under `diff-analysis/tools-output/`, `*.perf.data`, and `*.zst`, so the
-slot the gate wants is the slot LFS occupies. On this checkout all four LFS
-hooks are present and `.git/hooks/pre-push` holds the stock `git lfs pre-push`
-dispatcher; `scripts/hooks/pre-push` is installed nowhere. `make hooks` reports
-success on that path, so the absence produces no output a developer would read.
+`post-checkout`, `post-commit`, and `post-merge`. On 2026-08-06 this repository
+tracked 155 LFS files under `diff-analysis/tools-output/`, `*.perf.data`, and
+`*.zst`, so the slot the gate wants was the slot LFS occupied. All four LFS
+hooks were present, `.git/hooks/pre-push` held the stock `git lfs pre-push`
+dispatcher, and `scripts/hooks/pre-push` was installed nowhere. `make hooks`
+reports success on that path, so the absence produced no output a developer
+would read.
 
 Reproduced in a clone: with LFS's script copied into the pre-push slot, the
 previous installer prints the warning, exits 0, and leaves the gate hook
@@ -50,6 +51,18 @@ the gate second costs the preserved hook nothing. A foreign hook arriving when
 verification replays arguments and stdin to the preserved hook, confirms the
 gate runs after it, confirms a nonzero exit from the preserved hook aborts
 before the gate, and confirms a second install is idempotent.
+
+The occupant is gone on 2026-08-07: `docs/findings/git-lfs-payload-audit.md`
+records the removal of every `filter=lfs` rule and of the LFS store, and the
+four stock hooks went with it. A repository carrying no LFS object gains nothing
+from chaining `git lfs pre-push`, so `--force` is the disposition here. The
+chaining mechanism stays because it is what makes the installer correct on a
+checkout that does hold a foreign hook.
+
+Installed and confirmed by the falsifier the earlier state would have failed: a
+staged text-hygiene violation drives `make check` through rustfmt, three clippy
+configurations, six lints, and the artifact validators, `lint_text_hygiene`
+rejects the planted emoji, `git commit` exits 1, and HEAD does not move.
 
 ## The gate does not typecheck the xcb backend
 
@@ -139,7 +152,7 @@ The conclusions change when any of the following holds.
 
 ```sh
 scripts/install-git-hooks.sh              # preserves an occupying hook as <name>.local
-git lfs ls-files | wc -l                  # 155 tracked LFS files
+git lfs ls-files | wc -l                  # 155 on 2026-08-06, 0 after the payload removal
 make check                                # now includes the xcb-backend clippy step
 cargo check -p silksurf-gui --features xcb-backend
 git grep -n 'ADR-007' -- '*.md' ':!docs/archive/**'

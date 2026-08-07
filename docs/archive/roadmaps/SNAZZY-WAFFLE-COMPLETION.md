@@ -90,7 +90,7 @@ The SNAZZY-WAFFLE debt-reconciliation roadmap shipped across six waves. All 50 d
 | 37. Accessibility skeleton | Closed | P8.S5: `crates/silksurf-dom/src/a11y.rs` skeleton; `docs/design/ACCESSIBILITY.md` plan |
 | 38. Memory model / formal safety | Closed | P1.S3: UNSAFE-CONTRACTS.md; miri smoke in local gate; SAFETY contract on all 11 unsafe blocks (U11 added in Wave 5 for fill_row_neon) |
 | 39. Observability (tracing workspace-wide) | Closed | P8.S6: `tracing` in workspace deps; fused pipeline span instrumentation; panic hook in silksurf-app main; docs/LOGGING.md cross-linked |
-| 40. Cross-platform / AArch64 NEON | Closed | P8.S7: `fill_row_neon` with `vdupq_n_u32/vst1q_u32` committed at e5519dd |
+| 40. Cross-platform / AArch64 NEON | Closed | P8.S7: `fill_row_neon` with `vdupq_n_u32/vst1q_u32` committed at 444b675 |
 | 41. DoS bounds documented | Closed | P8.S8: `MAX_*` consts audited; each crate's OPERATIONS.md has DoS bounds table |
 | 42. Privacy / sandboxing | Closed | P8.S9: ADR + cookie-jar / storage-partition skeleton in silksurf-engine |
 | 43. Forensics / reproducibility | Closed | P8.S10: `silksurf-core::testing::Clock` + `silksurf-core::testing::Rng` seeded PRNG and virtual clock |

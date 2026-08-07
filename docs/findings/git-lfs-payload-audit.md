@@ -61,11 +61,18 @@ relocation that has not happened.
 
 | Measure | Bytes |
 | --- | --- |
-| `.git` | 147 MB |
+| `.git` on this checkout | 147 MB |
 | `.git/lfs` | 102 MB |
 | `.git/objects/pack` | 42 MB |
+| `.git` in a fresh clone | 45 MB |
 | GitHub server-side repository size (LFS excluded) | 41.8 MB |
 | checkout excluding `target/`, `.git/`, `silksurf-extras/`, `vendor/` | 209 MB |
+
+A checkout and a clone measure different things, and every `.git` figure below
+names which. `git clone` populates `.git/lfs` only for objects the checked-out
+ref smudges, and this checkout configures no smudge filter, so its 102 MB LFS
+store accumulated from `git lfs` commands run here rather than from cloning.
+The 45 MB clone figure is the same history without that store: 147 - 102 = 45.
 
 The working tree is not part of that cost. This checkout has no LFS smudge
 filter configured, so every tracked LFS path holds a 129-byte pointer rather
@@ -128,29 +135,65 @@ envelope in particular exists to let a reader reproduce a rate from the commit
 that produced it, so rewriting history would falsify the artifacts that record
 it.
 
-## Measured rewrite result
+## Rehearsed rewrite: the recorded prediction
 
-The rewrite was built and verified in a scratch clone before any decision.
+The rewrite was built in a scratch clone at `30d3de3` before any decision.
 `git filter-repo --invert-paths` over `diff-analysis/tools-output/`,
-`build-asan/`, and the stray `.zst` takes `.git` from 45 MB to 26 MB, a 42
-percent reduction. All 350 commits survive -- none becomes empty -- and 308 of
-them take new identities. The tree at HEAD is byte-identical
-(`993fb385e7724ee75c61025a27c8ff1e49e515c3` before and after), so the working
-copy does not move.
+`build-asan/`, and the stray `.zst` takes a clone's `.git` from 45 MB to 26 MB,
+a 42 percent reduction. All 350 commits survive -- none becomes empty -- and 308
+take new identities. The tree at HEAD is byte-identical
+(`993fb385e7724ee75c61025a27c8ff1e49e515c3` on both sides), so the working copy
+does not move. `scripts/reanchor_commit_citations.py` repoints 13 citations
+across 12 files.
 
-`scripts/reanchor_commit_citations.py` repoints the citations through the
-`commit-map` that rewrite writes: 13 across 12 files, including the three
-`measurement_environment.git.commit` values and the ADR, finding, and baseline
-anchors. Each rewritten SHA resolves in the new history and the old one does
-not, which is the check that the substitution happened rather than the text
-merely changing.
+## Executed rewrite: the observation
 
-Two limits stay after a force-push. GitHub keeps the pre-rewrite objects alive
-through 65 `refs/pull/*` refs, so the server-side repository size does not drop
-without support intervention; a fresh clone still gets the smaller history,
-because clone fetches branch and tag refs alone. And `Fixes:` trailers inside
-old commit bodies keep naming pre-rewrite SHAs, since a rewrite cannot repoint a
-reference held in the object it rewrites.
+The rewrite ran on this checkout at `607d943`, two commits past the rehearsal
+snapshot. Four figures deviate, and each deviation resolves to those two
+commits rather than to the rewrite mechanism.
+
+| Quantity | Predicted at `30d3de3` | Observed at `607d943` |
+| --- | --- | --- |
+| commits preserved | 350 | 352 |
+| `.git` in a clone | 26 MB | 26 MB |
+| `.git` on this checkout | not predicted | 28 MB |
+| citations re-anchored | 13 across 12 files | 14 across 12 files |
+| HEAD tree, both sides | `993fb385` | `3a9f91f0` |
+
+`487bc31` and `607d943` land between the two points, which is the whole commit
+delta. The extra citation is the AD-017 anchor `1066d3a` in this document: PR
+#84 added the ADR anchor section below, and that section names a commit. The
+tree hash moves for
+the same reason -- a different tree is a different hash, and the load-bearing
+property is that it is identical across the rewrite, which holds at both points.
+The clone prediction of 26 MB is exact. This checkout reads 28 MB because it
+retains `.git/filter-repo` and the pre-rewrite reflog, which a clone has never
+had.
+
+Each rewritten SHA resolves in the new history and each old one does not, which
+is the check that the substitution happened rather than the text merely
+changing.
+
+## Verified against a fresh clone of the pushed remote
+
+The force-push landed and `origin/main` is `a02a22d`. Cloning the remote fresh
+measures what a new contributor receives:
+
+| Property | Fresh clone |
+| --- | --- |
+| `.git` | 26 MB |
+| `.git/lfs` | absent |
+| `git lfs ls-files`, `--all` | 0, 0 |
+| `filter=lfs` rules in `.gitattributes` | 0 |
+| objects under the three purged paths, all refs | 0, 0, 0 |
+| commits | 353 |
+
+Two limits survive the force-push, both now measured rather than predicted.
+GitHub keeps the pre-rewrite objects alive through 66 `refs/pull/*` refs, so the
+server-side repository size does not drop without support intervention; a clone
+still gets the smaller history, because clone fetches branch and tag refs alone.
+And 2 `Fixes:` trailers inside old commit bodies keep naming pre-rewrite SHAs,
+since a rewrite cannot repoint a reference held in the object it rewrites.
 
 ## Three ADR anchors already dangle
 
@@ -165,6 +208,11 @@ carries no `commit-map` entry, so the tool reports it rather than guessing a
 substitute. The condition is recorded rather than repaired because repointing
 would change what each ADR claims to codify.
 
+The fresh clone confirms it. `git cat-file -e` reports `662ddb9`, `418ea00`, and
+`63e7551` MISSING and `1066d3a` present, and `git merge-base --is-ancestor`
+places `1066d3a` on the main line. `adr-anchor-reachability` in
+`docs/roadmaps/DEBT-RECONCILIATION-ROADMAP.md` owns the repair.
+
 ## Sequence taken
 
 The tip-level removal landed first and on its own. It captures the whole
@@ -177,18 +225,41 @@ test262 baseline into
 test262-derived seeds into `fuzz/corpus/js_runtime/`, and the small perf reports
 and flamegraphs into `docs/findings/data/`.
 
-The history rewrite follows as a separate, verified operation with its
-re-anchoring step, on the measurement above.
+The history rewrite followed as a separate operation with its re-anchoring step,
+on the measurement above. A bundle of the pre-rewrite history was written before
+`git filter-repo` ran, and `git lfs prune --verify-remote` confirmed all 155
+objects against the remote before deleting the local store. `.git` on this
+checkout fell from 147 MB to 28 MB, and a fresh clone is 26 MB.
+
+The four stock git-lfs hooks left the hook directory with the store. A repository
+carrying no `filter=lfs` rule gains nothing from `git lfs pre-push`, and
+`pre-push` is the slot `scripts/install-git-hooks.sh` needs for the gate, so the
+installer discards rather than chains them here.
 
 ## Falsifiers
 
-- A fresh network clone after tip-level removal still downloads LFS bytes, which
-  would mean `git clone` fetches beyond the checked-out ref.
+Two of the three original falsifiers probed tip-level removal, and the history
+rewrite subsumed both: no LFS pointer survives anywhere in the rewritten
+history, so a clone downloads no LFS bytes and `git lfs ls-files --all` returns
+0 for a reason neither test was written to detect. A check that can no longer
+fail asserts nothing, so both are restated against the condition that now
+carries the risk.
+
+- A future commit reintroduces a `filter=lfs` rule to `.gitattributes`, which
+  would restart the accumulation this finding measured. `git lfs ls-files` in a
+  fresh clone returning nonzero is the detector.
 - Some file outside `diff-analysis/` reads `tools-output/`, which would make it
   a live input rather than dead evidence.
-- `git lfs ls-files --all` reports more objects than `git lfs ls-files` after a
-  future commit, which would mean history-only LFS objects exist and tip removal
-  no longer captures the whole payload.
+- A path removed at the tip returns under a new name, which is
+  `tool-output-relocation` reopening. Generated output landing anywhere outside
+  an ignored path or `docs/findings/data/` is the detector.
+- `git rev-list --objects --all` over the three purged paths returns nonzero in
+  a fresh clone, which would mean the rewrite left reachable objects behind.
+- `reanchor_commit_citations.py --verify` passes with a pre-rewrite SHA planted
+  in a registered file, or with a resolving SHA planted in an unregistered one,
+  which would mean the gate step admits the defect it was added to catch. Both
+  currently fail as intended; the first rule needs `.git/filter-repo/commit-map`
+  and reports itself as not run in a clone, which has never had one.
 
 ## Evidence commands
 
@@ -198,4 +269,15 @@ git lfs ls-files --all | wc -l
 du -sh .git .git/lfs .git/objects/pack
 git rev-list --objects --all | git cat-file --batch-check='%(objecttype) %(objectname) %(objectsize) %(rest)'
 git grep -ln 'tools-output' -- ':!diff-analysis/**'
+```
+
+Against a fresh clone of the pushed remote:
+
+```sh
+git rev-list --count HEAD
+git rev-list --objects --all -- diff-analysis/tools-output | wc -l
+git cat-file -e 662ddb9^{commit} && echo resolves || echo MISSING
+git merge-base --is-ancestor 1066d3a HEAD && echo ancestor
+git ls-remote origin 'refs/pull/*' | wc -l
+git log --format=%B | grep -c '^Fixes:'
 ```

@@ -103,6 +103,12 @@ check:
 	@# false that no run enforced, because append_history.py builds each record
 	@# by hand. These two check the published artifacts against their schemas.
 	@python3 scripts/validate_measurement_artifacts.py
+	@# reanchor_commit_citations.py repoints cited SHAs across a history
+	@# rewrite from an explicit file list, so a file gaining its first
+	@# citation is invisible to it. --verify asks git which hex tokens
+	@# resolve to commits, which makes an unlisted citing file fail here
+	@# rather than silently miss the next rewrite.
+	@python3 scripts/reanchor_commit_citations.py --verify
 	@python3 -m unittest discover -q -s scripts -p 'test_*.py'
 
 # Workspace tests with -D warnings.
