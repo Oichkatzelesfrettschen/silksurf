@@ -283,10 +283,21 @@ Initial workloads are:
 7. worker startup, navigation, frame submission, crash detection, and restart.
 
 Each retained record names the commit, build profile, cache topology, governor,
-affinity, competing load, command, fixture, and counter availability. A workload
+affinity, competing load, command, fixture, and counter availability. Those
+facts come from `scripts/measurement_environment.py`, whose `capture()` output
+`perf/measurement-environment.schema.json` defines; the conformance scorecards
+and `perf/history.ndjson` embed the same object under the same key, so one
+record shape describes every measurement the repository publishes. A workload
 run that exits nonzero marks the record failed and makes the probe exit nonzero.
 A mode threshold becomes a gate only after repeated rank-1 measurements
 establish its variance and falsifiers.
+
+One host cannot separate host-specific behavior from general behavior. The
+development host reports a 96 MiB last-level cache, so it cannot establish
+behavior at the 8, 16, or 32 MiB sweep coordinates
+`perf/locality-budget.json` lists;
+`docs/findings/measurement-provenance-envelope.md` records that as the standing
+limit on every capacity claim.
 
 Example, against a binary built before the probe so the record measures the
 workload rather than Cargo:
