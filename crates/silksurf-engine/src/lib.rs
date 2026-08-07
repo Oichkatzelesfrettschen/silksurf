@@ -81,7 +81,7 @@ impl EnginePipeline {
     }
 
     /*
-     * P8.S6 -- coarse-grained tracing span at the pipeline boundary.
+     * coarse-grained tracing span at the pipeline boundary.
      *
      * WHY: We want structured timing for the three pipeline stages (style /
      * layout / display-list) without paying span-overhead per node.  An
@@ -123,7 +123,7 @@ impl EnginePipeline {
     }
 
     /*
-     * P8.S6 -- incremental render boundary span.
+     * incremental render boundary span.
      *
      * Mirrors render_document; we additionally record `dirty_count` because
      * dirty-set size is the primary driver of incremental cost and a
@@ -217,7 +217,7 @@ pub fn render_document(
 }
 
 /*
- * P8.S6 -- top-level render entry span.
+ * top-level render entry span.
  *
  * `skip_all` covers the large `&str` HTML/CSS payloads (would bloat span
  * fields) and the arena reference.  We include `html_len` and `css_len`

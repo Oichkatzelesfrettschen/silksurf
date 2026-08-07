@@ -14,7 +14,7 @@ publish = false
 # extension features (composite, damage, randr, shm, xfixes) yet -- the P6
 # slice is intentionally limited to base xproto + WM_DELETE_WINDOW so the
 # event loop and PutImage path can be validated end-to-end before opting
-# into the larger extension surface in P6.S4+.
+# into the larger extension surface.
 #
 # HOW: `cargo build -p silksurf-gui` pulls libxcb 1.14+ from the system; on
 # Arch this is the `libxcb` package, on Debian-likes `libxcb1-dev`. The crate

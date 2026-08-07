@@ -6,11 +6,19 @@
 
 ## Last refresh
 
-  * Date: 2026-07-02 (synthetic WPT runner covers HTML, CSS cascade,
-    layout rects, and paint-list invariants. test262 and h2spec rows remain
-    at their prior baselines.)
+  * Date: 2026-08-06. Three upstream-corpus rows join the table: HTML tree
+    construction, HTML tokenization, and CSS parse robustness. Each names its
+    corpus revision in its scorecard JSON, and
+    `scripts/check_status_consistency.py` rejects a scorecard whose revision
+    drifts from `silksurf-extras/html-css-test-corpora-revisions.txt`. The
+    synthetic WPT runner keeps its prior result and its regression-gate role;
+    test262 and h2spec rows remain at their prior baselines.
   * Baseline date: 2026-07-01
-  * Reproducer: `cargo run -p silksurf-engine --features js-conformance --bin wpt_runner -- --verbose`
+  * Reproducer, all harnesses: `scripts/conformance_run.sh`
+  * Reproducer, synthetic runner alone: `cargo run -p silksurf-engine --features js-conformance --bin wpt_runner -- --verbose`
+  * Corpora are untracked. Run `scripts/fetch_html_css_test_corpora.sh` first;
+    each upstream harness skips with a reason when its corpus is absent and
+    fails when an operator names a path that does not resolve.
 
 ## Harness summary
 
@@ -20,10 +28,13 @@
 | **test262** (lexer-only, legacy VM) | runner removed (AD-025) | 157 of ~53 040 .js files (numeric-literals subset) | 104 / 157 = 66.24 % at lexer level (2026-05-14 baseline, historical). JSON retained: `docs/archive/conformance/test262-lexer-scorecard.json` |
 | **TLS loader sanity** (silksurf-tls) | functional | 4 unit tests covering empty PEM, malformed PEM, default-host loader, root-store diagnostics | 4 / 4 pass |
 | **HTTP/2 (h2spec)** | scaffolded | `scripts/run_h2spec.sh` driver + JSON scorecard schema; in-tree h2 server still pending | 0 / 0 (stub -- needs in-tree server or operator-supplied `SILKSURF_H2_HOST`). See `crates/silksurf-engine/conformance/h2spec-scorecard.json` |
+| **HTML tree construction (upstream WPT corpus)** | functional | 1918 cases from WPT `html/syntax/parsing/resources`, the home html5lib moved its tree-construction `.dat` files to; driven through `silksurf_html::parse_html`, the production html5ever path | 1440 / 1726 executed = **83.43%**, 1440 / 1918 total = **75.08%**. 192 fragment cases skip (`parse_html` is document-mode only); 286 recorded gaps sit in `crates/silksurf-html/tests/html5lib-tree-construction.expectations`, led by template content (109) and processing instructions (90) -- both because `silksurf_dom::NodeKind` carries no matching variant. See `docs/conformance/html5lib-tree-construction-scorecard.json` |
+| **HTML tokenization (html5lib corpus)** | functional | 6806 cases from html5lib-tests `tokenizer`; drives `silksurf_html::Tokenizer`, which serves `wpt_runner` and the CSS harness rather than page loads | 3019 / 6640 executed = **45.47%**, 3019 / 6806 total = 44.36%. 166 cases need tokenizer states or `lastStartTag` the public API does not expose. Named character references (2283) and `test3` state permutations (1238) lead the 3621 recorded gaps; the `State` enum carries 8 states against roughly 80 in the standard |
+| **CSS parse robustness (upstream WPT corpus)** | functional | 871 files from WPT `css/CSS2/syntax`, `css/css-syntax`, `css/selectors/parsing` | 603 / 603 executed accepted. The oracle is `parse_stylesheet_bytes` returning without error or panic, and the parsed stylesheet is discarded, so this measures parser robustness over the corpus. Cascade and computed-value correctness are NOT YET MEASURED; this is not a CSS conformance number |
 | **HTML / CSS / Layout / Paint / JS-event WPT (synthetic)** | functional | 70 in-tree fixtures exercising HTML structure, CSS selectors and properties, inline style cascade, Taffy layout rects, fused paint-list suppression, and JS checks (event dispatch, complex selectors, innerHTML reparse, live style-to-cascade, matchMedia, getComputedStyle; js-conformance feature) | 70 / 0 / 0 (pass / fail / skip), 100.00 % @ 2026-07-12 refresh. See `crates/silksurf-engine/conformance/wpt-scorecard.json` |
-| **TLS 1.3 RFC 8446 vectors** | DELEGATED | rustls owns protocol-level conformance; silksurf-tls only owns the loader / config / extra-CA surface | NOT YET MEASURED in-tree; relies on upstream rustls test suite. A first-party vector harness is queued (P5.S4 follow-on) |
-| **OCSP stapling (RFC 6066)** | DEFERRED | not yet enforced in silksurf-net | NOT YET MEASURED (P5.S4) |
-| **HSTS (RFC 6797)** | DEFERRED | not yet enforced in silksurf-net | NOT YET MEASURED (P5.S4) |
+| **TLS 1.3 RFC 8446 vectors** | DELEGATED | rustls owns protocol-level conformance; silksurf-tls only owns the loader / config / extra-CA surface | NOT YET MEASURED in-tree; relies on upstream rustls test suite. A first-party vector harness is open |
+| **OCSP stapling (RFC 6066)** | DEFERRED | not yet enforced in silksurf-net | NOT YET MEASURED |
+| **HSTS (RFC 6797)** | DEFERRED | not yet enforced in silksurf-net | NOT YET MEASURED |
 
 ## Per-harness baseline (2026-05-15)
 
@@ -154,27 +165,37 @@ TEST262_PATH= scripts/conformance_run.sh test262
 ## How harnesses get added
 
   1. Land the harness binary or the test source under the appropriate
-     crate (e.g. `silksurf-js/src/bin/test262.rs` for test262).
+     crate (e.g. `silksurf-js/src/bin/test262_boa.rs` for test262).
   2. Add a `run_<harness>` function to `scripts/conformance_run.sh`.
   3. Update this file's "Harness summary" table.
   4. Update the harness's row in `silksurf-specification/SILKSURF-RUST-MIGRATION.md`.
 
 ## Why some harnesses are deferred
 
-  * **WPT** -- the web-platform-tests corpus is large (~150 MB submoduled).
-    Vendoring is queued for SNAZZY-WAFFLE P5.S2; it requires (a) a subset
-    selection (probably URL + Fetch + Encoding first since they're bounded),
-    (b) a runner that mounts wpt via the silksurf engine, and (c) browser-
-    isolation for tests that mutate DOM state.
+  * **WPT beyond parsing and CSS syntax** -- the full web-platform-tests corpus
+    is large, so `scripts/fetch_html_css_test_corpora.sh` sparse-checks out four
+    paths: `css/CSS2/syntax`, `css/css-syntax`, `css/selectors/parsing`, and
+    `html/syntax/parsing/resources`. The tree-construction and CSS-robustness
+    rows above run against those. Widening to URL, Fetch, and Encoding needs a
+    runner that mounts testharness.js pages through the engine and isolates
+    tests that mutate DOM state; the `.dat` files the parsing row consumes need
+    neither, which is why that row landed first.
   * **HTTP/3** -- RFC 9114; not started. silksurf-net does not currently
     support HTTP/3 transport.
-  * **WAI-ARIA / a11y** -- silksurf does not yet expose an accessibility
-    tree; queued for P8.S5.
+  * **WAI-ARIA / a11y** -- `crates/silksurf-app/src/accessibility.rs` builds an
+    `accesskit::TreeUpdate` carrying RootWebArea, Button, Label, Link,
+    TextInput, and UrlInput nodes, behind the non-default `accessibility`
+    feature. No platform adapter is wired: `Cargo.lock` carries `accesskit`
+    alone, and the only consumer is `log_accessibility_snapshot` at
+    `crates/silksurf-app/src/main.rs`, which prints the node count to stderr.
+    An assistive technology therefore sees nothing, and WAI-ARIA conformance is
+    NOT YET MEASURED. Exposure needs an `accesskit_unix` or `accesskit_winit`
+    adapter driven from the winit event loop.
   * **CSS Color 4** -- only the basic color slice is implemented; full
-    CSS-Color-4 conformance (Display P3, color()) is queued for P8.S2.
+    CSS-Color-4 conformance (Display P3, color()) is open.
 
-See `/.claude/plans/elucidate-and-build-out-snazzy-waffle.md` for the
-complete debt-reconciliation roadmap.
+See `docs/roadmaps/DEBT-RECONCILIATION-ROADMAP.md` for the complete
+debt-reconciliation roadmap.
 
 ## Related
 

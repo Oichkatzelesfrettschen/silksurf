@@ -7,7 +7,7 @@ cargo install cargo-fuzz
 
 ## Targets
 - `html_tokenizer`
-- `html_tree_builder`
+- `html_parse`
 - `css_tokenizer`
 - `css_parser`
 - `js_runtime`

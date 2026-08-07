@@ -6,10 +6,9 @@
 > display), runs an OCSP / DANE probe, and emits an explicit RCA for the
 > four canonical failure classes silksurf has seen in the wild.
 
-The canonical binary lives at `crates/silksurf-app/src/bin/tls_probe.rs`
-(982 lines). A 100-line in-crate smoke variant lives at
-`crates/silksurf-tls/src/bin/tls_probe.rs` and is excluded from `cargo
-doc` to avoid filename collision (consolidation tracked as a follow-up).
+The binary lives at `crates/silksurf-app/src/bin/tls_probe.rs`.
+`crates/silksurf-tls` declares no binary target; loader coverage there runs
+through `crates/silksurf-tls/tests/loader_sanity.rs`.
 
 ## Invocation
 
@@ -58,17 +57,18 @@ Flags:
 
 ## Output schema (planned)
 
-The current output is human-readable; a JSON schema is planned (P3.S2 of
-the SNAZZY-WAFFLE roadmap, slot 49 in the debt catalogue) so downstream
-tools can parse the result.
+The current output is human-readable. A JSON schema is planned so downstream
+tools can parse the result; it is catalogued in
+docs/roadmaps/DEBT-RECONCILIATION-ROADMAP.md.
 
-## Smoke binary
+## In-crate smoke
 
 ```sh
-cargo run --release -p silksurf-tls --bin tls_probe -- chatgpt.com
+cargo test -p silksurf-tls --test loader_sanity
 ```
 
-This is the in-crate smoke that tests `silksurf_tls::root_store_diagnostics`
-without depending on the full silksurf-app stack. It does NOT do the DANE
-probe and has no RCA paragraph. Use the silksurf-app variant for actual
-diagnosis; use the silksurf-tls variant for in-crate development.
+`crates/silksurf-tls` declares no binary target. `root_store_diagnostics`
+is covered by `crates/silksurf-tls/tests/loader_sanity.rs`, which exercises
+empty PEM, malformed PEM, the default-host loader, and root-store
+diagnostics without depending on the silksurf-app stack. The DANE probe and
+the RCA paragraph live only in the silksurf-app binary above.

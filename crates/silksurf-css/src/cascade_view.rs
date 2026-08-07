@@ -14,7 +14,8 @@
  * pattern match, no attribute Vec iteration, no SelectorIdent construction.
  *
  * LIFECYCLE: Built at the same phase boundaries as Dom::resolve_table:
- *   1. After TreeBuilder::into_dom() -- initial materialization
+ *   1. After silksurf_html::parse_html returns the finished Dom --
+ *      initial materialization
  *   2. After Dom::end_mutation_batch() -- incremental update
  *
  * Because CascadeView stores SelectorIdent (from silksurf-css), it cannot

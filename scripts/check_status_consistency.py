@@ -32,6 +32,60 @@ def forbid_text(errors: list[str], path: str, needle: str) -> None:
         fail(errors, f"{path}: stale text is forbidden: {needle!r}")
 
 
+# Scorecards produced against an upstream corpus, mapped to the corpus name
+# that scripts/fetch_html_css_test_corpora.sh records a revision for. A rate
+# without a pinned revision cannot be reproduced, so the revision is required
+# in the committed artifact; the corpus itself lives in the untracked extras
+# tree and is cross-checked only when present.
+UPSTREAM_SCORECARDS = {
+    "docs/conformance/html5lib-tokenizer-scorecard.json": "html5lib-tests",
+    "docs/conformance/html5lib-tree-construction-scorecard.json": "wpt-css-parser-subset",
+    "docs/conformance/css-parse-robustness-scorecard.json": "wpt-css-parser-subset",
+}
+
+REVISIONS_FILE = "silksurf-extras/html-css-test-corpora-revisions.txt"
+
+
+def pinned_revisions() -> dict[str, str]:
+    """Map corpus name to pinned revision, empty when the extras tree is absent."""
+    path = ROOT / REVISIONS_FILE
+    if not path.exists():
+        return {}
+    pinned = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        fields = line.split()
+        if len(fields) >= 2:
+            pinned[fields[0]] = fields[1]
+    return pinned
+
+
+def check_upstream_scorecards(errors: list[str]) -> None:
+    pinned = pinned_revisions()
+    for relative, corpus in UPSTREAM_SCORECARDS.items():
+        path = ROOT / relative
+        if not path.exists():
+            fail(errors, f"{relative}: upstream-corpus scorecard is missing")
+            continue
+
+        scorecard = json.loads(path.read_text(encoding="utf-8"))
+        revision = scorecard.get("corpus_revision", "")
+        if not re.fullmatch(r"[0-9a-f]{40}", revision):
+            fail(
+                errors,
+                f"{relative}: corpus_revision must be a full commit hash, found {revision!r}",
+            )
+            continue
+
+        expected = pinned.get(corpus)
+        if expected is not None and expected != revision:
+            fail(
+                errors,
+                f"{relative}: recorded corpus_revision {revision} does not match the "
+                f"{corpus} revision {expected} pinned in {REVISIONS_FILE}; re-run "
+                "scripts/conformance_run.sh",
+            )
+
+
 def main() -> int:
     errors: list[str] = []
 
@@ -67,6 +121,25 @@ def main() -> int:
         require_text(errors, path, wpt_fraction)
         require_text(errors, path, "synthetic")
         require_text(errors, path, "not vendored")
+
+    check_upstream_scorecards(errors)
+
+    # The canonical status prose quotes each upstream rate, so a scorecard
+    # cannot move without the summary moving with it.
+    tree = json.loads(
+        read_text("docs/conformance/html5lib-tree-construction-scorecard.json")
+    )
+    tokenizer = json.loads(
+        read_text("docs/conformance/html5lib-tokenizer-scorecard.json")
+    )
+    for scorecard, label in ((tree, "tree construction"), (tokenizer, "tokenizer")):
+        percent = f"{scorecard['rate_executed'] * 100:.2f}%"
+        require_text(errors, "docs/STATUS.md", percent)
+        if scorecard["pass"] + scorecard["expected_fail"] != scorecard["executed"]:
+            fail(
+                errors,
+                f"{label} scorecard: pass + expected_fail must equal executed",
+            )
 
     require_text(errors, "README.md", rust_version)
     require_text(errors, "docs/STATUS.md", rust_version)

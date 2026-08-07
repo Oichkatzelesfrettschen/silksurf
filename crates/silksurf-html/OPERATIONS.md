@@ -1,6 +1,6 @@
 # silksurf-html Operations
 
-## Resource bounds (P8.S8)
+## Resource bounds
 
 | Constant                  | Default     | Enforcement site                      | Failure mode                                     |
 |---------------------------|-------------|----------------------------------------|--------------------------------------------------|
@@ -16,8 +16,10 @@ cumulative tokens for the document. A streaming consumer that calls
 to bound a single batch's transient memory, not the lifetime of the
 document tree.
 
-## Tree builder
+## Tree construction
 
-`TreeBuilder::push_token` is the integration point used by
-`silksurf-engine`. It is bounded indirectly by the tokenizer cap: the
-builder cannot see more tokens than the tokenizer emitted.
+`parse_html` is the integration point used by `silksurf-engine`, which imports
+it as `html5ever_parse`. Tree construction runs inside html5ever and reaches
+the DOM through `treesink::SilkDomBuilder`, so the tokenizer cap above bounds
+`Tokenizer` alone and places no bound on this path. html5ever's own input
+handling is the bound that applies to a page load.

@@ -1,0 +1,13 @@
+{
+  "runner": "html5lib_tree_construction",
+  "runner_kind": "wpt-tree-construction",
+  "corpus": "wpt html/syntax/parsing/resources",
+  "corpus_revision": "1924c6e9784b3c1da4ad5bfcbfeea64b2a886e7b",
+  "total": 1918,
+  "executed": 1726,
+  "pass": 1440,
+  "expected_fail": 286,
+  "skip": 192,
+  "rate_executed": 0.8343,
+  "rate_total": 0.7508
+}
