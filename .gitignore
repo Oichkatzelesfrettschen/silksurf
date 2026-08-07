@@ -61,9 +61,21 @@ core
 /silksurf-extras/
 /silksurf-js/test262/
 
+## Reference-tool output ------------------------------------------------
+# diff-analysis/tools-output/ holds tokei, lizard, semgrep, and profiler output
+# over the reference checkouts. It is regenerable, nothing reads it, and
+# tracking it cost 104.5 MiB of git-lfs storage
+# (docs/findings/git-lfs-payload-audit.md). The measurements it supported live
+# in docs/findings/browser-engine-size-and-complexity-comparison.md; the
+# hand-written analysis under diff-analysis/ stays tracked.
+/diff-analysis/tools-output/
+
 ## Accidental artifacts --------------------------------------------------
 # `~/` is created by tools that write to "$HOME" without expanding the tilde.
 /~/
+# heaptrack and perf leave captures beside the binary they profiled.
+*.heaptrack.zst
+heaptrack.*.zst
 
 ## TLA+ scratch ----------------------------------------------------------
 # TLC writes state-graph artefacts here; the .tla model itself is tracked.
