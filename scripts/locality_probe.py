@@ -11,11 +11,8 @@ are part of every record.
 from __future__ import annotations
 
 import argparse
-import datetime as dt
 import json
 import math
-import os
-import platform
 import re
 import shutil
 import statistics
@@ -26,7 +23,29 @@ import time
 from pathlib import Path
 from typing import Any, Iterable
 
-SCHEMA_VERSION = 2
+# The host, toolchain, and revision facts are the same ones every measurement
+# artifact carries, so they come from the one implementation the conformance
+# scorecards and perf/history.ndjson also embed. The re-exported names keep
+# scripts/test_locality_probe.py addressing this module.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from measurement_environment import (  # noqa: E402
+    capture as capture_environment,
+    last_level_cache_bytes,
+    parse_optional_int,
+    parse_size_bytes,
+    read_cache_topology,
+    read_text,
+)
+
+__all__ = [
+    "last_level_cache_bytes",
+    "parse_optional_int",
+    "parse_size_bytes",
+    "read_cache_topology",
+    "read_text",
+]
+
+SCHEMA_VERSION = 3
 DEFAULT_EVENTS = (
     "cycles",
     "instructions",
@@ -38,7 +57,6 @@ DEFAULT_EVENTS = (
     "cpu-migrations",
     "page-faults",
 )
-CACHE_SIZE_RE = re.compile(r"^([0-9]+)([KMG])$", re.IGNORECASE)
 GNU_TIME_FIELDS = {
     "Maximum resident set size (kbytes)": "max_rss_kb",
     "Minor (reclaiming a frame) page faults": "minor_page_faults",
@@ -53,73 +71,6 @@ EVENT_MODIFIER_RE = re.compile(r":[ukhHGISDpPe]+$")
 # the same quantities from rusage without a privilege condition.
 SCHEDULER_EVENTS = {"context-switches", "cpu-migrations"}
 USER_ONLY_MODIFIERS = frozenset("u")
-
-
-def parse_size_bytes(value: str) -> int:
-    """Converts a sysfs cache size such as ``32K`` or ``96M`` to bytes."""
-
-    match = CACHE_SIZE_RE.fullmatch(value.strip())
-    if match is None:
-        raise ValueError(f"unsupported cache size: {value!r}")
-    quantity = int(match.group(1))
-    multiplier = {"K": 1024, "M": 1024**2, "G": 1024**3}[match.group(2).upper()]
-    return quantity * multiplier
-
-
-def read_text(path: Path) -> str | None:
-    try:
-        return path.read_text(encoding="utf-8").strip()
-    except OSError:
-        return None
-
-
-def read_cache_topology(root: Path = Path("/sys/devices/system/cpu/cpu0/cache")) -> list[dict[str, Any]]:
-    """Reads CPU 0 cache descriptors from Linux sysfs when available."""
-
-    descriptors: list[dict[str, Any]] = []
-    if not root.is_dir():
-        return descriptors
-    for index in sorted(root.glob("index*"), key=lambda path: path.name):
-        level_text = read_text(index / "level")
-        type_text = read_text(index / "type")
-        size_text = read_text(index / "size")
-        if level_text is None or type_text is None or size_text is None:
-            continue
-        try:
-            level = int(level_text)
-            size_bytes = parse_size_bytes(size_text)
-        except ValueError:
-            continue
-        descriptors.append(
-            {
-                "index": index.name,
-                "level": level,
-                "type": type_text,
-                "size_bytes": size_bytes,
-                "shared_cpu_list": read_text(index / "shared_cpu_list"),
-                "ways_of_associativity": parse_optional_int(read_text(index / "ways_of_associativity")),
-                "coherency_line_size": parse_optional_int(read_text(index / "coherency_line_size")),
-            }
-        )
-    return descriptors
-
-
-def parse_optional_int(value: str | None) -> int | None:
-    if value is None:
-        return None
-    try:
-        return int(value)
-    except ValueError:
-        return None
-
-
-def last_level_cache_bytes(descriptors: Iterable[dict[str, Any]]) -> int | None:
-    eligible = [entry for entry in descriptors if entry.get("type") in {"Unified", "Data"}]
-    if not eligible:
-        return None
-    highest_level = max(int(entry["level"]) for entry in eligible)
-    sizes = [int(entry["size_bytes"]) for entry in eligible if int(entry["level"]) == highest_level]
-    return max(sizes) if sizes else None
 
 
 def parse_gnu_time(text: str) -> dict[str, int]:
@@ -254,79 +205,6 @@ def probe_perf(events: tuple[str, ...]) -> tuple[tuple[str, ...], dict[str, str]
         reason = result.stderr.strip().splitlines()
         unavailable[event] = reason[-1] if reason else f"perf probe exited {result.returncode}"
     return tuple(supported), unavailable
-
-
-def command_output(command: list[str]) -> str | None:
-    try:
-        result = subprocess.run(
-            command,
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-        )
-    except OSError:
-        return None
-    if result.returncode != 0:
-        return None
-    return result.stdout.strip()
-
-
-def git_metadata() -> dict[str, Any] | None:
-    root = command_output(["git", "rev-parse", "--show-toplevel"])
-    if root is None:
-        return None
-    commit = command_output(["git", "-C", root, "rev-parse", "HEAD"])
-    branch = command_output(["git", "-C", root, "branch", "--show-current"])
-    status = command_output(["git", "-C", root, "status", "--porcelain"])
-    # The checkout path is host-local, so the record carries the commit identity
-    # that reproduces the tree instead.
-    return {
-        "commit": commit,
-        "branch": branch,
-        "dirty": bool(status),
-    }
-
-
-def cpu_model() -> str | None:
-    cpuinfo = read_text(Path("/proc/cpuinfo"))
-    if cpuinfo is None:
-        return None
-    for line in cpuinfo.splitlines():
-        if line.startswith("model name") and ":" in line:
-            return line.split(":", 1)[1].strip()
-    return None
-
-
-def cpu_governors() -> list[str]:
-    governors = {
-        value
-        for path in Path("/sys/devices/system/cpu").glob("cpu[0-9]*/cpufreq/scaling_governor")
-        if (value := read_text(path)) is not None
-    }
-    return sorted(governors)
-
-
-def process_affinity() -> list[int] | None:
-    getter = getattr(os, "sched_getaffinity", None)
-    if getter is None:
-        return None
-    try:
-        return sorted(getter(0))
-    except OSError:
-        return None
-
-
-def command_environment() -> dict[str, str]:
-    keys = (
-        "RUSTFLAGS",
-        "CARGO_PROFILE",
-        "WAYLAND_DISPLAY",
-        "DISPLAY",
-        "XDG_SESSION_TYPE",
-        "SILKSURF_TRACE_APP_FRAME",
-    )
-    return {key: os.environ[key] for key in keys if key in os.environ}
 
 
 def run_sample(
@@ -502,7 +380,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"requested perf events are unavailable: {details}")
     use_perf = args.perf != "off" and bool(supported_events)
 
-    topology = read_cache_topology()
+    # Capturing before the samples run records the load the workload starts
+    # against, which is the competing activity the cache-locality contract
+    # names as part of every record.
+    environment = capture_environment()
     samples = [
         run_sample(command, supported_events, use_perf, index + 1)
         for index in range(args.repeat)
@@ -520,22 +401,8 @@ def main(argv: list[str] | None = None) -> int:
             "sample_count": len(samples),
             "failed_sample_count": len(failed_samples),
         },
-        "timestamp_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "measurement_environment": environment,
         "command": command,
-        "environment": command_environment(),
-        "git": git_metadata(),
-        "host": {
-            "platform": platform.platform(),
-            "machine": platform.machine(),
-            "cpu_model": cpu_model(),
-            "logical_cpus": os.cpu_count(),
-            "process_affinity": process_affinity(),
-            "load_average": list(os.getloadavg()) if hasattr(os, "getloadavg") else None,
-            "cpu_governors": cpu_governors(),
-            "perf_event_paranoid": read_text(Path("/proc/sys/kernel/perf_event_paranoid")),
-            "cache_topology": topology,
-            "last_level_cache_bytes": last_level_cache_bytes(topology),
-        },
         "perf": {
             "policy": args.perf,
             "available": bool(supported_events),

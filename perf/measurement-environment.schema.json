@@ -1,0 +1,138 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/eirikr/silksurf/perf/measurement-environment.schema.json",
+  "title": "SilkSurf measurement provenance envelope",
+  "description": "Host, toolchain, and revision facts a measurement depends on. scripts/measurement_environment.py capture() produces exactly this object, and every artifact the repository publishes as evidence embeds one under the key `measurement_environment`. docs/design/CACHE-LOCALITY-CONTRACT.md states the requirement the envelope satisfies: a retained record names the commit, build profile, cache topology, governor, affinity, competing load, and command. A field is null when the host does not expose it rather than absent, so a reader distinguishes an unavailable fact from an unrecorded one.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "timestamp_utc",
+    "git",
+    "toolchain",
+    "host"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "description": "Envelope schema generation. A field addition keeps the version; a rename or a semantic change raises it.",
+      "minimum": 1
+    },
+    "timestamp_utc": {
+      "type": "string",
+      "description": "ISO-8601 UTC instant the envelope was captured, ending in Z.",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "git": {
+      "description": "Revision identity of the tree the measurement ran against. Null when the capture runs outside a git checkout.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["commit", "branch", "dirty"],
+      "properties": {
+        "commit": {
+          "description": "Full 40-character commit SHA, or null when git cannot resolve HEAD.",
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "branch": {
+          "description": "Current branch name, or null on a detached HEAD.",
+          "type": ["string", "null"]
+        },
+        "dirty": {
+          "description": "True when the working tree carries uncommitted changes. A dirty record does not reproduce from its commit alone.",
+          "type": "boolean"
+        }
+      }
+    },
+    "toolchain": {
+      "description": "Compiler that built the measured artifact. A rate without a compiler cannot separate an engine change from a codegen change.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rustc"],
+      "properties": {
+        "rustc": {
+          "description": "Resolved rustc version, the second field of `rustc --version`. Null when rustc is absent from PATH.",
+          "type": ["string", "null"]
+        },
+        "rustc_verbose": {
+          "description": "Full `rustc --version` line, which carries the commit hash and release date.",
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "host": {
+      "description": "Machine the measurement ran on. Every field is descriptive evidence; none is a portable threshold.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "machine", "cache_topology", "last_level_cache_bytes"],
+      "properties": {
+        "platform": {
+          "description": "platform.platform(): kernel release and libc.",
+          "type": ["string", "null"]
+        },
+        "machine": {
+          "description": "platform.machine(): the hardware architecture identifier.",
+          "type": ["string", "null"]
+        },
+        "cpu_model": {
+          "description": "The `model name` field of /proc/cpuinfo. Null off Linux.",
+          "type": ["string", "null"]
+        },
+        "logical_cpus": {
+          "description": "Logical CPUs the operating system reports, hardware threads included.",
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "process_affinity": {
+          "description": "Logical CPUs the capturing process may run on. A narrower set than logical_cpus reduces the cache share the workload receives.",
+          "type": ["array", "null"],
+          "items": {"type": "integer", "minimum": 0}
+        },
+        "load_average": {
+          "description": "One, five, and fifteen minute load averages. Competing load at capture time bounds how much of the machine the measurement had.",
+          "type": ["array", "null"],
+          "items": {"type": "number", "minimum": 0},
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "cpu_governors": {
+          "description": "Distinct cpufreq scaling governors across all CPUs, sorted. A powersave governor changes latency without changing code.",
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "perf_event_paranoid": {
+          "description": "/proc/sys/kernel/perf_event_paranoid. The value decides which hardware counters an unprivileged perf run may read.",
+          "type": ["string", "null"]
+        },
+        "cache_topology": {
+          "description": "CPU 0 cache descriptors from sysfs, deepest level last. Empty off Linux.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["index", "level", "type", "size_bytes"],
+            "properties": {
+              "index": {"type": "string", "description": "sysfs index directory name."},
+              "level": {"type": "integer", "minimum": 1},
+              "type": {"type": "string", "enum": ["Data", "Instruction", "Unified"]},
+              "size_bytes": {"type": "integer", "minimum": 1, "description": "Capacity of one instance at this level."},
+              "shared_cpu_list": {"type": ["string", "null"], "description": "Logical CPUs sharing this instance."},
+              "ways_of_associativity": {"type": ["integer", "null"], "minimum": 1},
+              "coherency_line_size": {"type": ["integer", "null"], "minimum": 1}
+            }
+          }
+        },
+        "last_level_cache_bytes": {
+          "description": "Largest cache at the deepest data-carrying level. sysfs reports one instance's nominal capacity, so this is an upper bound: affinity, cache sharing, explicit partitions, virtualization, and competing load all reduce the share a workload receives. perf/locality-budget.json treats capacity as a runtime input on these grounds.",
+          "type": ["integer", "null"],
+          "minimum": 1
+        }
+      }
+    },
+    "environment": {
+      "description": "Recorded environment variables that change what a run measures rather than where it runs. Absent keys were unset.",
+      "type": "object",
+      "additionalProperties": {"type": "string"}
+    }
+  }
+}
