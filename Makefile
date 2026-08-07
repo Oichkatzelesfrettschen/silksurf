@@ -86,6 +86,13 @@ check:
 	@# reaches it. The fuzz targets drive the same production entry points a
 	@# page load does, so they lint under the same rules.
 	cd fuzz && $(RUSTFLAGS_DENY) cargo clippy --all-targets -- $(CLIPPY_DENY)
+	@echo "==> clippy -D warnings (silksurf-gui xcb-backend)"
+	@# silksurf-gui declares no default features and silksurf-app selects
+	@# winit-backend, so the --workspace run resolves xcb-backend off and never
+	@# typechecks window.rs or event_loop.rs. Those modules carry the XCB
+	@# connection and the unsafe [u32]-to-wire-bytes reinterpretation, so they
+	@# lint under the same rules.
+	$(RUSTFLAGS_DENY) cargo clippy -p silksurf-gui --features xcb-backend --all-targets -- $(CLIPPY_DENY)
 	@if [ -x scripts/lint_unwrap.sh ]; then scripts/lint_unwrap.sh; fi
 	@if [ -x scripts/lint_unsafe.sh ]; then scripts/lint_unsafe.sh; fi
 	@if [ -x scripts/lint_glossary.sh ]; then scripts/lint_glossary.sh; fi
