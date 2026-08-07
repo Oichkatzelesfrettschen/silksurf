@@ -45,9 +45,21 @@ competing load all reduce the share a workload receives, which is why
 `schema.json` accepts an optional `distributions` object keyed the same as
 `metrics`, carrying `n`, `min`, `median`, `p95`, `p99`, `max`, and `mean`. A
 single scalar cannot distinguish a regression from run-to-run spread, so a
-harness that runs more than one iteration publishes both.
-`scripts/locality_probe.py` already summarizes every sample this way through
-`summarize_numeric`, using nearest-rank percentiles.
+harness that runs more than one iteration reports both.
+`scripts/locality_probe.py` computes exactly these statistics per sample set
+through `summarize_numeric`, using nearest-rank percentiles.
+
+`append_history.py --distribution` writes them, repeatable per metric:
+
+```sh
+python3 perf/append_history.py \
+  --distribution 'fused_pipeline_us=20:188.4:191.7:198.2:203.9:205.1:192.3'
+```
+
+A spec naming a metric the record does not carry is rejected, because a spread
+attached to an absent metric describes nothing and the schema cannot catch it:
+`distributions` is keyed freely. `min <= median <= max` is checked for the same
+reason.
 
 ## Appending a record
 
