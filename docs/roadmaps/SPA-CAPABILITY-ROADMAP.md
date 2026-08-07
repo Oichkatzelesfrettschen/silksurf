@@ -212,6 +212,27 @@ share files with the workstreams above and should land opportunistically:
 
 ## Named deferrals (not in this execution; each needs its own landing)
 
+- **nested-browsing-context-damage-model** -- OPEN, and it gates every
+  HTML 4.8 embedded-content element. `iframe`, `video`, `audio`,
+  `object`, `picture`, and `srcset` return zero hits across crates/ and
+  silksurf-js/. `iframe` is the decision gate rather than the cheapest
+  item: a nested browsing context needs its own document, style tree,
+  layout root, and paint subtree, and the shell owns exactly one
+  BrowserPageRuntime. The question to answer before any element work is
+  whether the retained damage model survives a second document. A nested
+  context that forces full-page repaint puts the latency evidence
+  (~100 us text repaint, 190-260 us fused relayout) in direct conflict
+  with the capability, and that conflict is the finding. Deferred
+  because the conformance instrument reached real upstream corpora only
+  on 2026-08-06, and admitting embedded-content work before an
+  upstream-corpus number moves repeats the synthetic-scorecard failure
+  docs/findings/conformance-instrument-fidelity.md records.
+- **media-element-stack** -- OPEN. `video` and `audio` need demux,
+  decode, and audio output the workspace does not have and does not
+  target. `picture` and `srcset` are tractable inside the existing
+  crates/silksurf-image surface and are the cheapest real
+  embedded-content capability once the damage-model question resolves.
+
 - **boa-bundle-throughput-spike** -- RUN 2026-07-12; verdict and numbers
   in docs/findings/boa-react-bundle-throughput.md. React 18 mounts and
   commits into the silksurf DOM (after ownerDocument and DOM-interface
