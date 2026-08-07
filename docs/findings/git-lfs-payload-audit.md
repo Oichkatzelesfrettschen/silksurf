@@ -2,12 +2,17 @@
 
 **Date**: 2026-08-07
 **Last verified**: 2026-08-07
-**Evidence class**: repository object measurement on this checkout (rank 1) plus
-`.gitattributes` and roadmap source (rank 4).
-**Mechanism**: `.gitattributes` routes three patterns through git-lfs:
+**Evidence class**: repository object measurement (rank 1) at three observation
+points -- this checkout before the rewrite, this checkout after it, and a fresh
+clone of the pushed remote -- plus `.gitattributes` and roadmap source (rank 4).
+Every `.git` figure names which point it comes from, because a checkout and a
+clone hold different object sets.
+**Mechanism**: `.gitattributes` routed three patterns through git-lfs:
 `diff-analysis/tools-output/**`, `*.perf.data`, and `*.zst`.
 `git lfs ls-files`, `git rev-list --objects --all` piped through `git cat-file
---batch-check`, and `du` over `.git` measure what those rules cost.
+--batch-check`, and `du` over `.git` measure what those rules cost. All three
+rules and the objects behind them are gone; the measurements below are what
+they cost while they stood and what removing them recovered.
 **Question**: a browser engine targeting a low-resource profile carries a
 large-file extension. What does LFS hold, does anything consume it, and what
 would removing it actually save?

@@ -213,7 +213,12 @@ def verify() -> int:
                     print(f"STALE CITATION: {relative} -> {token} (pre-rewrite)")
                     failures += 1
     else:
-        print("  commit map absent; the stale-citation rule needs a rewrite to compare against")
+        # A clone has never had a commit map, so this is the common path for
+        # everyone but the operator who ran the rewrite.
+        print(
+            "reanchor_commit_citations: stale-citation rule not run "
+            "(no .git/filter-repo/commit-map to compare against)"
+        )
 
     registered = set(CITING_FILES)
     for token in sorted(resolved):
