@@ -87,31 +87,56 @@ class EnvelopeTests(unittest.TestCase):
         )
         self.assertEqual(written["runner"], "probe")
 
+    def append_history(self, *extra: str) -> subprocess.CompletedProcess:
+        self.history_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.history_directory.cleanup)
+        self.history = Path(self.history_directory.name) / "history.ndjson"
+        return subprocess.run(
+            [
+                sys.executable,
+                str(APPEND_HISTORY),
+                "--history",
+                str(self.history),
+                "--profile",
+                "release",
+                *extra,
+            ],
+            cwd=REPO_ROOT,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
     @unittest.skipUnless(jsonschema_available(), "jsonschema is not installed")
     def test_append_history_writes_a_record_that_validates(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            history = Path(directory) / "history.ndjson"
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(APPEND_HISTORY),
-                    "--history",
-                    str(history),
-                    "--profile",
-                    "release",
-                    "--notes",
-                    "envelope round-trip test",
-                ],
-                cwd=REPO_ROOT,
-                check=False,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            record = json.loads(history.read_text(encoding="utf-8").splitlines()[0])
+        result = self.append_history("--notes", "envelope round-trip test")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        record = json.loads(self.history.read_text(encoding="utf-8").splitlines()[0])
         self.assertIn("measurement_environment", record)
         validator_for(HISTORY_SCHEMA).validate(record)
+
+    @unittest.skipUnless(jsonschema_available(), "jsonschema is not installed")
+    def test_append_history_writes_a_distribution_that_validates(self) -> None:
+        result = self.append_history(
+            "--distribution", "fused_pipeline_us=20:188.4:191.7:198.2:203.9:205.1:192.3"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        record = json.loads(self.history.read_text(encoding="utf-8").splitlines()[0])
+        self.assertEqual(record["distributions"]["fused_pipeline_us"]["n"], 20)
+        validator_for(HISTORY_SCHEMA).validate(record)
+
+    def test_append_history_rejects_a_distribution_naming_an_absent_metric(self) -> None:
+        # A spread attached to a metric the record does not carry describes
+        # nothing, and the schema cannot catch it: distributions is keyed freely.
+        result = self.append_history("--distribution", "not_a_metric=1:1:1:1:1:1:1")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("absent metric", result.stderr)
+
+    def test_append_history_rejects_an_unordered_distribution(self) -> None:
+        result = self.append_history("--distribution", "fused_pipeline_us=5:300:100:1:1:200:1")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("min <= median <= max", result.stderr)
 
 
 if __name__ == "__main__":
