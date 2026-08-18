@@ -1255,6 +1255,39 @@ pub(super) fn install_document(
 
     // UNWRAP-OK: if "document" is already defined, register_global_property overwrites it.
     let _ = ctx.register_global_property(js_string!("document"), document, Attribute::all());
+    install_window_event_target(dom_arc, ctx);
+}
+
+/*
+ * install_window_event_target -- addEventListener on the global object.
+ *
+ * `window` and `self` alias globalThis, so a page that calls
+ * `window.addEventListener('error', handler)` reads the property off the global
+ * object. The listeners bind to `event_dispatch::WINDOW_TARGET`, the propagation
+ * path's last entry, so an event that bubbles past the document reaches them.
+ */
+fn install_window_event_target(dom_arc: &Arc<Mutex<Dom>>, ctx: &mut Context) {
+    let target = super::event_dispatch::WINDOW_TARGET;
+    let listeners = [
+        (
+            js_string!("addEventListener"),
+            node_add_event_listener_native(target),
+        ),
+        (
+            js_string!("removeEventListener"),
+            node_remove_event_listener_native(target),
+        ),
+        (
+            js_string!("dispatchEvent"),
+            node_dispatch_event_native(dom_arc, target),
+        ),
+    ];
+    for (name, native) in listeners {
+        // register_global_property overwrites; register_global_callable rejects
+        // a name the DOM-less context already installed as a no-op stub.
+        let function = make_getter(ctx, native);
+        let _ = ctx.register_global_property(name, function, Attribute::all());
+    }
 }
 
 struct DocumentAccessors {

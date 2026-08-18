@@ -21,6 +21,13 @@ impl NodeId {
         NodeId(index)
     }
 
+    /// `from_raw` in a const context, for sentinel indices declared as
+    /// constants.
+    #[must_use]
+    pub const fn from_raw_const(index: usize) -> Self {
+        NodeId(index)
+    }
+
     /// Get the raw index.
     #[must_use]
     pub fn raw(self) -> usize {

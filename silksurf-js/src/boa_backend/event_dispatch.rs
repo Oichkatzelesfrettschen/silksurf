@@ -27,6 +27,19 @@ use boa_engine::{
 };
 use silksurf_dom::{Dom, NodeId};
 
+/*
+ * WINDOW_TARGET -- the NodeId the window EventTarget occupies.
+ *
+ * DOM Living Standard 2.9 puts window at the end of an event's propagation
+ * path, above the document. The listener registry and the propagation path are
+ * both keyed by NodeId, so window takes the one index no Dom arena allocates:
+ * `Dom::create_*` hands out ascending indices from zero, and `usize::MAX` is
+ * unreachable before the allocation itself exhausts memory. `ancestor_path`
+ * appends it, and `current_target_object` maps it to the global object, so no
+ * caller resolves it against the Dom.
+ */
+pub(super) const WINDOW_TARGET: NodeId = NodeId::from_raw_const(usize::MAX);
+
 pub(super) const EVENT_LISTENERS_REGISTRY: &str = "__silksurfEventListeners";
 pub(super) const LISTENER_TYPE_COUNTS: &str = "__silksurfListenerTypeCounts";
 
@@ -390,13 +403,21 @@ fn install_method(
 /// Snapshot the target-to-root ancestor chain. The Dom lock is taken and
 /// released inside this function; the propagation loop below runs unlocked.
 fn ancestor_path(dom_arc: &Arc<Mutex<Dom>>, target: NodeId) -> Vec<NodeId> {
-    let dom = dom_arc.lock().unwrap_or_else(PoisonError::into_inner);
-    let mut path = vec![target];
-    let mut current = target;
-    while let Ok(Some(parent)) = dom.parent(current) {
-        path.push(parent);
-        current = parent;
+    if target == WINDOW_TARGET {
+        return vec![WINDOW_TARGET];
     }
+    let mut path = vec![target];
+    {
+        let dom = dom_arc.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut current = target;
+        while let Ok(Some(parent)) = dom.parent(current) {
+            path.push(parent);
+            current = parent;
+        }
+    }
+    // Window closes the path: last to see a bubbling event, first to see a
+    // capturing one.
+    path.push(WINDOW_TARGET);
     path
 }
 
@@ -412,6 +433,9 @@ fn current_target_object(
 ) -> JsResult<JsValue> {
     if node_id == target_id {
         return Ok(target_value.clone());
+    }
+    if node_id == WINDOW_TARGET {
+        return Ok(JsValue::from(ctx.global_object().clone()));
     }
     if node_id.raw() == 0 {
         let global = ctx.global_object().clone();

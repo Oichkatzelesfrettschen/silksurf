@@ -1009,6 +1009,27 @@ impl SilkContext {
 
             .expect("document: install on fresh context cannot fail");
 
+        // -- window EventTarget stubs -----------------------------------------
+        // window aliases globalThis, so window.addEventListener resolves as a
+        // global. Without a DOM these accept and drop listeners, matching the
+        // document stub above; dom_bridge::install_window_event_target replaces
+        // them with dispatching versions once a Dom is attached.
+        let _ = ctx.register_global_callable(
+            js_string!("addEventListener"),
+            2,
+            NativeFunction::from_fn_ptr(|_, _, _| Ok(JsValue::undefined())),
+        );
+        let _ = ctx.register_global_callable(
+            js_string!("removeEventListener"),
+            2,
+            NativeFunction::from_fn_ptr(|_, _, _| Ok(JsValue::undefined())),
+        );
+        let _ = ctx.register_global_callable(
+            js_string!("dispatchEvent"),
+            1,
+            NativeFunction::from_fn_ptr(|_, _, _| Ok(JsValue::from(true))),
+        );
+
         // -- window / self aliases -------------------------------------------
         // window and self are aliases for globalThis in a browser context.
         // Cloning JsObject only increments the GC reference count; no copy.
