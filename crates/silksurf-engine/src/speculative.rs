@@ -160,22 +160,42 @@ fn hash_css_text(css: &str) -> u64 {
 }
 
 /*
+ * STYLESHEET_CACHE_EPOCH -- identity of the parser that produced a cached
+ * Stylesheet.
+ *
+ * The cache is content-addressed by CSS text, so identical bytes reuse an
+ * entry across process restarts. The text alone does not identify the parse:
+ * a change to `silksurf_css::parser` or to the `Stylesheet` serialization
+ * makes every stored entry a record of the old grammar, and the reader replays
+ * it instead of re-parsing. The epoch rides in the directory name, so a bump
+ * orphans the previous generation rather than reinterpreting it.
+ *
+ * Bump on any change to CSS parse output or `Stylesheet` serde shape.
+ * Epoch 2 covers the at-rule block discriminator that admits @layer and
+ * @supports blocks as rule lists.
+ */
+const STYLESHEET_CACHE_EPOCH: u32 = 2;
+
+/*
  * disk_cache_path -- return the file path for a stylesheet disk cache entry.
  *
  * WHY: The in-memory StylesheetCache is lost on process exit. The disk cache
  * persists across process restarts so cold starts pay only ~200us for
  * intern_rules instead of ~2.5ms for a full CSS parse.
  *
- * Format: {tmpdir}/silksurf_css_cache/{key:016x}.bin
+ * Format: ~/.cache/silksurf/css-v{epoch}/{key:016x}.bin
  * Key:    FxHash(css_text) -- 64-bit, 16 hex chars, collision probability ~1e-9
+ *
+ * The per-user cache root replaces the system temp directory so parsed
+ * stylesheets follow the XDG lifetime the HTTP responses already use rather
+ * than accumulating in /tmp.
  *
  * See: load_stylesheet_from_disk, save_stylesheet_to_disk below
  */
 fn disk_cache_path(key: u64) -> PathBuf {
-    let mut p = std::env::temp_dir();
-    p.push("silksurf_css_cache");
-    p.push(format!("{key:016x}.bin"));
-    p
+    silksurf_cache_root()
+        .join(format!("css-v{STYLESHEET_CACHE_EPOCH}"))
+        .join(format!("{key:016x}.bin"))
 }
 
 /*
@@ -232,7 +252,7 @@ fn save_stylesheet_to_disk(path: &PathBuf, sheet: &Stylesheet) {
  * On success returns ~/.cache/silksurf/http (directory need not exist yet;
  * ResponseCache::with_disk creates it on first write).
  */
-fn http_cache_dir() -> std::path::PathBuf {
+fn silksurf_cache_root() -> std::path::PathBuf {
     let base = std::env::var_os("XDG_CACHE_HOME").map_or_else(
         || {
             let home = std::env::var_os("HOME").unwrap_or_else(|| "/tmp".into());
@@ -240,7 +260,11 @@ fn http_cache_dir() -> std::path::PathBuf {
         },
         std::path::PathBuf::from,
     );
-    base.join("silksurf").join("http")
+    base.join("silksurf")
+}
+
+fn http_cache_dir() -> std::path::PathBuf {
+    silksurf_cache_root().join("http")
 }
 
 pub struct SpeculativeRenderer {
