@@ -39,6 +39,7 @@ use boa_runtime::Console;
 
 mod css_object;
 mod dom_bridge;
+mod dom_interfaces;
 mod event_dispatch;
 mod net_queue;
 mod platform_globals;

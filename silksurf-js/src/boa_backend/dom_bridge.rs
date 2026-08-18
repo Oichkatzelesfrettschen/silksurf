@@ -197,7 +197,7 @@ fn node_query_selector_native(
         NativeFunction::from_closure(move |_this, args, ctx| {
             let Some(selector) = selector_arg(args.first(), ctx)? else {
                 return if all {
-                    Ok(JsValue::from(JsArray::new(ctx)))
+                    Ok(empty_node_list(ctx))
                 } else {
                     Ok(JsValue::null())
                 };
@@ -612,6 +612,11 @@ pub(super) fn node_to_js_object(
         // -- canvas 2D context (returns null for non-canvas elements) --
         .function(getcontext_native(dom_arc, node_id), js_string!("getContext"), 1)
         .build();
+    // The wrapper inherits its IDL interface prototype, so `instanceof
+    // HTMLElement` answers from the chain and shared members resolve there.
+    if let Some(prototype) = super::dom_interfaces::interface_prototype(dom_arc, node_id, ctx) {
+        wrapper.set_prototype(Some(prototype));
+    }
     let wrapper: JsValue = wrapper.into();
     store_wrapper(node_id, &wrapper, ctx);
     wrapper
@@ -784,7 +789,21 @@ fn node_array(
     for node_id in nodes {
         arr.push(node_to_js_object(dom_arc, node_id, ctx), ctx)?;
     }
-    Ok(JsValue::from(arr))
+    Ok(node_list(arr, ctx))
+}
+
+/// Stamp the `NodeList` prototype on a collection so `item(i)` resolves. The
+/// object stays an Array exotic object, so indexing, `length`, and iteration
+/// keep working.
+fn node_list(array: JsArray, ctx: &mut Context) -> JsValue {
+    if let Some(prototype) = super::dom_interfaces::node_list_prototype(ctx) {
+        boa_engine::JsObject::from(array.clone()).set_prototype(Some(prototype));
+    }
+    JsValue::from(array)
+}
+
+fn empty_node_list(ctx: &mut Context) -> JsValue {
+    node_list(JsArray::new(ctx), ctx)
 }
 
 fn get_attribute_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
@@ -1161,29 +1180,6 @@ pub(super) fn install_document(
 ) {
     let root = NodeId::from_raw(0);
     super::css_object::install_style_dataset_natives(dom_arc, ctx);
-    // DOM interface constructors: frameworks probe them with instanceof and
-    // typeof (react-dom evaluates `node instanceof win.HTMLIFrameElement`
-    // during selection restore). Bridge wrappers are plain objects, so
-    // instanceof correctly reports false; the constructors exist so the
-    // expression evaluates instead of throwing on undefined.
-    let interface_bootstrap = r"
-        (function () {
-            var names = ['Node', 'Element', 'Document', 'HTMLElement',
-                'HTMLIFrameElement', 'HTMLInputElement', 'HTMLTextAreaElement',
-                'HTMLSelectElement', 'HTMLAnchorElement', 'CharacterData',
-                'Text', 'Comment', 'DocumentFragment', 'SVGElement'];
-            for (var i = 0; i < names.length; i++) {
-                if (typeof globalThis[names[i]] === 'undefined') {
-                    globalThis[names[i]] = function () {};
-                }
-            }
-        })();
-    ";
-    if let Err(err) = ctx.eval(boa_engine::Source::from_bytes(
-        interface_bootstrap.as_bytes(),
-    )) {
-        eprintln!("silksurf-js: DOM interface bootstrap failed: {err}");
-    }
     let methods = document_methods(dom_arc, root);
     let accessors = document_accessors(dom_arc, root, ctx);
     let cookie_getter =
@@ -1255,6 +1251,8 @@ pub(super) fn install_document(
 
     // UNWRAP-OK: if "document" is already defined, register_global_property overwrites it.
     let _ = ctx.register_global_property(js_string!("document"), document, Attribute::all());
+    // The interface bootstrap reads `document`, so it runs after registration.
+    super::dom_interfaces::install_dom_interfaces(dom_arc, ctx);
     install_window_event_target(dom_arc, ctx);
 }
 
@@ -1420,7 +1418,7 @@ fn document_query_selector_all_native(dom_arc: &Arc<Mutex<Dom>>, root: NodeId) -
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let Some(selector) = selector_arg(args.first(), ctx)? else {
-                return Ok(JsValue::from(JsArray::new(ctx)));
+                return Ok(empty_node_list(ctx));
             };
             query_array_value(&arc, root, &selector, ctx)
         })
@@ -1437,7 +1435,7 @@ fn document_get_elements_by_tag_name_native(
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let Some(tag) = selector_arg(args.first(), ctx)? else {
-                return Ok(JsValue::from(JsArray::new(ctx)));
+                return Ok(empty_node_list(ctx));
             };
             query_array_value(&arc, root, &tag, ctx)
         })
