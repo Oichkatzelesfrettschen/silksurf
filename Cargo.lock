@@ -3472,6 +3472,7 @@ dependencies = [
  "futures-util",
  "getrandom 0.3.4",
  "mimalloc",
+ "rustc-hash",
  "serde_json",
  "silksurf-css",
  "silksurf-dom",

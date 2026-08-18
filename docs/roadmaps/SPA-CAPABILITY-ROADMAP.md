@@ -325,6 +325,18 @@ separately-landable follow-up):
   textContent; a real HTML serializer is needed for the getter.
 - open-ws-idle-poll -- an open WebSocket/EventSource holds the 10 ms
   poll cadence; the event-loop waker deferral subsumes this.
+- import-map-scopes -- PageModuleLoader applies the import map's
+  top-level `imports` entries. The `scopes` member changes resolution by
+  referrer, and applying a scoped mapping to every referrer resolves a
+  specifier to the wrong module, so scopes are read as absent. Wiring
+  them needs the referrer URL matched against each scope prefix before
+  the `imports` lookup.
+- dynamic-import-fetch -- the module graph is fetched ahead of
+  evaluation from the static imports boa reports, so `import()` reaches
+  a module the registry does not hold and rejects. chatgpt.com's entry
+  module route-splits through `import()`, so its page code never
+  evaluates. Wiring it needs load_imported_module to fetch on demand
+  rather than report a miss.
 - stale-entry-revalidation -- ResponseCache::get answers only while an
   entry is fresh, and a stale entry stays in the map carrying its ETag
   and Last-Modified. Nothing consults conditional_headers on a miss, so

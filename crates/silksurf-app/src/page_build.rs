@@ -608,20 +608,25 @@ pub(crate) fn execute_static_module_scripts(
     if module_texts.is_empty() {
         return;
     }
-    let root_urls = {
+    let (root_urls, import_map) = {
         let dom = dom_arc
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        external_module_script_urls(&dom, root, base_url)
+        (
+            external_module_script_urls(&dom, root, base_url),
+            document_import_map(&dom, root),
+        )
     };
+    // The import map must be in place before the first module resolves a bare
+    // specifier (HTML, 8.1.3.8).
+    js_ctx.set_import_map(import_map);
     for (idx, root_url) in dedupe_resource_urls(&root_urls).iter().enumerate() {
-        let root_path = module_path_for_url(root_url);
         let root_len = module_texts
             .iter()
-            .find_map(|(path, text)| (path == &root_path).then_some(text.len()))
+            .find_map(|(url, text)| (url == root_url).then_some(text.len()))
             .unwrap_or(0);
         let module_start = std::time::Instant::now();
-        match js_ctx.eval_module_graph(&root_path, module_texts) {
+        match js_ctx.eval_module_graph(root_url, module_texts) {
             Ok(()) => trace_navigation_script(
                 trace_build,
                 idx,
@@ -1476,11 +1481,11 @@ mod tests {
             script_texts: Vec::new(),
             module_texts: vec![
                 (
-                    "/module.js".to_string(),
-                    "import { fixtureGraph } from '/module-child.js'; document.body.setAttribute('data-module-graph', fixtureGraph);".to_string(),
+                    "https://example.com/module.js".to_string(),
+                    "import { fixtureGraph } from './module-child.js'; document.body.setAttribute('data-module-graph', fixtureGraph);".to_string(),
                 ),
                 (
-                    "/module-child.js".to_string(),
+                    "https://example.com/module-child.js".to_string(),
                     "export const fixtureGraph = 'module-child';".to_string(),
                 ),
             ],
