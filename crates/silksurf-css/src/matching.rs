@@ -33,17 +33,30 @@ use crate::{
 };
 use silksurf_dom::{Attribute, AttributeName, Dom, NodeId, NodeKind};
 
+/// Cascade sort key for one declaration within an origin, ordered by derived
+/// `Ord` over its fields in declaration order.
+///
+/// `layer` leads because cascade layers outrank selector specificity (CSS
+/// Cascade 5, 6.4.4): a later-declared layer beats an earlier one whatever the
+/// selectors say, and unlayered declarations beat every layer. `UNLAYERED`
+/// carries that last rule as the maximum value, so a rule that never enters a
+/// layer sorts above all layered rules without a special case.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Specificity {
+    pub layer: u32,
     pub ids: u32,
     pub classes: u32,
     pub elements: u32,
 }
 
 impl Specificity {
+    /// Layer index of a declaration outside every cascade layer.
+    pub const UNLAYERED: u32 = u32::MAX;
+
     #[must_use]
     pub fn zero() -> Self {
         Self {
+            layer: Self::UNLAYERED,
             ids: 0,
             classes: 0,
             elements: 0,

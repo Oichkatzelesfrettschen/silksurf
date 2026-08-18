@@ -5,9 +5,9 @@ use silksurf_core::SilkInterner;
 use smol_str::SmolStr;
 use std::borrow::Cow;
 
-const MAX_CSS_BYTES: usize = 128 * 1024;
+const MAX_CSS_BYTES: usize = 4 * 1024 * 1024;
 const MAX_INLINE_STYLE_BYTES: usize = 16 * 1024;
-const MAX_NESTED_AT_RULE_BLOCK_TOKENS: usize = 4096;
+const MAX_AT_RULE_NESTING_DEPTH: usize = 32;
 const MAX_QUALIFIED_RULE_SELECTOR_TOKENS: usize = 1024;
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -53,15 +53,27 @@ pub struct Declaration {
 pub struct CssParser {
     tokens: Vec<CssToken>,
     cursor: usize,
+    /// At-rule block nesting depth of this parser. `parse_at_rule` refuses to
+    /// descend past `MAX_AT_RULE_NESTING_DEPTH`, which bounds the recursion
+    /// `parse_at_rule_block` drives through `CssParser::parse_stylesheet`.
+    depth: usize,
 }
 
 impl CssParser {
     #[must_use]
-    pub fn new(mut tokens: Vec<CssToken>) -> Self {
+    pub fn new(tokens: Vec<CssToken>) -> Self {
+        Self::with_depth(tokens, 0)
+    }
+
+    fn with_depth(mut tokens: Vec<CssToken>, depth: usize) -> Self {
         if !matches!(tokens.last(), Some(CssToken::Eof)) {
             tokens.push(CssToken::Eof);
         }
-        Self { tokens, cursor: 0 }
+        Self {
+            tokens,
+            cursor: 0,
+            depth,
+        }
     }
 
     pub fn parse_stylesheet(&mut self) -> Stylesheet {
@@ -104,7 +116,7 @@ impl CssParser {
                 Some(CssToken::CurlyOpen) => {
                     self.next();
                     let block_tokens = self.consume_block();
-                    let block = Some(parse_at_rule_block(block_tokens));
+                    let block = Some(parse_at_rule_block(&name, block_tokens, self.depth + 1));
                     return Some(Rule::At(AtRule {
                         name,
                         prelude,
@@ -379,15 +391,62 @@ fn is_css_whitespace(byte: u8) -> bool {
     matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | 0x0c)
 }
 
-fn parse_at_rule_block(tokens: Vec<CssToken>) -> AtRuleBlock {
-    if looks_like_declarations(&tokens) {
-        AtRuleBlock::Declarations(parse_declarations(&tokens))
-    } else if tokens.len() > MAX_NESTED_AT_RULE_BLOCK_TOKENS {
-        AtRuleBlock::Rules(Vec::new())
-    } else {
-        let mut parser = CssParser::new(tokens);
-        AtRuleBlock::Rules(parser.parse_stylesheet().rules)
+/*
+ * The at-rule name fixes its block grammar, so the name selects the parse.
+ * Scanning the block for an `Ident Colon` pair instead misreads any rule list
+ * holding a pseudo-class selector: `@layer theme{a:hover{...}}` presents
+ * `Ident("a") Colon` at depth 0 and parses as declarations, which discards
+ * every rule the layer carries.
+ */
+fn at_rule_block_holds_rules(name: &str, tokens: &[CssToken]) -> bool {
+    let lowered = name.to_ascii_lowercase();
+    match strip_vendor_prefix(&lowered) {
+        "media"
+        | "supports"
+        | "layer"
+        | "container"
+        | "scope"
+        | "document"
+        | "keyframes"
+        | "starting-style"
+        | "font-feature-values" => true,
+        "font-face"
+        | "page"
+        | "property"
+        | "counter-style"
+        | "viewport"
+        | "font-palette-values"
+        | "position-try" => false,
+        // An unnamed at-rule grammar is read from the block: a rule list opens
+        // a nested block, a declaration list never does.
+        _ => block_opens_nested_block(tokens),
     }
+}
+
+fn strip_vendor_prefix(name: &str) -> &str {
+    for prefix in ["-webkit-", "-moz-", "-ms-", "-o-"] {
+        if let Some(rest) = name.strip_prefix(prefix) {
+            return rest;
+        }
+    }
+    name
+}
+
+fn block_opens_nested_block(tokens: &[CssToken]) -> bool {
+    tokens
+        .iter()
+        .any(|token| matches!(token, CssToken::CurlyOpen))
+}
+
+fn parse_at_rule_block(name: &str, tokens: Vec<CssToken>, depth: usize) -> AtRuleBlock {
+    if !at_rule_block_holds_rules(name, &tokens) {
+        return AtRuleBlock::Declarations(parse_declarations(&tokens));
+    }
+    if depth > MAX_AT_RULE_NESTING_DEPTH {
+        return AtRuleBlock::Rules(Vec::new());
+    }
+    let mut parser = CssParser::with_depth(tokens, depth);
+    AtRuleBlock::Rules(parser.parse_stylesheet().rules)
 }
 
 fn parse_bounded_selector_list(tokens: Vec<CssToken>, max_tokens: usize) -> SelectorList {
@@ -413,29 +472,13 @@ fn intern_rules(rules: &mut [Rule], interner: &mut SilkInterner) {
     }
 }
 
-fn looks_like_declarations(tokens: &[CssToken]) -> bool {
-    let mut depth = 0usize;
-    let mut index = 0usize;
-    while index < tokens.len() {
-        match tokens[index] {
-            CssToken::CurlyOpen => depth += 1,
-            CssToken::CurlyClose => depth = depth.saturating_sub(1),
-            CssToken::Ident(_) if depth == 0 => {
-                let mut lookahead = index + 1;
-                while lookahead < tokens.len() && matches!(tokens[lookahead], CssToken::Whitespace)
-                {
-                    lookahead += 1;
-                }
-                if matches!(tokens.get(lookahead), Some(CssToken::Colon)) {
-                    return true;
-                }
-            }
-            _ => {}
-        }
-        index += 1;
-    }
-    false
+/// Parse a declaration list already tokenized by the caller. `@supports`
+/// declaration conditions arrive as tokens inside a parenthesized group, so
+/// they reach the declaration grammar without a round trip through text.
+pub(crate) fn parse_declarations_from_tokens(tokens: &[CssToken]) -> Vec<Declaration> {
+    parse_declarations(tokens)
 }
+
 fn parse_declarations(tokens: &[CssToken]) -> Vec<Declaration> {
     let mut declarations = Vec::new();
     let mut cursor = 0usize;

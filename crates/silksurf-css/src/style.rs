@@ -40,6 +40,7 @@ use smol_str::SmolStr;
 use std::sync::Arc;
 
 const INLINE_STYLE_SPECIFICITY: Specificity = Specificity {
+    layer: Specificity::UNLAYERED,
     ids: u32::MAX,
     classes: u32::MAX,
     elements: u32::MAX,
@@ -599,7 +600,7 @@ impl ComputedStyle {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 struct ResolvedProperty<T> {
     value: T,
     important: bool,
@@ -619,7 +620,7 @@ impl<T: Clone> ResolvedProperty<T> {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, PartialEq)]
 struct CascadedStyle {
     /// CSS-wide keyword overrides (inherit/initial/unset) keyed by `PropertyId`.
     /// When a keyword is set with higher cascade priority than the typed slot,
@@ -1439,6 +1440,192 @@ struct IndexedSelector {
 }
 
 /*
+ * LayerOrder assigns each cascade layer its rank (CSS Cascade 5, 6.4.4).
+ *
+ * A layer's rank is the position at which its qualified name is first
+ * declared, so `@layer a, b;` fixes the order before either block appears.
+ * `Specificity::layer` carries the rank into the cascade comparison, where it
+ * outranks selector specificity; unlayered declarations hold
+ * `Specificity::UNLAYERED` and therefore beat every layer.
+ *
+ * Important declarations invert layer order in the specification. This engine
+ * compares importance before specificity, so two important declarations in
+ * different layers resolve by rank rather than by inverted rank. Tracked in
+ * docs/roadmaps/SPA-CAPABILITY-ROADMAP.md under important-layer-inversion.
+ */
+struct LayerOrder {
+    names: Vec<String>,
+    anonymous_count: usize,
+}
+
+impl LayerOrder {
+    fn new() -> Self {
+        Self {
+            names: Vec::new(),
+            anonymous_count: 0,
+        }
+    }
+
+    /// Rank a qualified layer path, appending it on first sight so ranks follow
+    /// declaration order. Ranks stop one below `Specificity::UNLAYERED`, which
+    /// unlayered declarations own.
+    fn rank_of(&mut self, path: &str) -> u32 {
+        let index = self
+            .names
+            .iter()
+            .position(|name| name == path)
+            .unwrap_or_else(|| {
+                self.names.push(path.to_string());
+                self.names.len() - 1
+            });
+        u32::try_from(index)
+            .unwrap_or(Specificity::UNLAYERED)
+            .min(Specificity::UNLAYERED - 1)
+    }
+
+    fn anonymous_path(&mut self, parent: &str) -> String {
+        self.anonymous_count += 1;
+        // A CSS ident holds no space, so a spaced name cannot collide with an
+        // author layer name.
+        if parent.is_empty() {
+            format!("anonymous layer {}", self.anonymous_count)
+        } else {
+            format!("{parent}.anonymous layer {}", self.anonymous_count)
+        }
+    }
+}
+
+/// Split an `@layer` prelude into qualified layer paths. `@layer a, b;` names
+/// two layers; `@layer a.b {` names one nested path.
+fn layer_paths(prelude: &[CssToken]) -> Vec<String> {
+    let mut paths = Vec::new();
+    let mut current = String::new();
+    for token in prelude {
+        match token {
+            CssToken::Ident(name) => current.push_str(name),
+            CssToken::Delim('.') => current.push('.'),
+            CssToken::Comma => {
+                if !current.is_empty() {
+                    paths.push(std::mem::take(&mut current));
+                }
+            }
+            _ => {}
+        }
+    }
+    if !current.is_empty() {
+        paths.push(current);
+    }
+    paths
+}
+
+fn qualify(parent: &str, child: &str) -> String {
+    if parent.is_empty() {
+        child.to_string()
+    } else {
+        format!("{parent}.{child}")
+    }
+}
+
+fn collect_active_rules(
+    rules: &[Rule],
+    viewport_w: f32,
+    viewport_h: f32,
+    layer_path: &str,
+    order: &mut LayerOrder,
+    out: &mut Vec<(u32, StyleRule)>,
+) {
+    for rule in rules {
+        match rule {
+            Rule::Style(sr) => {
+                let rank = if layer_path.is_empty() {
+                    Specificity::UNLAYERED
+                } else {
+                    order.rank_of(layer_path)
+                };
+                out.push((rank, sr.clone()));
+            }
+            Rule::At(at) => {
+                let name = at.name.to_ascii_lowercase();
+                let children = match &at.block {
+                    Some(AtRuleBlock::Rules(children)) => children.as_slice(),
+                    // `@layer a, b;` declares layer order without carrying
+                    // rules; recording the names now fixes their rank.
+                    _ => {
+                        if name == "layer" {
+                            for path in layer_paths(&at.prelude) {
+                                order.rank_of(&qualify(layer_path, &path));
+                            }
+                        }
+                        continue;
+                    }
+                };
+                match name.as_str() {
+                    "media" => {
+                        if crate::media::evaluate_media_query(&at.prelude, viewport_w, viewport_h) {
+                            collect_active_rules(
+                                children, viewport_w, viewport_h, layer_path, order, out,
+                            );
+                        }
+                    }
+                    "supports" => {
+                        if crate::supports::evaluate_supports_condition(&at.prelude) {
+                            collect_active_rules(
+                                children, viewport_w, viewport_h, layer_path, order, out,
+                            );
+                        }
+                    }
+                    "layer" => {
+                        let names = layer_paths(&at.prelude);
+                        let child_path = match names.first() {
+                            Some(first) => qualify(layer_path, first),
+                            None => order.anonymous_path(layer_path),
+                        };
+                        order.rank_of(&child_path);
+                        collect_active_rules(
+                            children,
+                            viewport_w,
+                            viewport_h,
+                            &child_path,
+                            order,
+                            out,
+                        );
+                    }
+                    // @keyframes, @scope, @container, and the rest carry rules
+                    // this cascade does not select against.
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
+/// Flatten a stylesheet into the rules the cascade selects against, in document
+/// order, paired with the layer rank each rule carries into `Specificity`.
+fn flatten_active_rules(
+    stylesheet: &Stylesheet,
+    viewport_w: f32,
+    viewport_h: f32,
+) -> (Vec<StyleRule>, Vec<u32>) {
+    let mut ranked: Vec<(u32, StyleRule)> = Vec::new();
+    let mut order = LayerOrder::new();
+    collect_active_rules(
+        &stylesheet.rules,
+        viewport_w,
+        viewport_h,
+        "",
+        &mut order,
+        &mut ranked,
+    );
+    let mut rules = Vec::with_capacity(ranked.len());
+    let mut ranks = Vec::with_capacity(ranked.len());
+    for (rank, rule) in ranked {
+        ranks.push(rank);
+        rules.push(rule);
+    }
+    (rules, ranks)
+}
+
+/*
  * StyleIndex -- hash-based selector index for O(1) candidate lookup.
  *
  * WHY: Naive cascade iterates ALL selectors for EVERY node: O(N*S).
@@ -1464,10 +1651,12 @@ pub struct StyleIndex {
     id_rules: FxHashMap<SelectorIdent, Vec<IndexedSelector>>,
     class_rules: FxHashMap<SelectorIdent, Vec<IndexedSelector>>,
     universal_rules: Vec<IndexedSelector>,
-    /// Flat list of active `StyleRules`: top-level rules plus children of
-    /// @media rules whose query matched the build viewport. The `rule_index`
-    /// field of every `IndexedSelector` indexes into this vec, not into
-    /// stylesheet.rules. Cascade lookups go through `active_rules` exclusively.
+    /// Flat list of active `StyleRules` in document order: top-level rules plus
+    /// the rules that conditional group rules admit -- `@media` whose query
+    /// matched the build viewport, `@supports` whose condition this engine
+    /// satisfies, and every `@layer` block. The `rule_index` field of every
+    /// `IndexedSelector` indexes into this vec, not into stylesheet.rules.
+    /// Cascade lookups go through `active_rules` exclusively.
     pub active_rules: Vec<StyleRule>,
     /// Total number of unique (rule, selector) pairs. Used to size the
     /// `CascadeWorkspace::seen_bits` bitvec for O(1) dedup without hashing.
@@ -1485,10 +1674,12 @@ impl StyleIndex {
     /// Build a `StyleIndex` that includes @media children whose query matches
     /// the given viewport dimensions (pixels).
     ///
-    /// Top-level Style rules are always included. @media rules are evaluated
-    /// against (`viewport_w`, `viewport_h`); matching rules' children are promoted
-    /// into `active_rules`. Non-media At rules (@keyframes, @supports, etc.) are
-    /// skipped entirely -- they contribute no selector-matchable style rules.
+    /// Top-level Style rules are always included. `@media` rules are evaluated
+    /// against (`viewport_w`, `viewport_h`), `@supports` rules against
+    /// `crate::supports::evaluate_supports_condition`, and `@layer` blocks are
+    /// admitted with the layer rank their name earns. `@keyframes`, `@scope`,
+    /// and `@container` stay out: their blocks hold rules this cascade does not
+    /// select against.
     ///
     /// Unknown or complex @media queries default to true (safe fallback: apply
     /// the rules). This matches media.rs `evaluate_media_query` semantics.
@@ -1496,24 +1687,7 @@ impl StyleIndex {
     pub fn for_viewport(stylesheet: &Stylesheet, viewport_w: f32, viewport_h: f32) -> Self {
         // Flatten stylesheet into a contiguous Vec<StyleRule> of active rules.
         // rule_index fields in IndexedSelector index into this vec.
-        let mut active_rules: Vec<StyleRule> = Vec::new();
-        for rule in &stylesheet.rules {
-            match rule {
-                Rule::Style(sr) => active_rules.push(sr.clone()),
-                Rule::At(at) if at.name.eq_ignore_ascii_case("media") => {
-                    if crate::media::evaluate_media_query(&at.prelude, viewport_w, viewport_h) {
-                        if let Some(AtRuleBlock::Rules(children)) = &at.block {
-                            for child in children {
-                                if let Rule::Style(sr) = child {
-                                    active_rules.push(sr.clone());
-                                }
-                            }
-                        }
-                    }
-                }
-                Rule::At(_) => {}
-            }
-        }
+        let (active_rules, layer_ranks) = flatten_active_rules(stylesheet, viewport_w, viewport_h);
 
         // Build tag/id/class/universal selector index over active_rules.
         // Separating collection from indexing avoids a borrow conflict
@@ -1526,10 +1700,15 @@ impl StyleIndex {
 
         for (rule_index, rule) in active_rules.iter().enumerate() {
             for (selector_index, selector) in rule.selectors.selectors.iter().enumerate() {
+                let mut specificity = selector_specificity(selector);
+                specificity.layer = layer_ranks
+                    .get(rule_index)
+                    .copied()
+                    .unwrap_or(Specificity::UNLAYERED);
                 let entry = IndexedSelector {
                     rule_index,
                     selector_index,
-                    specificity: selector_specificity(selector),
+                    specificity,
                     pair_id,
                 };
                 pair_id += 1;
@@ -2259,6 +2438,25 @@ fn inline_style_text(dom: &Dom, node: NodeId) -> Option<&str> {
  * See: property_id.rs for the ID table
  * See: parser.rs parse_declarations() for where IDs are assigned
  */
+/*
+ * engine_applies_declaration -- the @supports oracle.
+ *
+ * `@supports (property: value)` asks whether this engine honors the pair, and
+ * the cascade is the authority: `apply_declaration` sets a slot only when
+ * `PropertyId` names the property and the value parser accepts the value. An
+ * untouched `CascadedStyle` therefore means no support, and the author's
+ * fallback branch applies. Custom properties are supported by definition
+ * (CSS Variables 1, 2), so they answer true without reaching the slots.
+ */
+pub(crate) fn engine_applies_declaration(declaration: &Declaration) -> bool {
+    if declaration.name.starts_with("--") {
+        return true;
+    }
+    let mut probe = CascadedStyle::default();
+    apply_declaration(&mut probe, declaration, Specificity::zero(), 0);
+    probe != CascadedStyle::default()
+}
+
 fn apply_declaration(
     cascaded: &mut CascadedStyle,
     declaration: &Declaration,

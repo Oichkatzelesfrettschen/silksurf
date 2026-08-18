@@ -325,6 +325,13 @@ separately-landable follow-up):
   textContent; a real HTML serializer is needed for the getter.
 - open-ws-idle-poll -- an open WebSocket/EventSource holds the 10 ms
   poll cadence; the event-loop waker deferral subsumes this.
+- important-layer-inversion -- `Specificity::layer` orders cascade
+  layers ahead of selector specificity, which is correct for normal
+  declarations. CSS Cascade 5, 6.4.4 inverts layer order for important
+  declarations; `ResolvedProperty::should_override` compares importance
+  before specificity, so two important declarations in different layers
+  resolve by rank rather than by inverted rank. Correcting it needs the
+  importance bit to select between the rank and its complement.
 
 ## Verification checklist (applies to every workstream)
 
