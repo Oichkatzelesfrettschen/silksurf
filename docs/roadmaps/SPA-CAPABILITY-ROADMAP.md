@@ -325,6 +325,12 @@ separately-landable follow-up):
   textContent; a real HTML serializer is needed for the getter.
 - open-ws-idle-poll -- an open WebSocket/EventSource holds the 10 ms
   poll cadence; the event-loop waker deferral subsumes this.
+- stale-entry-revalidation -- ResponseCache::get answers only while an
+  entry is fresh, and a stale entry stays in the map carrying its ETag
+  and Last-Modified. Nothing consults conditional_headers on a miss, so
+  a stale entry refetches in full instead of riding a 304. Wiring it
+  needs fetch_or_speculate to send the validators and to rebuild the
+  response from the cached body when the origin answers 304.
 - intl-formatters -- Intl carries Locale and getCanonicalLocales, which
   is what language negotiation reads. DateTimeFormat, NumberFormat,
   Collator, PluralRules, and RelativeTimeFormat stay absent rather than
