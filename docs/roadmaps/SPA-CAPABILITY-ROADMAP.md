@@ -325,6 +325,20 @@ separately-landable follow-up):
   textContent; a real HTML serializer is needed for the getter.
 - open-ws-idle-poll -- an open WebSocket/EventSource holds the 10 ms
   poll cadence; the event-loop waker deferral subsumes this.
+- svg-paint-pipeline -- silksurf-render, silksurf-image, and
+  silksurf-layout carry no SVG handling, so an `<svg>` subtree paints
+  nothing. chatgpt.com draws its logo and every icon as inline SVG, and
+  the shell renders with blank gaps where they sit. A real
+  implementation needs the SVG document structure, path geometry,
+  fill and stroke, transforms, gradients, `viewBox` mapping, and
+  `<svg>` sized as a replaced element in layout. `usvg` plus `resvg`
+  would supply it against the tiny-skia backend silksurf-render already
+  rasterizes through, at a dependency weight the low-resource profile
+  has not accepted.
+- mutation-observer -- MutationObserver is undefined. `Dom::take_dirty_nodes`
+  already records the mutated set the fused pipeline consumes, so the
+  records exist; delivering them needs a per-observer subtree filter and
+  a microtask-checkpoint queue.
 - import-map-scopes -- PageModuleLoader applies the import map's
   top-level `imports` entries. The `scopes` member changes resolution by
   referrer, and applying a scoped mapping to every referrer resolves a
