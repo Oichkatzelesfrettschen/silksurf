@@ -41,6 +41,7 @@ mod css_object;
 mod dom_bridge;
 mod event_dispatch;
 mod net_queue;
+mod platform_globals;
 
 const HOST_CALLBACKS_REGISTRY: &str = "__silksurfHostCallbacks";
 const DEFAULT_HOST_CALLBACK_BUDGET: usize = 256;
@@ -942,6 +943,7 @@ impl SilkContext {
         install_stream_constructors(&mut ctx);
         install_crypto(&mut ctx);
         install_abort_api(&mut ctx);
+        platform_globals::install_platform_globals(&mut ctx);
         install_xml_http_request(&mut ctx);
 
         // -- document stub ----------------------------------------------------
@@ -1216,6 +1218,17 @@ impl SilkContext {
     /// The embedder calls this on window resize.
     pub fn set_viewport(&mut self, width: f32, height: f32) {
         self.viewport.set((width, height));
+    }
+
+    /// Point `location` and `document.URL` at the document's address.
+    ///
+    /// The location stub installs with empty fields, and a page reads
+    /// `location.href` and `location.origin` to build API endpoints:
+    /// chatgpt.com's startup script evaluates `new URL(location.href)` and
+    /// throws on the empty string. Embedders call this with the navigation URL
+    /// before running page script. An unparseable URL leaves the stub as it is.
+    pub fn set_document_url(&mut self, url: &str) {
+        platform_globals::set_document_url(&mut self.ctx, url);
     }
 
     /// Drain the same-document navigations queued by history.pushState and

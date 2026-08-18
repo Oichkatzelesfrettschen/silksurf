@@ -275,6 +275,7 @@ pub(crate) fn build_browser_page_with_buffers_for_height(
         &payload.render_config.top_level_site,
         &cookie_host,
     );
+    js_ctx.set_document_url(&payload.url);
     js_ctx.preload_local_storage(crate::profile::load_local_storage(&payload.url));
     js_ctx.set_viewport(viewport.width, viewport.height);
     install_computed_style_provider(&mut js_ctx, &dom_arc, &stylesheet);

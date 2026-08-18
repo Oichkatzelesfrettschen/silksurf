@@ -36,6 +36,10 @@ boa_runtime = { workspace = true }
 # JSON host objects (JSON.parse/stringify bridging, scorecard emission)
 serde_json = { workspace = true }
 
+# WHATWG URL parsing and form serialization behind the URL/URLSearchParams
+# globals; silksurf-net already links the same crate.
+url = { workspace = true }
+
 # Browser crypto host APIs use OS randomness directly.
 getrandom = { workspace = true }
 

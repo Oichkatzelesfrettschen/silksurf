@@ -325,6 +325,13 @@ separately-landable follow-up):
   textContent; a real HTML serializer is needed for the getter.
 - open-ws-idle-poll -- an open WebSocket/EventSource holds the 10 ms
   poll cadence; the event-loop waker deferral subsumes this.
+- intl-formatters -- Intl carries Locale and getCanonicalLocales, which
+  is what language negotiation reads. DateTimeFormat, NumberFormat,
+  Collator, PluralRules, and RelativeTimeFormat stay absent rather than
+  wrong: a formatter that ignores the locale produces text a page
+  presents as localized. boa_engine's `intl` feature supplies
+  spec-correct implementations backed by icu4x, at a binary-size and
+  compile-time cost the low-resource profile has not accepted.
 - important-layer-inversion -- `Specificity::layer` orders cascade
   layers ahead of selector specificity, which is correct for normal
   declarations. CSS Cascade 5, 6.4.4 inverts layer order for important
