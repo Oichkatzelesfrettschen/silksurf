@@ -5,7 +5,7 @@ use silksurf_core::SilkInterner;
 use smol_str::SmolStr;
 use std::borrow::Cow;
 
-const MAX_CSS_BYTES: usize = 4 * 1024 * 1024;
+const MAX_CSS_BYTES: usize = 1024 * 1024;
 const MAX_INLINE_STYLE_BYTES: usize = 16 * 1024;
 const MAX_AT_RULE_NESTING_DEPTH: usize = 32;
 const MAX_QUALIFIED_RULE_SELECTOR_TOKENS: usize = 1024;

@@ -17,7 +17,7 @@ rule `Vec`.
 ## Existing `MAX_CSS_BYTES`
 
 `parse_stylesheet_with_interner` truncates inputs larger than
-`4 MiB` at a safe rule boundary before parsing. This is an
+`1 MiB` at a safe rule boundary before parsing. This is an
 independent cap layered on top of `MAX_CSS_RULES`; the truncation
 predates the rule-count cap and exists to bound the tokenizer cost on
 very large stylesheets.
@@ -27,6 +27,25 @@ The cap sits above the concatenated sheet a real page produces.
 string before a single parse call, so the bound applies to the sum:
 chatgpt.com alone contributes 99,982 bytes inline plus 79,481 bytes
 external. A 128 KiB cap truncated that page mid-sheet.
+
+Measured cost of the cap on the 96 MiB-LLC reference host, over
+synthetic sheets of 66-byte rules through `parse_stylesheet` plus
+`StyleIndex::for_viewport`:
+
+| Input     | Rules  | Parse   | Index   |
+|-----------|--------|---------|---------|
+| 256 KiB   | 3,972  | 9.0 ms  | 6.3 ms  |
+| 1 MiB     | 15,888 | 38.6 ms | 30.0 ms |
+
+At 4 MiB the same input produces 63,551 rules and `MAX_CSS_RULES`
+fires, so the whole sheet is discarded after its tokenize and parse
+cost is already paid. The 1 MiB cap keeps that outcome off the density
+a real stylesheet has. An adversarial sheet of minimal rules still
+reaches it: 1 MiB of `a{}` parses to 349,526 rules and returns
+`CssError`, which leaves the page with no author stylesheet. Truncating
+at the rule boundary instead of erroring would degrade rather than
+discard; that is a change to `MAX_CSS_RULES` semantics, not to this
+cap.
 
 ## `MAX_AT_RULE_NESTING_DEPTH`
 
