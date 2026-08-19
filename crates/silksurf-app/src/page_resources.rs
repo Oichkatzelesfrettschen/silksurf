@@ -3,17 +3,6 @@
 #[allow(clippy::wildcard_imports)]
 use crate::*;
 
-/// Extract href values from `<link rel="stylesheet">` tags.
-pub(crate) fn extract_stylesheet_urls(
-    dom: &silksurf_dom::Dom,
-    root: silksurf_dom::NodeId,
-    base_url: &str,
-) -> Vec<String> {
-    let mut urls = Vec::new();
-    collect_link_resource_urls(dom, root, base_url, "stylesheet", &mut urls);
-    urls
-}
-
 pub(crate) fn extract_modulepreload_urls(
     dom: &silksurf_dom::Dom,
     root: silksurf_dom::NodeId,
@@ -258,16 +247,26 @@ pub(crate) struct DocumentScriptNode {
     pub(crate) source: DocumentScriptRef,
 }
 
+/*
+ * load_document_script_texts -- the document's classic scripts, in tree order,
+ * each paired with the `<script>` element that carries it.
+ *
+ * The element is what `document.currentScript` reports while the script runs,
+ * and pages reach their own tag through it -- chatgpt.com's stylesheet swap
+ * reads `document.currentScript.previousElementSibling`. An external script
+ * whose fetch fails drops out of the list with its node, so text and node stay
+ * index-aligned.
+ */
 pub(crate) fn load_document_script_texts(
     renderer: &mut SpeculativeRenderer,
     dom: &silksurf_dom::Dom,
     root: silksurf_dom::NodeId,
     base_url: &str,
-) -> Vec<String> {
-    let scripts = extract_document_scripts(dom, root, base_url);
+) -> Vec<(Option<silksurf_dom::NodeId>, String)> {
+    let scripts = extract_document_script_nodes(dom, root, base_url);
     let external_urls: Vec<String> = scripts
         .iter()
-        .filter_map(|script| match script {
+        .filter_map(|script| match &script.source {
             DocumentScriptRef::External(url) => Some(url.clone()),
             DocumentScriptRef::Inline(_) => None,
         })
@@ -275,13 +274,40 @@ pub(crate) fn load_document_script_texts(
     let fetched = fetch_external_script_texts(renderer, &external_urls);
     scripts
         .into_iter()
-        .filter_map(|script| match script {
-            DocumentScriptRef::Inline(text) => Some(text),
-            DocumentScriptRef::External(url) => fetched
-                .iter()
-                .find_map(|(fetched_url, text)| (fetched_url == &url).then(|| text.clone())),
+        .filter_map(|script| match script.source {
+            DocumentScriptRef::Inline(text) => Some((Some(script.node), text)),
+            DocumentScriptRef::External(url) => fetched.iter().find_map(|(fetched_url, text)| {
+                (fetched_url == &url).then(|| (Some(script.node), text.clone()))
+            }),
         })
         .collect()
+}
+
+/// The document's classic scripts in tree order, each with its element.
+pub(crate) fn extract_document_script_nodes(
+    dom: &silksurf_dom::Dom,
+    root: silksurf_dom::NodeId,
+    base_url: &str,
+) -> Vec<DocumentScriptNode> {
+    let mut scripts = Vec::new();
+    collect_document_script_nodes(dom, root, base_url, &mut scripts);
+    scripts
+}
+
+pub(crate) fn collect_document_script_nodes(
+    dom: &silksurf_dom::Dom,
+    node: silksurf_dom::NodeId,
+    base_url: &str,
+    scripts: &mut Vec<DocumentScriptNode>,
+) {
+    if let Some(source) = script_ref_for_node(dom, node, base_url) {
+        scripts.push(DocumentScriptNode { node, source });
+    }
+    if let Ok(children) = dom.children(node) {
+        for &child in children {
+            collect_document_script_nodes(dom, child, base_url, scripts);
+        }
+    }
 }
 
 pub(crate) fn load_document_module_texts(
@@ -834,63 +860,6 @@ pub(crate) fn resolve_resource_url(base_url: &str, resource_url: &str) -> String
         .unwrap_or_default()
 }
 
-pub(crate) fn extract_inline_css(dom: &silksurf_dom::Dom, root: silksurf_dom::NodeId) -> String {
-    let mut css = String::new();
-    collect_style_tags(dom, root, &mut css);
-    css
-}
-
-pub(crate) fn collect_style_tags(
-    dom: &silksurf_dom::Dom,
-    node: silksurf_dom::NodeId,
-    css: &mut String,
-) {
-    if let Ok(name) = dom.element_name(node)
-        && name == Some("style")
-        && let Ok(children) = dom.children(node)
-    {
-        for &child in children {
-            if let Ok(n) = dom.node(child)
-                && let silksurf_dom::NodeKind::Text { text } = n.kind()
-            {
-                css.push_str(text);
-                css.push('\n');
-            }
-        }
-    }
-    if let Ok(children) = dom.children(node) {
-        for &child in children {
-            collect_style_tags(dom, child, css);
-        }
-    }
-}
-
-pub(crate) fn extract_document_scripts(
-    dom: &silksurf_dom::Dom,
-    root: silksurf_dom::NodeId,
-    base_url: &str,
-) -> Vec<DocumentScriptRef> {
-    let mut scripts = Vec::new();
-    collect_document_script_refs(dom, root, base_url, &mut scripts);
-    scripts
-}
-
-pub(crate) fn collect_document_script_refs(
-    dom: &silksurf_dom::Dom,
-    node: silksurf_dom::NodeId,
-    base_url: &str,
-    scripts: &mut Vec<DocumentScriptRef>,
-) {
-    if let Some(script) = script_ref_for_node(dom, node, base_url) {
-        scripts.push(script);
-    }
-    if let Ok(children) = dom.children(node) {
-        for &child in children {
-            collect_document_script_refs(dom, child, base_url, scripts);
-        }
-    }
-}
-
 pub(crate) fn collect_classic_script_nodes(
     dom: &silksurf_dom::Dom,
     node: silksurf_dom::NodeId,
@@ -968,31 +937,6 @@ pub(crate) fn script_text_content(dom: &silksurf_dom::Dom, node: silksurf_dom::N
         }
     }
     text
-}
-
-/// Extract text content from inline `<script>` tags.
-pub(crate) fn extract_inline_scripts(
-    dom: &silksurf_dom::Dom,
-    root: silksurf_dom::NodeId,
-) -> Vec<String> {
-    let mut scripts = Vec::new();
-    collect_script_tags(dom, root, &mut scripts);
-    scripts
-}
-
-pub(crate) fn collect_script_tags(
-    dom: &silksurf_dom::Dom,
-    node: silksurf_dom::NodeId,
-    scripts: &mut Vec<String>,
-) {
-    if let Some(DocumentScriptRef::Inline(text)) = script_ref_for_node(dom, node, "") {
-        scripts.push(text);
-    }
-    if let Ok(children) = dom.children(node) {
-        for &child in children {
-            collect_script_tags(dom, child, scripts);
-        }
-    }
 }
 
 #[cfg(test)]
@@ -1181,8 +1125,13 @@ mod tests {
                 "https://example.com/shared.js".to_string(),
             ]
         );
+        let sheet_urls: Vec<String> =
+            collect_style_sources(&document.dom, document.document, "https://example.com/")
+                .iter()
+                .filter_map(|source| source.link_url().map(str::to_string))
+                .collect();
         assert_eq!(
-            extract_stylesheet_urls(&document.dom, document.document, "https://example.com/"),
+            sheet_urls,
             vec![
                 "https://example.com/shared.js".to_string(),
                 "https://example.com/style.css".to_string(),

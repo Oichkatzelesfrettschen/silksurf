@@ -3,7 +3,8 @@
 //! Pipeline: fetch URL -> parse HTML -> load CSS/JS resources -> create VM
 //! with DOM bridge -> run scripts -> layout -> render.
 //!
-//! Usage: silksurf-app \[--headless\] \[--display-backend=auto|wayland|x11\] \[URL\]
+//! Usage: silksurf-app \[--headless\] \[--screenshot PATH\]
+//!          \[--display-backend=auto|wayland|x11\] \[URL\]
 //! Default URL: `https://example.com`. The windowed browser is the default;
 //! `--headless` runs the one-shot static render pipeline instead.
 
@@ -44,11 +45,13 @@ mod dom_hit_test;
 mod engine_process;
 mod input;
 mod js_events;
+mod link_preload;
 mod page_build;
 mod page_resources;
 mod profile;
 mod redraw_geometry;
 mod runtime_repaint;
+mod stylesheet_set;
 mod window_frame;
 #[cfg(feature = "accessibility")]
 #[allow(clippy::wildcard_imports)]
@@ -64,6 +67,8 @@ pub(crate) use dom_hit_test::*;
 #[allow(clippy::wildcard_imports)]
 pub(crate) use input::*;
 #[allow(clippy::wildcard_imports)]
+pub(crate) use link_preload::*;
+#[allow(clippy::wildcard_imports)]
 pub(crate) use page_build::*;
 #[allow(clippy::wildcard_imports)]
 pub(crate) use page_resources::*;
@@ -71,6 +76,8 @@ pub(crate) use page_resources::*;
 pub(crate) use redraw_geometry::*;
 #[allow(clippy::wildcard_imports)]
 pub(crate) use runtime_repaint::*;
+#[allow(clippy::wildcard_imports)]
+pub(crate) use stylesheet_set::*;
 #[allow(clippy::wildcard_imports)]
 pub(crate) use window_frame::*;
 #[cfg(test)]
@@ -128,16 +135,25 @@ fn run_winit_browser_page(
         "[SilkSurf] Display backend: configured={display_backend:?} resolved={resolved_display_backend:?}"
     );
 
-    // JS timers drive the event-loop sleep: the backend waits until the
-    // earliest setTimeout/setInterval deadline, then the wake callback drains
-    // the due callbacks through tick_browser_runtime.
+    /*
+     * JS timers drive the event-loop sleep: the backend waits until the
+     * earliest setTimeout/setInterval deadline, then the wake callback drains
+     * the due callbacks through tick_browser_runtime.
+     *
+     * A stylesheet fetch completes on a worker thread and posts no wake, so
+     * an outstanding one arms its own short poll and the earlier deadline
+     * wins.
+     */
     let deadline_state = Rc::clone(&browser_state);
     let window = window.with_host_work_deadline(move || {
-        deadline_state
-            .borrow()
-            .runtime
-            .as_ref()
-            .and_then(|runtime| runtime.js_ctx.next_host_callback_deadline())
+        let state = deadline_state.borrow();
+        let runtime = state.runtime.as_ref()?;
+        let timer = runtime.js_ctx.next_host_callback_deadline();
+        if !runtime.sheets.has_pending_fetches() && !runtime.preloads.has_pending_fetches() {
+            return timer;
+        }
+        let poll = std::time::Instant::now() + STYLESHEET_FETCH_POLL_INTERVAL;
+        Some(timer.map_or(poll, |timer| timer.min(poll)))
     });
 
     let render_state = Rc::clone(&browser_state);
@@ -392,21 +408,27 @@ fn run_static_browser_render(
     let dom = document.dom;
     eprintln!("[SilkSurf] DOM parsed successfully");
 
-    // 3. Extract inline CSS from <style> tags + fetch external stylesheets
-    let inline_css = extract_inline_css(&dom, doc_node);
-    let mut css_text = stylesheet_text_with_user_agent_defaults(&inline_css);
-    eprintln!(
-        "[SilkSurf] Extracted {} bytes of inline CSS",
-        inline_css.len()
-    );
-
     /*
-     * fetch_all_or_speculate loads external stylesheet links through the
-     * cache-first resource path. Same-host HTTPS requests share HTTP/2
-     * multiplexing when the server supports it; cached stylesheets return
-     * without network delay.
+     * The document's stylesheets are the <style> elements and the
+     * <link rel=stylesheet> hrefs in tree order. fetch_all_or_speculate loads
+     * the links through the cache-first resource path, so same-host HTTPS
+     * requests share HTTP/2 multiplexing and a cached sheet returns without
+     * network delay.
      */
-    append_static_external_stylesheets(renderer, &dom, doc_node, &options.url, &mut css_text);
+    let mut sheets = document_stylesheet_set(
+        renderer,
+        &dom,
+        doc_node,
+        &options.url,
+        &options.render_config,
+        "Stylesheet",
+    );
+    let css_text = sheets.css_text();
+    eprintln!(
+        "[SilkSurf] Assembled {} bytes of CSS from {} source(s)",
+        css_text.len(),
+        sheets.source_count()
+    );
 
     let image_urls = extract_image_urls(&dom, doc_node, &options.url);
     let decoded_images = {
@@ -443,8 +465,19 @@ fn run_static_browser_render(
         });
     eprintln!("[SilkSurf] CSS parsed in {:?}", css_start.elapsed());
 
-    // 5. Extract inline script text before wrapping Dom for the JS context.
-    let scripts = extract_inline_scripts(&dom, doc_node);
+    /*
+     * The scripts carry their own `<script>` element so the eval loop can name
+     * it as document.currentScript, which pages read to reach the tag they sit
+     * beside.
+     */
+    let scripts: Vec<(Option<silksurf_dom::NodeId>, String)> =
+        extract_document_script_nodes(&dom, doc_node, &options.url)
+            .into_iter()
+            .filter_map(|script| match script.source {
+                DocumentScriptRef::Inline(text) => Some((Some(script.node), text)),
+                DocumentScriptRef::External(_) => None,
+            })
+            .collect();
     eprintln!("[SilkSurf] Found {} inline script(s)", scripts.len());
 
     // Viewport dimensions used by fused pipeline and rasterizer
@@ -476,6 +509,10 @@ fn run_static_browser_render(
     // location.href backs every same-origin URL a page builds; page script runs
     // after the document address is in place.
     js_ctx.set_document_url(&options.url);
+    // matchMedia answers from this size, and a startup script that branches on
+    // it -- chatgpt.com sets data-desktop-layout from `(min-width: 48rem)` --
+    // selects which shell the document renders.
+    js_ctx.set_viewport(viewport.width, viewport.height);
 
     // 7. Execute inline <script> tags.
     execute_static_inline_scripts(&mut js_ctx, &scripts);
@@ -483,6 +520,37 @@ fn run_static_browser_render(
     // 7. Drain pending microtasks and Promise reactions.
     js_ctx.run_pending_jobs();
     drain_initial_host_callbacks(&mut js_ctx);
+
+    /*
+     * Converge on the document a windowed load reaches: a preload that lands
+     * after the scripts run fires its load event, a handler may upgrade a link
+     * to a stylesheet, and the new sheet reparses into the cascade.
+     */
+    let mut preloads = PreloadLinks::new(&options.url, &options.render_config);
+    let stylesheet = match settle_static_document(
+        &mut js_ctx,
+        &dom_arc,
+        doc_node,
+        &mut sheets,
+        &mut preloads,
+        STATIC_SETTLE_BUDGET,
+    ) {
+        Some(settled_css) => {
+            eprintln!(
+                "[SilkSurf] Settled CSS: {} bytes from {} source(s)",
+                settled_css.len(),
+                sheets.source_count()
+            );
+            let dom = dom_arc
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            dom.with_interner_mut(|interner| {
+                renderer.get_or_parse_stylesheet(&settled_css, interner)
+            })
+            .unwrap_or(stylesheet)
+        }
+        None => stylesheet,
+    };
 
     // 8. Fused style+layout+paint: single BFS pass over post-JS DOM.
     //    Replaces separate compute_styles + build_layout_tree + build_display_list calls.
@@ -550,6 +618,10 @@ fn run_static_browser_render(
         raster_buf.len(),
         raster_elapsed
     );
+
+    if let Some(path) = options.screenshot.as_ref() {
+        write_static_screenshot(&display_list, path);
+    }
 
     eprintln!("\n=== PROCESSING BUDGET (excludes network) ===");
     eprintln!(

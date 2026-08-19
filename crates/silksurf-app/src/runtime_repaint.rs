@@ -91,14 +91,18 @@ pub(crate) fn repaint_runtime_host_callbacks(
     runtime: &mut BrowserPageRuntime,
     frame: &mut BrowserFrame,
 ) -> Result<Option<BrowserRedrawMode>, String> {
-    if !runtime.js_ctx.has_pending_host_callbacks() {
-        return Ok(None);
-    }
+    // A stylesheet body lands on a worker thread and queues no host callback,
+    // so the tick checks the set before deciding it has nothing to do.
+    let callback_count = if runtime.js_ctx.has_pending_host_callbacks() {
+        runtime.js_ctx.run_host_callbacks(64)?
+    } else {
+        0
+    };
 
-    let callback_count = runtime.js_ctx.run_host_callbacks(64)?;
-    if callback_count == 0 {
-        return Ok(None);
-    }
+    // A preload fetch that finished runs the page's load handler, which is
+    // where a startup script upgrades a link to a stylesheet. It runs before
+    // the dirty set is drained so its mutations ride the same repaint.
+    let preload_events = runtime.preloads.dispatch_completed(&mut runtime.js_ctx);
 
     let dirty_nodes = {
         let mut dom = runtime
@@ -107,6 +111,27 @@ pub(crate) fn repaint_runtime_host_callbacks(
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         dom.take_dirty_nodes()
     };
+    {
+        let dom = runtime
+            .dom
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        runtime
+            .preloads
+            .refresh(&dom, runtime.document, &dirty_nodes);
+    }
+
+    // A stylesheet that arrived or a source list that moved changes the
+    // cascade for the whole document, so it forces a full repaint rather than
+    // riding the dirty-node damage rect.
+    if refresh_runtime_stylesheets(runtime, &dirty_nodes) {
+        let redraw_mode = repaint_runtime_full_document(runtime, frame);
+        eprintln!(
+            "[SilkSurf] Runtime host callbacks: {callback_count}, preload events: {preload_events} (stylesheet rebuild)"
+        );
+        return Ok(Some(redraw_mode));
+    }
+
     if dirty_nodes.is_empty() {
         return Ok(None);
     }
@@ -114,6 +139,54 @@ pub(crate) fn repaint_runtime_host_callbacks(
     let redraw_mode = repaint_runtime_dirty_nodes(runtime, frame, &dirty_nodes);
     eprintln!("[SilkSurf] Runtime host callbacks: {callback_count}");
     Ok(redraw_mode)
+}
+
+/*
+ * refresh_runtime_stylesheets -- rebuild the cascade when the document's
+ * stylesheet list changed.
+ *
+ * StyleSheetSet::refresh walks the tree only when the tree shape moved or a
+ * dirty node is a `<style>` or `<link>`, so a reconcile that touches neither
+ * costs one integer comparison plus a scan of the dirty set. When the list
+ * moved or a fetched body landed,
+ * the concatenated text reparses and StyleIndex rebuilds against it, which is
+ * what a page that swaps a link's rel from preload to stylesheet needs.
+ */
+pub(crate) fn refresh_runtime_stylesheets(
+    runtime: &mut BrowserPageRuntime,
+    dirty_nodes: &[silksurf_dom::NodeId],
+) -> bool {
+    let changed = {
+        let dom = runtime
+            .dom
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        runtime.sheets.refresh(&dom, runtime.document, dirty_nodes)
+    };
+    if !changed {
+        return false;
+    }
+    let css_text = runtime.sheets.css_text();
+    let dom = runtime
+        .dom
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some(stylesheet) = dom.with_interner_mut(|interner| {
+        silksurf_css::parse_stylesheet_with_interner(&css_text, interner).ok()
+    }) else {
+        eprintln!("[SilkSurf] Stylesheet rebuild: CSS parse failed");
+        return false;
+    };
+    drop(dom);
+    eprintln!(
+        "[SilkSurf] Stylesheet rebuild: {} source(s), {} rules",
+        runtime.sheets.source_count(),
+        stylesheet.rules.len()
+    );
+    runtime.style_index =
+        StyleIndex::for_viewport(&stylesheet, runtime.viewport.width, runtime.viewport.height);
+    runtime.stylesheet = stylesheet;
+    true
 }
 
 pub(crate) fn repaint_runtime_dirty_nodes(
@@ -129,6 +202,34 @@ pub(crate) fn repaint_runtime_dirty_nodes(
         return Some(redraw_mode);
     }
 
+    Some(repaint_runtime_document(runtime, frame, Some(dirty_nodes)))
+}
+
+/*
+ * repaint_runtime_full_document -- restyle, relayout, and repaint everything.
+ *
+ * A cascade input that changed for the whole document -- a stylesheet
+ * arriving, a source list moving -- has no damage rect to ride, so the frame
+ * rasterizes in full.
+ */
+pub(crate) fn repaint_runtime_full_document(
+    runtime: &mut BrowserPageRuntime,
+    frame: &mut BrowserFrame,
+) -> BrowserRedrawMode {
+    repaint_runtime_document(runtime, frame, None)
+}
+
+/*
+ * repaint_runtime_document -- the shared fused restyle/relayout/raster body.
+ *
+ * `dirty_nodes` of Some(..) computes a damage rect from the node set and
+ * rasterizes only that region; None rasterizes the viewport.
+ */
+fn repaint_runtime_document(
+    runtime: &mut BrowserPageRuntime,
+    frame: &mut BrowserFrame,
+    dirty_nodes: Option<&[silksurf_dom::NodeId]>,
+) -> BrowserRedrawMode {
     let dom = runtime
         .dom
         .lock()
@@ -157,7 +258,8 @@ pub(crate) fn repaint_runtime_dirty_nodes(
     );
     frame.link_targets = collect_link_targets(&dom, &display_list.items, &frame.url);
     frame.input_targets = collect_input_targets(&dom, &new_fused);
-    let damage = dirty_nodes_damage_rect(&dom, dirty_nodes, &runtime.fused, &new_fused);
+    let damage = dirty_nodes
+        .and_then(|nodes| dirty_nodes_damage_rect(&dom, nodes, &runtime.fused, &new_fused));
     drop(dom);
 
     let next_height = browser_frame_height(&display_list.items, BROWSER_CHROME_HEIGHT as u32);
@@ -197,8 +299,8 @@ pub(crate) fn repaint_runtime_dirty_nodes(
 
     let old_fused = std::mem::replace(&mut runtime.fused, new_fused);
     runtime.fused_workspace.recycle_result_storage(old_fused);
-    trace_runtime_fused_repaint(dirty_nodes.len(), redraw_mode);
-    Some(redraw_mode)
+    trace_runtime_fused_repaint(dirty_nodes.map_or(0, <[_]>::len), redraw_mode);
+    redraw_mode
 }
 
 pub(crate) fn repaint_runtime_text_only_dirty_nodes(
@@ -1097,6 +1199,11 @@ mod tests {
                 input_targets: Vec::new(),
             },
             runtime: Some(BrowserPageRuntime {
+                sheets: StyleSheetSet::empty("https://example.com/"),
+                preloads: PreloadLinks::new(
+                    "https://example.com/",
+                    &BrowserRenderConfig::default(),
+                ),
                 dom: Arc::clone(&dom_arc),
                 document: document.document,
                 stylesheet,
@@ -1210,6 +1317,11 @@ mod tests {
                 input_targets: Vec::new(),
             },
             runtime: Some(BrowserPageRuntime {
+                sheets: StyleSheetSet::empty("https://example.com/"),
+                preloads: PreloadLinks::new(
+                    "https://example.com/",
+                    &BrowserRenderConfig::default(),
+                ),
                 dom: Arc::clone(&dom_arc),
                 document: document.document,
                 stylesheet,
@@ -1269,6 +1381,7 @@ mod tests {
             url: "https://example.com/".to_string(),
             html: "<!doctype html><html><body><input id=\"prompt\" value=\"Hi\"><script>requestAnimationFrame(function(){setTimeout(function(){document.getElementById('prompt').value='AI';},0);});</script></body></html>".to_string(),
             css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(),
             script_texts: Vec::new(),
             module_texts: Vec::new(),
             images: Vec::new(),

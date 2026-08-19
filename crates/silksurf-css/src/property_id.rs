@@ -107,6 +107,19 @@ pub enum PropertyId {
     GridRow = 75,
     GridArea = 76,
     BoxSizing = 77,
+    Background = 78,
+    Font = 79,
+    PlaceItems = 80,
+    Outline = 81,
+    Transform = 82,
+    /// `margin-block`: one or two values for the top and bottom edges.
+    MarginBlock = 87,
+    /// `margin-inline`: one or two values for the left and right edges.
+    MarginInline = 88,
+    PaddingBlock = 89,
+    PaddingInline = 90,
+    /// `inset`: the box-shorthand form over top, right, bottom, left.
+    Inset = 91,
     Unknown = 255,
 }
 
@@ -135,6 +148,7 @@ pub fn lookup_property_id(name: &str) -> PropertyId {
         // 'b' prefix
         (b'b', 16) if name.eq_ignore_ascii_case("background-color") => PropertyId::BackgroundColor,
         (b'b', 16) if name.eq_ignore_ascii_case("background-image") => PropertyId::BackgroundImage,
+        (b'b', 10) if name.eq_ignore_ascii_case("background") => PropertyId::Background,
         (b'b', 6) if name.eq_ignore_ascii_case("border") => PropertyId::Border,
         (b'b', 12) if name.eq_ignore_ascii_case("border-width") => PropertyId::BorderWidth,
         (b'b', 12) if name.eq_ignore_ascii_case("border-color") => PropertyId::BorderColor,
@@ -148,6 +162,7 @@ pub fn lookup_property_id(name: &str) -> PropertyId {
         (b'b', 10) if name.eq_ignore_ascii_case("box-shadow") => PropertyId::BoxShadow,
         (b'b', 10) if name.eq_ignore_ascii_case("box-sizing") => PropertyId::BoxSizing,
         // 'f' prefix
+        (b'f', 4) if name.eq_ignore_ascii_case("font") => PropertyId::Font,
         (b'f', 9) if name.eq_ignore_ascii_case("font-size") => PropertyId::FontSize,
         (b'f', 11) if name.eq_ignore_ascii_case("font-family") => PropertyId::FontFamily,
         (b'f', 11) if name.eq_ignore_ascii_case("font-weight") => PropertyId::FontWeight,
@@ -204,12 +219,14 @@ pub fn lookup_property_id(name: &str) -> PropertyId {
         (b'm', 13) if name.eq_ignore_ascii_case("margin-bottom") => PropertyId::MarginBottom,
         // 'o' prefix
         (b'o', 7) if name.eq_ignore_ascii_case("opacity") => PropertyId::Opacity,
+        (b'o', 7) if name.eq_ignore_ascii_case("outline") => PropertyId::Outline,
         (b'o', 5) if name.eq_ignore_ascii_case("order") => PropertyId::Order,
         (b'o', 8) if name.eq_ignore_ascii_case("overflow") => PropertyId::Overflow,
         (b'o', 10) if name.eq_ignore_ascii_case("overflow-x") => PropertyId::OverflowX,
         (b'o', 10) if name.eq_ignore_ascii_case("overflow-y") => PropertyId::OverflowY,
         // 'p' prefix
         (b'p', 7) if name.eq_ignore_ascii_case("padding") => PropertyId::Padding,
+        (b'p', 11) if name.eq_ignore_ascii_case("place-items") => PropertyId::PlaceItems,
         (b'p', 8) if name.eq_ignore_ascii_case("position") => PropertyId::Position,
         (b'p', 11) if name.eq_ignore_ascii_case("padding-top") => PropertyId::PaddingTop,
         (b'p', 12) if name.eq_ignore_ascii_case("padding-left") => PropertyId::PaddingLeft,
@@ -220,6 +237,7 @@ pub fn lookup_property_id(name: &str) -> PropertyId {
         (b'r', 7) if name.eq_ignore_ascii_case("row-gap") => PropertyId::RowGap,
         // 't' prefix
         (b't', 3) if name.eq_ignore_ascii_case("top") => PropertyId::Top,
+        (b't', 9) if name.eq_ignore_ascii_case("transform") => PropertyId::Transform,
         (b't', 10) if name.eq_ignore_ascii_case("text-align") => PropertyId::TextAlign,
         (b't', 15) if name.eq_ignore_ascii_case("text-decoration") => PropertyId::TextDecoration,
         // 'v' prefix
@@ -233,6 +251,60 @@ pub fn lookup_property_id(name: &str) -> PropertyId {
         (b'a', 10) if name.eq_ignore_ascii_case("align-self") => PropertyId::AlignSelf,
         // 'z' prefix
         (b'z', 7) if name.eq_ignore_ascii_case("z-index") => PropertyId::ZIndex,
+        _ => logical_property_id(name),
+    }
+}
+
+/*
+ * logical_property_id -- CSS Logical Properties names resolved to their
+ * physical equivalent.
+ *
+ * CSS Logical Properties and Values 1 maps an inline or block edge onto a
+ * physical one through `writing-mode` and `direction`. The engine models
+ * neither, so every element resolves as `horizontal-tb` with `ltr`: inline is
+ * the horizontal axis and block the vertical, inline-start is left and
+ * block-start is top. Resolving here rather than in the cascade keeps one
+ * PropertyId per physical property, so a logical and a physical declaration
+ * for the same edge compete by specificity as the cascade requires.
+ *
+ * A vertical writing mode reverses the mapping; supporting it means carrying
+ * the resolution into the cascade, where the element's computed writing-mode
+ * is known. The logical border-width and corner-radius names resolve once the
+ * cascade carries a physical PropertyId per side and per corner; today it
+ * models border width as one value and radius as one value.
+ */
+fn logical_property_id(name: &str) -> PropertyId {
+    let lowered = name.to_ascii_lowercase();
+    match lowered.as_str() {
+        "inline-size" => PropertyId::Width,
+        "block-size" => PropertyId::Height,
+        "min-inline-size" => PropertyId::MinWidth,
+        "max-inline-size" => PropertyId::MaxWidth,
+        "min-block-size" => PropertyId::MinHeight,
+        "max-block-size" => PropertyId::MaxHeight,
+        "margin-block-start" => PropertyId::MarginTop,
+        "margin-block-end" => PropertyId::MarginBottom,
+        "margin-inline-start" => PropertyId::MarginLeft,
+        "margin-inline-end" => PropertyId::MarginRight,
+        "padding-block-start" => PropertyId::PaddingTop,
+        "padding-block-end" => PropertyId::PaddingBottom,
+        "padding-inline-start" => PropertyId::PaddingLeft,
+        "padding-inline-end" => PropertyId::PaddingRight,
+        "border-block-start" => PropertyId::BorderTop,
+        "border-block-end" => PropertyId::BorderBottom,
+        "border-inline-start" => PropertyId::BorderLeft,
+        "border-inline-end" => PropertyId::BorderRight,
+        "inset-block-start" => PropertyId::Top,
+        "inset-block-end" => PropertyId::Bottom,
+        "inset-inline-start" => PropertyId::Left,
+        "inset-inline-end" => PropertyId::Right,
+        // The two-value logical shorthands take the physical shorthand that
+        // covers the same pair of edges under horizontal-tb.
+        "margin-block" => PropertyId::MarginBlock,
+        "margin-inline" => PropertyId::MarginInline,
+        "padding-block" => PropertyId::PaddingBlock,
+        "padding-inline" => PropertyId::PaddingInline,
+        "inset" => PropertyId::Inset,
         _ => PropertyId::Unknown,
     }
 }

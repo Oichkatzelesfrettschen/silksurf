@@ -1233,6 +1233,21 @@ impl SilkContext {
         platform_globals::set_document_url(&mut self.ctx, url);
     }
 
+    /*
+     * set_current_script -- report `node` as `document.currentScript`.
+     *
+     * The embedder brackets each classic script evaluation with the script's
+     * own element and a clearing `None`, which is what HTML defines the
+     * property to hold during and outside evaluation. A context built without
+     * a DOM bridge has no node to wrap and leaves the property alone.
+     */
+    pub fn set_current_script(&mut self, node: Option<silksurf_dom::NodeId>) {
+        let Some(dom) = self.dom.clone() else {
+            return;
+        };
+        dom_interfaces::set_current_script(&dom, node, &mut self.ctx);
+    }
+
     /// Drain the same-document navigations queued by history.pushState and
     /// replaceState since the last call.
     pub fn take_history_intents(&mut self) -> Vec<HistoryIntent> {

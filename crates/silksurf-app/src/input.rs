@@ -2340,6 +2340,7 @@ mod tests {
             html: "<!doctype html><html><body><input id=\"q\" value=\"Hi\"></body></html>"
                 .to_string(),
             css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(),
             script_texts: Vec::new(),
             module_texts: Vec::new(),
             images: Vec::new(),
@@ -2387,6 +2388,7 @@ mod tests {
             html: "<!doctype html><html><body><textarea id=\"q\">Hi</textarea></body></html>"
                 .to_string(),
             css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(),
             script_texts: Vec::new(),
             module_texts: Vec::new(),
             images: Vec::new(),
@@ -2435,6 +2437,7 @@ mod tests {
             html: "<!doctype html><html><body><div id=\"q\" contenteditable=\"plaintext-only\">Hi</div></body></html>"
                 .to_string(),
             css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(),
             script_texts: Vec::new(),
             module_texts: Vec::new(),
             images: Vec::new(),
@@ -2483,6 +2486,7 @@ mod tests {
             html: "<!doctype html><html><body><textarea id=\"q\">Hi</textarea></body></html>"
                 .to_string(),
             css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(),
             script_texts: Vec::new(),
             module_texts: Vec::new(),
             images: Vec::new(),
@@ -2527,6 +2531,7 @@ mod tests {
             html: "<!doctype html><html><body><input id=\"q\" value=\"Hi\"></body></html>"
                 .to_string(),
             css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(),
             script_texts: Vec::new(),
             module_texts: Vec::new(),
             images: Vec::new(),
@@ -2579,6 +2584,7 @@ mod tests {
             )
             .to_string(),
             css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(),
             script_texts: Vec::new(),
             module_texts: Vec::new(),
             images: Vec::new(),
@@ -2628,6 +2634,7 @@ mod tests {
             )
             .to_string(),
             css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(),
             script_texts: Vec::new(),
             module_texts: Vec::new(),
             images: Vec::new(),
@@ -2679,6 +2686,7 @@ mod tests {
             )
             .to_string(),
             css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(),
             script_texts: Vec::new(),
             module_texts: Vec::new(),
             images: Vec::new(),
@@ -2727,6 +2735,7 @@ mod tests {
             )
             .to_string(),
             css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(),
             script_texts: Vec::new(),
             module_texts: Vec::new(),
             images: Vec::new(),
@@ -2876,6 +2885,7 @@ mod tests {
                 "<!doctype html><html><body><input type=\"checkbox\"><input id=\"q\"></body></html>"
                     .to_string(),
             css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(),
             script_texts: Vec::new(),
             module_texts: Vec::new(),
             images: Vec::new(),
@@ -2902,6 +2912,7 @@ mod tests {
                 "<!doctype html><html><body><input type=\"checkbox\"><input id=\"q\"></body></html>"
                     .to_string(),
             css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(),
             script_texts: Vec::new(),
             module_texts: Vec::new(),
             images: Vec::new(),

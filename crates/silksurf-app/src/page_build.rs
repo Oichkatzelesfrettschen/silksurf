@@ -7,47 +7,11 @@
 #[allow(clippy::wildcard_imports)]
 use crate::*;
 
-pub(crate) fn append_static_external_stylesheets(
-    renderer: &mut SpeculativeRenderer,
-    dom: &silksurf_dom::Dom,
-    doc_node: silksurf_dom::NodeId,
-    url: &str,
-    css_text: &mut String,
+pub(crate) fn execute_static_inline_scripts(
+    js_ctx: &mut SilkContext,
+    scripts: &[(Option<silksurf_dom::NodeId>, String)],
 ) {
-    let stylesheet_urls = extract_stylesheet_urls(dom, doc_node, url);
-    let css_accept_header = [("Accept".to_string(), "text/css,*/*".to_string())];
-    let sheet_requests: Vec<(&str, &[(String, String)])> = stylesheet_urls
-        .iter()
-        .map(|u| (u.as_str(), css_accept_header.as_slice()))
-        .collect();
-
-    let sheet_results = renderer.fetch_all_or_speculate(&sheet_requests);
-    for (result, sheet_url) in sheet_results.into_iter().zip(stylesheet_urls.iter()) {
-        match result {
-            Ok((resp, origin, elapsed)) if resp.status == 200 => {
-                eprintln!(
-                    "[SilkSurf] Stylesheet {sheet_url}: {} bytes ({:?} {:?})",
-                    resp.body.len(),
-                    origin,
-                    elapsed
-                );
-                let sheet_css = String::from_utf8_lossy(&resp.body);
-                css_text.push_str(&sheet_css);
-                css_text.push('\n');
-            }
-            Ok((resp, _, _)) => {
-                eprintln!("[SilkSurf] Stylesheet {sheet_url}: HTTP {}", resp.status);
-            }
-            Err(e) => eprintln!(
-                "[SilkSurf] Stylesheet {sheet_url}: fetch error: {}",
-                e.message
-            ),
-        }
-    }
-}
-
-pub(crate) fn execute_static_inline_scripts(js_ctx: &mut SilkContext, scripts: &[String]) {
-    for (i, script) in scripts.iter().enumerate() {
+    for (i, (node, script)) in scripts.iter().enumerate() {
         const MAX_INLINE_SCRIPT: usize = 256 * 1024;
         if script.len() > MAX_INLINE_SCRIPT {
             eprintln!(
@@ -58,6 +22,7 @@ pub(crate) fn execute_static_inline_scripts(js_ctx: &mut SilkContext, scripts: &
         }
         log_static_script_start(i, script);
         let script_start = std::time::Instant::now();
+        js_ctx.set_current_script(*node);
         match js_ctx.eval(script) {
             Ok(()) => eprintln!(
                 "[SilkSurf] Script {i} executed OK ({:?})",
@@ -68,6 +33,7 @@ pub(crate) fn execute_static_inline_scripts(js_ctx: &mut SilkContext, scripts: &
                 script_start.elapsed()
             ),
         }
+        js_ctx.set_current_script(None);
     }
 }
 
@@ -149,39 +115,11 @@ pub(crate) fn load_navigation_payload(
     let doc_node = document.document;
     let dom = &document.dom;
 
-    let inline_css = extract_inline_css(dom, doc_node);
-    let mut css_text = stylesheet_text_with_user_agent_defaults(&inline_css);
-    let stylesheet_urls = extract_stylesheet_urls(dom, doc_node, url);
-    let css_accept_header = [("Accept".to_string(), "text/css,*/*".to_string())];
-    let sheet_requests: Vec<(&str, &[(String, String)])> = stylesheet_urls
-        .iter()
-        .map(|sheet_url| (sheet_url.as_str(), css_accept_header.as_slice()))
-        .collect();
-    for (result, sheet_url) in renderer
-        .fetch_all_or_speculate(&sheet_requests)
-        .into_iter()
-        .zip(stylesheet_urls.iter())
-    {
-        match result {
-            Ok((resp, _, _)) if resp.status == 200 => {
-                let sheet_css = String::from_utf8_lossy(&resp.body);
-                css_text.push_str(&sheet_css);
-                css_text.push('\n');
-            }
-            Ok((resp, _, _)) => {
-                eprintln!(
-                    "[SilkSurf] Navigation stylesheet {sheet_url}: HTTP {}",
-                    resp.status
-                );
-            }
-            Err(err) => {
-                eprintln!(
-                    "[SilkSurf] Navigation stylesheet {sheet_url}: fetch error: {}",
-                    err.message
-                );
-            }
-        }
-    }
+    let style_sources = collect_style_sources(dom, doc_node, url);
+    let sheet_bodies =
+        fetch_style_source_bodies(&mut renderer, &style_sources, "Navigation stylesheet");
+    let css_text =
+        StyleSheetSet::new(style_sources, sheet_bodies.clone(), url, config, dom).css_text();
 
     let image_urls = extract_image_urls(dom, doc_node, url);
     let images = {
@@ -197,6 +135,7 @@ pub(crate) fn load_navigation_payload(
         url: url.to_string(),
         html,
         css_text,
+        sheet_bodies,
         script_texts,
         module_texts,
         images,
@@ -252,7 +191,13 @@ pub(crate) fn build_browser_page_with_buffers_for_height(
     };
     trace_navigation_build_phase(trace_build, &payload.url, "css", phase_start.elapsed());
     let scripts = if payload.script_texts.is_empty() {
-        extract_inline_scripts(&dom, doc_node)
+        extract_document_script_nodes(&dom, doc_node, &payload.url)
+            .into_iter()
+            .filter_map(|script| match script.source {
+                DocumentScriptRef::Inline(text) => Some((Some(script.node), text)),
+                DocumentScriptRef::External(_) => None,
+            })
+            .collect()
     } else {
         payload.script_texts
     };
@@ -288,7 +233,7 @@ pub(crate) fn build_browser_page_with_buffers_for_height(
     let phase_start = std::time::Instant::now();
     let script_phase_start = phase_start;
     let static_eval_start = std::time::Instant::now();
-    for (idx, script) in scripts.iter().enumerate() {
+    for (idx, (node, script)) in scripts.iter().enumerate() {
         if script.len() > max_navigation_script_bytes() {
             eprintln!(
                 "[SilkSurf] Navigation script {idx}: {} bytes skipped",
@@ -298,9 +243,11 @@ pub(crate) fn build_browser_page_with_buffers_for_height(
         }
         trace_navigation_script(trace_build, idx, script.len(), "start", None);
         let script_start = std::time::Instant::now();
+        js_ctx.set_current_script(*node);
         if let Err(err) = js_ctx.eval(script) {
             eprintln!("[SilkSurf] Navigation script {idx} error: {err}");
         }
+        js_ctx.set_current_script(None);
         trace_navigation_script(
             trace_build,
             idx,
@@ -344,6 +291,39 @@ pub(crate) fn build_browser_page_with_buffers_for_height(
         trace_build,
     );
     trace_navigation_script_phase(trace_build, "module-total", module_start.elapsed());
+    /*
+     * The set collects after the page's scripts have run, so a document that
+     * rewrites a link's rel from preload to stylesheet during startup enters
+     * the list on its first collection. The bodies the payload already fetched
+     * seed it, so an unchanged list costs no refetch.
+     */
+    let sheets = {
+        let dom = dom_arc
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        StyleSheetSet::new(
+            collect_style_sources(&dom, doc_node, &payload.url),
+            payload.sheet_bodies,
+            &payload.url,
+            &payload.render_config,
+            &dom,
+        )
+    };
+
+    /*
+     * The preload fetches start at build time so the event loop already has a
+     * reason to wake when the first frame presents; a completion posts no wake
+     * of its own, and a document whose only pending work is a preload would
+     * otherwise sleep until an input arrived.
+     */
+    let mut preloads = PreloadLinks::new(&payload.url, &payload.render_config);
+    {
+        let dom = dom_arc
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        preloads.refresh(&dom, doc_node, &[]);
+    }
+
     let trace_body_start = std::time::Instant::now();
     trace_navigation_body_data_fixture(trace_build, &dom_arc);
     trace_navigation_script_phase(trace_build, "trace-body", trace_body_start.elapsed());
@@ -477,6 +457,8 @@ pub(crate) fn build_browser_page_with_buffers_for_height(
             dom: dom_arc,
             document: doc_node,
             stylesheet,
+            sheets,
+            preloads,
             style_index,
             viewport,
             js_ctx,
@@ -751,7 +733,9 @@ pub(crate) fn execute_dynamic_script_round(
         let Some(text) = dynamic_script_text(base_url, script, &fetched) else {
             continue;
         };
+        js_ctx.set_current_script(Some(script.node));
         execute_dynamic_script_text(js_ctx, trace_build, round, idx, text);
+        js_ctx.set_current_script(None);
     }
     trace_navigation_dynamic_phase(trace_build, round, "eval-total", eval_start.elapsed());
 }
@@ -1187,6 +1171,7 @@ fn build_ephemeral_renderer_from_config(
     Ok(SpeculativeRenderer::new_ephemeral())
 }
 
+#[cfg(test)]
 pub(crate) fn stylesheet_text_with_user_agent_defaults(document_css: &str) -> String {
     let mut css_text =
         String::with_capacity(DEFAULT_USER_AGENT_STYLESHEET.len() + document_css.len() + 1);
@@ -1194,6 +1179,86 @@ pub(crate) fn stylesheet_text_with_user_agent_defaults(document_css: &str) -> St
     css_text.push('\n');
     css_text.push_str(document_css);
     css_text
+}
+
+/*
+ * settle_static_document -- converge the one-shot render on the document a
+ * windowed load would reach.
+ *
+ * The static path has no event loop, so a preload that completes after the
+ * scripts run has nothing to dispatch its load event and a stylesheet the
+ * handler adds never enters the cascade. This drives the same three steps the
+ * repaint tick drives -- dispatch finished preloads, refresh the stylesheet
+ * set, drain host callbacks -- until a pass changes nothing or the deadline
+ * passes, and reports the final concatenated CSS.
+ *
+ * Returns Some(css_text) when the stylesheet list moved, and None when the
+ * document the scripts left is already the final one.
+ */
+pub(crate) fn settle_static_document(
+    js_ctx: &mut SilkContext,
+    dom_arc: &Arc<Mutex<silksurf_dom::Dom>>,
+    doc_node: silksurf_dom::NodeId,
+    sheets: &mut StyleSheetSet,
+    preloads: &mut PreloadLinks,
+    settle_deadline: std::time::Duration,
+) -> Option<String> {
+    let deadline = std::time::Instant::now() + settle_deadline;
+    let mut changed = false;
+    loop {
+        let dispatched = preloads.dispatch_completed(js_ctx);
+        let _ = js_ctx.run_host_callbacks(64);
+        js_ctx.run_pending_jobs();
+        // The settle loop drains the dirty set so a rel a load handler
+        // rewrote reaches the collectors' dirty-node check.
+        let dirty = take_dom_dirty_nodes(dom_arc);
+        let refreshed = {
+            let dom = dom_arc
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            preloads.refresh(&dom, doc_node, &dirty);
+            sheets.refresh(&dom, doc_node, &dirty)
+        };
+        changed |= refreshed;
+        let waiting = preloads.has_pending_fetches() || sheets.has_pending_fetches();
+        if !waiting && dispatched == 0 && !refreshed {
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            eprintln!("[SilkSurf] Static settle: deadline reached with work outstanding");
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(4));
+    }
+    changed.then(|| sheets.css_text())
+}
+
+/*
+ * write_static_screenshot -- the headless frame as a PNG file.
+ *
+ * The frame the budget measures covers the viewport; a screenshot covers the
+ * whole document, so this rasterizes at the document's own height into a
+ * buffer of its own. A rendering claim backed by an image a reviewer opens is
+ * a different evidence class from one backed by a paint-item count.
+ */
+pub(crate) fn write_static_screenshot(
+    display_list: &silksurf_render::DisplayList,
+    path: &std::path::Path,
+) {
+    let height = browser_frame_height(&display_list.items, 0).min(MAX_SCREENSHOT_HEIGHT);
+    let mut rgba: Vec<u8> = Vec::new();
+    silksurf_render::rasterize_skia_into(display_list, FRAME_WIDTH, height, &mut rgba);
+    match silksurf_image::encode_png(&rgba, FRAME_WIDTH, height) {
+        Ok(png) => match std::fs::write(path, &png) {
+            Ok(()) => eprintln!(
+                "[SilkSurf] Screenshot: {} ({FRAME_WIDTH}x{height}, {} bytes)",
+                path.display(),
+                png.len()
+            ),
+            Err(err) => eprintln!("[SilkSurf] Screenshot {}: {err}", path.display()),
+        },
+        Err(err) => eprintln!("[SilkSurf] Screenshot encode: {}", err.message),
+    }
 }
 
 #[cfg(test)]
@@ -1221,6 +1286,7 @@ mod tests {
             url: "https://example.com/".to_string(),
             html: "<!doctype html><html><body><p>Hello</p></body></html>".to_string(),
             css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(),
             script_texts: Vec::new(),
             module_texts: Vec::new(),
             images: Vec::new(),
@@ -1252,6 +1318,7 @@ mod tests {
             url: "https://example.com/".to_string(),
             html: "<!doctype html><html><body><p>fallback html</p></body></html>".to_string(),
             css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(),
             script_texts: Vec::new(),
             module_texts: Vec::new(),
             images: Vec::new(),
@@ -1303,6 +1370,7 @@ mod tests {
                 inline_css
             ),
             css_text: stylesheet_text_with_user_agent_defaults(inline_css),
+            sheet_bodies: Vec::new(),
             script_texts: Vec::new(),
             module_texts: Vec::new(),
             images: Vec::new(),
@@ -1346,6 +1414,7 @@ mod tests {
             url: "https://example.com/results/".to_string(),
             html: "<!doctype html><html><body><p>Result</p></body></html>".to_string(),
             css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(),
             script_texts: Vec::new(),
             module_texts: Vec::new(),
             images: Vec::new(),
@@ -1376,6 +1445,7 @@ mod tests {
             )
             .to_string(),
             css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(),
             script_texts: Vec::new(),
             module_texts: Vec::new(),
             images: Vec::new(),
@@ -1424,6 +1494,7 @@ mod tests {
             url: "https://example.com/".to_string(),
             html: "<!doctype html><html><body><p id=\"msg\">Hello</p><script>requestAnimationFrame(function(){setTimeout(function(){document.getElementById('msg').firstChild.textContent='Runtime';},0);});</script></body></html>".to_string(),
             css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(),
             script_texts: Vec::new(),
             module_texts: Vec::new(),
             images: Vec::new(),
@@ -1454,9 +1525,11 @@ mod tests {
             url: "https://example.com/".to_string(),
             html: "<!doctype html><html><body><p id=\"msg\">Hello</p><script src=\"/app.js\"></script></body></html>".to_string(),
             css_text: stylesheet_text_with_user_agent_defaults(""),
-            script_texts: vec![
+            sheet_bodies: Vec::new(),
+            script_texts: vec![(
+                None,
                 "document.getElementById('msg').firstChild.textContent='External';".to_string(),
-            ],
+            )],
             module_texts: Vec::new(),
             images: Vec::new(),
             render_config: BrowserRenderConfig::default(),
@@ -1478,6 +1551,7 @@ mod tests {
             url: "https://example.com/".to_string(),
             html: "<!doctype html><html><body><script type=\"module\" src=\"/module.js\"></script></body></html>".to_string(),
             css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(),
             script_texts: Vec::new(),
             module_texts: vec![
                 (
@@ -1518,6 +1592,7 @@ mod tests {
                    </script></body></html>"
                 .to_string(),
             css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(),
             script_texts: Vec::new(),
             module_texts: Vec::new(),
             images: Vec::new(),

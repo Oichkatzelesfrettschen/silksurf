@@ -575,12 +575,6 @@ pub(super) fn node_to_js_object(
             Some(accessors.value_set),
             Attribute::CONFIGURABLE | Attribute::ENUMERABLE,
         )
-        .accessor(
-            js_string!("src"),
-            Some(accessors.src_get),
-            Some(accessors.src_set),
-            Attribute::CONFIGURABLE | Attribute::ENUMERABLE,
-        )
         // -- live mutation methods --
         .function(methods.get_attribute, js_string!("getAttribute"), 1)
         .function(methods.set_attribute, js_string!("setAttribute"), 2)
@@ -637,8 +631,6 @@ struct NodeAccessors {
     inner_html_set: JsFunction,
     value_get: JsFunction,
     value_set: JsFunction,
-    src_get: JsFunction,
-    src_set: JsFunction,
     node_value_get: JsFunction,
     node_value_set: JsFunction,
     data_get: JsFunction,
@@ -703,8 +695,6 @@ fn node_accessors(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId, ctx: &mut Context)
         inner_html_set: make_getter(ctx, inner_html_set_native(dom_arc, node_id)),
         value_get: make_getter(ctx, value_get_native(dom_arc, node_id)),
         value_set: make_getter(ctx, value_set_native(dom_arc, node_id)),
-        src_get: make_getter(ctx, attribute_get_native(dom_arc, node_id, "src")),
-        src_set: make_getter(ctx, attribute_set_native(dom_arc, node_id, "src")),
         node_value_get: make_getter(ctx, node_value_get_native(dom_arc, node_id)),
         node_value_set: make_getter(ctx, node_value_set_native(dom_arc, node_id)),
         data_get: make_getter(ctx, node_value_get_native(dom_arc, node_id)),

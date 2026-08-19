@@ -8,7 +8,7 @@ use rustc_hash::FxHashMap;
 
 /// Storage for custom property values.
 /// Maps `--property-name` -> token list value.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CustomPropertyMap {
     properties: FxHashMap<String, Vec<CssToken>>,
 }
@@ -36,6 +36,13 @@ impl CustomPropertyMap {
                 .entry(name.clone())
                 .or_insert_with(|| value.clone());
         }
+    }
+
+    /// Whether the map holds no properties, which is the state a document
+    /// with no custom property declaration keeps for every element.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.properties.is_empty()
     }
 
     /// Check if a declaration name is a custom property (starts with --).

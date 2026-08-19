@@ -372,6 +372,67 @@ separately-landable follow-up):
   resolve by rank rather than by inverted rank. Correcting it needs the
   importance bit to select between the rank and its complement.
 
+## Live document resources (landed 2026-08-19)
+
+The pipeline treated the document's resources as a parse-time snapshot; three
+mechanisms now re-collect from the DOM. AD-028 records the decision and
+AD-029 the cascade half.
+
+- Stylesheets are a live ordered list (`StyleSheetSet`), re-collected when the
+  tree shape moves or a dirty node is a `<style>` or `<link>`, and reparsed
+  into `StyleIndex` when it changes.
+- `<link rel=preload>` fetches and fires `load` or `error` at its element
+  (`PreloadLinks`), which is what a startup script waits on before upgrading a
+  link to a stylesheet.
+- IDL attribute reflection lives on the interface prototypes, so
+  `element.rel`, `img.src`, `input.disabled`, and the rest of the HTML table
+  read and write the content attribute.
+- `document.currentScript` names the `<script>` element under evaluation.
+- `var()` resolves in the cascade against an inherited, Arc-shared map, and
+  the `background`, `font`, `place-items`, and `inset` shorthands plus the CSS
+  logical box properties reach the computed style.
+- `--screenshot PATH` writes the headless frame as PNG, which is what turns a
+  rendering claim into a file a reviewer opens.
+
+## Open work after the live-resource change
+
+Named cuts, each with the mechanism that closes it:
+
+- registered-custom-properties -- `@property` declares a syntax, an inherits
+  flag, and an initial value; the parser discards the at-rule, so an
+  unregistered `var(--unset)` with no fallback leaves its declaration
+  unapplied instead of taking a registered initial. chatgpt.com opens its
+  sheet with four of them.
+- css-transform-beyond-translation -- `transform` contributes its translation
+  component to the paint rect; rotate, scale, skew, and matrix contribute
+  nothing, because every DisplayItem is an axis-aligned rect. Carrying them
+  needs a transform per display item and a rasterizer that applies it to
+  geometry and to shaped glyph runs.
+- fixed-position-containing-block -- `position: fixed` maps to taffy's
+  Absolute, so a fixed box resolves against its nearest positioned ancestor
+  rather than against the viewport, and it scrolls with the page. Several
+  fixed boxes with no inset therefore stack at the same origin, which is the
+  overlapping band still visible at the top of a chatgpt.com render.
+- viewport-units-in-calc -- CalcExpr carries only the percentage context, so a
+  viewport unit inside `calc()` evaluates as a bare number. It resolves
+  correctly outside calc(); wiring it needs the viewport threaded into
+  CalcExpr::evaluate.
+- chatgpt-render-fixture -- every paint-item and document-height number cited
+  for chatgpt.com comes from a live fetch, and the origin serves different
+  documents between runs (505 nodes / 97 items on one, 291 / 34 on another).
+  A retained HTML-plus-stylesheet fixture served from the local test server
+  would make those numbers a regression test rather than a snapshot.
+- document-stylesheets-cssom -- `StyleSheetSet` is engine state with no
+  scripted object model, so `document.styleSheets`, `CSSStyleSheet`, and
+  `insertRule` are absent. A page that installs styles through the CSSOM
+  rather than through a `<style>` element contributes nothing to the cascade.
+- backdrop-filter-and-mask -- `backdrop-filter`, `mask-image`, and
+  `mask-composite` parse to nothing; the paint list carries no filter or mask
+  stage.
+- animation-and-transition -- the `animation-*` and `transition` longhands
+  parse to nothing and `@keyframes` blocks flatten out of the cascade, so an
+  element animated into view keeps its start state.
+
 ## Verification checklist (applies to every workstream)
 
 - make check and make test green with RUSTFLAGS='-D warnings'.

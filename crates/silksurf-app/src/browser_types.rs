@@ -32,6 +32,10 @@ pub(crate) const ADDRESS_BAR_HEIGHT: u32 = 28;
 pub(crate) const ADDRESS_TEXT_MAX_CHARS: usize = 2048;
 pub(crate) const PAGE_INPUT_TEXT_MAX_CHARS: usize = 4096;
 pub(crate) const DOCUMENT_TILE_SIZE: u32 = 128;
+/// Ceiling on a headless screenshot's height. A 1280-wide RGBA surface costs
+/// 5 MiB per 1024 rows, so a pathological document bounds here rather than in
+/// the allocator.
+pub(crate) const MAX_SCREENSHOT_HEIGHT: u32 = 16_384;
 // 8 MiB accommodates real-world and benchmark bundles (JetStream/Octane
 // payloads run 2-5 MiB); the cap exists to bound memory on hostile pages,
 // and SILKSURF_MAX_SCRIPT_BYTES overrides it for experiments.
@@ -78,6 +82,9 @@ pub(crate) const ACCESSIBILITY_INPUT_BASE_ID: u64 = 20_000;
 pub(crate) const DEFAULT_USER_AGENT_STYLESHEET: &str = "
 html, body { display: block; }
 head, title, meta, link, style, script { display: none; }
+noscript, template, datalist, param, source, track { display: none; }
+[hidden] { display: none; }
+dialog:not([open]) { display: none; }
 body {
   margin: 8px;
   color: black;
@@ -229,7 +236,15 @@ pub(crate) struct BrowserPagePayload {
     pub(crate) url: String,
     pub(crate) html: String,
     pub(crate) css_text: String,
-    pub(crate) script_texts: Vec<String>,
+    /// The `<link rel=stylesheet>` bodies the initial fetch produced, keyed
+    /// by resolved URL. The runtime seeds StyleSheetSet from these so a
+    /// document that adds a sheet later refetches only the addition.
+    pub(crate) sheet_bodies: Vec<(String, String)>,
+    /// The document's classic scripts in tree order, each paired with the
+    /// `<script>` element `document.currentScript` reports while it runs. A
+    /// payload assembled without a parsed document names no element and
+    /// carries None.
+    pub(crate) script_texts: Vec<(Option<silksurf_dom::NodeId>, String)>,
     pub(crate) module_texts: Vec<(String, String)>,
     pub(crate) images: Vec<DecodedPageImage>,
     pub(crate) render_config: BrowserRenderConfig,
@@ -304,6 +319,14 @@ pub(crate) struct BrowserPageRuntime {
     pub(crate) dom: Arc<Mutex<silksurf_dom::Dom>>,
     pub(crate) document: silksurf_dom::NodeId,
     pub(crate) stylesheet: silksurf_css::Stylesheet,
+    /// The document's live stylesheet list. Script that appends a `<style>`,
+    /// rewrites a link's rel, or swaps an href changes it, and the repaint
+    /// tick rebuilds `stylesheet` and `style_index` from the new list.
+    pub(crate) sheets: StyleSheetSet,
+    /// The document's `<link rel=preload>` fetches. Their load events are what
+    /// a page's startup script waits on before upgrading a link to a
+    /// stylesheet or evaluating a deferred bundle.
+    pub(crate) preloads: PreloadLinks,
     pub(crate) style_index: StyleIndex,
     pub(crate) viewport: Rect,
     pub(crate) js_ctx: SilkContext,
@@ -374,6 +397,10 @@ pub(crate) struct AppOptions {
     pub(crate) headless: bool,
     pub(crate) display_backend: silksurf_gui::WinitDisplayBackend,
     pub(crate) url: String,
+    /// Where the headless render writes its frame as PNG. A rendering claim
+    /// backed by a file a reviewer opens is a different evidence class from
+    /// one backed by a paint-item count.
+    pub(crate) screenshot: Option<std::path::PathBuf>,
     pub(crate) render_config: BrowserRenderConfig,
 }
 

@@ -362,6 +362,21 @@ pub enum Length {
     Em(f32),
     /// Relative to the root element's font-size; defaults to 16 px (resolved at cascade time).
     Rem(f32),
+    /// Percent of the viewport's width (resolved at cascade time).
+    Vw(f32),
+    /// Percent of the viewport's height (resolved at cascade time).
+    Vh(f32),
+    /// Percent of the viewport's smaller axis (resolved at cascade time).
+    Vmin(f32),
+    /// Percent of the viewport's larger axis (resolved at cascade time).
+    Vmax(f32),
+}
+
+impl Default for Length {
+    /// The identity length, which every offset-valued property starts from.
+    fn default() -> Self {
+        Length::Px(0.0)
+    }
 }
 
 impl Length {
@@ -373,7 +388,14 @@ impl Length {
     #[must_use]
     pub fn is_zero(&self) -> bool {
         match self {
-            Length::Px(v) | Length::Percent(v) | Length::Em(v) | Length::Rem(v) => *v == 0.0,
+            Length::Px(v)
+            | Length::Percent(v)
+            | Length::Em(v)
+            | Length::Rem(v)
+            | Length::Vw(v)
+            | Length::Vh(v)
+            | Length::Vmin(v)
+            | Length::Vmax(v) => *v == 0.0,
         }
     }
 }
@@ -395,6 +417,14 @@ pub struct Color {
 }
 
 impl Color {
+    /// Fully transparent black, the initial `background-color`.
+    pub const TRANSPARENT: Self = Self {
+        r: 0,
+        g: 0,
+        b: 0,
+        a: 0,
+    };
+
     #[must_use]
     pub fn black() -> Self {
         Self {
@@ -465,8 +495,36 @@ impl Margins {
     }
 }
 
+/*
+ * A 2D translation from the `transform` property.
+ *
+ * CSS Transforms 1 4.1 defines a full 3x2 matrix; the paint list carries an
+ * axis-aligned rect per item, so the engine models the translation component,
+ * which is what moves an element out from under its neighbour. A percentage
+ * resolves against the element's own border box, so it stays a Length until
+ * paint has the rect.
+ *
+ * Rotation, scale, skew, and matrix() parse into no offset: they need the
+ * rasterizer to carry a transform per display item.
+ */
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Translation {
+    pub x: Length,
+    pub y: Length,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComputedStyle {
+    /*
+     * Custom properties resolved for this element, parent values included.
+     * CSS Custom Properties 1 3 makes them inherited, so a child that
+     * declares none shares the parent's Arc and the map allocates once per
+     * element that actually declares one.
+     */
+    pub custom_properties: std::sync::Arc<crate::custom_properties::CustomPropertyMap>,
+    /// The `transform` property's translation component, applied to this
+    /// element and its subtree at paint.
+    pub transform: Translation,
     pub display: Display,
     pub color: Color,
     pub background_color: Color,
@@ -525,6 +583,8 @@ pub struct ComputedStyle {
 impl Default for ComputedStyle {
     fn default() -> Self {
         Self {
+            custom_properties: std::sync::Arc::default(),
+            transform: Translation::default(),
             display: Display::Inline,
             color: Color::black(),
             background_color: Color::transparent(),
@@ -622,6 +682,9 @@ impl<T: Clone> ResolvedProperty<T> {
 
 #[derive(Default, PartialEq)]
 struct CascadedStyle {
+    /// The map this element resolves `var()` against, parent values included.
+    custom_properties: std::sync::Arc<crate::custom_properties::CustomPropertyMap>,
+    transform: Option<ResolvedProperty<Translation>>,
     /// CSS-wide keyword overrides (inherit/initial/unset) keyed by `PropertyId`.
     /// When a keyword is set with higher cascade priority than the typed slot,
     /// `resolve()` applies keyword behavior instead of the typed value.
@@ -704,7 +767,7 @@ struct CascadedStyle {
     // Decoration
     border_radius: Option<ResolvedProperty<f32>>,
     box_shadow: Option<ResolvedProperty<BoxShadow>>,
-    background_image: Option<ResolvedProperty<LinearGradient>>,
+    background_image: Option<ResolvedProperty<Option<LinearGradient>>>,
 }
 
 /*
@@ -719,32 +782,49 @@ struct CascadedStyle {
  * for font-size means relative to parent, per CSS spec). All other properties
  * use the element's own resolved font-size as the em base.
  */
-fn resolve_length(l: Length, em_px: f32, rem_px: f32) -> Length {
+fn resolve_length(l: Length, em_px: f32, rem_px: f32, viewport: (f32, f32)) -> Length {
+    let (viewport_width, viewport_height) = viewport;
     match l {
         Length::Px(_) | Length::Percent(_) => l,
         Length::Em(multiplier) => Length::Px(multiplier * em_px),
         Length::Rem(multiplier) => Length::Px(multiplier * rem_px),
+        Length::Vw(percent) => Length::Px(percent / 100.0 * viewport_width),
+        Length::Vh(percent) => Length::Px(percent / 100.0 * viewport_height),
+        Length::Vmin(percent) => Length::Px(percent / 100.0 * viewport_width.min(viewport_height)),
+        Length::Vmax(percent) => Length::Px(percent / 100.0 * viewport_width.max(viewport_height)),
     }
 }
 
-fn resolve_edges(edges: Edges, em_px: f32, rem_px: f32) -> Edges {
+fn resolve_edges(edges: Edges, em_px: f32, rem_px: f32, viewport: (f32, f32)) -> Edges {
     Edges {
-        top: resolve_length(edges.top, em_px, rem_px),
-        right: resolve_length(edges.right, em_px, rem_px),
-        bottom: resolve_length(edges.bottom, em_px, rem_px),
-        left: resolve_length(edges.left, em_px, rem_px),
+        top: resolve_length(edges.top, em_px, rem_px, viewport),
+        right: resolve_length(edges.right, em_px, rem_px, viewport),
+        bottom: resolve_length(edges.bottom, em_px, rem_px, viewport),
+        left: resolve_length(edges.left, em_px, rem_px, viewport),
     }
 }
 
-fn resolve_length_or_auto(l: LengthOrAuto, em_px: f32, rem_px: f32) -> LengthOrAuto {
+fn resolve_length_or_auto(
+    l: LengthOrAuto,
+    em_px: f32,
+    rem_px: f32,
+    viewport: (f32, f32),
+) -> LengthOrAuto {
     match l {
         LengthOrAuto::Auto => LengthOrAuto::Auto,
-        LengthOrAuto::Length(len) => LengthOrAuto::Length(resolve_length(len, em_px, rem_px)),
+        LengthOrAuto::Length(len) => {
+            LengthOrAuto::Length(resolve_length(len, em_px, rem_px, viewport))
+        }
     }
 }
 
-fn resolve_opt_length(l: Option<Length>, em_px: f32, rem_px: f32) -> Option<Length> {
-    l.map(|len| resolve_length(len, em_px, rem_px))
+fn resolve_opt_length(
+    l: Option<Length>,
+    em_px: f32,
+    rem_px: f32,
+    viewport: (f32, f32),
+) -> Option<Length> {
+    l.map(|len| resolve_length(len, em_px, rem_px, viewport))
 }
 
 fn resolve_margins(
@@ -754,12 +834,13 @@ fn resolve_margins(
     left: LengthOrAuto,
     em_px: f32,
     rem_px: f32,
+    viewport: (f32, f32),
 ) -> Margins {
     Margins {
-        top: resolve_length_or_auto(top, em_px, rem_px),
-        right: resolve_length_or_auto(right, em_px, rem_px),
-        bottom: resolve_length_or_auto(bottom, em_px, rem_px),
-        left: resolve_length_or_auto(left, em_px, rem_px),
+        top: resolve_length_or_auto(top, em_px, rem_px, viewport),
+        right: resolve_length_or_auto(right, em_px, rem_px, viewport),
+        bottom: resolve_length_or_auto(bottom, em_px, rem_px, viewport),
+        left: resolve_length_or_auto(left, em_px, rem_px, viewport),
     }
 }
 
@@ -773,7 +854,12 @@ impl CascadedStyle {
      * Copy fields use the static directly; non-Copy (font_family) clones only
      * when needed (rare: only when no cascade value and no parent inheritance).
      */
-    fn resolve(mut self, parent: Option<&ComputedStyle>, rem_base_px: f32) -> ComputedStyle {
+    fn resolve(
+        mut self,
+        parent: Option<&ComputedStyle>,
+        rem_base_px: f32,
+        viewport: (f32, f32),
+    ) -> ComputedStyle {
         use crate::property_id::PropertyId;
         static FALLBACK: std::sync::LazyLock<ComputedStyle> =
             std::sync::LazyLock::new(ComputedStyle::default);
@@ -813,6 +899,9 @@ impl CascadedStyle {
             Length::Rem(m) => Length::Px(m * rem_base_px),
             Length::Percent(p) => Length::Px(p / 100.0 * parent_font_size_px),
             other @ Length::Px(_) => other,
+            // A viewport-relative font-size resolves against the viewport, not
+            // against the parent, so it takes the shared resolver.
+            viewport_relative => resolve_length(viewport_relative, 0.0, rem_base_px, viewport),
         };
         // All non-font-size length properties use the element's own font-size as em base.
         let em_px = match resolved_font_size {
@@ -821,6 +910,10 @@ impl CascadedStyle {
         };
 
         ComputedStyle {
+            custom_properties: std::mem::take(&mut self.custom_properties),
+            transform: self
+                .transform
+                .map_or_else(Translation::default, |e| e.value),
             display: resolve_non_inherited_kw(
                 self.display,
                 ks.get(&PropertyId::Display),
@@ -861,6 +954,7 @@ impl CascadedStyle {
                 },
                 em_px,
                 rem_base_px,
+                viewport,
             ),
             font_family: {
                 let ff_kw = ks.get(&PropertyId::FontFamily);
@@ -910,6 +1004,7 @@ impl CascadedStyle {
                     ),
                     em_px,
                     rem_base_px,
+                    viewport,
                 )
             },
             padding: resolve_edges(
@@ -941,6 +1036,7 @@ impl CascadedStyle {
                 },
                 em_px,
                 rem_base_px,
+                viewport,
             ),
             border: {
                 let zero = Length::Px(0.0);
@@ -970,7 +1066,7 @@ impl CascadedStyle {
                         zero,
                     ),
                 };
-                resolve_edges(raw, em_px, rem_base_px)
+                resolve_edges(raw, em_px, rem_base_px, viewport)
             },
             flex_container: FlexContainerStyle {
                 direction: resolve_non_inherited_kw(
@@ -1080,6 +1176,7 @@ impl CascadedStyle {
                 ),
                 em_px,
                 rem_base_px,
+                viewport,
             ),
             right: resolve_length_or_auto(
                 resolve_non_inherited_kw(
@@ -1090,6 +1187,7 @@ impl CascadedStyle {
                 ),
                 em_px,
                 rem_base_px,
+                viewport,
             ),
             bottom: resolve_length_or_auto(
                 resolve_non_inherited_kw(
@@ -1100,6 +1198,7 @@ impl CascadedStyle {
                 ),
                 em_px,
                 rem_base_px,
+                viewport,
             ),
             left: resolve_length_or_auto(
                 resolve_non_inherited_kw(
@@ -1110,6 +1209,7 @@ impl CascadedStyle {
                 ),
                 em_px,
                 rem_base_px,
+                viewport,
             ),
             z_index: resolve_non_inherited_kw(
                 self.z_index,
@@ -1126,6 +1226,7 @@ impl CascadedStyle {
                 ),
                 em_px,
                 rem_base_px,
+                viewport,
             ),
             height: resolve_length_or_auto(
                 resolve_non_inherited_kw(
@@ -1136,6 +1237,7 @@ impl CascadedStyle {
                 ),
                 em_px,
                 rem_base_px,
+                viewport,
             ),
             min_width: resolve_length(
                 resolve_non_inherited_kw(
@@ -1146,6 +1248,7 @@ impl CascadedStyle {
                 ),
                 em_px,
                 rem_base_px,
+                viewport,
             ),
             max_width: resolve_opt_length(
                 resolve_non_inherited_kw(
@@ -1156,6 +1259,7 @@ impl CascadedStyle {
                 ),
                 em_px,
                 rem_base_px,
+                viewport,
             ),
             min_height: resolve_length(
                 resolve_non_inherited_kw(
@@ -1166,6 +1270,7 @@ impl CascadedStyle {
                 ),
                 em_px,
                 rem_base_px,
+                viewport,
             ),
             max_height: resolve_opt_length(
                 resolve_non_inherited_kw(
@@ -1176,6 +1281,7 @@ impl CascadedStyle {
                 ),
                 em_px,
                 rem_base_px,
+                viewport,
             ),
             box_sizing: resolve_non_inherited_kw(
                 self.box_sizing,
@@ -1290,7 +1396,7 @@ impl CascadedStyle {
                         CascadeKeyword::Initial | CascadeKeyword::Unset => None,
                     }
                 } else {
-                    self.background_image.map(|e| e.value)
+                    self.background_image.and_then(|e| e.value)
                 }
             },
         }
@@ -1661,6 +1767,10 @@ pub struct StyleIndex {
     /// Total number of unique (rule, selector) pairs. Used to size the
     /// `CascadeWorkspace::seen_bits` bitvec for O(1) dedup without hashing.
     pub total_selector_pairs: usize,
+    /// Whether any active rule declares a custom property. A document that
+    /// declares none skips the custom-property pass entirely, so the cascade
+    /// iterates the rule list once per element rather than twice.
+    pub declares_custom_properties: bool,
 }
 
 impl StyleIndex {
@@ -1727,6 +1837,11 @@ impl StyleIndex {
             }
         }
 
+        let declares_custom_properties = active_rules.iter().any(|rule| {
+            rule.declarations
+                .iter()
+                .any(|declaration| declaration.name.starts_with("--"))
+        });
         StyleIndex {
             tag_rules,
             id_rules,
@@ -1734,6 +1849,7 @@ impl StyleIndex {
             universal_rules,
             active_rules,
             total_selector_pairs: pair_id as usize,
+            declares_custom_properties,
         }
     }
 }
@@ -1954,6 +2070,7 @@ pub fn compute_styles(
         &mut styles,
         &mut workspace,
         16.0,
+        DEFAULT_VIEWPORT_PX,
     );
     styles
 }
@@ -2077,12 +2194,17 @@ impl StyleCache {
                 styles,
                 &mut workspace,
                 16.0,
+                DEFAULT_VIEWPORT_PX,
             );
         }
 
         Arc::clone(&self.styles)
     }
 }
+
+/// The viewport the convenience entry points assume, matching the default
+/// StyleIndex viewport.
+pub const DEFAULT_VIEWPORT_PX: (f32, f32) = (1280.0, 800.0);
 
 pub fn compute_style_for_node(
     dom: &Dom,
@@ -2101,6 +2223,7 @@ pub fn compute_style_for_node(
         &mut workspace,
         None,
         16.0,
+        DEFAULT_VIEWPORT_PX,
     )
 }
 
@@ -2121,6 +2244,7 @@ pub fn compute_style_for_node_with_index(
         &mut workspace,
         None,
         16.0,
+        DEFAULT_VIEWPORT_PX,
     )
 }
 
@@ -2145,6 +2269,10 @@ pub fn compute_style_for_node_with_workspace(
     workspace: &mut CascadeWorkspace,
     cascade_view: Option<&crate::cascade_view::CascadeView>,
     rem_base_px: f32,
+    // viewport: width and height in CSS pixels, the basis for vw, vh, vmin,
+    // and vmax. CSS Values 4 6.1.2 gives the small, large, and dynamic
+    // viewport the same size in a window with no retracting browser UI.
+    viewport: (f32, f32),
 ) -> ComputedStyle {
     if dom.element_name(node).ok().flatten().is_none() {
         if dom
@@ -2156,8 +2284,16 @@ pub fn compute_style_for_node_with_workspace(
         }
         return parent.cloned().unwrap_or_default();
     }
-    cascade_for_node(dom, node, stylesheet, index, workspace, cascade_view)
-        .resolve(parent, rem_base_px)
+    cascade_for_node(
+        dom,
+        node,
+        stylesheet,
+        index,
+        workspace,
+        cascade_view,
+        parent,
+    )
+    .resolve(parent, rem_base_px, viewport)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2170,6 +2306,7 @@ fn compute_styles_recursive(
     styles: &mut FxHashMap<NodeId, ComputedStyle>,
     workspace: &mut CascadeWorkspace,
     rem_base_px: f32,
+    viewport: (f32, f32),
 ) {
     let style = compute_style_for_node_with_workspace(
         dom,
@@ -2180,6 +2317,7 @@ fn compute_styles_recursive(
         workspace,
         None,
         rem_base_px,
+        viewport,
     );
     styles.insert(node, style.clone());
     // Update rem_base after processing the html element: all descendants
@@ -2208,6 +2346,7 @@ fn compute_styles_recursive(
                 styles,
                 workspace,
                 child_rem_base,
+                viewport,
             );
         }
     }
@@ -2245,6 +2384,7 @@ fn cascade_for_node(
     index: &StyleIndex,
     workspace: &mut CascadeWorkspace,
     cascade_view: Option<&crate::cascade_view::CascadeView>,
+    parent: Option<&ComputedStyle>,
 ) -> CascadedStyle {
     /*
      * Prepare workspace: zero-fill matched_by_rule, zero seen_bits, clear
@@ -2258,9 +2398,144 @@ fn cascade_for_node(
 
     collect_candidate_rules(dom, node, index, workspace, cascade_view);
     match_candidate_rules(dom, node, index, workspace, cascade_view);
+    /*
+     * CSS Custom Properties 1 5 substitutes `var()` at computed-value time,
+     * after the cascade has settled which custom-property declaration wins.
+     * The element's own declarations therefore resolve in two passes: the
+     * custom properties first, then every other declaration against the map
+     * that pass produced.
+     */
+    cascaded.custom_properties = resolve_custom_properties(dom, node, index, workspace, parent);
     apply_matched_rules(index, workspace, &mut cascaded, &mut order);
     apply_inline_style_attribute(dom, node, &mut cascaded, &mut order);
     cascaded
+}
+
+/*
+ * resolve_custom_properties -- the element's custom-property map.
+ *
+ * Custom properties inherit, so the map starts as the parent's. An element
+ * that declares none shares the parent's Arc, which is the common case and
+ * costs no allocation. Declarations compete by importance, then specificity,
+ * then document order, the same precedence apply_property enforces for typed
+ * properties.
+ */
+fn resolve_custom_properties(
+    dom: &Dom,
+    node: NodeId,
+    index: &StyleIndex,
+    workspace: &CascadeWorkspace,
+    parent: Option<&ComputedStyle>,
+) -> std::sync::Arc<crate::custom_properties::CustomPropertyMap> {
+    let inherited = parent.map_or_else(std::sync::Arc::default, |style| {
+        std::sync::Arc::clone(&style.custom_properties)
+    });
+    // A document declaring no custom property anywhere pays one bool per
+    // element and inherits the parent's Arc unchanged.
+    if !index.declares_custom_properties && !element_declares_custom_property(dom, node) {
+        return inherited;
+    }
+    let mut winners: FxHashMap<&str, (bool, Specificity, usize)> = FxHashMap::default();
+    let mut declared: Vec<(&str, &[CssToken])> = Vec::new();
+    let mut order = 0usize;
+    for (rule_index, rule) in index.active_rules.iter().enumerate() {
+        let Some(specificity) = workspace
+            .matched_by_rule
+            .get(rule_index)
+            .and_then(|spec| *spec)
+        else {
+            continue;
+        };
+        for declaration in &rule.declarations {
+            order += 1;
+            if !declaration.name.starts_with("--") {
+                continue;
+            }
+            record_custom_property(
+                &mut winners,
+                &mut declared,
+                declaration.name.as_str(),
+                &declaration.value,
+                (declaration.important, specificity, order),
+            );
+        }
+    }
+    let inline = inline_custom_property_declarations(dom, node);
+    for declaration in &inline {
+        order += 1;
+        record_custom_property(
+            &mut winners,
+            &mut declared,
+            declaration.name.as_str(),
+            &declaration.value,
+            (declaration.important, INLINE_STYLE_SPECIFICITY, order),
+        );
+    }
+    if declared.is_empty() {
+        return inherited;
+    }
+    let mut map = (*inherited).clone();
+    for (name, value) in declared {
+        map.set(name, value.to_vec());
+    }
+    std::sync::Arc::new(map)
+}
+
+/// Keep the winning declaration for one custom property, replacing an earlier
+/// one that this declaration outranks.
+fn record_custom_property<'a>(
+    winners: &mut FxHashMap<&'a str, (bool, Specificity, usize)>,
+    declared: &mut Vec<(&'a str, &'a [CssToken])>,
+    name: &'a str,
+    value: &'a [CssToken],
+    rank: (bool, Specificity, usize),
+) {
+    match winners.get(name) {
+        Some(current) if !custom_property_wins(rank, *current) => {}
+        Some(_) => {
+            winners.insert(name, rank);
+            if let Some(entry) = declared.iter_mut().find(|(existing, _)| *existing == name) {
+                entry.1 = value;
+            }
+        }
+        None => {
+            winners.insert(name, rank);
+            declared.push((name, value));
+        }
+    }
+}
+
+/// Importance first, then specificity, then document order.
+fn custom_property_wins(
+    candidate: (bool, Specificity, usize),
+    current: (bool, Specificity, usize),
+) -> bool {
+    match (candidate.0, current.0) {
+        (true, false) => true,
+        (false, true) => false,
+        _ => (candidate.1, candidate.2) >= (current.1, current.2),
+    }
+}
+
+/// Whether an element's `style` attribute names a custom property. The
+/// substring test avoids parsing the attribute for the common element that
+/// declares none.
+fn element_declares_custom_property(dom: &Dom, node: NodeId) -> bool {
+    inline_style_text(dom, node).is_some_and(|text| text.contains("--"))
+}
+
+/// The `--name` declarations in an element's `style` attribute.
+fn inline_custom_property_declarations(dom: &Dom, node: NodeId) -> Vec<Declaration> {
+    let Some(style_text) = inline_style_text(dom, node) else {
+        return Vec::new();
+    };
+    let Ok(declarations) = parse_declaration_list(style_text) else {
+        return Vec::new();
+    };
+    declarations
+        .into_iter()
+        .filter(|declaration| declaration.name.starts_with("--"))
+        .collect()
 }
 
 fn collect_candidate_rules(
@@ -2392,9 +2667,55 @@ fn apply_matched_rules(
         };
         for declaration in &rule.declarations {
             *order += 1;
-            apply_declaration(cascaded, declaration, specificity, *order);
+            apply_substituted_declaration(cascaded, declaration, specificity, *order);
         }
     }
+}
+
+/*
+ * apply_substituted_declaration -- apply one declaration, `var()` resolved.
+ *
+ * A value holding no `var()` function applies from its own tokens, so the
+ * common declaration allocates nothing. A value that does hold one is
+ * substituted against the element's map first, per CSS Custom Properties 1 5.
+ * A custom property's own declaration is stored rather than applied: it is
+ * the map, not a typed property.
+ */
+fn apply_substituted_declaration(
+    cascaded: &mut CascadedStyle,
+    declaration: &Declaration,
+    specificity: Specificity,
+    order: usize,
+) {
+    if declaration.name.starts_with("--") {
+        return;
+    }
+    if !value_references_var(&declaration.value) {
+        apply_declaration(cascaded, declaration, specificity, order);
+        return;
+    }
+    let substituted = crate::custom_properties::resolve_var_references(
+        &declaration.value,
+        &cascaded.custom_properties,
+    );
+    if substituted.is_empty() {
+        return;
+    }
+    let resolved = Declaration {
+        name: declaration.name.clone(),
+        property_id: declaration.property_id,
+        value: substituted,
+        important: declaration.important,
+    };
+    apply_declaration(cascaded, &resolved, specificity, order);
+}
+
+/// Whether a value holds a `var()` function anywhere, including inside a
+/// `calc()` or another function's arguments.
+fn value_references_var(tokens: &[CssToken]) -> bool {
+    tokens
+        .iter()
+        .any(|token| matches!(token, CssToken::Function(name) if name.eq_ignore_ascii_case("var")))
 }
 
 fn apply_inline_style_attribute(
@@ -2411,7 +2732,7 @@ fn apply_inline_style_attribute(
     };
     for declaration in &declarations {
         *order += 1;
-        apply_declaration(cascaded, declaration, INLINE_STYLE_SPECIFICITY, *order);
+        apply_substituted_declaration(cascaded, declaration, INLINE_STYLE_SPECIFICITY, *order);
     }
 }
 
@@ -2594,6 +2915,121 @@ fn apply_declaration(
                 );
             }
         }
+        /*
+         * The `background` shorthand resets every background longhand and
+         * then sets the ones its value names. CSS Backgrounds 3 2 defines
+         * eight longhands; the cascade models colour and image, so the value
+         * contributes whichever of those it carries and clears the other.
+         * `background: none` and `background: transparent` therefore erase a
+         * colour or gradient an earlier rule set, which a shorthand that only
+         * added would leave standing.
+         */
+        PropertyId::Background => {
+            let (imp, spec, ord) = (declaration.important, specificity, order);
+            let gradient = parse_linear_gradient(&declaration.value);
+            let color = parse_color(&declaration.value);
+            apply_property(&mut cascaded.background_image, gradient, imp, spec, ord);
+            apply_property(
+                &mut cascaded.background_color,
+                color.unwrap_or(Color::TRANSPARENT),
+                imp,
+                spec,
+                ord,
+            );
+        }
+        // `margin-block` and `margin-inline` take one or two values for the
+        // pair of edges the logical axis names, which horizontal-tb resolves
+        // to top/bottom and left/right.
+        PropertyId::MarginBlock => {
+            if let Some((start, end)) = parse_edge_pair(&declaration.value) {
+                let (imp, spec, ord) = (declaration.important, specificity, order);
+                apply_property(&mut cascaded.margin_top, start, imp, spec, ord);
+                apply_property(&mut cascaded.margin_bottom, end, imp, spec, ord);
+            }
+        }
+        PropertyId::MarginInline => {
+            if let Some((start, end)) = parse_edge_pair(&declaration.value) {
+                let (imp, spec, ord) = (declaration.important, specificity, order);
+                apply_property(&mut cascaded.margin_left, start, imp, spec, ord);
+                apply_property(&mut cascaded.margin_right, end, imp, spec, ord);
+            }
+        }
+        PropertyId::PaddingBlock => {
+            if let Some((start, end)) = parse_length_pair(&declaration.value) {
+                let (imp, spec, ord) = (declaration.important, specificity, order);
+                apply_property(&mut cascaded.padding_top, start, imp, spec, ord);
+                apply_property(&mut cascaded.padding_bottom, end, imp, spec, ord);
+            }
+        }
+        PropertyId::PaddingInline => {
+            if let Some((start, end)) = parse_length_pair(&declaration.value) {
+                let (imp, spec, ord) = (declaration.important, specificity, order);
+                apply_property(&mut cascaded.padding_left, start, imp, spec, ord);
+                apply_property(&mut cascaded.padding_right, end, imp, spec, ord);
+            }
+        }
+        // `inset` is the box shorthand over the four offset properties.
+        PropertyId::Inset => {
+            if let Some([top, right, bottom, left]) = parse_margin_edges(&declaration.value) {
+                let (imp, spec, ord) = (declaration.important, specificity, order);
+                apply_property(&mut cascaded.top, top, imp, spec, ord);
+                apply_property(&mut cascaded.right_offset, right, imp, spec, ord);
+                apply_property(&mut cascaded.bottom, bottom, imp, spec, ord);
+                apply_property(&mut cascaded.left_offset, left, imp, spec, ord);
+            }
+        }
+        /*
+         * `place-items` sets align-items then justify-items; one value sets
+         * both. The cascade models align-items and justify-content, so the
+         * second value lands on justify-content, which is where a grid or
+         * flex container's inline-axis alignment is read from.
+         */
+        PropertyId::PlaceItems => {
+            let (imp, spec, ord) = (declaration.important, specificity, order);
+            let words = value_keywords(&declaration.value);
+            if let Some(first) = words.first()
+                && let Some(align) = parse_align_items_keyword(first)
+            {
+                apply_property(&mut cascaded.align_items, align, imp, spec, ord);
+            }
+            let inline_word = words.get(1).or_else(|| words.first());
+            if let Some(word) = inline_word
+                && let Some(justify) = parse_justify_content_keyword(word)
+            {
+                apply_property(&mut cascaded.justify_content, justify, imp, spec, ord);
+            }
+        }
+        /*
+         * The `font` shorthand carries size and family at minimum, in the
+         * order `[style] [weight] size[/line-height] family`. The cascade
+         * takes the size, the optional line-height, and the family list; the
+         * leading keywords resolve through the same parsers the longhands
+         * use.
+         */
+        PropertyId::Font => {
+            apply_font_shorthand(cascaded, declaration, specificity, order);
+        }
+        /*
+         * `transform` contributes its translation component. A transform list
+         * whose functions are all rotation, scale, or skew resolves to no
+         * offset, which leaves the element where layout placed it rather than
+         * moving it wrongly.
+         */
+        PropertyId::Transform => {
+            if let Some(value) = parse_translation(&declaration.value) {
+                apply_property(
+                    &mut cascaded.transform,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        // `outline` draws outside the border box and takes no layout space.
+        // The paint list has no outline item, so the declaration parses and
+        // contributes nothing rather than being mistaken for a border.
+        PropertyId::Outline => {}
         PropertyId::Margin => {
             if let Some([top, right, bottom, left]) = parse_margin_edges(&declaration.value) {
                 let (imp, spec, ord) = (declaration.important, specificity, order);
@@ -3152,7 +3588,7 @@ fn apply_declaration(
             if let Some(value) = parse_linear_gradient(&declaration.value) {
                 apply_property(
                     &mut cascaded.background_image,
-                    value,
+                    Some(value),
                     declaration.important,
                     specificity,
                     order,
@@ -3633,6 +4069,194 @@ fn first_ident(tokens: &[CssToken]) -> Option<&str> {
     })
 }
 
+/// Every identifier in the value, in order. A shorthand whose components are
+/// keywords reads its positions from this.
+fn value_keywords(tokens: &[CssToken]) -> Vec<&str> {
+    tokens
+        .iter()
+        .filter_map(|token| match token {
+            CssToken::Ident(value) => Some(value.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn parse_align_items_keyword(ident: &str) -> Option<AlignItems> {
+    match ident {
+        "stretch" => Some(AlignItems::Stretch),
+        "flex-start" | "start" | "self-start" => Some(AlignItems::FlexStart),
+        "flex-end" | "end" | "self-end" => Some(AlignItems::FlexEnd),
+        "center" => Some(AlignItems::Center),
+        "baseline" => Some(AlignItems::Baseline),
+        _ => None,
+    }
+}
+
+fn parse_justify_content_keyword(ident: &str) -> Option<JustifyContent> {
+    match ident {
+        "flex-start" | "start" | "self-start" | "left" => Some(JustifyContent::FlexStart),
+        "flex-end" | "end" | "self-end" | "right" => Some(JustifyContent::FlexEnd),
+        "center" => Some(JustifyContent::Center),
+        "space-between" => Some(JustifyContent::SpaceBetween),
+        "space-around" => Some(JustifyContent::SpaceAround),
+        "space-evenly" => Some(JustifyContent::SpaceEvenly),
+        _ => None,
+    }
+}
+
+/// One or two margin values for a logical axis: one value covers both edges.
+fn parse_edge_pair(tokens: &[CssToken]) -> Option<(LengthOrAuto, LengthOrAuto)> {
+    let values = parse_margin_value_list(tokens);
+    match values.len() {
+        1 => Some((values[0], values[0])),
+        2 => Some((values[0], values[1])),
+        _ => None,
+    }
+}
+
+/// One or two lengths for a logical axis, for the properties that take no
+/// `auto`.
+fn parse_length_pair(tokens: &[CssToken]) -> Option<(Length, Length)> {
+    let values = parse_length_list(tokens);
+    match values.len() {
+        1 => Some((values[0], values[0])),
+        2 => Some((values[0], values[1])),
+        _ => None,
+    }
+}
+
+/*
+ * apply_font_shorthand -- the `font` shorthand's size, line-height, and family.
+ *
+ * CSS Fonts 4 15.9 requires size and family and allows style, variant, weight,
+ * and stretch before the size, with an optional `/line-height` after it. The
+ * size is the first length in the value, the family is every identifier and
+ * string after it, and a leading keyword resolves through the same parser its
+ * longhand uses.
+ */
+fn apply_font_shorthand(
+    cascaded: &mut CascadedStyle,
+    declaration: &Declaration,
+    specificity: Specificity,
+    order: usize,
+) {
+    let (imp, spec, ord) = (declaration.important, specificity, order);
+    let tokens = &declaration.value;
+    let Some(size_index) = tokens
+        .iter()
+        .position(|token| parse_length_token(token).is_some())
+    else {
+        return;
+    };
+    if let Some(size) = parse_length_token(&tokens[size_index]) {
+        apply_property(&mut cascaded.font_size, size, imp, spec, ord);
+    }
+    let leading = &tokens[..size_index];
+    if let Some(weight) = parse_font_weight(leading) {
+        apply_property(&mut cascaded.font_weight, weight, imp, spec, ord);
+    }
+    if let Some(style) = parse_font_style(leading) {
+        apply_property(&mut cascaded.font_style, style, imp, spec, ord);
+    }
+    let after_size = &tokens[size_index + 1..];
+    if matches!(after_size.first(), Some(CssToken::Delim('/')))
+        && let Some(line_height) = after_size.get(1).and_then(parse_length_token)
+    {
+        apply_property(&mut cascaded.line_height, line_height, imp, spec, ord);
+    }
+    if let Some(family) = parse_font_family(after_size) {
+        apply_property(&mut cascaded.font_family, family, imp, spec, ord);
+    }
+}
+
+/*
+ * parse_translation -- the translation a `transform` value contributes.
+ *
+ * Reads `translate(x[, y])`, `translateX(x)`, `translateY(y)`, and
+ * `translate3d(x, y, z)`, summing every occurrence the way CSS Transforms 1
+ * 7.1 composes a list of translations. A function this engine does not model
+ * contributes nothing, and a value naming only such functions returns None so
+ * the declaration leaves the element where layout placed it.
+ */
+fn parse_translation(tokens: &[CssToken]) -> Option<Translation> {
+    let mut found = false;
+    let mut translation = Translation::default();
+    let mut index = 0usize;
+    while index < tokens.len() {
+        let CssToken::Function(name) = &tokens[index] else {
+            index += 1;
+            continue;
+        };
+        let lowered = name.to_ascii_lowercase();
+        let end = matching_paren(tokens, index);
+        let arguments = comma_separated_lengths(&tokens[index + 1..end]);
+        match lowered.as_str() {
+            "translate" | "translate3d" => {
+                if let Some(x) = arguments.first() {
+                    translation.x = add_lengths(translation.x, *x);
+                    found = true;
+                }
+                if let Some(y) = arguments.get(1) {
+                    translation.y = add_lengths(translation.y, *y);
+                }
+            }
+            "translatex" => {
+                if let Some(x) = arguments.first() {
+                    translation.x = add_lengths(translation.x, *x);
+                    found = true;
+                }
+            }
+            "translatey" => {
+                if let Some(y) = arguments.first() {
+                    translation.y = add_lengths(translation.y, *y);
+                    found = true;
+                }
+            }
+            _ => {}
+        }
+        index = end + 1;
+    }
+    found.then_some(translation)
+}
+
+/// The index of the `)` closing the function at `open`, or the token count.
+fn matching_paren(tokens: &[CssToken], open: usize) -> usize {
+    let mut depth = 0usize;
+    for (offset, token) in tokens[open..].iter().enumerate() {
+        match token {
+            CssToken::Function(_) | CssToken::ParenOpen => depth += 1,
+            CssToken::ParenClose => {
+                depth -= 1;
+                if depth == 0 {
+                    return open + offset;
+                }
+            }
+            _ => {}
+        }
+    }
+    tokens.len()
+}
+
+/// The comma-separated lengths inside a function's argument list.
+fn comma_separated_lengths(tokens: &[CssToken]) -> Vec<Length> {
+    tokens
+        .split(|token| matches!(token, CssToken::Comma))
+        .filter_map(|group| group.iter().find_map(parse_length_token))
+        .collect()
+}
+
+/// Sum two lengths of the same unit; mixed units keep the second, because the
+/// cascade carries no calc tree at this point.
+fn add_lengths(left: Length, right: Length) -> Length {
+    match (left, right) {
+        (Length::Px(a), Length::Px(b)) => Length::Px(a + b),
+        (Length::Percent(a), Length::Percent(b)) => Length::Percent(a + b),
+        (Length::Em(a), Length::Em(b)) => Length::Em(a + b),
+        (Length::Rem(a), Length::Rem(b)) => Length::Rem(a + b),
+        _ => right,
+    }
+}
+
 fn parse_length(tokens: &[CssToken]) -> Option<Length> {
     tokens.iter().find_map(parse_length_token)
 }
@@ -3648,8 +4272,31 @@ fn parse_length_token(token: &CssToken) -> Option<Length> {
         CssToken::Dimension { value, unit } if unit.eq_ignore_ascii_case("rem") => {
             value.parse::<f32>().ok().map(Length::Rem)
         }
+        /*
+         * CSS Values 4 6.1.2 defines small, large, and dynamic viewport
+         * variants alongside the plain one. The engine paints into a window
+         * with no retracting browser UI, so all four viewport sizes coincide
+         * and `svh`, `lvh`, and `dvh` take the same arm as `vh`.
+         */
+        CssToken::Dimension { value, unit } => {
+            viewport_unit(unit).and_then(|construct| value.parse::<f32>().ok().map(construct))
+        }
         CssToken::Percentage(value) => value.parse::<f32>().ok().map(Length::Percent),
         CssToken::Number(value) if value == "0" => Some(Length::zero()),
+        _ => None,
+    }
+}
+
+/// The Length constructor a viewport-relative unit names, or None when the
+/// unit is not viewport-relative.
+fn viewport_unit(unit: &str) -> Option<fn(f32) -> Length> {
+    let lowered = unit.to_ascii_lowercase();
+    let axis = lowered.strip_prefix(['s', 'l', 'd']).unwrap_or(&lowered);
+    match axis {
+        "vw" | "vi" => Some(Length::Vw),
+        "vh" | "vb" => Some(Length::Vh),
+        "vmin" => Some(Length::Vmin),
+        "vmax" => Some(Length::Vmax),
         _ => None,
     }
 }
@@ -3771,7 +4418,14 @@ fn parse_box_shadow(tokens: &[CssToken]) -> Option<BoxShadow> {
         return None;
     }
     let px = |l: &Length| match l {
-        Length::Px(v) | Length::Percent(v) | Length::Em(v) | Length::Rem(v) => *v,
+        Length::Px(v)
+        | Length::Percent(v)
+        | Length::Em(v)
+        | Length::Rem(v)
+        | Length::Vw(v)
+        | Length::Vh(v)
+        | Length::Vmin(v)
+        | Length::Vmax(v) => *v,
     };
     Some(BoxShadow {
         offset_x: px(&lengths[0]),

@@ -536,7 +536,15 @@ pub(crate) fn length_to_px(length: Length) -> f32 {
     match length {
         Length::Px(value) => value,
         Length::Percent(_) => 0.0,
-        Length::Em(_) | Length::Rem(_) => unresolved_font_relative_px(),
+        // The cascade resolves font-relative and viewport-relative lengths to
+        // px before layout sees them; reaching this arm means a caller skipped
+        // ComputedStyle::resolve.
+        Length::Em(_)
+        | Length::Rem(_)
+        | Length::Vw(_)
+        | Length::Vh(_)
+        | Length::Vmin(_)
+        | Length::Vmax(_) => unresolved_font_relative_px(),
     }
 }
 

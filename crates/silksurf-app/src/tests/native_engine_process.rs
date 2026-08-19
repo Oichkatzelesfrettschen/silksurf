@@ -23,6 +23,7 @@ fn fixture_payload(
     config: BrowserRenderConfig,
 ) -> BrowserPagePayload {
     BrowserPagePayload {
+        sheet_bodies: Vec::new(),
         url: request.url,
         html: "<!doctype html><html><body><p>worker page</p></body></html>".to_string(),
         css_text: "html, body { display: block; } body { margin: 0; }".to_string(),

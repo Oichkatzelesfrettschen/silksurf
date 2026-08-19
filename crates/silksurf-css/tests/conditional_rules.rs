@@ -133,7 +133,7 @@ fn unsupported_condition_rejects_its_block() {
 #[test]
 fn negated_unsupported_condition_admits_the_fallback_block() {
     assert_eq!(
-        target_color("@supports not (height: 100dvb) { #target { color: red; } }"),
+        target_color("@supports not (height: anchor-size(height)) { #target { color: red; } }"),
         RED
     );
 }
