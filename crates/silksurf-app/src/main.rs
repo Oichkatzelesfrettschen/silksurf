@@ -509,6 +509,10 @@ fn run_static_browser_render(
     // location.href backs every same-origin URL a page builds; page script runs
     // after the document address is in place.
     js_ctx.set_document_url(&options.url);
+    // matchMedia answers from this size, and a startup script that branches on
+    // it -- chatgpt.com sets data-desktop-layout from `(min-width: 48rem)` --
+    // selects which shell the document renders.
+    js_ctx.set_viewport(viewport.width, viewport.height);
 
     // 7. Execute inline <script> tags.
     execute_static_inline_scripts(&mut js_ctx, &scripts);

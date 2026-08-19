@@ -403,10 +403,25 @@ Named cuts, each with the mechanism that closes it:
   unregistered `var(--unset)` with no fallback leaves its declaration
   unapplied instead of taking a registered initial. chatgpt.com opens its
   sheet with four of them.
-- css-transform-paint -- `transform` reaches neither the cascade nor the paint
-  list, so an element positioned by `translate()` paints at its untransformed
-  origin and overlaps its neighbours. This is the dominant remaining visual
-  defect on chatgpt.com.
+- css-transform-beyond-translation -- `transform` contributes its translation
+  component to the paint rect; rotate, scale, skew, and matrix contribute
+  nothing, because every DisplayItem is an axis-aligned rect. Carrying them
+  needs a transform per display item and a rasterizer that applies it to
+  geometry and to shaped glyph runs.
+- fixed-position-containing-block -- `position: fixed` maps to taffy's
+  Absolute, so a fixed box resolves against its nearest positioned ancestor
+  rather than against the viewport, and it scrolls with the page. Several
+  fixed boxes with no inset therefore stack at the same origin, which is the
+  overlapping band still visible at the top of a chatgpt.com render.
+- viewport-units-in-calc -- CalcExpr carries only the percentage context, so a
+  viewport unit inside `calc()` evaluates as a bare number. It resolves
+  correctly outside calc(); wiring it needs the viewport threaded into
+  CalcExpr::evaluate.
+- chatgpt-render-fixture -- every paint-item and document-height number cited
+  for chatgpt.com comes from a live fetch, and the origin serves different
+  documents between runs (505 nodes / 97 items on one, 291 / 34 on another).
+  A retained HTML-plus-stylesheet fixture served from the local test server
+  would make those numbers a regression test rather than a snapshot.
 - document-stylesheets-cssom -- `StyleSheetSet` is engine state with no
   scripted object model, so `document.styleSheets`, `CSSStyleSheet`, and
   `insertRule` are absent. A page that installs styles through the CSSOM
