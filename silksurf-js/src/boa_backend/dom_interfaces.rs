@@ -38,6 +38,11 @@ pub(super) fn install_dom_interfaces(dom_arc: &Arc<Mutex<Dom>>, ctx: &mut Contex
     if let Err(err) = ctx.eval(Source::from_bytes(INTERFACE_BOOTSTRAP.as_bytes())) {
         eprintln!("silksurf-js: DOM interface bootstrap failed: {err}");
     }
+    // The reflection table reads __silksurfInterfacePrototypes, which the
+    // interface bootstrap records, so it runs second.
+    if let Err(err) = ctx.eval(Source::from_bytes(REFLECTION_BOOTSTRAP.as_bytes())) {
+        eprintln!("silksurf-js: IDL reflection bootstrap failed: {err}");
+    }
 }
 
 /// The prototype a wrapper for `node_id` inherits from, or `None` when the
@@ -246,6 +251,48 @@ fn remove_attribute(
     Ok(JsValue::undefined())
 }
 
+/// Read one content attribute by node id, or null when it is absent. IDL
+/// attribute reflection reads through this rather than through a per-node
+/// accessor, so the getter lives once on the interface prototype.
+fn get_attribute_by_id(
+    dom_arc: &Arc<Mutex<Dom>>,
+    args: &[JsValue],
+    ctx: &mut Context,
+) -> JsResult<JsValue> {
+    let Some(node_id) = node_id_arg(args, 0, ctx)? else {
+        return Ok(JsValue::null());
+    };
+    let name = string_arg(args, 1, ctx)?;
+    let dom = dom_arc.lock().unwrap_or_else(PoisonError::into_inner);
+    let Ok(attributes) = dom.attributes(node_id) else {
+        return Ok(JsValue::null());
+    };
+    Ok(attributes
+        .iter()
+        .find(|a| a.name.matches(&name))
+        .map_or_else(JsValue::null, |a| {
+            JsValue::from(js_string!(a.value.as_str()))
+        }))
+}
+
+/// Write one content attribute by node id, which marks the node dirty and
+/// advances `Dom::style_generation` so the cascade and the stylesheet set both
+/// observe the change.
+fn set_attribute_by_id(
+    dom_arc: &Arc<Mutex<Dom>>,
+    args: &[JsValue],
+    ctx: &mut Context,
+) -> JsResult<JsValue> {
+    let Some(node_id) = node_id_arg(args, 0, ctx)? else {
+        return Ok(JsValue::undefined());
+    };
+    let name = string_arg(args, 1, ctx)?;
+    let value = string_arg(args, 2, ctx)?;
+    let mut dom = dom_arc.lock().unwrap_or_else(PoisonError::into_inner);
+    let _ = dom.set_attribute(node_id, name, value);
+    Ok(JsValue::undefined())
+}
+
 /// True when `other` is `node` or a descendant of it, matching Node.contains.
 fn contains_node(
     dom_arc: &Arc<Mutex<Dom>>,
@@ -374,6 +421,35 @@ fn create_detached(
     Ok(JsValue::from(created.raw() as u32))
 }
 
+/*
+ * set_current_script -- point `document.currentScript` at the running script.
+ *
+ * HTML defines currentScript as the `<script>` element whose evaluation is in
+ * progress, and a page reads its own tag through it: chatgpt.com's stylesheet
+ * swap takes `document.currentScript.previousElementSibling` to find the
+ * `<link>` it upgrades. The embedder sets the node before each classic script
+ * evaluates and clears it after, which is the null the property reports at
+ * every other moment.
+ */
+pub(super) fn set_current_script(
+    dom_arc: &Arc<Mutex<Dom>>,
+    node: Option<NodeId>,
+    ctx: &mut Context,
+) {
+    let value = node.map_or_else(JsValue::null, |id| {
+        super::dom_bridge::node_to_js_object(dom_arc, id, ctx)
+    });
+    let Some(document) = ctx
+        .global_object()
+        .get(js_string!("document"), ctx)
+        .ok()
+        .and_then(|document| document.as_object())
+    else {
+        return;
+    };
+    let _ = document.set(js_string!("currentScript"), value, false, ctx);
+}
+
 fn install_node_natives(dom_arc: &Arc<Mutex<Dom>>, ctx: &mut Context) {
     dom_native!(ctx, dom_arc, "__silksurfNodeHasAttribute", 2, has_attribute);
     dom_native!(
@@ -389,6 +465,20 @@ fn install_node_natives(dom_arc: &Arc<Mutex<Dom>>, ctx: &mut Context) {
         "__silksurfNodeRemoveAttribute",
         2,
         remove_attribute
+    );
+    dom_native!(
+        ctx,
+        dom_arc,
+        "__silksurfNodeGetAttribute",
+        2,
+        get_attribute_by_id
+    );
+    dom_native!(
+        ctx,
+        dom_arc,
+        "__silksurfNodeSetAttribute",
+        3,
+        set_attribute_by_id
     );
     dom_native!(ctx, dom_arc, "__silksurfNodeContains", 2, contains_node);
     dom_native!(ctx, dom_arc, "__silksurfNodeIsConnected", 1, is_connected);
@@ -772,5 +862,192 @@ const INTERFACE_BOOTSTRAP: &str = r"
     if (document.characterSet === undefined) { document.characterSet = 'UTF-8'; }
     if (document.contentType === undefined) { document.contentType = 'text/html'; }
     if (document.compatMode === undefined) { document.compatMode = 'CSS1Compat'; }
+})();
+";
+
+/*
+ * IDL attribute reflection.
+ *
+ * HTML defines most element properties as reflections of a content attribute:
+ * `link.rel` is the `rel` attribute, `img.src` is `src` resolved against the
+ * document base, `input.disabled` is the presence of `disabled`. Without the
+ * accessor a page's `element.rel = "stylesheet"` writes a plain own property
+ * and the DOM never moves, so nothing downstream -- cascade, layout, resource
+ * fetch -- observes the change.
+ *
+ * The accessors live on the interface prototype and reach the node through
+ * `this.nodeId`, so a document pays nothing per element. Four reflection kinds
+ * cover the table: `s` string, `u` URL resolved against document.URL, `b`
+ * boolean by attribute presence, and `l` long parsed with a zero default.
+ */
+const REFLECTION_BOOTSTRAP: &str = r"
+(function () {
+    'use strict';
+    var protos = globalThis.__silksurfInterfacePrototypes;
+    if (!protos) { return; }
+
+    function read(element, attribute) {
+        return element.nodeId
+            ? __silksurfNodeGetAttribute(element.nodeId, attribute)
+            : null;
+    }
+    function write(element, attribute, value) {
+        if (element.nodeId) { __silksurfNodeSetAttribute(element.nodeId, attribute, value); }
+    }
+    function drop(element, attribute) {
+        if (element.nodeId) { __silksurfNodeRemoveAttribute(element.nodeId, attribute); }
+    }
+    function absolute(raw) {
+        if (raw === null) { return ''; }
+        try {
+            return new URL(raw, document.URL).href;
+        } catch (e) {
+            return raw;
+        }
+    }
+
+    var accessors = {
+        s: function (attribute) {
+            return {
+                get: function () { var v = read(this, attribute); return v === null ? '' : v; },
+                set: function (value) { write(this, attribute, String(value)); }
+            };
+        },
+        u: function (attribute) {
+            return {
+                get: function () { return absolute(read(this, attribute)); },
+                set: function (value) { write(this, attribute, String(value)); }
+            };
+        },
+        b: function (attribute) {
+            return {
+                get: function () { return read(this, attribute) !== null; },
+                set: function (value) {
+                    if (value) { write(this, attribute, ''); } else { drop(this, attribute); }
+                }
+            };
+        },
+        l: function (attribute) {
+            return {
+                get: function () {
+                    var parsed = parseInt(read(this, attribute), 10);
+                    return Number.isNaN(parsed) ? 0 : parsed;
+                },
+                set: function (value) { write(this, attribute, String(value)); }
+            };
+        }
+    };
+
+    // interface: [[idlName, contentAttribute, kind], ...]
+    var table = {
+        Element: [['slot', 'slot', 's']],
+        HTMLElement: [['title', 'title', 's'], ['lang', 'lang', 's'], ['dir', 'dir', 's'],
+            ['hidden', 'hidden', 'b'], ['accessKey', 'accesskey', 's'],
+            ['tabIndex', 'tabindex', 'l'], ['draggable', 'draggable', 'b'],
+            ['spellcheck', 'spellcheck', 's'], ['translate', 'translate', 's']],
+        HTMLAnchorElement: [['href', 'href', 'u'], ['target', 'target', 's'],
+            ['rel', 'rel', 's'], ['download', 'download', 's'], ['type', 'type', 's'],
+            ['hreflang', 'hreflang', 's'], ['referrerPolicy', 'referrerpolicy', 's'],
+            ['ping', 'ping', 's']],
+        HTMLAreaElement: [['href', 'href', 'u'], ['target', 'target', 's'],
+            ['rel', 'rel', 's'], ['alt', 'alt', 's'], ['coords', 'coords', 's'],
+            ['shape', 'shape', 's']],
+        HTMLBaseElement: [['href', 'href', 'u'], ['target', 'target', 's']],
+        HTMLButtonElement: [['type', 'type', 's'], ['name', 'name', 's'],
+            ['value', 'value', 's'], ['disabled', 'disabled', 'b'],
+            ['formAction', 'formaction', 'u'], ['formMethod', 'formmethod', 's']],
+        HTMLCanvasElement: [['width', 'width', 'l'], ['height', 'height', 'l']],
+        HTMLDialogElement: [['open', 'open', 'b'], ['returnValue', 'returnvalue', 's']],
+        HTMLDetailsElement: [['open', 'open', 'b']],
+        HTMLEmbedElement: [['src', 'src', 'u'], ['type', 'type', 's'],
+            ['width', 'width', 's'], ['height', 'height', 's']],
+        HTMLFieldSetElement: [['name', 'name', 's'], ['disabled', 'disabled', 'b']],
+        HTMLFormElement: [['action', 'action', 'u'], ['method', 'method', 's'],
+            ['name', 'name', 's'], ['target', 'target', 's'], ['enctype', 'enctype', 's'],
+            ['acceptCharset', 'accept-charset', 's'], ['noValidate', 'novalidate', 'b'],
+            ['autocomplete', 'autocomplete', 's']],
+        HTMLIFrameElement: [['src', 'src', 'u'], ['srcdoc', 'srcdoc', 's'],
+            ['name', 'name', 's'], ['width', 'width', 's'], ['height', 'height', 's'],
+            ['allow', 'allow', 's'], ['loading', 'loading', 's'],
+            ['referrerPolicy', 'referrerpolicy', 's'], ['sandbox', 'sandbox', 's']],
+        HTMLImageElement: [['src', 'src', 'u'], ['alt', 'alt', 's'],
+            ['srcset', 'srcset', 's'], ['sizes', 'sizes', 's'], ['useMap', 'usemap', 's'],
+            ['crossOrigin', 'crossorigin', 's'], ['referrerPolicy', 'referrerpolicy', 's'],
+            ['loading', 'loading', 's'], ['decoding', 'decoding', 's'],
+            ['width', 'width', 'l'], ['height', 'height', 'l'],
+            ['isMap', 'ismap', 'b']],
+        HTMLInputElement: [['type', 'type', 's'], ['name', 'name', 's'],
+            ['placeholder', 'placeholder', 's'], ['disabled', 'disabled', 'b'],
+            ['required', 'required', 'b'], ['readOnly', 'readonly', 'b'],
+            ['multiple', 'multiple', 'b'], ['maxLength', 'maxlength', 'l'],
+            ['minLength', 'minlength', 'l'], ['min', 'min', 's'], ['max', 'max', 's'],
+            ['step', 'step', 's'], ['pattern', 'pattern', 's'],
+            ['autocomplete', 'autocomplete', 's'], ['accept', 'accept', 's'],
+            ['src', 'src', 'u'], ['alt', 'alt', 's'],
+            ['defaultChecked', 'checked', 'b'], ['defaultValue', 'value', 's']],
+        HTMLLabelElement: [['htmlFor', 'for', 's']],
+        HTMLLinkElement: [['href', 'href', 'u'], ['rel', 'rel', 's'],
+            ['media', 'media', 's'], ['type', 'type', 's'], ['as', 'as', 's'],
+            ['crossOrigin', 'crossorigin', 's'], ['integrity', 'integrity', 's'],
+            ['hreflang', 'hreflang', 's'], ['disabled', 'disabled', 'b'],
+            ['referrerPolicy', 'referrerpolicy', 's']],
+        HTMLMetaElement: [['name', 'name', 's'], ['content', 'content', 's'],
+            ['httpEquiv', 'http-equiv', 's'], ['media', 'media', 's']],
+        HTMLObjectElement: [['data', 'data', 'u'], ['type', 'type', 's'],
+            ['name', 'name', 's'], ['width', 'width', 's'], ['height', 'height', 's']],
+        HTMLOptGroupElement: [['label', 'label', 's'], ['disabled', 'disabled', 'b']],
+        HTMLOptionElement: [['label', 'label', 's'], ['disabled', 'disabled', 'b'],
+            ['defaultSelected', 'selected', 'b'], ['value', 'value', 's']],
+        HTMLOutputElement: [['name', 'name', 's'], ['htmlFor', 'for', 's']],
+        HTMLScriptElement: [['src', 'src', 'u'], ['type', 'type', 's'],
+            ['noModule', 'nomodule', 'b'], ['async', 'async', 'b'],
+            ['defer', 'defer', 'b'], ['crossOrigin', 'crossorigin', 's'],
+            ['integrity', 'integrity', 's'], ['referrerPolicy', 'referrerpolicy', 's']],
+        HTMLSelectElement: [['name', 'name', 's'], ['disabled', 'disabled', 'b'],
+            ['multiple', 'multiple', 'b'], ['required', 'required', 'b'],
+            ['size', 'size', 'l'], ['autocomplete', 'autocomplete', 's']],
+        HTMLSlotElement: [['name', 'name', 's']],
+        HTMLSourceElement: [['src', 'src', 'u'], ['srcset', 'srcset', 's'],
+            ['sizes', 'sizes', 's'], ['type', 'type', 's'], ['media', 'media', 's']],
+        HTMLStyleElement: [['media', 'media', 's'], ['type', 'type', 's'],
+            ['disabled', 'disabled', 'b']],
+        HTMLTextAreaElement: [['name', 'name', 's'], ['placeholder', 'placeholder', 's'],
+            ['disabled', 'disabled', 'b'], ['required', 'required', 'b'],
+            ['readOnly', 'readonly', 'b'], ['rows', 'rows', 'l'], ['cols', 'cols', 'l'],
+            ['maxLength', 'maxlength', 'l'], ['wrap', 'wrap', 's'],
+            ['autocomplete', 'autocomplete', 's']],
+        HTMLTimeElement: [['dateTime', 'datetime', 's']],
+        HTMLTrackElement: [['src', 'src', 'u'], ['kind', 'kind', 's'],
+            ['srclang', 'srclang', 's'], ['label', 'label', 's'],
+            ['default', 'default', 'b']],
+        HTMLMediaElement: [['src', 'src', 'u'], ['preload', 'preload', 's'],
+            ['autoplay', 'autoplay', 'b'], ['controls', 'controls', 'b'],
+            ['loop', 'loop', 'b'], ['muted', 'muted', 'b'],
+            ['crossOrigin', 'crossorigin', 's']],
+        HTMLVideoElement: [['poster', 'poster', 'u'], ['width', 'width', 'l'],
+            ['height', 'height', 'l'], ['playsInline', 'playsinline', 'b']],
+        HTMLOListElement: [['reversed', 'reversed', 'b'], ['start', 'start', 'l'],
+            ['type', 'type', 's']],
+        HTMLLIElement: [['value', 'value', 'l']],
+        HTMLTableCellElement: [['colSpan', 'colspan', 'l'], ['rowSpan', 'rowspan', 'l'],
+            ['headers', 'headers', 's'], ['scope', 'scope', 's'], ['abbr', 'abbr', 's']],
+        HTMLProgressElement: [['max', 'max', 'l']],
+        HTMLMeterElement: [['min', 'min', 'l'], ['max', 'max', 'l'], ['low', 'low', 'l'],
+            ['high', 'high', 'l'], ['optimum', 'optimum', 'l']],
+        HTMLQuoteElement: [['cite', 'cite', 'u']],
+        HTMLModElement: [['cite', 'cite', 'u'], ['dateTime', 'datetime', 's']],
+        HTMLDataElement: [['value', 'value', 's']]
+    };
+
+    Object.keys(table).forEach(function (name) {
+        var proto = protos[name];
+        if (!proto) { return; }
+        table[name].forEach(function (entry) {
+            var descriptor = accessors[entry[2]](entry[1]);
+            descriptor.configurable = true;
+            descriptor.enumerable = false;
+            Object.defineProperty(proto, entry[0], descriptor);
+        });
+    });
 })();
 ";
