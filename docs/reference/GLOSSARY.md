@@ -636,6 +636,10 @@ files and the relevant ADRs.
 **Type**: Layout invariant funnel function
 **Definition**: The single boundary every em/rem match arm in silksurf-layout routes through when a font-relative length survives past the cascade (which resolves em/rem to px before layout). Fails loudly via `debug_assert!` in debug and test builds so the gate catches cascade regressions; degrades to a deterministic 0 px in release builds so a regressed page still paints instead of aborting the frame.
 
+### unresolved_calc_px
+**Type**: Layout invariant funnel function
+**Definition**: The boundary for a retained calc expression that reaches a numeric layout helper without its percentage basis. The Taffy resolver and the explicit `ComputedStyle::resolve_calc_length` path supply the basis; this funnel fails loudly in debug and test builds and returns deterministic 0 px in release builds when a caller violates that contract.
+
 ### materialize_resolve_table
 **Type**: DOM phase-boundary function
 **Definition**: Snapshots the `SilkInterner` into the lock-free monotonic resolve table (`Vec<SmallString>`). Must be called after every `into_dom()` and every `end_mutation_batch()`. Without it, `resolve_fast` panics. See silksurf-dom OPERATIONS.md.

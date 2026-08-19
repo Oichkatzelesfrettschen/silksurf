@@ -532,6 +532,12 @@ pub(crate) fn unresolved_font_relative_px() -> f32 {
     0.0
 }
 
+#[cold]
+pub(crate) fn unresolved_calc_px() -> f32 {
+    debug_assert!(false, "calc values require a percentage basis");
+    0.0
+}
+
 pub(crate) fn length_to_px(length: Length) -> f32 {
     match length {
         Length::Px(value) => value,
@@ -545,6 +551,7 @@ pub(crate) fn length_to_px(length: Length) -> f32 {
         | Length::Vh(_)
         | Length::Vmin(_)
         | Length::Vmax(_) => unresolved_font_relative_px(),
+        Length::Calc(_) => unresolved_calc_px(),
     }
 }
 

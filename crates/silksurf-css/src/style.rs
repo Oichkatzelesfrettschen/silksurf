@@ -26,6 +26,7 @@
  * See: custom_properties.rs for CSS var() resolution
  * See: calc.rs for calc() expression evaluation
  */
+use crate::calc::{CalcExpr, parse_calc};
 use crate::matching::{
     Specificity, matches_selector, matches_selector_with_view, selector_specificity,
 };
@@ -373,6 +374,8 @@ pub enum Length {
     Vmin(f32),
     /// Percent of the viewport's larger axis (resolved at cascade time).
     Vmax(f32),
+    /// An interned calculation retained until its percentage basis is known.
+    Calc(u32),
 }
 
 impl Default for Length {
@@ -399,6 +402,7 @@ impl Length {
             | Length::Vh(v)
             | Length::Vmin(v)
             | Length::Vmax(v) => *v == 0.0,
+            Length::Calc(_) => false,
         }
     }
 }
@@ -518,6 +522,9 @@ pub struct Translation {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComputedStyle {
+    /// Calculation trees retained for lengths whose percentage basis belongs
+    /// to layout rather than cascade resolution.
+    pub calc_expressions: Arc<Vec<CalcExpr>>,
     /*
      * Custom properties resolved for this element, parent values included.
      * CSS Custom Properties 1 3 makes them inherited, so a child that
@@ -586,6 +593,7 @@ pub struct ComputedStyle {
 impl Default for ComputedStyle {
     fn default() -> Self {
         Self {
+            calc_expressions: Arc::default(),
             custom_properties: std::sync::Arc::default(),
             transform: Translation::default(),
             display: Display::Inline,
@@ -639,6 +647,24 @@ impl Default for ComputedStyle {
 }
 
 impl ComputedStyle {
+    /// Resolve a retained calculation against the layout percentage basis.
+    /// Relative units are normalized while `CascadedStyle::resolve` builds the
+    /// computed style, so this pass supplies the basis that only layout knows.
+    #[must_use]
+    pub fn resolve_calc_length(
+        &self,
+        length: Length,
+        percentage_basis_px: f32,
+        viewport: (f32, f32),
+    ) -> Option<f32> {
+        let Length::Calc(expression_id) = length else {
+            return None;
+        };
+        self.calc_expressions
+            .get(expression_id as usize)
+            .map(|expression| expression.evaluate(percentage_basis_px, 0.0, 0.0, viewport))
+    }
+
     #[must_use]
     pub fn anonymous_text(parent: Option<&ComputedStyle>) -> Self {
         let Some(parent) = parent else {
@@ -687,6 +713,7 @@ impl<T: Clone> ResolvedProperty<T> {
 
 #[derive(Default, PartialEq)]
 struct CascadedStyle {
+    calc_expressions: Vec<CalcExpr>,
     /// The map this element resolves `var()` against, parent values included.
     custom_properties: std::sync::Arc<crate::custom_properties::CustomPropertyMap>,
     transform: Option<ResolvedProperty<Translation>>,
@@ -787,7 +814,14 @@ struct CascadedStyle {
  * for font-size means relative to parent, per CSS spec). All other properties
  * use the element's own resolved font-size as the em base.
  */
-fn resolve_length(l: Length, em_px: f32, rem_px: f32, viewport: (f32, f32)) -> Length {
+fn resolve_length(
+    l: Length,
+    calc_expressions: &[CalcExpr],
+    em_px: f32,
+    rem_px: f32,
+    viewport: (f32, f32),
+    percentage_basis_px: Option<f32>,
+) -> Length {
     let (viewport_width, viewport_height) = viewport;
     match l {
         Length::Px(_) | Length::Percent(_) => l,
@@ -797,39 +831,75 @@ fn resolve_length(l: Length, em_px: f32, rem_px: f32, viewport: (f32, f32)) -> L
         Length::Vh(percent) => Length::Px(percent / 100.0 * viewport_height),
         Length::Vmin(percent) => Length::Px(percent / 100.0 * viewport_width.min(viewport_height)),
         Length::Vmax(percent) => Length::Px(percent / 100.0 * viewport_width.max(viewport_height)),
+        Length::Calc(expression_id) => {
+            let Some(expression) = calc_expressions.get(expression_id as usize) else {
+                return Length::zero();
+            };
+            if expression.contains_percentage() && percentage_basis_px.is_none() {
+                return l;
+            }
+            Length::Px(expression.evaluate(
+                percentage_basis_px.unwrap_or(0.0),
+                em_px,
+                rem_px,
+                viewport,
+            ))
+        }
     }
 }
 
-fn resolve_edges(edges: Edges, em_px: f32, rem_px: f32, viewport: (f32, f32)) -> Edges {
-    Edges {
-        top: resolve_length(edges.top, em_px, rem_px, viewport),
-        right: resolve_length(edges.right, em_px, rem_px, viewport),
-        bottom: resolve_length(edges.bottom, em_px, rem_px, viewport),
-        left: resolve_length(edges.left, em_px, rem_px, viewport),
-    }
-}
-
-fn resolve_length_or_auto(
-    l: LengthOrAuto,
+#[derive(Clone, Copy)]
+struct LengthResolveContext<'a> {
+    calc_expressions: &'a [CalcExpr],
     em_px: f32,
     rem_px: f32,
     viewport: (f32, f32),
-) -> LengthOrAuto {
+}
+
+fn resolve_edges(
+    edges: Edges,
+    calc_expressions: &[CalcExpr],
+    em_px: f32,
+    rem_px: f32,
+    viewport: (f32, f32),
+) -> Edges {
+    Edges {
+        top: resolve_length(edges.top, calc_expressions, em_px, rem_px, viewport, None),
+        right: resolve_length(edges.right, calc_expressions, em_px, rem_px, viewport, None),
+        bottom: resolve_length(
+            edges.bottom,
+            calc_expressions,
+            em_px,
+            rem_px,
+            viewport,
+            None,
+        ),
+        left: resolve_length(edges.left, calc_expressions, em_px, rem_px, viewport, None),
+    }
+}
+
+fn resolve_length_or_auto(l: LengthOrAuto, context: LengthResolveContext<'_>) -> LengthOrAuto {
     match l {
         LengthOrAuto::Auto => LengthOrAuto::Auto,
-        LengthOrAuto::Length(len) => {
-            LengthOrAuto::Length(resolve_length(len, em_px, rem_px, viewport))
-        }
+        LengthOrAuto::Length(len) => LengthOrAuto::Length(resolve_length(
+            len,
+            context.calc_expressions,
+            context.em_px,
+            context.rem_px,
+            context.viewport,
+            None,
+        )),
     }
 }
 
 fn resolve_opt_length(
     l: Option<Length>,
+    calc_expressions: &[CalcExpr],
     em_px: f32,
     rem_px: f32,
     viewport: (f32, f32),
 ) -> Option<Length> {
-    l.map(|len| resolve_length(len, em_px, rem_px, viewport))
+    l.map(|len| resolve_length(len, calc_expressions, em_px, rem_px, viewport, None))
 }
 
 fn resolve_margins(
@@ -837,15 +907,13 @@ fn resolve_margins(
     right: LengthOrAuto,
     bottom: LengthOrAuto,
     left: LengthOrAuto,
-    em_px: f32,
-    rem_px: f32,
-    viewport: (f32, f32),
+    context: LengthResolveContext<'_>,
 ) -> Margins {
     Margins {
-        top: resolve_length_or_auto(top, em_px, rem_px, viewport),
-        right: resolve_length_or_auto(right, em_px, rem_px, viewport),
-        bottom: resolve_length_or_auto(bottom, em_px, rem_px, viewport),
-        left: resolve_length_or_auto(left, em_px, rem_px, viewport),
+        top: resolve_length_or_auto(top, context),
+        right: resolve_length_or_auto(right, context),
+        bottom: resolve_length_or_auto(bottom, context),
+        left: resolve_length_or_auto(left, context),
     }
 }
 
@@ -899,26 +967,53 @@ impl CascadedStyle {
             }
         };
         // For font-size: Percent means percent of parent font-size (same as em).
-        let resolved_font_size = match raw_font_size {
-            Length::Em(m) => Length::Px(m * parent_font_size_px),
-            Length::Rem(m) => Length::Px(m * rem_base_px),
-            Length::Percent(p) => Length::Px(p / 100.0 * parent_font_size_px),
-            other @ Length::Px(_) => other,
-            // A viewport-relative font-size resolves against the viewport, not
-            // against the parent, so it takes the shared resolver.
-            viewport_relative => resolve_length(viewport_relative, 0.0, rem_base_px, viewport),
-        };
+        let resolved_font_size = resolve_length(
+            raw_font_size,
+            &self.calc_expressions,
+            parent_font_size_px,
+            rem_base_px,
+            viewport,
+            Some(parent_font_size_px),
+        );
         // All non-font-size length properties use the element's own font-size as em base.
         let em_px = match resolved_font_size {
             Length::Px(v) => v,
             _ => 16.0,
         };
+        for expression in &mut self.calc_expressions {
+            *expression = expression.resolve_units(em_px, rem_base_px, viewport);
+        }
+        let calc_expressions = Arc::new(std::mem::take(&mut self.calc_expressions));
+        let length_context = LengthResolveContext {
+            calc_expressions: calc_expressions.as_slice(),
+            em_px,
+            rem_px: rem_base_px,
+            viewport,
+        };
 
         ComputedStyle {
+            calc_expressions: calc_expressions.clone(),
             custom_properties: std::mem::take(&mut self.custom_properties),
             transform: self
                 .transform
-                .map_or_else(Translation::default, |e| e.value),
+                .map_or_else(Translation::default, |e| Translation {
+                    x: resolve_length(
+                        e.value.x,
+                        calc_expressions.as_slice(),
+                        em_px,
+                        rem_base_px,
+                        viewport,
+                        None,
+                    ),
+                    y: resolve_length(
+                        e.value.y,
+                        calc_expressions.as_slice(),
+                        em_px,
+                        rem_base_px,
+                        viewport,
+                        None,
+                    ),
+                }),
             display: resolve_non_inherited_kw(
                 self.display,
                 ks.get(&PropertyId::Display),
@@ -957,9 +1052,11 @@ impl CascadedStyle {
                             .unwrap_or(resolved_font_size)
                     }
                 },
+                calc_expressions.as_slice(),
                 em_px,
                 rem_base_px,
                 viewport,
+                Some(em_px),
             ),
             font_family: {
                 let ff_kw = ks.get(&PropertyId::FontFamily);
@@ -1007,9 +1104,12 @@ impl CascadedStyle {
                         parent.map(|p| p.margin.left),
                         zero,
                     ),
-                    em_px,
-                    rem_base_px,
-                    viewport,
+                    LengthResolveContext {
+                        calc_expressions: calc_expressions.as_slice(),
+                        em_px,
+                        rem_px: rem_base_px,
+                        viewport,
+                    },
                 )
             },
             padding: resolve_edges(
@@ -1039,6 +1139,7 @@ impl CascadedStyle {
                         Length::Px(0.0),
                     ),
                 },
+                calc_expressions.as_slice(),
                 em_px,
                 rem_base_px,
                 viewport,
@@ -1071,7 +1172,13 @@ impl CascadedStyle {
                         zero,
                     ),
                 };
-                resolve_edges(raw, em_px, rem_base_px, viewport)
+                resolve_edges(
+                    raw,
+                    calc_expressions.as_slice(),
+                    em_px,
+                    rem_base_px,
+                    viewport,
+                )
             },
             flex_container: FlexContainerStyle {
                 direction: resolve_non_inherited_kw(
@@ -1179,9 +1286,7 @@ impl CascadedStyle {
                     parent.map(|s| s.top),
                     LengthOrAuto::Auto,
                 ),
-                em_px,
-                rem_base_px,
-                viewport,
+                length_context,
             ),
             right: resolve_length_or_auto(
                 resolve_non_inherited_kw(
@@ -1190,9 +1295,7 @@ impl CascadedStyle {
                     parent.map(|s| s.right),
                     LengthOrAuto::Auto,
                 ),
-                em_px,
-                rem_base_px,
-                viewport,
+                length_context,
             ),
             bottom: resolve_length_or_auto(
                 resolve_non_inherited_kw(
@@ -1201,9 +1304,7 @@ impl CascadedStyle {
                     parent.map(|s| s.bottom),
                     LengthOrAuto::Auto,
                 ),
-                em_px,
-                rem_base_px,
-                viewport,
+                length_context,
             ),
             left: resolve_length_or_auto(
                 resolve_non_inherited_kw(
@@ -1212,9 +1313,7 @@ impl CascadedStyle {
                     parent.map(|s| s.left),
                     LengthOrAuto::Auto,
                 ),
-                em_px,
-                rem_base_px,
-                viewport,
+                length_context,
             ),
             z_index: resolve_non_inherited_kw(
                 self.z_index,
@@ -1229,9 +1328,7 @@ impl CascadedStyle {
                     parent.map(|s| s.width),
                     LengthOrAuto::Auto,
                 ),
-                em_px,
-                rem_base_px,
-                viewport,
+                length_context,
             ),
             height: resolve_length_or_auto(
                 resolve_non_inherited_kw(
@@ -1240,9 +1337,7 @@ impl CascadedStyle {
                     parent.map(|s| s.height),
                     LengthOrAuto::Auto,
                 ),
-                em_px,
-                rem_base_px,
-                viewport,
+                length_context,
             ),
             min_width: resolve_length(
                 resolve_non_inherited_kw(
@@ -1251,9 +1346,11 @@ impl CascadedStyle {
                     parent.map(|s| s.min_width),
                     Length::Px(0.0),
                 ),
+                calc_expressions.as_slice(),
                 em_px,
                 rem_base_px,
                 viewport,
+                None,
             ),
             max_width: resolve_opt_length(
                 resolve_non_inherited_kw(
@@ -1262,6 +1359,7 @@ impl CascadedStyle {
                     parent.map(|s| s.max_width),
                     None,
                 ),
+                calc_expressions.as_slice(),
                 em_px,
                 rem_base_px,
                 viewport,
@@ -1273,9 +1371,11 @@ impl CascadedStyle {
                     parent.map(|s| s.min_height),
                     Length::Px(0.0),
                 ),
+                calc_expressions.as_slice(),
                 em_px,
                 rem_base_px,
                 viewport,
+                None,
             ),
             max_height: resolve_opt_length(
                 resolve_non_inherited_kw(
@@ -1284,6 +1384,7 @@ impl CascadedStyle {
                     parent.map(|s| s.max_height),
                     None,
                 ),
+                calc_expressions.as_slice(),
                 em_px,
                 rem_base_px,
                 viewport,
@@ -3052,7 +3153,7 @@ fn apply_declaration(
             }
         }
         PropertyId::FontSize => {
-            if let Some(value) = parse_length(&declaration.value) {
+            if let Some(value) = parse_length(&declaration.value, &mut cascaded.calc_expressions) {
                 apply_property(
                     &mut cascaded.font_size,
                     value,
@@ -3063,7 +3164,7 @@ fn apply_declaration(
             }
         }
         PropertyId::LineHeight => {
-            if let Some(value) = parse_length(&declaration.value) {
+            if let Some(value) = parse_length(&declaration.value, &mut cascaded.calc_expressions) {
                 apply_property(
                     &mut cascaded.line_height,
                     value,
@@ -3110,28 +3211,36 @@ fn apply_declaration(
         // pair of edges the logical axis names, which horizontal-tb resolves
         // to top/bottom and left/right.
         PropertyId::MarginBlock => {
-            if let Some((start, end)) = parse_edge_pair(&declaration.value) {
+            if let Some((start, end)) =
+                parse_edge_pair(&declaration.value, &mut cascaded.calc_expressions)
+            {
                 let (imp, spec, ord) = (declaration.important, specificity, order);
                 apply_property(&mut cascaded.margin_top, start, imp, spec, ord);
                 apply_property(&mut cascaded.margin_bottom, end, imp, spec, ord);
             }
         }
         PropertyId::MarginInline => {
-            if let Some((start, end)) = parse_edge_pair(&declaration.value) {
+            if let Some((start, end)) =
+                parse_edge_pair(&declaration.value, &mut cascaded.calc_expressions)
+            {
                 let (imp, spec, ord) = (declaration.important, specificity, order);
                 apply_property(&mut cascaded.margin_left, start, imp, spec, ord);
                 apply_property(&mut cascaded.margin_right, end, imp, spec, ord);
             }
         }
         PropertyId::PaddingBlock => {
-            if let Some((start, end)) = parse_length_pair(&declaration.value) {
+            if let Some((start, end)) =
+                parse_length_pair(&declaration.value, &mut cascaded.calc_expressions)
+            {
                 let (imp, spec, ord) = (declaration.important, specificity, order);
                 apply_property(&mut cascaded.padding_top, start, imp, spec, ord);
                 apply_property(&mut cascaded.padding_bottom, end, imp, spec, ord);
             }
         }
         PropertyId::PaddingInline => {
-            if let Some((start, end)) = parse_length_pair(&declaration.value) {
+            if let Some((start, end)) =
+                parse_length_pair(&declaration.value, &mut cascaded.calc_expressions)
+            {
                 let (imp, spec, ord) = (declaration.important, specificity, order);
                 apply_property(&mut cascaded.padding_left, start, imp, spec, ord);
                 apply_property(&mut cascaded.padding_right, end, imp, spec, ord);
@@ -3139,7 +3248,9 @@ fn apply_declaration(
         }
         // `inset` is the box shorthand over the four offset properties.
         PropertyId::Inset => {
-            if let Some([top, right, bottom, left]) = parse_margin_edges(&declaration.value) {
+            if let Some([top, right, bottom, left]) =
+                parse_margin_edges(&declaration.value, &mut cascaded.calc_expressions)
+            {
                 let (imp, spec, ord) = (declaration.important, specificity, order);
                 apply_property(&mut cascaded.top, top, imp, spec, ord);
                 apply_property(&mut cascaded.right_offset, right, imp, spec, ord);
@@ -3185,7 +3296,9 @@ fn apply_declaration(
          * moving it wrongly.
          */
         PropertyId::Transform => {
-            if let Some(value) = parse_translation(&declaration.value) {
+            if let Some(value) =
+                parse_translation(&declaration.value, &mut cascaded.calc_expressions)
+            {
                 apply_property(
                     &mut cascaded.transform,
                     value,
@@ -3200,7 +3313,9 @@ fn apply_declaration(
         // contributes nothing rather than being mistaken for a border.
         PropertyId::Outline => {}
         PropertyId::Margin => {
-            if let Some([top, right, bottom, left]) = parse_margin_edges(&declaration.value) {
+            if let Some([top, right, bottom, left]) =
+                parse_margin_edges(&declaration.value, &mut cascaded.calc_expressions)
+            {
                 let (imp, spec, ord) = (declaration.important, specificity, order);
                 apply_property(&mut cascaded.margin_top, top, imp, spec, ord);
                 apply_property(&mut cascaded.margin_right, right, imp, spec, ord);
@@ -3209,7 +3324,9 @@ fn apply_declaration(
             }
         }
         PropertyId::MarginTop => {
-            if let Some(value) = parse_length_or_auto(&declaration.value) {
+            if let Some(value) =
+                parse_length_or_auto(&declaration.value, &mut cascaded.calc_expressions)
+            {
                 apply_property(
                     &mut cascaded.margin_top,
                     value,
@@ -3220,7 +3337,9 @@ fn apply_declaration(
             }
         }
         PropertyId::MarginRight => {
-            if let Some(value) = parse_length_or_auto(&declaration.value) {
+            if let Some(value) =
+                parse_length_or_auto(&declaration.value, &mut cascaded.calc_expressions)
+            {
                 apply_property(
                     &mut cascaded.margin_right,
                     value,
@@ -3231,7 +3350,9 @@ fn apply_declaration(
             }
         }
         PropertyId::MarginBottom => {
-            if let Some(value) = parse_length_or_auto(&declaration.value) {
+            if let Some(value) =
+                parse_length_or_auto(&declaration.value, &mut cascaded.calc_expressions)
+            {
                 apply_property(
                     &mut cascaded.margin_bottom,
                     value,
@@ -3242,7 +3363,9 @@ fn apply_declaration(
             }
         }
         PropertyId::MarginLeft => {
-            if let Some(value) = parse_length_or_auto(&declaration.value) {
+            if let Some(value) =
+                parse_length_or_auto(&declaration.value, &mut cascaded.calc_expressions)
+            {
                 apply_property(
                     &mut cascaded.margin_left,
                     value,
@@ -3253,7 +3376,7 @@ fn apply_declaration(
             }
         }
         PropertyId::Padding => {
-            if let Some(value) = parse_edges(&declaration.value) {
+            if let Some(value) = parse_edges(&declaration.value, &mut cascaded.calc_expressions) {
                 let (imp, spec, ord) = (declaration.important, specificity, order);
                 apply_property(&mut cascaded.padding_top, value.top, imp, spec, ord);
                 apply_property(&mut cascaded.padding_right, value.right, imp, spec, ord);
@@ -3262,7 +3385,7 @@ fn apply_declaration(
             }
         }
         PropertyId::PaddingTop => {
-            if let Some(value) = parse_length(&declaration.value) {
+            if let Some(value) = parse_length(&declaration.value, &mut cascaded.calc_expressions) {
                 apply_property(
                     &mut cascaded.padding_top,
                     value,
@@ -3273,7 +3396,7 @@ fn apply_declaration(
             }
         }
         PropertyId::PaddingRight => {
-            if let Some(value) = parse_length(&declaration.value) {
+            if let Some(value) = parse_length(&declaration.value, &mut cascaded.calc_expressions) {
                 apply_property(
                     &mut cascaded.padding_right,
                     value,
@@ -3284,7 +3407,7 @@ fn apply_declaration(
             }
         }
         PropertyId::PaddingBottom => {
-            if let Some(value) = parse_length(&declaration.value) {
+            if let Some(value) = parse_length(&declaration.value, &mut cascaded.calc_expressions) {
                 apply_property(
                     &mut cascaded.padding_bottom,
                     value,
@@ -3295,7 +3418,7 @@ fn apply_declaration(
             }
         }
         PropertyId::PaddingLeft => {
-            if let Some(value) = parse_length(&declaration.value) {
+            if let Some(value) = parse_length(&declaration.value, &mut cascaded.calc_expressions) {
                 apply_property(
                     &mut cascaded.padding_left,
                     value,
@@ -3306,7 +3429,8 @@ fn apply_declaration(
             }
         }
         PropertyId::Border => {
-            let (width, style, color) = parse_border_shorthand(&declaration.value);
+            let (width, style, color) =
+                parse_border_shorthand(&declaration.value, &mut cascaded.calc_expressions);
             let (imp, spec, ord) = (declaration.important, specificity, order);
             if let Some(w) = width {
                 apply_property(&mut cascaded.border_top, w, imp, spec, ord);
@@ -3322,7 +3446,7 @@ fn apply_declaration(
             }
         }
         PropertyId::BorderWidth => {
-            if let Some(edges) = parse_edges(&declaration.value) {
+            if let Some(edges) = parse_edges(&declaration.value, &mut cascaded.calc_expressions) {
                 let (imp, spec, ord) = (declaration.important, specificity, order);
                 apply_property(&mut cascaded.border_top, edges.top, imp, spec, ord);
                 apply_property(&mut cascaded.border_right, edges.right, imp, spec, ord);
@@ -3331,7 +3455,8 @@ fn apply_declaration(
             }
         }
         PropertyId::BorderTop => {
-            let (width, _, _) = parse_border_shorthand(&declaration.value);
+            let (width, _, _) =
+                parse_border_shorthand(&declaration.value, &mut cascaded.calc_expressions);
             if let Some(w) = width {
                 apply_property(
                     &mut cascaded.border_top,
@@ -3343,7 +3468,8 @@ fn apply_declaration(
             }
         }
         PropertyId::BorderRight => {
-            let (width, _, _) = parse_border_shorthand(&declaration.value);
+            let (width, _, _) =
+                parse_border_shorthand(&declaration.value, &mut cascaded.calc_expressions);
             if let Some(w) = width {
                 apply_property(
                     &mut cascaded.border_right,
@@ -3355,7 +3481,8 @@ fn apply_declaration(
             }
         }
         PropertyId::BorderBottom => {
-            let (width, _, _) = parse_border_shorthand(&declaration.value);
+            let (width, _, _) =
+                parse_border_shorthand(&declaration.value, &mut cascaded.calc_expressions);
             if let Some(w) = width {
                 apply_property(
                     &mut cascaded.border_bottom,
@@ -3367,7 +3494,8 @@ fn apply_declaration(
             }
         }
         PropertyId::BorderLeft => {
-            let (width, _, _) = parse_border_shorthand(&declaration.value);
+            let (width, _, _) =
+                parse_border_shorthand(&declaration.value, &mut cascaded.calc_expressions);
             if let Some(w) = width {
                 apply_property(
                     &mut cascaded.border_left,
@@ -3526,7 +3654,9 @@ fn apply_declaration(
             }
         }
         PropertyId::FlexBasis => {
-            if let Some(value) = parse_flex_basis(&declaration.value) {
+            if let Some(value) =
+                parse_flex_basis(&declaration.value, &mut cascaded.calc_expressions)
+            {
                 apply_property(
                     &mut cascaded.flex_basis,
                     value,
@@ -3537,7 +3667,8 @@ fn apply_declaration(
             }
         }
         PropertyId::Flex => {
-            let (grow, shrink, basis) = parse_flex_shorthand(&declaration.value);
+            let (grow, shrink, basis) =
+                parse_flex_shorthand(&declaration.value, &mut cascaded.calc_expressions);
             if let Some(g) = grow {
                 apply_property(
                     &mut cascaded.flex_grow,
@@ -3590,7 +3721,9 @@ fn apply_declaration(
             }
         }
         PropertyId::Top => {
-            if let Some(value) = parse_length_or_auto(&declaration.value) {
+            if let Some(value) =
+                parse_length_or_auto(&declaration.value, &mut cascaded.calc_expressions)
+            {
                 apply_property(
                     &mut cascaded.top,
                     value,
@@ -3601,7 +3734,9 @@ fn apply_declaration(
             }
         }
         PropertyId::Right => {
-            if let Some(value) = parse_length_or_auto(&declaration.value) {
+            if let Some(value) =
+                parse_length_or_auto(&declaration.value, &mut cascaded.calc_expressions)
+            {
                 apply_property(
                     &mut cascaded.right_offset,
                     value,
@@ -3612,7 +3747,9 @@ fn apply_declaration(
             }
         }
         PropertyId::Bottom => {
-            if let Some(value) = parse_length_or_auto(&declaration.value) {
+            if let Some(value) =
+                parse_length_or_auto(&declaration.value, &mut cascaded.calc_expressions)
+            {
                 apply_property(
                     &mut cascaded.bottom,
                     value,
@@ -3623,7 +3760,9 @@ fn apply_declaration(
             }
         }
         PropertyId::Left => {
-            if let Some(value) = parse_length_or_auto(&declaration.value) {
+            if let Some(value) =
+                parse_length_or_auto(&declaration.value, &mut cascaded.calc_expressions)
+            {
                 apply_property(
                     &mut cascaded.left_offset,
                     value,
@@ -3766,7 +3905,9 @@ fn apply_declaration(
         }
         // Sizing
         PropertyId::Width => {
-            if let Some(value) = parse_length_or_auto(&declaration.value) {
+            if let Some(value) =
+                parse_length_or_auto(&declaration.value, &mut cascaded.calc_expressions)
+            {
                 apply_property(
                     &mut cascaded.width,
                     value,
@@ -3777,7 +3918,9 @@ fn apply_declaration(
             }
         }
         PropertyId::Height => {
-            if let Some(value) = parse_length_or_auto(&declaration.value) {
+            if let Some(value) =
+                parse_length_or_auto(&declaration.value, &mut cascaded.calc_expressions)
+            {
                 apply_property(
                     &mut cascaded.height,
                     value,
@@ -3788,7 +3931,7 @@ fn apply_declaration(
             }
         }
         PropertyId::MinWidth => {
-            if let Some(value) = parse_length(&declaration.value) {
+            if let Some(value) = parse_length(&declaration.value, &mut cascaded.calc_expressions) {
                 apply_property(
                     &mut cascaded.min_width,
                     value,
@@ -3799,7 +3942,9 @@ fn apply_declaration(
             }
         }
         PropertyId::MaxWidth => {
-            if let Some(value) = parse_max_dimension(&declaration.value) {
+            if let Some(value) =
+                parse_max_dimension(&declaration.value, &mut cascaded.calc_expressions)
+            {
                 apply_property(
                     &mut cascaded.max_width,
                     value,
@@ -3810,7 +3955,7 @@ fn apply_declaration(
             }
         }
         PropertyId::MinHeight => {
-            if let Some(value) = parse_length(&declaration.value) {
+            if let Some(value) = parse_length(&declaration.value, &mut cascaded.calc_expressions) {
                 apply_property(
                     &mut cascaded.min_height,
                     value,
@@ -3821,7 +3966,9 @@ fn apply_declaration(
             }
         }
         PropertyId::MaxHeight => {
-            if let Some(value) = parse_max_dimension(&declaration.value) {
+            if let Some(value) =
+                parse_max_dimension(&declaration.value, &mut cascaded.calc_expressions)
+            {
                 apply_property(
                     &mut cascaded.max_height,
                     value,
@@ -4199,12 +4346,15 @@ fn parse_align_self(tokens: &[CssToken]) -> Option<AlignSelf> {
     }
 }
 
-fn parse_flex_basis(tokens: &[CssToken]) -> Option<FlexBasis> {
+fn parse_flex_basis(
+    tokens: &[CssToken],
+    calc_expressions: &mut Vec<CalcExpr>,
+) -> Option<FlexBasis> {
     let ident = first_ident(tokens);
     if ident == Some("auto") {
         return Some(FlexBasis::Auto);
     }
-    parse_length(tokens).map(FlexBasis::Length)
+    parse_length(tokens, calc_expressions).map(FlexBasis::Length)
 }
 
 fn parse_number_value(tokens: &[CssToken]) -> Option<f32> {
@@ -4274,8 +4424,11 @@ fn parse_justify_content_keyword(ident: &str) -> Option<JustifyContent> {
 }
 
 /// One or two margin values for a logical axis: one value covers both edges.
-fn parse_edge_pair(tokens: &[CssToken]) -> Option<(LengthOrAuto, LengthOrAuto)> {
-    let values = parse_margin_value_list(tokens);
+fn parse_edge_pair(
+    tokens: &[CssToken],
+    calc_expressions: &mut Vec<CalcExpr>,
+) -> Option<(LengthOrAuto, LengthOrAuto)> {
+    let values = parse_margin_value_list(tokens, calc_expressions);
     match values.len() {
         1 => Some((values[0], values[0])),
         2 => Some((values[0], values[1])),
@@ -4285,8 +4438,11 @@ fn parse_edge_pair(tokens: &[CssToken]) -> Option<(LengthOrAuto, LengthOrAuto)> 
 
 /// One or two lengths for a logical axis, for the properties that take no
 /// `auto`.
-fn parse_length_pair(tokens: &[CssToken]) -> Option<(Length, Length)> {
-    let values = parse_length_list(tokens);
+fn parse_length_pair(
+    tokens: &[CssToken],
+    calc_expressions: &mut Vec<CalcExpr>,
+) -> Option<(Length, Length)> {
+    let values = parse_length_list(tokens, calc_expressions);
     match values.len() {
         1 => Some((values[0], values[0])),
         2 => Some((values[0], values[1])),
@@ -4311,13 +4467,21 @@ fn apply_font_shorthand(
 ) {
     let (imp, spec, ord) = (declaration.important, specificity, order);
     let tokens = &declaration.value;
-    let Some(size_index) = tokens
-        .iter()
-        .position(|token| parse_length_token(token).is_some())
-    else {
-        return;
+    let mut size_index = 0;
+    let (size, size_end) = loop {
+        while size_index < tokens.len() && matches!(tokens[size_index], CssToken::Whitespace) {
+            size_index += 1;
+        }
+        if size_index >= tokens.len() {
+            return;
+        }
+        match parse_length_component(tokens, size_index, &mut cascaded.calc_expressions) {
+            Ok(Some((size, end))) => break (size, end),
+            Ok(None) => size_index += 1,
+            Err(()) => return,
+        }
     };
-    if let Some(size) = parse_length_token(&tokens[size_index]) {
+    {
         apply_property(&mut cascaded.font_size, size, imp, spec, ord);
     }
     let leading = &tokens[..size_index];
@@ -4327,13 +4491,17 @@ fn apply_font_shorthand(
     if let Some(style) = parse_font_style(leading) {
         apply_property(&mut cascaded.font_style, style, imp, spec, ord);
     }
-    let after_size = &tokens[size_index + 1..];
-    if matches!(after_size.first(), Some(CssToken::Delim('/')))
-        && let Some(line_height) = after_size.get(1).and_then(parse_length_token)
-    {
-        apply_property(&mut cascaded.line_height, line_height, imp, spec, ord);
+    let after_size = &tokens[size_end..];
+    let mut family_start = 0;
+    if matches!(after_size.first(), Some(CssToken::Delim('/'))) {
+        if let Ok(Some((line_height, end))) =
+            parse_length_component(after_size, 1, &mut cascaded.calc_expressions)
+        {
+            apply_property(&mut cascaded.line_height, line_height, imp, spec, ord);
+            family_start = end;
+        }
     }
-    if let Some(family) = parse_font_family(after_size) {
+    if let Some(family) = parse_font_family(&after_size[family_start..]) {
         apply_property(&mut cascaded.font_family, family, imp, spec, ord);
     }
 }
@@ -4347,7 +4515,10 @@ fn apply_font_shorthand(
  * contributes nothing, and a value naming only such functions returns None so
  * the declaration leaves the element where layout placed it.
  */
-fn parse_translation(tokens: &[CssToken]) -> Option<Translation> {
+fn parse_translation(
+    tokens: &[CssToken],
+    calc_expressions: &mut Vec<CalcExpr>,
+) -> Option<Translation> {
     let mut found = false;
     let mut translation = Translation::default();
     let mut index = 0usize;
@@ -4357,27 +4528,29 @@ fn parse_translation(tokens: &[CssToken]) -> Option<Translation> {
             continue;
         };
         let lowered = name.to_ascii_lowercase();
-        let end = matching_paren(tokens, index);
-        let arguments = comma_separated_lengths(&tokens[index + 1..end]);
+        let end = matching_paren(tokens, index)?;
         match lowered.as_str() {
             "translate" | "translate3d" => {
+                let arguments = comma_separated_lengths(&tokens[index + 1..end], calc_expressions)?;
                 if let Some(x) = arguments.first() {
-                    translation.x = add_lengths(translation.x, *x);
+                    translation.x = add_lengths(translation.x, *x, calc_expressions)?;
                     found = true;
                 }
                 if let Some(y) = arguments.get(1) {
-                    translation.y = add_lengths(translation.y, *y);
+                    translation.y = add_lengths(translation.y, *y, calc_expressions)?;
                 }
             }
             "translatex" => {
+                let arguments = comma_separated_lengths(&tokens[index + 1..end], calc_expressions)?;
                 if let Some(x) = arguments.first() {
-                    translation.x = add_lengths(translation.x, *x);
+                    translation.x = add_lengths(translation.x, *x, calc_expressions)?;
                     found = true;
                 }
             }
             "translatey" => {
+                let arguments = comma_separated_lengths(&tokens[index + 1..end], calc_expressions)?;
                 if let Some(y) = arguments.first() {
-                    translation.y = add_lengths(translation.y, *y);
+                    translation.y = add_lengths(translation.y, *y, calc_expressions)?;
                     found = true;
                 }
             }
@@ -4389,45 +4562,98 @@ fn parse_translation(tokens: &[CssToken]) -> Option<Translation> {
 }
 
 /// The index of the `)` closing the function at `open`, or the token count.
-fn matching_paren(tokens: &[CssToken], open: usize) -> usize {
+fn matching_paren(tokens: &[CssToken], open: usize) -> Option<usize> {
     let mut depth = 0usize;
     for (offset, token) in tokens[open..].iter().enumerate() {
         match token {
             CssToken::Function(_) | CssToken::ParenOpen => depth += 1,
             CssToken::ParenClose => {
+                if depth == 0 {
+                    return None;
+                }
                 depth -= 1;
                 if depth == 0 {
-                    return open + offset;
+                    return Some(open + offset);
                 }
             }
             _ => {}
         }
     }
-    tokens.len()
+    None
 }
 
 /// The comma-separated lengths inside a function's argument list.
-fn comma_separated_lengths(tokens: &[CssToken]) -> Vec<Length> {
+fn comma_separated_lengths(
+    tokens: &[CssToken],
+    calc_expressions: &mut Vec<CalcExpr>,
+) -> Option<Vec<Length>> {
     tokens
         .split(|token| matches!(token, CssToken::Comma))
-        .filter_map(|group| group.iter().find_map(parse_length_token))
+        .map(|group| parse_length(group, calc_expressions))
         .collect()
 }
 
-/// Sum two lengths of the same unit; mixed units keep the second, because the
-/// cascade carries no calc tree at this point.
-fn add_lengths(left: Length, right: Length) -> Length {
+/// Sum same-unit lengths directly and retain a calculation when either term
+/// already carries an expression tree.
+fn add_lengths(
+    left: Length,
+    right: Length,
+    calc_expressions: &mut Vec<CalcExpr>,
+) -> Option<Length> {
     match (left, right) {
-        (Length::Px(a), Length::Px(b)) => Length::Px(a + b),
-        (Length::Percent(a), Length::Percent(b)) => Length::Percent(a + b),
-        (Length::Em(a), Length::Em(b)) => Length::Em(a + b),
-        (Length::Rem(a), Length::Rem(b)) => Length::Rem(a + b),
-        _ => right,
+        (Length::Px(a), Length::Px(b)) => Some(Length::Px(a + b)),
+        (Length::Percent(a), Length::Percent(b)) => Some(Length::Percent(a + b)),
+        (Length::Em(a), Length::Em(b)) => Some(Length::Em(a + b)),
+        (Length::Rem(a), Length::Rem(b)) => Some(Length::Rem(a + b)),
+        (left, right) if matches!(left, Length::Calc(_)) || matches!(right, Length::Calc(_)) => {
+            let left = length_as_calc_expr(left, calc_expressions)?;
+            let right = length_as_calc_expr(right, calc_expressions)?;
+            let expression_id = calc_expressions.len() as u32;
+            calc_expressions.push(CalcExpr::Add(Box::new(left), Box::new(right)));
+            Some(Length::Calc(expression_id))
+        }
+        (_, right) => Some(right),
     }
 }
 
-fn parse_length(tokens: &[CssToken]) -> Option<Length> {
-    tokens.iter().find_map(parse_length_token)
+fn length_as_calc_expr(length: Length, calc_expressions: &[CalcExpr]) -> Option<CalcExpr> {
+    match length {
+        Length::Calc(expression_id) => calc_expressions.get(expression_id as usize).cloned(),
+        length => Some(CalcExpr::Value(length)),
+    }
+}
+
+fn parse_length(tokens: &[CssToken], calc_expressions: &mut Vec<CalcExpr>) -> Option<Length> {
+    let mut cursor = 0;
+    while cursor < tokens.len() && matches!(tokens[cursor], CssToken::Whitespace) {
+        cursor += 1;
+    }
+    let (length, end) = parse_length_component(tokens, cursor, calc_expressions).ok()??;
+    cursor = end;
+    while cursor < tokens.len() && matches!(tokens[cursor], CssToken::Whitespace) {
+        cursor += 1;
+    }
+    (cursor == tokens.len()).then_some(length)
+}
+
+fn parse_length_component(
+    tokens: &[CssToken],
+    cursor: usize,
+    calc_expressions: &mut Vec<CalcExpr>,
+) -> Result<Option<(Length, usize)>, ()> {
+    let Some(token) = tokens.get(cursor) else {
+        return Ok(None);
+    };
+    if let CssToken::Function(name) = token
+        && name.eq_ignore_ascii_case("calc")
+    {
+        let end = matching_paren(tokens, cursor).ok_or(())?;
+        let expression = parse_calc(&tokens[cursor + 1..end]).ok_or(())?;
+        let expression_id = calc_expressions.len() as u32;
+        calc_expressions.push(expression);
+        return Ok(Some((Length::Calc(expression_id), end + 1)));
+    }
+    Ok(parse_length_token(token).map(|length| (length, cursor + 1)))
 }
 
 fn parse_length_token(token: &CssToken) -> Option<Length> {
@@ -4491,11 +4717,14 @@ fn parse_overflow(tokens: &[CssToken]) -> Option<Overflow> {
     }
 }
 
-fn parse_length_or_auto(tokens: &[CssToken]) -> Option<LengthOrAuto> {
+fn parse_length_or_auto(
+    tokens: &[CssToken],
+    calc_expressions: &mut Vec<CalcExpr>,
+) -> Option<LengthOrAuto> {
     if first_ident(tokens) == Some("auto") {
         return Some(LengthOrAuto::Auto);
     }
-    parse_length(tokens).map(LengthOrAuto::Length)
+    parse_length(tokens, calc_expressions).map(LengthOrAuto::Length)
 }
 
 fn parse_opacity(tokens: &[CssToken]) -> Option<f32> {
@@ -4595,6 +4824,7 @@ fn parse_box_shadow(tokens: &[CssToken]) -> Option<BoxShadow> {
         | Length::Vh(v)
         | Length::Vmin(v)
         | Length::Vmax(v) => *v,
+        Length::Calc(_) => 0.0,
     };
     Some(BoxShadow {
         offset_x: px(&lengths[0]),
@@ -4770,7 +5000,10 @@ fn gradient_color_stop(tokens: &[&CssToken], auto_pos: f32) -> Option<(f32, Colo
     Some((pos, color))
 }
 
-fn parse_flex_shorthand(tokens: &[CssToken]) -> (Option<f32>, Option<f32>, Option<FlexBasis>) {
+fn parse_flex_shorthand(
+    tokens: &[CssToken],
+    calc_expressions: &mut Vec<CalcExpr>,
+) -> (Option<f32>, Option<f32>, Option<FlexBasis>) {
     // CSS flex shorthand per spec:
     //   none          -> 0 0 auto
     //   auto          -> 1 1 auto
@@ -4788,9 +5021,19 @@ fn parse_flex_shorthand(tokens: &[CssToken]) -> (Option<f32>, Option<f32>, Optio
 
     let mut numbers: Vec<f32> = Vec::new();
     let mut basis: Option<FlexBasis> = None;
-    for token in tokens {
+    let mut cursor = 0;
+    while cursor < tokens.len() {
+        if matches!(tokens[cursor], CssToken::Whitespace) {
+            cursor += 1;
+            continue;
+        }
+        if let Ok(Some((length, end))) = parse_length_component(tokens, cursor, calc_expressions) {
+            basis = Some(FlexBasis::Length(length));
+            cursor = end;
+            continue;
+        }
+        let token = &tokens[cursor];
         match token {
-            CssToken::Whitespace => {}
             CssToken::Number(v) => {
                 if let Ok(n) = v.parse::<f32>() {
                     numbers.push(n);
@@ -4811,6 +5054,7 @@ fn parse_flex_shorthand(tokens: &[CssToken]) -> (Option<f32>, Option<f32>, Optio
             }
             _ => {}
         }
+        cursor += 1;
     }
 
     match (numbers.len(), basis) {
@@ -4837,23 +5081,26 @@ fn parse_flex_shorthand(tokens: &[CssToken]) -> (Option<f32>, Option<f32>, Optio
 
 fn parse_border_shorthand(
     tokens: &[CssToken],
+    calc_expressions: &mut Vec<CalcExpr>,
 ) -> (Option<Length>, Option<BorderStyle>, Option<Color>) {
     let mut width: Option<Length> = None;
     let mut style: Option<BorderStyle> = None;
     let mut color: Option<Color> = None;
-    for token in tokens {
+    let mut cursor = 0;
+    while cursor < tokens.len() {
+        if matches!(tokens[cursor], CssToken::Whitespace) {
+            cursor += 1;
+            continue;
+        }
+        if let Ok(Some((length, end))) = parse_length_component(tokens, cursor, calc_expressions) {
+            if width.is_none() {
+                width = Some(length);
+            }
+            cursor = end;
+            continue;
+        }
+        let token = &tokens[cursor];
         match token {
-            CssToken::Whitespace => {}
-            CssToken::Dimension { value, unit } if unit.eq_ignore_ascii_case("px") => {
-                if width.is_none() {
-                    width = value.parse::<f32>().ok().map(Length::Px);
-                }
-            }
-            CssToken::Number(value) if value == "0" => {
-                if width.is_none() {
-                    width = Some(Length::Px(0.0));
-                }
-            }
             CssToken::Hash(hex) => {
                 if color.is_none() {
                     color = parse_hex_color(hex);
@@ -4880,15 +5127,19 @@ fn parse_border_shorthand(
             }
             _ => {}
         }
+        cursor += 1;
     }
     (width, style, color)
 }
 
-fn parse_max_dimension(tokens: &[CssToken]) -> Option<Option<Length>> {
+fn parse_max_dimension(
+    tokens: &[CssToken],
+    calc_expressions: &mut Vec<CalcExpr>,
+) -> Option<Option<Length>> {
     if first_ident(tokens) == Some("none") {
         return Some(None);
     }
-    parse_length(tokens).map(Some)
+    parse_length(tokens, calc_expressions).map(Some)
 }
 
 fn parse_border_style_value(tokens: &[CssToken]) -> Option<BorderStyle> {
@@ -4945,18 +5196,28 @@ fn parse_visibility_value(tokens: &[CssToken]) -> Option<Visibility> {
     }
 }
 
-fn parse_length_list(tokens: &[CssToken]) -> Vec<Length> {
+fn parse_length_list(tokens: &[CssToken], calc_expressions: &mut Vec<CalcExpr>) -> Vec<Length> {
     let mut values = Vec::new();
-    for token in tokens {
-        if let Some(length) = parse_length_token(token) {
-            values.push(length);
+    let mut cursor = 0;
+    while cursor < tokens.len() {
+        if matches!(tokens[cursor], CssToken::Whitespace) {
+            cursor += 1;
+            continue;
+        }
+        match parse_length_component(tokens, cursor, calc_expressions) {
+            Ok(Some((length, end))) => {
+                values.push(length);
+                cursor = end;
+            }
+            Ok(None) => cursor += 1,
+            Err(()) => return Vec::new(),
         }
     }
     values
 }
 
-fn parse_edges(tokens: &[CssToken]) -> Option<Edges> {
-    let values = parse_length_list(tokens);
+fn parse_edges(tokens: &[CssToken], calc_expressions: &mut Vec<CalcExpr>) -> Option<Edges> {
+    let values = parse_length_list(tokens, calc_expressions);
     match values.len() {
         1 => Some(Edges::all(values[0])),
         2 => Some(Edges {
@@ -4981,24 +5242,42 @@ fn parse_edges(tokens: &[CssToken]) -> Option<Edges> {
     }
 }
 
-fn parse_margin_value_list(tokens: &[CssToken]) -> Vec<LengthOrAuto> {
+fn parse_margin_value_list(
+    tokens: &[CssToken],
+    calc_expressions: &mut Vec<CalcExpr>,
+) -> Vec<LengthOrAuto> {
     let mut values = Vec::new();
-    for token in tokens {
+    let mut cursor = 0;
+    while cursor < tokens.len() {
+        if matches!(tokens[cursor], CssToken::Whitespace) {
+            cursor += 1;
+            continue;
+        }
+        let token = &tokens[cursor];
         if let CssToken::Ident(ident) = token {
             if ident.eq_ignore_ascii_case("auto") {
                 values.push(LengthOrAuto::Auto);
+                cursor += 1;
                 continue;
             }
         }
-        if let Some(length) = parse_length_token(token) {
-            values.push(LengthOrAuto::Length(length));
+        match parse_length_component(tokens, cursor, calc_expressions) {
+            Ok(Some((length, end))) => {
+                values.push(LengthOrAuto::Length(length));
+                cursor = end;
+            }
+            Ok(None) => cursor += 1,
+            Err(()) => return Vec::new(),
         }
     }
     values
 }
 
-fn parse_margin_edges(tokens: &[CssToken]) -> Option<[LengthOrAuto; 4]> {
-    let values = parse_margin_value_list(tokens);
+fn parse_margin_edges(
+    tokens: &[CssToken],
+    calc_expressions: &mut Vec<CalcExpr>,
+) -> Option<[LengthOrAuto; 4]> {
+    let values = parse_margin_value_list(tokens, calc_expressions);
     match values.len() {
         1 => Some([values[0]; 4]),
         2 => Some([values[0], values[1], values[0], values[1]]),

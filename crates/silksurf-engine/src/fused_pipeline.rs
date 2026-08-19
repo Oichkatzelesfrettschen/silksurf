@@ -1062,8 +1062,8 @@ fn apply_transform_offsets(
         let (mut dx, mut dy) = parent.map_or((0.0, 0.0), |p| offsets[p as usize]);
         if let Some(style) = styles[i].as_ref() {
             let rect = node_rects[i];
-            let own_x = translation_px(style.transform.x, rect.width, style.font_size);
-            let own_y = translation_px(style.transform.y, rect.height, style.font_size);
+            let own_x = translation_px(style, style.transform.x, rect.width);
+            let own_y = translation_px(style, style.transform.y, rect.height);
             if own_x != 0.0 || own_y != 0.0 {
                 any = true;
                 dx += own_x;
@@ -1077,15 +1077,18 @@ fn apply_transform_offsets(
 
 /// One translation component in pixels. A percentage resolves against the
 /// element's own border-box extent along that axis.
-fn translation_px(length: Length, extent: f32, font_size: Length) -> f32 {
+fn translation_px(style: &ComputedStyle, length: Length, extent: f32) -> f32 {
     match length {
         Length::Px(value) => value,
         Length::Percent(value) => extent * value / 100.0,
-        Length::Em(value) => value * length_px(font_size, 16.0),
+        Length::Em(value) => value * length_px(style.font_size, 16.0),
         Length::Rem(value) => value * 16.0,
         // The cascade resolves viewport units to px, so a translation still
         // carrying one came from a caller that skipped resolve.
         Length::Vw(value) | Length::Vh(value) | Length::Vmin(value) | Length::Vmax(value) => value,
+        Length::Calc(_) => style
+            .resolve_calc_length(length, extent, (0.0, 0.0))
+            .unwrap_or(0.0),
     }
 }
 
@@ -1098,6 +1101,7 @@ fn length_px(length: Length, fallback: f32) -> f32 {
         Length::Percent(_) | Length::Vw(_) | Length::Vh(_) | Length::Vmin(_) | Length::Vmax(_) => {
             fallback
         }
+        Length::Calc(_) => fallback,
     }
 }
 

@@ -341,3 +341,59 @@ fn a_viewport_relative_font_size_resolves_against_the_viewport() {
     let style = computed_in_viewport(".box { font-size: 5vh; }", (1280.0, 800.0));
     assert_eq!(style.font_size, Length::Px(40.0));
 }
+
+#[test]
+fn calc_applies_addition_before_subtraction_and_multiplication_first() {
+    let style = computed_in_viewport(
+        ".box { width: calc(10px + 5px * 2); height: calc((10px + 5px) * 2); }",
+        (1280.0, 800.0),
+    );
+    assert_eq!(style.width, LengthOrAuto::Length(Length::Px(20.0)));
+    assert_eq!(style.height, LengthOrAuto::Length(Length::Px(30.0)));
+}
+
+#[test]
+fn calc_resolves_viewport_units_at_cascade_time() {
+    let style = computed_in_viewport(
+        ".box { width: calc(100vw - 20px); height: calc(50vh + 10px); }",
+        (1280.0, 800.0),
+    );
+    assert_eq!(style.width, LengthOrAuto::Length(Length::Px(1260.0)));
+    assert_eq!(style.height, LengthOrAuto::Length(Length::Px(410.0)));
+}
+
+#[test]
+fn calc_resolves_em_and_rem_against_the_computed_font_sizes() {
+    let style = computed_in_viewport(
+        ".box { font-size: 20px; width: calc(1em + 1rem); }",
+        (1280.0, 800.0),
+    );
+    assert_eq!(style.width, LengthOrAuto::Length(Length::Px(36.0)));
+}
+
+#[test]
+fn calc_retains_a_percentage_term_until_a_layout_basis_is_supplied() {
+    let style = computed_in_viewport(".box { width: calc(100% - 2rem); }", (1280.0, 800.0));
+    let LengthOrAuto::Length(Length::Calc(expression_id)) = style.width else {
+        panic!("mixed-unit calc must remain represented as a calculation");
+    };
+    assert_eq!(
+        style.resolve_calc_length(Length::Calc(expression_id), 500.0, (0.0, 0.0)),
+        Some(468.0)
+    );
+}
+
+#[test]
+fn calc_uses_the_parent_font_size_as_font_size_percentage_basis() {
+    let style = computed(
+        "html { font-size: 20px; } .box { font-size: calc(100% - 1rem); }",
+        None,
+    );
+    assert_eq!(style.font_size, Length::Px(4.0));
+}
+
+#[test]
+fn malformed_calc_is_an_invalid_declaration() {
+    let style = computed(".box { width: 42px; width: calc(10px +); }", None);
+    assert_eq!(style.width, LengthOrAuto::Length(Length::Px(42.0)));
+}

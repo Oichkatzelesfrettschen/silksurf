@@ -640,10 +640,11 @@ Named cuts, each with the mechanism that closes it:
   stacking context. CSS 2.1 Appendix E lets a positioned z-auto element's
   positioned descendants join the ancestor context instead. Closing it needs
   `z-index` to carry `auto` distinctly through the cascade.
-- viewport-units-in-calc -- CalcExpr carries only the percentage context, so a
-  viewport unit inside `calc()` evaluates as a bare number. It resolves
-  correctly outside calc(); wiring it needs the viewport threaded into
-  CalcExpr::evaluate.
+- viewport-units-in-calc -- `parse_length` matches `Function("calc")`, consumes
+  balanced component values, and stores the resulting `CalcExpr` in the
+  computed-style arena. `CascadedStyle::resolve` normalizes em/rem and
+  viewport units, while layout supplies the percentage basis for the retained
+  tree.
 - document-stylesheets-cssom -- `StyleSheetSet` is engine state with no
   scripted object model, so `document.styleSheets`, `CSSStyleSheet`, and
   `insertRule` are absent. A page that installs styles through the CSSOM

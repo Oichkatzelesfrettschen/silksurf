@@ -28,11 +28,13 @@ use silksurf_css::{
 };
 use silksurf_dom::{Dom, NodeId as DomNodeId, NodeKind, TagName};
 use taffy::{
-    AlignItems, AlignSelf, AvailableSpace, BoxSizing as TaffyBoxSizing, Dimension,
-    Display as TaffyDisplay, FlexDirection, FlexWrap, GridAutoFlow, GridPlacement,
-    GridTemplateComponent, JustifyContent, LengthPercentage, LengthPercentageAuto, Line,
-    MaxTrackSizingFunction, MinTrackSizingFunction, NodeId as TaffyId, Position as TaffyPosition,
-    Size, Style, TaffyTree, TrackSizingFunction,
+    AlignItems, AlignSelf, AvailableSpace, BoxSizing as TaffyBoxSizing, Cache, CacheTree,
+    Dimension, Display as TaffyDisplay, FlexDirection, FlexWrap, GridAutoFlow, GridPlacement,
+    GridTemplateComponent, JustifyContent, Layout, LayoutInput, LayoutOutput, LayoutPartialTree,
+    LengthPercentage, LengthPercentageAuto, Line, MaxTrackSizingFunction, MinTrackSizingFunction,
+    NodeId as TaffyId, Position as TaffyPosition, Size, Style, TrackSizingFunction,
+    TraversePartialTree, compute_block_layout, compute_cached_layout, compute_flexbox_layout,
+    compute_grid_layout, compute_hidden_layout, compute_leaf_layout, compute_root_layout,
     geometry::Rect as TaffyRect,
     style_helpers::{
         TaffyAuto as _, TaffyFitContent as _, TaffyMaxContent as _, TaffyMinContent as _, fr,
@@ -42,7 +44,242 @@ use taffy::{
 
 use crate::{Rect, neighbor_table::LayoutNeighborTable, unresolved_font_relative_px};
 
-pub type SilkTaffy = TaffyTree<()>;
+pub struct SilkTaffy {
+    styles: Vec<Style>,
+    children: Vec<Vec<TaffyId>>,
+    caches: Vec<Cache>,
+    layouts: Vec<Layout>,
+}
+
+impl SilkTaffy {
+    fn with_capacity(capacity: usize) -> Self {
+        Self {
+            styles: Vec::with_capacity(capacity),
+            children: Vec::with_capacity(capacity),
+            caches: Vec::with_capacity(capacity),
+            layouts: Vec::with_capacity(capacity),
+        }
+    }
+
+    fn clear(&mut self) {
+        self.styles.clear();
+        self.children.clear();
+        self.caches.clear();
+        self.layouts.clear();
+    }
+
+    fn new_node(&mut self, style: Style, children: Vec<TaffyId>) -> TaffyId {
+        let node = TaffyId::from(self.styles.len());
+        self.styles.push(style);
+        self.children.push(children);
+        self.caches.push(Cache::new());
+        self.layouts.push(Layout::new());
+        node
+    }
+
+    fn new_leaf(&mut self, style: Style) -> TaffyId {
+        self.new_node(style, Vec::new())
+    }
+
+    fn new_with_children(&mut self, style: Style, children: &[TaffyId]) -> TaffyId {
+        self.new_node(style, children.to_vec())
+    }
+
+    fn set_style(&mut self, node: TaffyId, style: Style) {
+        self.styles[usize::from(node)] = style;
+        self.caches[usize::from(node)].clear();
+    }
+
+    fn style(&self, node: TaffyId) -> &Style {
+        &self.styles[usize::from(node)]
+    }
+
+    fn layout(&self, node: TaffyId) -> Layout {
+        self.layouts[usize::from(node)]
+    }
+}
+
+struct CalcTaffyView<'a, MeasureFunction> {
+    tree: &'a mut SilkTaffy,
+    measure_function: MeasureFunction,
+}
+
+impl<MeasureFunction> TraversePartialTree for CalcTaffyView<'_, MeasureFunction> {
+    type ChildIter<'a>
+        = std::iter::Copied<std::slice::Iter<'a, TaffyId>>
+    where
+        Self: 'a;
+
+    fn child_ids(&self, parent_node_id: TaffyId) -> Self::ChildIter<'_> {
+        self.tree.children[usize::from(parent_node_id)]
+            .iter()
+            .copied()
+    }
+
+    fn child_count(&self, parent_node_id: TaffyId) -> usize {
+        self.tree.children[usize::from(parent_node_id)].len()
+    }
+
+    fn get_child_id(&self, parent_node_id: TaffyId, child_index: usize) -> TaffyId {
+        self.tree.children[usize::from(parent_node_id)][child_index]
+    }
+}
+
+impl<MeasureFunction> LayoutPartialTree for CalcTaffyView<'_, MeasureFunction>
+where
+    MeasureFunction: FnMut(
+        Size<Option<f32>>,
+        Size<AvailableSpace>,
+        TaffyId,
+        Option<&mut ()>,
+        &Style,
+    ) -> Size<f32>,
+{
+    type CoreContainerStyle<'a>
+        = &'a Style
+    where
+        Self: 'a;
+    type CustomIdent = String;
+
+    fn get_core_container_style(&self, node_id: TaffyId) -> Self::CoreContainerStyle<'_> {
+        self.tree.style(node_id)
+    }
+
+    fn resolve_calc_value(&self, value: *const (), basis: f32) -> f32 {
+        resolve_calc_pointer(value, basis)
+    }
+
+    fn set_unrounded_layout(&mut self, node_id: TaffyId, layout: &Layout) {
+        self.tree.layouts[usize::from(node_id)] = *layout;
+    }
+
+    fn compute_child_layout(&mut self, node_id: TaffyId, inputs: LayoutInput) -> LayoutOutput {
+        compute_cached_layout(self, node_id, inputs, |tree, node_id, inputs| {
+            let display = tree.tree.style(node_id).display;
+            let has_children = tree.child_count(node_id) > 0;
+            match (display, has_children) {
+                (TaffyDisplay::None, _) => compute_hidden_layout(tree, node_id),
+                (TaffyDisplay::Block, true) => compute_block_layout(tree, node_id, inputs, None),
+                (TaffyDisplay::Flex, true) => compute_flexbox_layout(tree, node_id, inputs),
+                (TaffyDisplay::Grid, true) => compute_grid_layout(tree, node_id, inputs),
+                (_, false) => {
+                    let style = tree.tree.style(node_id);
+                    let measure = |known, available| {
+                        (tree.measure_function)(known, available, node_id, None, style)
+                    };
+                    compute_leaf_layout(inputs, style, resolve_calc_pointer, measure)
+                }
+            }
+        })
+    }
+}
+
+impl<MeasureFunction> CacheTree for CalcTaffyView<'_, MeasureFunction> {
+    fn cache_get(&self, node_id: TaffyId, input: &LayoutInput) -> Option<LayoutOutput> {
+        self.tree.caches[usize::from(node_id)].get(input)
+    }
+
+    fn cache_store(&mut self, node_id: TaffyId, input: &LayoutInput, output: LayoutOutput) {
+        self.tree.caches[usize::from(node_id)].store(input, output);
+    }
+
+    fn cache_clear(&mut self, node_id: TaffyId) {
+        self.tree.caches[usize::from(node_id)].clear();
+    }
+}
+
+impl<MeasureFunction> taffy::LayoutBlockContainer for CalcTaffyView<'_, MeasureFunction>
+where
+    MeasureFunction: FnMut(
+        Size<Option<f32>>,
+        Size<AvailableSpace>,
+        TaffyId,
+        Option<&mut ()>,
+        &Style,
+    ) -> Size<f32>,
+{
+    type BlockContainerStyle<'a>
+        = &'a Style
+    where
+        Self: 'a;
+    type BlockItemStyle<'a>
+        = &'a Style
+    where
+        Self: 'a;
+
+    fn get_block_container_style(&self, node_id: TaffyId) -> Self::BlockContainerStyle<'_> {
+        self.tree.style(node_id)
+    }
+
+    fn get_block_child_style(&self, node_id: TaffyId) -> Self::BlockItemStyle<'_> {
+        self.tree.style(node_id)
+    }
+
+    fn compute_block_child_layout(
+        &mut self,
+        node_id: TaffyId,
+        inputs: LayoutInput,
+        _block_context: Option<&mut taffy::BlockContext<'_>>,
+    ) -> LayoutOutput {
+        self.compute_child_layout(node_id, inputs)
+    }
+}
+
+impl<MeasureFunction> taffy::LayoutFlexboxContainer for CalcTaffyView<'_, MeasureFunction>
+where
+    MeasureFunction: FnMut(
+        Size<Option<f32>>,
+        Size<AvailableSpace>,
+        TaffyId,
+        Option<&mut ()>,
+        &Style,
+    ) -> Size<f32>,
+{
+    type FlexboxContainerStyle<'a>
+        = &'a Style
+    where
+        Self: 'a;
+    type FlexboxItemStyle<'a>
+        = &'a Style
+    where
+        Self: 'a;
+
+    fn get_flexbox_container_style(&self, node_id: TaffyId) -> Self::FlexboxContainerStyle<'_> {
+        self.tree.style(node_id)
+    }
+
+    fn get_flexbox_child_style(&self, node_id: TaffyId) -> Self::FlexboxItemStyle<'_> {
+        self.tree.style(node_id)
+    }
+}
+
+impl<MeasureFunction> taffy::LayoutGridContainer for CalcTaffyView<'_, MeasureFunction>
+where
+    MeasureFunction: FnMut(
+        Size<Option<f32>>,
+        Size<AvailableSpace>,
+        TaffyId,
+        Option<&mut ()>,
+        &Style,
+    ) -> Size<f32>,
+{
+    type GridContainerStyle<'a>
+        = &'a Style
+    where
+        Self: 'a;
+    type GridItemStyle<'a>
+        = &'a Style
+    where
+        Self: 'a;
+
+    fn get_grid_container_style(&self, node_id: TaffyId) -> Self::GridContainerStyle<'_> {
+        self.tree.style(node_id)
+    }
+
+    fn get_grid_child_style(&self, node_id: TaffyId) -> Self::GridItemStyle<'_> {
+        self.tree.style(node_id)
+    }
+}
 
 /// Cached taffy layout state held inside `FusedWorkspace`.
 ///
@@ -461,7 +698,7 @@ impl TaffyLayout {
                 stats.child_edges += self.child_ids_scratch.len();
             }
             let tree_start = trace_start(trace_taffy);
-            let result = if self.child_ids_scratch.is_empty() {
+            let taffy_node = if self.child_ids_scratch.is_empty() {
                 if trace_taffy {
                     stats.leaves += 1;
                 }
@@ -475,12 +712,10 @@ impl TaffyLayout {
             };
             record_elapsed(&mut stats.tree_time, tree_start);
 
-            if let Ok(tn) = result {
-                let map_start = trace_start(trace_taffy);
-                self.taffy_to_bfs.insert(tn, i);
-                self.taffy_nodes[i] = Some(tn);
-                record_elapsed(&mut stats.map_time, map_start);
-            }
+            let map_start = trace_start(trace_taffy);
+            self.taffy_to_bfs.insert(taffy_node, i);
+            self.taffy_nodes[i] = Some(taffy_node);
+            record_elapsed(&mut stats.map_time, map_start);
         }
         if any_viewport_rooted {
             self.child_ids_scratch.clear();
@@ -492,16 +727,13 @@ impl TaffyLayout {
             // compute() overwrites the size with the live viewport before it
             // lays this root out; block display gives these children a
             // containing block rather than a flex line.
-            self.viewport_root = self
-                .tree
-                .new_with_children(
-                    Style {
-                        display: TaffyDisplay::Block,
-                        ..Default::default()
-                    },
-                    &self.child_ids_scratch,
-                )
-                .ok();
+            self.viewport_root = Some(self.tree.new_with_children(
+                Style {
+                    display: TaffyDisplay::Block,
+                    ..Default::default()
+                },
+                &self.child_ids_scratch,
+            ));
         }
         if trace_taffy {
             stats.created = self.taffy_to_bfs.len();
@@ -561,7 +793,7 @@ impl TaffyLayout {
         // document root keeps `size: auto`, so this second pass leaves in-flow
         // geometry untouched.
         if let Some(anchored_root) = *viewport_root {
-            let _ = tree.set_style(
+            tree.set_style(
                 anchored_root,
                 Style {
                     display: TaffyDisplay::Block,
@@ -575,100 +807,106 @@ impl TaffyLayout {
         }
         let mut laid_out = true;
         for target in [Some(root), *viewport_root].into_iter().flatten() {
-            let result = tree.compute_layout_with_measure(
-                target,
-                available,
-                |known, avail, taffy_node_id, _context, _style| {
-                    if let Some(stats) = trace_stats.as_mut() {
-                        stats.calls += 1;
-                    }
-                    if let Some(size) = known_measure_size(known) {
+            let result = {
+                let mut view = CalcTaffyView {
+                    tree,
+                    measure_function: |known: Size<Option<f32>>,
+                                       avail: Size<AvailableSpace>,
+                                       taffy_node_id: TaffyId,
+                                       _context: Option<&mut ()>,
+                                       _style: &Style| {
                         if let Some(stats) = trace_stats.as_mut() {
-                            stats.known_size_hits += 1;
+                            stats.calls += 1;
                         }
-                        return size;
-                    }
-                    let Some(&bfs_idx) = taffy_to_bfs.get(&taffy_node_id) else {
-                        return Size::ZERO;
-                    };
-
-                    let font_size =
-                        styles
-                            .get(bfs_idx)
-                            .and_then(Option::as_ref)
-                            .map_or(16.0, |s| match s.font_size {
-                                Length::Px(px) => px,
-                                _ => 16.0,
-                            });
-
-                    let max_w = match avail.width {
-                        AvailableSpace::Definite(w) => Some(w),
-                        _ => None,
-                    };
-
-                    if let Some((size, text_len, elapsed, cache_hit)) = measure_taffy_text_node(
-                        dom,
-                        bfs_order,
-                        bfs_idx,
-                        font_size,
-                        max_w,
-                        text_measure_cache,
-                        trace_taffy,
-                    ) {
-                        if let Some(stats) = trace_stats.as_mut() {
-                            if cache_hit {
-                                stats.text_cache_hits += 1;
-                            } else {
-                                stats.text_elapsed += elapsed;
+                        if let Some(size) = known_measure_size(known) {
+                            if let Some(stats) = trace_stats.as_mut() {
+                                stats.known_size_hits += 1;
                             }
-                            stats.text_calls += 1;
-                            stats.text_bytes += text_len;
-                            stats.max_text_bytes = stats.max_text_bytes.max(text_len);
+                            return size;
                         }
-                        return size;
-                    }
-
-                    if bfs_order.get(bfs_idx).is_none() {
-                        return Size::ZERO;
-                    }
-
-                    // Reaching here means the node measured no text of its
-                    // own. Its children's boxes therefore lay out elsewhere --
-                    // absolutely positioned, reparented onto another containing
-                    // block, or suppressed -- so it holds no line box, and CSS
-                    // 2.1 10.6.3 gives it an auto height of zero. The text
-                    // measure above must stay ahead of this check: an element
-                    // that absorbed its text child carries the same flag.
-                    if generates_no_line_box.get(bfs_idx).copied().unwrap_or(false) {
-                        return Size {
-                            width: known.width.unwrap_or(0.0),
-                            height: known.height.unwrap_or(0.0),
+                        let Some(&bfs_idx) = taffy_to_bfs.get(&taffy_node_id) else {
+                            return Size::ZERO;
                         };
-                    }
 
-                    if let Some(line_h) =
-                        styles
-                            .get(bfs_idx)
-                            .and_then(Option::as_ref)
-                            .map(|s| match s.line_height {
-                                Length::Px(px) => px,
-                                _ => 16.0,
+                        let font_size =
+                            styles
+                                .get(bfs_idx)
+                                .and_then(Option::as_ref)
+                                .map_or(16.0, |s| match s.font_size {
+                                    Length::Px(px) => px,
+                                    _ => 16.0,
+                                });
+
+                        let max_w = match avail.width {
+                            AvailableSpace::Definite(w) => Some(w),
+                            _ => None,
+                        };
+
+                        if let Some((size, text_len, elapsed, cache_hit)) = measure_taffy_text_node(
+                            dom,
+                            bfs_order,
+                            bfs_idx,
+                            font_size,
+                            max_w,
+                            text_measure_cache,
+                            trace_taffy,
+                        ) {
+                            if let Some(stats) = trace_stats.as_mut() {
+                                if cache_hit {
+                                    stats.text_cache_hits += 1;
+                                } else {
+                                    stats.text_elapsed += elapsed;
+                                }
+                                stats.text_calls += 1;
+                                stats.text_bytes += text_len;
+                                stats.max_text_bytes = stats.max_text_bytes.max(text_len);
+                            }
+                            return size;
+                        }
+
+                        if bfs_order.get(bfs_idx).is_none() {
+                            return Size::ZERO;
+                        }
+
+                        // Reaching here means the node measured no text of its
+                        // own. Its children's boxes therefore lay out elsewhere --
+                        // absolutely positioned, reparented onto another containing
+                        // block, or suppressed -- so it holds no line box, and CSS
+                        // 2.1 10.6.3 gives it an auto height of zero. The text
+                        // measure above must stay ahead of this check: an element
+                        // that absorbed its text child carries the same flag.
+                        if generates_no_line_box.get(bfs_idx).copied().unwrap_or(false) {
+                            return Size {
+                                width: known.width.unwrap_or(0.0),
+                                height: known.height.unwrap_or(0.0),
+                            };
+                        }
+
+                        if let Some(line_h) =
+                            styles.get(bfs_idx).and_then(Option::as_ref).map(|s| {
+                                match s.line_height {
+                                    Length::Px(px) => px,
+                                    _ => 16.0,
+                                }
                             })
-                    {
-                        return Size {
-                            width: known.width.unwrap_or(0.0),
-                            height: known.height.unwrap_or(line_h),
-                        };
-                    }
+                        {
+                            return Size {
+                                width: known.width.unwrap_or(0.0),
+                                height: known.height.unwrap_or(line_h),
+                            };
+                        }
 
-                    // Element leaf node with no text: use line_height as minimum height.
-                    Size {
-                        width: known.width.unwrap_or(0.0),
-                        height: known.height.unwrap_or(16.0),
-                    }
-                },
-            );
-            laid_out &= result.is_ok();
+                        // Element leaf node with no text: use line_height as minimum height.
+                        Size {
+                            width: known.width.unwrap_or(0.0),
+                            height: known.height.unwrap_or(16.0),
+                        }
+                    },
+                };
+                compute_root_layout(&mut view, target, available);
+                true
+            };
+            laid_out &= result;
         }
         if let Some(stats) = trace_stats {
             eprintln!(
@@ -711,9 +949,7 @@ impl TaffyLayout {
                 }
                 continue;
             };
-            let Ok(layout) = self.tree.layout(tn) else {
-                continue;
-            };
+            let layout = self.tree.layout(tn);
 
             let dom_parent = (parent_idx[i] != u32::MAX)
                 .then(|| parent_idx[i] as usize)
@@ -774,9 +1010,7 @@ impl Default for TaffyLayout {
 // ---------------------------------------------------------------------------
 
 fn new_taffy_tree(capacity: usize) -> SilkTaffy {
-    let mut tree = TaffyTree::with_capacity(capacity);
-    tree.disable_rounding();
-    tree
+    SilkTaffy::with_capacity(capacity)
 }
 
 #[derive(Default)]
@@ -1109,7 +1343,28 @@ fn text_node_parent_is_text_leaf(
     })
 }
 
-fn length_auto(l: Length) -> LengthPercentageAuto {
+fn calc_pointer(style: Option<&ComputedStyle>, expression_id: u32) -> Option<*const ()> {
+    style?
+        .calc_expressions
+        .get(expression_id as usize)
+        .map(|expression| std::ptr::from_ref(expression).cast::<()>())
+}
+
+fn resolve_calc_pointer(value: *const (), basis: f32) -> f32 {
+    // SAFETY: `calc_pointer` stores a pointer to a `CalcExpr` in the Arc
+    // retained by `ComputedStyle`; the style slice outlives this layout call
+    // and no expression is mutated during computation.
+    let expression = unsafe { &*value.cast::<silksurf_css::calc::CalcExpr>() };
+    expression.evaluate(basis, 0.0, 0.0, (0.0, 0.0))
+}
+
+#[cold]
+fn unresolved_calc_px() -> f32 {
+    debug_assert!(false, "calc handle has no retained expression tree");
+    0.0
+}
+
+fn length_auto(l: Length, style: Option<&ComputedStyle>) -> LengthPercentageAuto {
     match l {
         Length::Px(px) => LengthPercentageAuto::length(px),
         Length::Percent(p) => LengthPercentageAuto::percent(p / 100.0),
@@ -1119,17 +1374,21 @@ fn length_auto(l: Length) -> LengthPercentageAuto {
         | Length::Vh(_)
         | Length::Vmin(_)
         | Length::Vmax(_) => LengthPercentageAuto::length(unresolved_font_relative_px()),
+        Length::Calc(expression_id) => calc_pointer(style, expression_id).map_or_else(
+            || LengthPercentageAuto::length(unresolved_calc_px()),
+            LengthPercentageAuto::calc,
+        ),
     }
 }
 
-fn length_or_auto_lpa(v: LengthOrAuto) -> LengthPercentageAuto {
+fn length_or_auto_lpa(v: LengthOrAuto, style: Option<&ComputedStyle>) -> LengthPercentageAuto {
     match v {
         LengthOrAuto::Auto => LengthPercentageAuto::auto(),
-        LengthOrAuto::Length(l) => length_auto(l),
+        LengthOrAuto::Length(l) => length_auto(l, style),
     }
 }
 
-fn length_pct(l: Length) -> LengthPercentage {
+fn length_pct(l: Length, style: Option<&ComputedStyle>) -> LengthPercentage {
     match l {
         Length::Px(px) => LengthPercentage::length(px),
         Length::Percent(p) => LengthPercentage::percent(p / 100.0),
@@ -1139,6 +1398,10 @@ fn length_pct(l: Length) -> LengthPercentage {
         | Length::Vh(_)
         | Length::Vmin(_)
         | Length::Vmax(_) => LengthPercentage::length(unresolved_font_relative_px()),
+        Length::Calc(expression_id) => calc_pointer(style, expression_id).map_or_else(
+            || LengthPercentage::length(unresolved_calc_px()),
+            LengthPercentage::calc,
+        ),
     }
 }
 
@@ -1341,6 +1604,8 @@ fn css_to_taffy_style(style: Option<&ComputedStyle>) -> Style {
             | Length::Vmin(_)
             | Length::Vmax(_),
         ) => Dimension::length(unresolved_font_relative_px()),
+        FlexBasis::Length(Length::Calc(expression_id)) => calc_pointer(Some(style), expression_id)
+            .map_or_else(|| Dimension::length(unresolved_calc_px()), Dimension::calc),
     };
 
     let gap_col = LengthPercentage::length(
@@ -1359,25 +1624,25 @@ fn css_to_taffy_style(style: Option<&ComputedStyle>) -> Style {
         .grid_container
         .template_columns
         .iter()
-        .map(|t| GridTemplateComponent::Single(track_size_to_taffy(t)))
+        .map(|t| GridTemplateComponent::Single(track_size_to_taffy(t, Some(style))))
         .collect();
     let grid_template_rows: Vec<GridTemplateComponent<String>> = style
         .grid_container
         .template_rows
         .iter()
-        .map(|t| GridTemplateComponent::Single(track_size_to_taffy(t)))
+        .map(|t| GridTemplateComponent::Single(track_size_to_taffy(t, Some(style))))
         .collect();
     let grid_auto_columns: Vec<TrackSizingFunction> = style
         .grid_container
         .auto_columns
         .iter()
-        .map(track_size_to_taffy)
+        .map(|track| track_size_to_taffy(track, Some(style)))
         .collect();
     let grid_auto_rows: Vec<TrackSizingFunction> = style
         .grid_container
         .auto_rows
         .iter()
-        .map(track_size_to_taffy)
+        .map(|track| track_size_to_taffy(track, Some(style)))
         .collect();
     let grid_auto_flow = match style.grid_container.auto_flow {
         CssGridAutoFlow::Row => GridAutoFlow::Row,
@@ -1410,38 +1675,38 @@ fn css_to_taffy_style(style: Option<&ComputedStyle>) -> Style {
         flex_shrink: style.flex_item.flex_shrink,
         flex_basis,
         margin: TaffyRect {
-            left: length_or_auto_lpa(style.margin.left),
-            right: length_or_auto_lpa(style.margin.right),
-            top: length_or_auto_lpa(style.margin.top),
-            bottom: length_or_auto_lpa(style.margin.bottom),
+            left: length_or_auto_lpa(style.margin.left, Some(style)),
+            right: length_or_auto_lpa(style.margin.right, Some(style)),
+            top: length_or_auto_lpa(style.margin.top, Some(style)),
+            bottom: length_or_auto_lpa(style.margin.bottom, Some(style)),
         },
         padding: TaffyRect {
-            left: length_pct(style.padding.left),
-            right: length_pct(style.padding.right),
-            top: length_pct(style.padding.top),
-            bottom: length_pct(style.padding.bottom),
+            left: length_pct(style.padding.left, Some(style)),
+            right: length_pct(style.padding.right, Some(style)),
+            top: length_pct(style.padding.top, Some(style)),
+            bottom: length_pct(style.padding.bottom, Some(style)),
         },
         border: TaffyRect {
-            left: length_pct(style.border.left),
-            right: length_pct(style.border.right),
-            top: length_pct(style.border.top),
-            bottom: length_pct(style.border.bottom),
+            left: length_pct(style.border.left, Some(style)),
+            right: length_pct(style.border.right, Some(style)),
+            top: length_pct(style.border.top, Some(style)),
+            bottom: length_pct(style.border.bottom, Some(style)),
         },
         gap: Size {
             width: gap_col,
             height: gap_row,
         },
         size: Size {
-            width: length_or_auto_dim(style.width),
-            height: length_or_auto_dim(style.height),
+            width: length_or_auto_dim(style.width, Some(style)),
+            height: length_or_auto_dim(style.height, Some(style)),
         },
         min_size: Size {
-            width: length_dim(style.min_width),
-            height: length_dim(style.min_height),
+            width: length_dim(style.min_width, Some(style)),
+            height: length_dim(style.min_height, Some(style)),
         },
         max_size: Size {
-            width: opt_length_dim(style.max_width),
-            height: opt_length_dim(style.max_height),
+            width: opt_length_dim(style.max_width, Some(style)),
+            height: opt_length_dim(style.max_height, Some(style)),
         },
         grid_template_columns,
         grid_template_rows,
@@ -1452,17 +1717,20 @@ fn css_to_taffy_style(style: Option<&ComputedStyle>) -> Style {
         grid_row,
         position,
         inset: TaffyRect {
-            left: length_or_auto_lpa(style.left),
-            right: length_or_auto_lpa(style.right),
-            top: length_or_auto_lpa(style.top),
-            bottom: length_or_auto_lpa(style.bottom),
+            left: length_or_auto_lpa(style.left, Some(style)),
+            right: length_or_auto_lpa(style.right, Some(style)),
+            top: length_or_auto_lpa(style.top, Some(style)),
+            bottom: length_or_auto_lpa(style.bottom, Some(style)),
         },
         ..Default::default()
     }
 }
 
 /// Convert a silksurf-css `GridTrackSize` to a taffy `TrackSizingFunction`.
-fn track_size_to_taffy(track: &CssGridTrackSize) -> TrackSizingFunction {
+fn track_size_to_taffy(
+    track: &CssGridTrackSize,
+    style: Option<&ComputedStyle>,
+) -> TrackSizingFunction {
     match track {
         CssGridTrackSize::Auto => TrackSizingFunction::AUTO,
         CssGridTrackSize::MinContent => TrackSizingFunction::MIN_CONTENT,
@@ -1477,10 +1745,27 @@ fn track_size_to_taffy(track: &CssGridTrackSize) -> TrackSizingFunction {
             | Length::Vmin(_)
             | Length::Vmax(_),
         ) => length(unresolved_font_relative_px()),
-        CssGridTrackSize::Fr(fr_val) => fr(*fr_val),
-        CssGridTrackSize::Minmax(min, max) => {
-            minmax(grid_track_min_to_taffy(*min), grid_track_max_to_taffy(*max))
+        CssGridTrackSize::Length(Length::Calc(expression_id)) => {
+            calc_pointer(style, *expression_id).map_or_else(
+                || {
+                    minmax(
+                        MinTrackSizingFunction::length(unresolved_calc_px()),
+                        MaxTrackSizingFunction::length(unresolved_calc_px()),
+                    )
+                },
+                |pointer| {
+                    minmax(
+                        MinTrackSizingFunction::calc(pointer),
+                        MaxTrackSizingFunction::calc(pointer),
+                    )
+                },
+            )
         }
+        CssGridTrackSize::Fr(fr_val) => fr(*fr_val),
+        CssGridTrackSize::Minmax(min, max) => minmax(
+            grid_track_min_to_taffy(*min, style),
+            grid_track_max_to_taffy(*max, style),
+        ),
         CssGridTrackSize::FitContent(Length::Px(px)) => {
             TrackSizingFunction::fit_content(LengthPercentage::length(*px))
         }
@@ -1497,10 +1782,19 @@ fn track_size_to_taffy(track: &CssGridTrackSize) -> TrackSizingFunction {
         ) => TrackSizingFunction::fit_content(LengthPercentage::length(
             unresolved_font_relative_px(),
         )),
+        CssGridTrackSize::FitContent(Length::Calc(expression_id)) => {
+            calc_pointer(style, *expression_id).map_or_else(
+                || TrackSizingFunction::fit_content(LengthPercentage::length(unresolved_calc_px())),
+                |pointer| TrackSizingFunction::fit_content(LengthPercentage::calc(pointer)),
+            )
+        }
     }
 }
 
-fn grid_track_min_to_taffy(min: CssGridTrackMin) -> MinTrackSizingFunction {
+fn grid_track_min_to_taffy(
+    min: CssGridTrackMin,
+    style: Option<&ComputedStyle>,
+) -> MinTrackSizingFunction {
     match min {
         CssGridTrackMin::Auto => MinTrackSizingFunction::AUTO,
         CssGridTrackMin::MinContent => MinTrackSizingFunction::MIN_CONTENT,
@@ -1515,10 +1809,18 @@ fn grid_track_min_to_taffy(min: CssGridTrackMin) -> MinTrackSizingFunction {
             | Length::Vmin(_)
             | Length::Vmax(_),
         ) => MinTrackSizingFunction::length(unresolved_font_relative_px()),
+        CssGridTrackMin::Length(Length::Calc(expression_id)) => calc_pointer(style, expression_id)
+            .map_or_else(
+                || MinTrackSizingFunction::length(unresolved_calc_px()),
+                MinTrackSizingFunction::calc,
+            ),
     }
 }
 
-fn grid_track_max_to_taffy(max: CssGridTrackMax) -> MaxTrackSizingFunction {
+fn grid_track_max_to_taffy(
+    max: CssGridTrackMax,
+    style: Option<&ComputedStyle>,
+) -> MaxTrackSizingFunction {
     match max {
         CssGridTrackMax::Auto => MaxTrackSizingFunction::AUTO,
         CssGridTrackMax::MinContent => MaxTrackSizingFunction::MIN_CONTENT,
@@ -1533,6 +1835,11 @@ fn grid_track_max_to_taffy(max: CssGridTrackMax) -> MaxTrackSizingFunction {
             | Length::Vmin(_)
             | Length::Vmax(_),
         ) => MaxTrackSizingFunction::length(unresolved_font_relative_px()),
+        CssGridTrackMax::Length(Length::Calc(expression_id)) => calc_pointer(style, expression_id)
+            .map_or_else(
+                || MaxTrackSizingFunction::length(unresolved_calc_px()),
+                MaxTrackSizingFunction::calc,
+            ),
         CssGridTrackMax::Fr(fr_val) => MaxTrackSizingFunction::fr(fr_val),
     }
 }
@@ -1545,7 +1852,7 @@ fn grid_line_to_taffy(line: CssGridLine) -> GridPlacement<String> {
     }
 }
 
-fn length_or_auto_dim(v: LengthOrAuto) -> Dimension {
+fn length_or_auto_dim(v: LengthOrAuto, style: Option<&ComputedStyle>) -> Dimension {
     match v {
         LengthOrAuto::Auto => Dimension::auto(),
         LengthOrAuto::Length(Length::Px(px)) => Dimension::length(px),
@@ -1558,10 +1865,12 @@ fn length_or_auto_dim(v: LengthOrAuto) -> Dimension {
             | Length::Vmin(_)
             | Length::Vmax(_),
         ) => Dimension::length(unresolved_font_relative_px()),
+        LengthOrAuto::Length(Length::Calc(expression_id)) => calc_pointer(style, expression_id)
+            .map_or_else(|| Dimension::length(unresolved_calc_px()), Dimension::calc),
     }
 }
 
-fn length_dim(v: Length) -> Dimension {
+fn length_dim(v: Length, style: Option<&ComputedStyle>) -> Dimension {
     match v {
         Length::Px(px) => Dimension::length(px),
         Length::Percent(p) => Dimension::percent(p / 100.0),
@@ -1571,10 +1880,12 @@ fn length_dim(v: Length) -> Dimension {
         | Length::Vh(_)
         | Length::Vmin(_)
         | Length::Vmax(_) => Dimension::length(unresolved_font_relative_px()),
+        Length::Calc(expression_id) => calc_pointer(style, expression_id)
+            .map_or_else(|| Dimension::length(unresolved_calc_px()), Dimension::calc),
     }
 }
 
-fn opt_length_dim(v: Option<Length>) -> Dimension {
+fn opt_length_dim(v: Option<Length>, style: Option<&ComputedStyle>) -> Dimension {
     match v {
         None => Dimension::auto(),
         Some(Length::Px(px)) => Dimension::length(px),
@@ -1587,6 +1898,8 @@ fn opt_length_dim(v: Option<Length>) -> Dimension {
             | Length::Vmin(_)
             | Length::Vmax(_),
         ) => Dimension::length(unresolved_font_relative_px()),
+        Some(Length::Calc(expression_id)) => calc_pointer(style, expression_id)
+            .map_or_else(|| Dimension::length(unresolved_calc_px()), Dimension::calc),
     }
 }
 
@@ -1774,6 +2087,45 @@ mod tests {
         tl.write_rects(&table.parent_idx, &mut node_rects, viewport);
         assert!(node_rects[0].width <= viewport.width + 1.0);
         assert!(node_rects[0].height <= viewport.height + 1.0);
+    }
+
+    #[test]
+    fn taffy_resolves_a_percentage_calc_against_the_parent_width() {
+        let mut dom = Dom::new();
+        let root = dom.create_document();
+        let child = dom.create_element("div");
+        dom.append_child(root, child).unwrap();
+
+        let table = LayoutNeighborTable::build(&dom, root);
+        let child_style = ComputedStyle {
+            width: LengthOrAuto::Length(Length::Calc(0)),
+            calc_expressions: std::sync::Arc::new(vec![silksurf_css::calc::CalcExpr::Sub(
+                Box::new(silksurf_css::calc::CalcExpr::Value(Length::Percent(100.0))),
+                Box::new(silksurf_css::calc::CalcExpr::Value(Length::Px(20.0))),
+            )]),
+            ..Default::default()
+        };
+        let mut styles = vec![None; table.len()];
+        let child_index = table
+            .bfs_order
+            .iter()
+            .position(|node| *node == child)
+            .unwrap();
+        styles[child_index] = Some(child_style);
+
+        let viewport = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 800.0,
+            height: 600.0,
+        };
+        let mut layout = TaffyLayout::new();
+        layout.rebuild(&dom, &table, &styles);
+        assert!(layout.compute(&dom, &styles, &table.bfs_order, viewport));
+
+        let mut node_rects = vec![Rect::default(); table.len()];
+        layout.write_rects(&table.parent_idx, &mut node_rects, viewport);
+        assert!((node_rects[child_index].width - 780.0).abs() < 0.01);
     }
 
     #[test]
