@@ -1765,6 +1765,139 @@ not yet delivered; the frame transport is unspecified until #53 measures it.
 
 ---
 
+## AD-028: Document Resources as Live State -- Stylesheets, Preloads, Reflection
+
+**Status**: Accepted (implemented on branch live-document-stylesheets)
+**Date**: 2026-08-19
+**Deciders**: Public web page load repairs
+
+### Context
+
+The page pipeline treated the document's resources as a parse-time snapshot.
+`extract_stylesheet_urls` ran once on the freshly parsed DOM and produced a
+flat `css_text` String before any script executed. `<link rel=preload>` was
+collected for module warming alone and fired no `load` event. Element wrappers
+carried live accessors for `id`, `className`, `value`, and `src` and nothing
+else, so a page's `element.rel = "stylesheet"` wrote a plain JavaScript
+property that no engine stage observed.
+
+Each of the three is enough on its own to leave a real page unstyled.
+chatgpt.com serves its 79 KB stylesheet as `<link rel=preload as=style>` and
+upgrades the rel from the link's load handler: the preload was never fetched,
+the handler was never registered because `document.currentScript` was a
+constant null, the rel assignment would not have reached the DOM, and a
+changed rel would not have re-entered the cascade. Measured before the change,
+the document's entire author CSS was its inline `<style>`: 100,831 bytes over
+one source.
+
+### Decision
+
+Model the document's resources as live state the engine re-collects from the
+DOM.
+
+`StyleSheetSet` (crates/silksurf-app/src/stylesheet_set.rs) holds the ordered
+stylesheet list, one entry per `<style>` element and per `<link
+rel=stylesheet>`, keyed by owning NodeId plus resolved href. `refresh`
+recollects when the tree shape moved or a dirty node is a `<style>` or
+`<link>`, and re-reads inline text when only `Dom::generation` moved. A
+changed list reparses the concatenated text and rebuilds `StyleIndex` against
+it, which forces a full repaint because a cascade input that changed
+document-wide has no damage rect to ride. Link bodies fetch on worker threads
+and arrive over an mpsc channel, so the repaint tick never blocks.
+
+`PreloadLinks` (crates/silksurf-app/src/link_preload.rs) fetches each `<link
+rel=preload>` with the Accept header its `as` attribute selects and dispatches
+`load` or `error` at the element through `SilkContext::dispatch_dom_event`.
+The body is discarded; the warmed HTTP cache is what the follow-on fetch
+reads.
+
+IDL attribute reflection (silksurf-js/src/boa_backend/dom_interfaces.rs,
+REFLECTION_BOOTSTRAP) defines accessors on the interface prototypes rather
+than per wrapper, reaching the node through `this.nodeId`. Four reflection
+kinds cover the HTML table: string, URL resolved against `document.URL`,
+boolean by attribute presence, and long with a zero default.
+
+`SilkContext::set_current_script` brackets each classic script evaluation with
+the `<script>` element that carries it, which HTML defines and which pages
+read to reach their own tag.
+
+### Consequences
+
+A page that appends a `<style>`, rewrites a link's rel, swaps an href, or sets
+any reflected property now moves the engine. Measured on chatgpt.com the
+author CSS rises to 180,449 bytes over two sources and the cascade from 345 to
+496 rules.
+
+The cost is a tree walk per stylesheet-affecting mutation. Gating it on
+`Dom::structure_generation` plus a dirty-node check keeps a React reconcile
+off that path: `make gui-probe-page-click` measures 113 us average against a
+recorded 112, and the reconcile probes 210 us against a 190-260 band.
+
+`document.styleSheets` and the CSSOM stay absent: the set is engine state, not
+a scripted object model, so a page cannot enumerate or mutate a sheet through
+script. The payload keeps `css_text` beside `sheet_bodies` so the first frame
+paints from the text the navigation worker assembled while the runtime set
+converges.
+
+---
+
+## AD-029: CSS Custom Properties Resolved in the Cascade
+
+**Status**: Accepted (implemented on branch live-document-stylesheets)
+**Date**: 2026-08-19
+**Deciders**: Public web page load repairs
+
+### Context
+
+`crates/silksurf-css/src/custom_properties.rs` supplied `CustomPropertyMap`
+and `resolve_var_references` and was exported from the crate root, and no
+caller ever constructed either. Every `var()` reference therefore resolved to
+nothing and the declaration holding it was discarded. Modern CSS puts each
+colour, radius, and spacing value behind a token, so the cascade dropped most
+of what a page declares: a headless fixture declaring
+`background-color: var(--tone)` painted white whether the property was
+declared at `:root`, on `html`, or on the element itself.
+
+### Decision
+
+Resolve custom properties in the cascade, in the two passes CSS Custom
+Properties 1 5 requires.
+
+`resolve_custom_properties` runs first and settles which custom-property
+declaration wins for each name by importance, then specificity, then document
+order -- the same precedence `apply_property` enforces for typed properties --
+seeded from the parent element's map, because custom properties inherit.
+`apply_substituted_declaration` then substitutes each remaining declaration's
+value against that map before applying it; a value holding no `var()` applies
+from its own tokens and allocates nothing.
+
+`ComputedStyle` carries the map behind an `Arc`. An element that declares none
+shares its parent's allocation, so the map allocates once per element that
+actually declares one. `StyleIndex::declares_custom_properties` is computed
+once at index build, and a document that declares none anywhere skips the pass
+on one bool per element.
+
+### Consequences
+
+`var()` resolves through inheritance, fallbacks, nesting, inline style
+attributes, and both the longhand and the shorthand forms; twenty tests in
+`crates/silksurf-css/tests/shorthands_and_variables.rs` pin those cases.
+
+Registered custom properties are not modelled: `@property` declares a syntax,
+an inherits flag, and an initial value, and the parser treats the at-rule as
+a declaration block it discards. An unregistered property therefore has no
+initial value, so `var(--unset)` with no fallback leaves the declaration
+unapplied rather than falling back to a registered initial. chatgpt.com opens
+its sheet with four `@property` declarations, which is where this surfaces
+first.
+
+Custom properties resolve at computed-value time, so a value that changes
+between elements re-resolves per element. There is no dependency graph and no
+invalidation short-cut: a changed custom property invalidates through the
+ordinary cascade rebuild.
+
+---
+
 ## Future ADRs
 
 Planned (renumbered after the 2026-04-30 batch):
