@@ -394,6 +394,27 @@ AD-029 the cascade half.
 - `--screenshot PATH` writes the headless frame as PNG, which is what turns a
   rendering claim into a file a reviewer opens.
 
+## Positioned-box rendering (landed 2026-08-19)
+
+- A `position: fixed` subtree lays out under a second taffy root sized to the
+  viewport (`TaffyLayout::viewport_root`), so its insets and percentages
+  resolve against the viewport per CSS Position 3 2.1. An axis whose two
+  insets both compute to auto keeps the CSS static position.
+- The paint pass walks the stacking-context tree (`build_paint_order`): the
+  context element's box, then negative z-index children, then in-flow members
+  in tree order, then zero and positive z-index children, recursively. A
+  z-index-3 pane paints its background before the subtree it contains.
+- `display: none` suppresses the boxes of the whole subtree
+  (`mark_rendered_boxes`), not just the declaring element's own box.
+- `--monitor <selector>` binds the window to one monitor, matching the
+  connector name the display server reports and the EDID Display Product Name
+  from DRM sysfs, so both `DP-2` and `LG` reach the same panel.
+  `--list-monitors` prints both names. Wayland names an output only through
+  `xdg_toplevel.set_fullscreen`, so a named monitor opens borderless
+  fullscreen there; X11 positions the window at the monitor's origin.
+  `SILKSURF_MONITOR` supplies the default, which keeps a host's connector
+  names out of the repository.
+
 ## Open work after the live-resource change
 
 Named cuts, each with the mechanism that closes it:
@@ -408,11 +429,23 @@ Named cuts, each with the mechanism that closes it:
   nothing, because every DisplayItem is an axis-aligned rect. Carrying them
   needs a transform per display item and a rasterizer that applies it to
   geometry and to shaped glyph runs.
-- fixed-position-containing-block -- `position: fixed` maps to taffy's
-  Absolute, so a fixed box resolves against its nearest positioned ancestor
-  rather than against the viewport, and it scrolls with the page. Several
-  fixed boxes with no inset therefore stack at the same origin, which is the
-  overlapping band still visible at the top of a chatgpt.com render.
+- absolute-containing-block -- `position: absolute` maps to taffy's Absolute
+  and resolves against its taffy parent, which is the DOM parent whether or
+  not that parent is positioned. CSS Position 3 2.1 names the nearest ancestor
+  whose position is not static. Closing it reparents an absolute box onto that
+  ancestor's taffy node the way `fixed` now reparents onto the viewport root,
+  and it moves every absolutely positioned box on every page, so it lands with
+  its own before-and-after evidence.
+- fixed-position-scrolling -- a `position: fixed` box now resolves against the
+  viewport, and the static render has one scroll origin, so nothing yet holds
+  it still while the page scrolls. The windowed browser scrolls by offsetting
+  the paint rect, so closing it exempts the viewport-anchored subtrees from
+  that offset.
+- z-index-auto-context-escape -- `ComputedStyle::z_index` resolves `auto` to 0,
+  so `build_paint_order` treats every positioned element as establishing a
+  stacking context. CSS 2.1 Appendix E lets a positioned z-auto element's
+  positioned descendants join the ancestor context instead. Closing it needs
+  `z-index` to carry `auto` distinctly through the cascade.
 - viewport-units-in-calc -- CalcExpr carries only the percentage context, so a
   viewport unit inside `calc()` evaluates as a bare number. It resolves
   correctly outside calc(); wiring it needs the viewport threaded into

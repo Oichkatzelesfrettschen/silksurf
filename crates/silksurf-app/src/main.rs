@@ -86,8 +86,28 @@ mod test_support;
 #[allow(clippy::wildcard_imports)]
 pub(crate) use test_support::*;
 
+/// Print the monitors the display server reports, then exit. winit reports
+/// them only from inside an active event loop, so this opens one and lets
+/// `resumed` print before it stops.
+fn list_monitors_and_exit(display_backend: silksurf_gui::WinitDisplayBackend) -> ! {
+    match silksurf_gui::WinitWindow::new("silksurf", 1, 1) {
+        Ok(window) => {
+            window
+                .with_display_backend(display_backend)
+                .with_monitor(silksurf_gui::WinitMonitorChoice::List)
+                .run(|_width, _height, _pixels| {});
+            std::process::exit(0);
+        }
+        Err(err) => {
+            eprintln!("[SilkSurf] --list-monitors: cannot open display: {err}");
+            std::process::exit(1);
+        }
+    }
+}
+
 fn run_winit_browser_page(
     display_backend: silksurf_gui::WinitDisplayBackend,
+    monitor: silksurf_gui::WinitMonitorChoice,
     render_config: &BrowserRenderConfig,
     image_cache: &Arc<Mutex<ImageResourceCache>>,
     page: BrowserPage,
@@ -125,7 +145,9 @@ fn run_winit_browser_page(
     let resolved_display_backend = display_backend.resolve_for_current_environment();
     let window =
         match silksurf_gui::WinitWindow::new("silksurf", FRAME_WIDTH, initial_window_height) {
-            Ok(window) => window.with_display_backend(display_backend),
+            Ok(window) => window
+                .with_display_backend(display_backend)
+                .with_monitor(monitor),
             Err(err) => {
                 eprintln!("[SilkSurf] winit: cannot open display: {err}");
                 std::process::exit(1);
@@ -305,6 +327,12 @@ fn main() {
         run_legacy_window_mode();
     }
 
+    // --list-monitors reports the display server's monitor names and exits
+    // without loading a page; the names it prints are what --monitor matches.
+    if options.monitor == silksurf_gui::WinitMonitorChoice::List {
+        list_monitors_and_exit(options.display_backend);
+    }
+
     let image_cache = Arc::new(Mutex::new(ImageResourceCache::new()));
     let mut renderer = match renderer_from_config(&options.render_config) {
         Ok(renderer) => renderer,
@@ -327,6 +355,7 @@ fn main() {
             Ok(page) => {
                 run_winit_browser_page(
                     options.display_backend,
+                    options.monitor.clone(),
                     &options.render_config,
                     &image_cache,
                     page,

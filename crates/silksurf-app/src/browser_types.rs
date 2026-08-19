@@ -396,6 +396,9 @@ pub(crate) struct AppOptions {
     pub(crate) window_mode: bool,
     pub(crate) headless: bool,
     pub(crate) display_backend: silksurf_gui::WinitDisplayBackend,
+    /// Which monitor shows the browser window. `SILKSURF_MONITOR` supplies the
+    /// default so a host's connector names stay out of the repository.
+    pub(crate) monitor: silksurf_gui::WinitMonitorChoice,
     pub(crate) url: String,
     /// Where the headless render writes its frame as PNG. A rendering claim
     /// backed by a file a reviewer opens is a different evidence class from

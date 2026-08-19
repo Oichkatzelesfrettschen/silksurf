@@ -27,7 +27,8 @@ use winit::{
     event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy},
     keyboard::{Key, ModifiersState, NamedKey},
-    window::{CursorIcon, Window, WindowAttributes, WindowId},
+    monitor::MonitorHandle,
+    window::{CursorIcon, Fullscreen, Window, WindowAttributes, WindowId},
 };
 
 #[cfg(target_os = "linux")]
@@ -332,12 +333,193 @@ pub fn resolve_winit_wayland_presenter(
 ///
 /// Call `run()` to enter the event loop. The call blocks until the window
 /// is closed (`CloseRequested`) or Escape is pressed.
+/*
+ * Which monitor shows the window.
+ *
+ * Wayland has no protocol that places an ordinary toplevel on a named output;
+ * `xdg_toplevel.set_fullscreen` is the one request that names one, so
+ * `Named` opens the window borderless-fullscreen on that output there. X11
+ * accepts an absolute position, so the window opens at the monitor's origin
+ * at its requested size instead.
+ *
+ * A selector matches `MonitorHandle::name()` -- the connector name the display
+ * server reports, such as `DP-2` -- case-insensitively, as a whole name first
+ * and then as a substring. `List` prints the monitors and exits, which is how
+ * a caller discovers the name to pass.
+ */
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum WinitMonitorChoice {
+    /// The compositor places the window, which is the platform default.
+    #[default]
+    Compositor,
+    /// Place the window on the monitor whose name matches this selector.
+    Named(String),
+    /// Print the available monitors and exit without opening a window.
+    List,
+}
+
+/*
+ * edid_display_product_name -- the label on the bezel, from an EDID block.
+ *
+ * EDID 1.4 3.10.3 lays the base block's four 18-byte descriptors at offset 54.
+ * A descriptor whose first three bytes are zero and whose fourth is 0xFC is
+ * the Display Product Name; bytes 5 through 17 carry the name, terminated by
+ * 0x0A and padded with spaces. That is the string a person reads off the
+ * monitor -- `LG ULTRAGEAR` -- while the display server reports only the
+ * connector, `DP-2`.
+ */
+fn edid_display_product_name(block: &[u8]) -> Option<String> {
+    const DESCRIPTOR_BASE: usize = 54;
+    const DESCRIPTOR_LEN: usize = 18;
+    const PRODUCT_NAME_TAG: u8 = 0xFC;
+    for start in (DESCRIPTOR_BASE..DESCRIPTOR_BASE + 4 * DESCRIPTOR_LEN).step_by(DESCRIPTOR_LEN) {
+        let Some(descriptor) = block.get(start..start + DESCRIPTOR_LEN) else {
+            break;
+        };
+        if descriptor[0..3] != [0, 0, 0] || descriptor[3] != PRODUCT_NAME_TAG {
+            continue;
+        }
+        let text = descriptor[5..]
+            .split(|&byte| byte == 0x0A)
+            .next()
+            .unwrap_or_default();
+        let name = String::from_utf8_lossy(text).trim().to_string();
+        if !name.is_empty() {
+            return Some(name);
+        }
+    }
+    None
+}
+
+/*
+ * The EDID for a connector, from the DRM sysfs node the kernel names
+ * `<card>-<connector>`; `DP-2` reads back through `card1-DP-2`. The node
+ * reports size 0 and yields its bytes on read, so this reads rather than
+ * stats. A host without sysfs, without read permission, or with no
+ * product-name descriptor matches on the connector name alone.
+ */
+#[cfg(target_os = "linux")]
+fn connector_product_name(connector: &str) -> Option<String> {
+    let suffix = format!("-{connector}");
+    let entries = std::fs::read_dir("/sys/class/drm").ok()?;
+    for entry in entries.flatten() {
+        if !entry.file_name().to_string_lossy().ends_with(&suffix) {
+            continue;
+        }
+        let block = std::fs::read(entry.path().join("edid")).ok()?;
+        return edid_display_product_name(&block);
+    }
+    None
+}
+
+#[cfg(not(target_os = "linux"))]
+fn connector_product_name(_connector: &str) -> Option<String> {
+    None
+}
+
+/*
+ * The monitor a selector names, tried in narrowing order: the connector name
+ * exactly, then the connector name as a substring, then the EDID product name
+ * as a substring. `DP-2` and `LG` therefore both reach the same panel, one by
+ * the name the display server reports and one by the name on the bezel.
+ */
+fn monitor_matching(event_loop: &ActiveEventLoop, selector: &str) -> Option<MonitorHandle> {
+    let selector = selector.to_ascii_lowercase();
+    let named: Vec<(MonitorHandle, String)> = event_loop
+        .available_monitors()
+        .filter_map(|monitor| monitor.name().map(|name| (monitor, name)))
+        .collect();
+    let by_connector = named
+        .iter()
+        .find(|(_, name)| name.to_ascii_lowercase() == selector)
+        .or_else(|| {
+            named
+                .iter()
+                .find(|(_, name)| name.to_ascii_lowercase().contains(&selector))
+        });
+    if let Some((monitor, _)) = by_connector {
+        return Some(monitor.clone());
+    }
+    named
+        .iter()
+        .find(|(_, name)| {
+            connector_product_name(name)
+                .is_some_and(|product| product.to_ascii_lowercase().contains(&selector))
+        })
+        .map(|(monitor, _)| monitor.clone())
+}
+
+/// One line per monitor: name, mode, position, and scale, in the form a
+/// `--monitor` selector matches.
+fn print_monitors(event_loop: &ActiveEventLoop) {
+    let mut found = false;
+    for monitor in event_loop.available_monitors() {
+        found = true;
+        let size = monitor.size();
+        let position = monitor.position();
+        let refresh = monitor
+            .refresh_rate_millihertz()
+            .map_or_else(String::new, |mhz| {
+                format!(" @{:.3}Hz", f64::from(mhz) / 1000.0)
+            });
+        let connector = monitor.name().unwrap_or_else(|| "<unnamed>".to_string());
+        let product = connector_product_name(&connector)
+            .map_or_else(String::new, |product| format!("  {product}"));
+        println!(
+            "{connector:<12} {}x{}{} at ({}, {}) scale {}{product}",
+            size.width,
+            size.height,
+            refresh,
+            position.x,
+            position.y,
+            monitor.scale_factor()
+        );
+    }
+    if !found {
+        println!("no monitors reported by the display server");
+    }
+}
+
+/// Bind the window to a monitor. Wayland names an output only through
+/// `xdg_toplevel.set_fullscreen`, so a named monitor opens borderless
+/// fullscreen there; X11 positions the window at the monitor's origin.
+fn attributes_for_monitor(
+    attrs: WindowAttributes,
+    event_loop: &ActiveEventLoop,
+    monitor: &WinitMonitorChoice,
+    display_backend: WinitDisplayBackend,
+) -> WindowAttributes {
+    let WinitMonitorChoice::Named(selector) = monitor else {
+        return attrs;
+    };
+    let Some(handle) = monitor_matching(event_loop, selector) else {
+        eprintln!(
+            "[SilkSurf] --monitor {selector}: no monitor matches; run --list-monitors to see the names"
+        );
+        return attrs;
+    };
+    let name = handle.name().unwrap_or_else(|| selector.clone());
+    if display_backend == WinitDisplayBackend::X11 {
+        let position = handle.position();
+        eprintln!(
+            "[SilkSurf] monitor {name}: window at ({}, {})",
+            position.x, position.y
+        );
+        return attrs.with_position(position);
+    }
+    eprintln!(
+        "[SilkSurf] monitor {name}: borderless fullscreen (Wayland names an output only through set_fullscreen)"
+    );
+    attrs.with_fullscreen(Some(Fullscreen::Borderless(Some(handle))))
+}
+
 pub struct WinitWindow {
     title: String,
     width: u32,
     height: u32,
     display_backend: WinitDisplayBackend,
     wayland_presenter: WinitWaylandPresenter,
+    monitor: WinitMonitorChoice,
     host_work_deadline_fn: Option<Box<HostWorkDeadlineCallback>>,
 }
 
@@ -354,6 +536,7 @@ impl WinitWindow {
             height,
             display_backend: WinitDisplayBackend::Auto,
             wayland_presenter: WinitWaylandPresenter::Auto,
+            monitor: WinitMonitorChoice::Compositor,
             host_work_deadline_fn: None,
         })
     }
@@ -384,6 +567,13 @@ impl WinitWindow {
     #[must_use]
     pub fn with_wayland_presenter(mut self, wayland_presenter: WinitWaylandPresenter) -> Self {
         self.wayland_presenter = wayland_presenter;
+        self
+    }
+
+    /// Choose which monitor shows the window, or list the monitors and exit.
+    #[must_use]
+    pub fn with_monitor(mut self, monitor: WinitMonitorChoice) -> Self {
+        self.monitor = monitor;
         self
     }
 
@@ -512,6 +702,7 @@ impl WinitWindow {
             input_probe: WinitInputProbe::from_env(),
             display_backend: resolved_display_backend,
             wayland_presenter,
+            monitor: self.monitor,
             redraw_pacing_enabled: redraw_pacing_enabled_for_backend(
                 resolved_display_backend,
                 wayland_presenter,
@@ -773,6 +964,7 @@ struct WinitApp {
     input_probe: Option<WinitInputProbe>,
     display_backend: WinitDisplayBackend,
     wayland_presenter: WinitWaylandPresenter,
+    monitor: WinitMonitorChoice,
     redraw_pacing_enabled: bool,
     input_redraw_bypass_pacing: bool,
     redraw_pace_interval: Duration,
@@ -796,9 +988,15 @@ struct WinitApp {
 impl ApplicationHandler<WinitUserEvent> for WinitApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         event_loop.set_control_flow(ControlFlow::Wait);
+        if self.monitor == WinitMonitorChoice::List {
+            print_monitors(event_loop);
+            event_loop.exit();
+            return;
+        }
         let attrs = WindowAttributes::default()
             .with_title(&self.title)
             .with_inner_size(PhysicalSize::new(self.init_width, self.init_height));
+        let attrs = attributes_for_monitor(attrs, event_loop, &self.monitor, self.display_backend);
 
         let window = match event_loop.create_window(attrs) {
             Ok(w) => Rc::new(w),
@@ -2446,5 +2644,52 @@ mod tests {
                 .all(|wait| !wait)
         );
         assert_eq!(steps.get(steps.len() - 2), Some(&WinitInput::SubmitAddress));
+    }
+}
+
+#[cfg(test)]
+mod monitor_tests {
+    use super::*;
+
+    /// A 128-byte EDID base block carrying `name` in the first descriptor's
+    /// Display Product Name slot.
+    fn edid_with_product_name(name: &str) -> Vec<u8> {
+        let mut block = vec![0u8; 128];
+        block[54..57].copy_from_slice(&[0, 0, 0]);
+        block[57] = 0xFC;
+        block[58] = 0;
+        let mut text = name.as_bytes().to_vec();
+        text.push(0x0A);
+        text.resize(13, 0x20);
+        block[59..72].copy_from_slice(&text);
+        block
+    }
+
+    #[test]
+    fn the_product_name_descriptor_yields_the_panel_label() {
+        let block = edid_with_product_name("LG ULTRAGEAR");
+        assert_eq!(
+            edid_display_product_name(&block).as_deref(),
+            Some("LG ULTRAGEAR")
+        );
+    }
+
+    #[test]
+    fn a_block_without_a_product_name_descriptor_yields_nothing() {
+        assert_eq!(edid_display_product_name(&[0u8; 128]), None);
+    }
+
+    #[test]
+    fn a_truncated_block_yields_nothing_rather_than_panicking() {
+        assert_eq!(edid_display_product_name(&[0u8; 60]), None);
+        assert_eq!(edid_display_product_name(&[]), None);
+    }
+
+    #[test]
+    fn the_default_choice_leaves_placement_to_the_compositor() {
+        assert_eq!(
+            WinitMonitorChoice::default(),
+            WinitMonitorChoice::Compositor
+        );
     }
 }
