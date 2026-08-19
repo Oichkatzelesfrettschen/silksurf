@@ -415,6 +415,32 @@ AD-029 the cascade half.
   `SILKSURF_MONITOR` supplies the default, which keeps a host's connector
   names out of the repository.
 
+## Application-shell paint fixture (landed 2026-08-19)
+
+`crates/silksurf-engine/conformance/wpt/fixtures/css_spa_shell_stacking.html`
+is a synthetic application shell carrying the three structures a
+client-rendered page depends on: a `position: fixed` root with `inset: 0`, a
+`z-index: 3` pane holding its own text, and a `display: none` subtree whose
+descendants carry text. Its document order runs pane, watermark, flow while
+its paint order runs watermark, flow, pane, so a BFS paint order fails the
+fixture rather than passing it by coincidence.
+
+The specimen is synthetic because a captured chatgpt.com document is
+third-party markup that a live fetch of a logged-in origin can carry account
+state into, which is what keeps `silksurf-extras/` and `silksurf-js/test262/`
+untracked. Reproducing the structures gives the same discrimination with
+bytes the repository owns.
+
+`crates/silksurf-engine/tests/spa_shell_render.rs` asserts the same three
+invariants over the same file, so `make test` covers what `make conformance`
+scores; `make full` runs the workspace tests and not the conformance harness,
+so a fixture reachable only from the catalog would not run before a push.
+Each assertion was falsified by reverting its mechanism: suppressing only the
+declaring element's box surfaces "consent banner" in the paint list, painting
+in BFS order gives pane=5 against flow=9, and resolving the fixed insets
+against the document root gives `#shell` a 76.8 px height at y=38.4.
+Scorecard 70/70 to 71/71.
+
 ## Open work after the live-resource change
 
 Named cuts, each with the mechanism that closes it:
@@ -460,11 +486,6 @@ Named cuts, each with the mechanism that closes it:
   viewport unit inside `calc()` evaluates as a bare number. It resolves
   correctly outside calc(); wiring it needs the viewport threaded into
   CalcExpr::evaluate.
-- chatgpt-render-fixture -- every paint-item and document-height number cited
-  for chatgpt.com comes from a live fetch, and the origin serves different
-  documents between runs (505 nodes / 97 items on one, 291 / 34 on another).
-  A retained HTML-plus-stylesheet fixture served from the local test server
-  would make those numbers a regression test rather than a snapshot.
 - document-stylesheets-cssom -- `StyleSheetSet` is engine state with no
   scripted object model, so `document.styleSheets`, `CSSStyleSheet`, and
   `insertRule` are absent. A page that installs styles through the CSSOM

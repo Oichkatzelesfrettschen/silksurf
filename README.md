@@ -78,7 +78,7 @@ local-only under AD-009: `scripts/local_gate.sh full`, normally installed throug
 Current evidence lives in `docs/conformance/SCORECARD.md`, the per-harness JSON
 artifacts, `docs/PERFORMANCE.md`, and `perf/`.
 
-- The in-tree **synthetic** WPT-style regression harness passes **70/70**
+- The in-tree **synthetic** WPT-style regression harness passes **71/71**
   fixtures. It is not the upstream Web Platform Tests corpus and is not a broad
   interoperability percentage.
 - The recorded 2026-05-17 test262 full-corpus baseline passes **99.81% of

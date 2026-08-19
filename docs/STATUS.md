@@ -138,7 +138,7 @@ is measurable here against the sweep coordinates
 ### Synthetic WPT-style regression harness
 
 - runner kind: `wpt-synthetic`
-- result: **70/70** pass, 0 fail, 0 skip
+- result: **71/71** pass, 0 fail, 0 skip
 - scope: in-tree HTML/CSS/layout/paint/JavaScript-event fixtures
 - role: a regression gate over the fused style-layout-paint pipeline
 - limitation: not the upstream Web Platform Tests corpus; do not quote this as a

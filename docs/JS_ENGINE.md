@@ -85,7 +85,7 @@ reproducible from a clean checkout until the corpus is fetched or pinned, and
 the latest JSON artifact may contain a narrower subset run. Always report date,
 scope, skips, and both denominators.
 
-The engine's 70/70 WPT-labelled result is a synthetic in-tree browser regression
+The engine's 71/71 WPT-labelled result is a synthetic in-tree browser regression
 suite, not upstream WPT interoperability evidence.
 
 ## Measured performance boundary

@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>SPA shell stacking and suppression</title>
+<style>
+body { margin: 0; }
+
+/* The application shell anchors to the viewport, so its insets resolve
+   against the viewport rather than against the content-sized document root. */
+#shell { position: fixed; inset: 0; background: #111111; }
+
+/* Document order runs pane, watermark, flow. Paint order runs watermark,
+   flow, pane: the z-index-3 pane paints last among the shell's children and
+   the z-index-minus-1 watermark paints first. */
+#pane { position: absolute; z-index: 3; top: 0; left: 0;
+        width: 600px; height: 400px; background: #ffffff; }
+#paneText { color: #000000; font-size: 16px; }
+#watermark { position: absolute; z-index: -1; top: 0; left: 0;
+             width: 100px; height: 100px; background: #ff0000; }
+#flow { background: #00ff00; height: 40px; }
+
+/* Deferred UI: the subtree generates no boxes, so none of its text reaches
+   the paint list. */
+#deferred { display: none; }
+</style>
+</head>
+<body>
+<div id="shell">
+  <div id="pane"><p id="paneText">pane content</p></div>
+  <div id="watermark"></div>
+  <div id="flow"></div>
+</div>
+<div id="deferred">
+  <div><p>login modal</p><p>settings dialog</p></div>
+  <p>consent banner</p>
+</div>
+</body>
+</html>

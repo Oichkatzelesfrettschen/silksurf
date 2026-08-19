@@ -305,6 +305,9 @@ fn run_one(path: &Path) -> Outcome {
         "paint_visible_text_and_hidden_metadata" => {
             check_paint_visible_text_and_hidden_metadata(&parsed.dom, parsed.document, &source)
         }
+        "css_spa_shell_stacking" => {
+            check_css_spa_shell_stacking(&parsed.dom, parsed.document, &source)
+        }
         // @media query evaluation
         "css_media_screen" => check_css_media_screen(&parsed.dom, parsed.document, &source),
         "css_media_width" => check_css_media_width(&parsed.dom, parsed.document, &source),
@@ -3039,6 +3042,136 @@ fn require_painted_background(fused: &silksurf_engine::fused_pipeline::FusedResu
     } else {
         Outcome::Fail("visible element background did not reach the paint list".to_string())
     }
+}
+
+/*
+ * The SPA shell fixture exercises the three mechanisms that a client-rendered
+ * application shell depends on at once: a viewport-anchored fixed root, a
+ * nested stacking context whose opaque background must not cover its own
+ * descendants, and a deferred-UI subtree that generates no boxes.
+ */
+fn check_css_spa_shell_stacking(dom: &Dom, document: NodeId, source: &str) -> Outcome {
+    let Some(css) = extract_inline_style(source) else {
+        return Outcome::Skip("no <style> block".to_string());
+    };
+    let stylesheet = match parse_stylesheet(&css) {
+        Ok(s) => s,
+        Err(e) => return Outcome::Fail(format!("css parse: {e:?}")),
+    };
+    let viewport = Rect {
+        x: 0.0,
+        y: 0.0,
+        width: 1280.0,
+        height: 800.0,
+    };
+    let fused = fused_style_layout_paint(dom, &stylesheet, document, viewport);
+
+    let anchored = require_shell_fills_viewport(&fused, dom, document, viewport);
+    if !matches!(anchored, Outcome::Pass) {
+        return anchored;
+    }
+    let suppressed = reject_deferred_subtree_text(&fused);
+    if !matches!(suppressed, Outcome::Pass) {
+        return suppressed;
+    }
+    require_nested_context_order(&fused)
+}
+
+/// `#shell` is `position: fixed; inset: 0`, so CSS Position 3 2.1 resolves its
+/// insets against the viewport. Resolving them against the document root gives
+/// that root's content height instead, because the root is content-sized in
+/// the block axis.
+fn require_shell_fills_viewport(
+    fused: &silksurf_engine::fused_pipeline::FusedResult,
+    dom: &Dom,
+    document: NodeId,
+    viewport: Rect,
+) -> Outcome {
+    let Some(shell) = fused_rect_by_id(fused, dom, document, "shell") else {
+        return Outcome::Fail("#shell not found in layout".to_string());
+    };
+    let tol = 2.0_f32;
+    if (shell.x - viewport.x).abs() > tol
+        || (shell.y - viewport.y).abs() > tol
+        || (shell.width - viewport.width).abs() > tol
+        || (shell.height - viewport.height).abs() > tol
+    {
+        return Outcome::Fail(format!(
+            "#shell expected the viewport rect {}x{} at ({}, {}), got {:.1}x{:.1} at ({:.1}, {:.1})",
+            viewport.width,
+            viewport.height,
+            viewport.x,
+            viewport.y,
+            shell.width,
+            shell.height,
+            shell.x,
+            shell.y
+        ));
+    }
+    Outcome::Pass
+}
+
+/// CSS Display 3 3 suppresses the boxes of a `display: none` element's whole
+/// subtree. Suppressing only the declaring element leaves its descendants
+/// painting at the collapsed origin, which stacks them into one band.
+fn reject_deferred_subtree_text(fused: &silksurf_engine::fused_pipeline::FusedResult) -> Outcome {
+    let deferred = ["login modal", "settings dialog", "consent banner"];
+    for item in &fused.display_items {
+        if let DisplayItem::Text { text, .. } = item
+            && let Some(found) = deferred.iter().find(|needle| text.contains(*needle))
+        {
+            return Outcome::Fail(format!(
+                "display:none subtree text reached paint: {found:?}"
+            ));
+        }
+    }
+    Outcome::Pass
+}
+
+/// CSS 2.1 Appendix E orders a stacking context as its own background, then
+/// negative z-index children, then in-flow members, then the remaining
+/// children by z-index. Document order runs `#pane`, `#watermark`, `#flow`,
+/// so a BFS paint order puts `#pane` under `#flow`. Nesting is the second
+/// axis: `#pane` carries `z-index: 3` and still paints before the text inside
+/// it, which a flat sort over the same z-index keys reverses.
+fn require_nested_context_order(fused: &silksurf_engine::fused_pipeline::FusedResult) -> Outcome {
+    let shell = solid_color_step(fused, 0x11, 0x11, 0x11);
+    let watermark = solid_color_step(fused, 0xff, 0x00, 0x00);
+    let flow = solid_color_step(fused, 0x00, 0xff, 0x00);
+    let pane = solid_color_step(fused, 0xff, 0xff, 0xff);
+    let text = fused.display_items.iter().position(
+        |item| matches!(item, DisplayItem::Text { text, .. } if text.contains("pane content")),
+    );
+    let (Some(shell), Some(watermark), Some(flow), Some(pane), Some(text)) =
+        (shell, watermark, flow, pane, text)
+    else {
+        return Outcome::Fail(format!(
+            "expected five paint items, got shell={shell:?} watermark={watermark:?} \
+             flow={flow:?} pane={pane:?} text={text:?}"
+        ));
+    };
+    if !(shell < watermark && watermark < flow && flow < pane && pane < text) {
+        return Outcome::Fail(format!(
+            "expected paint order shell < watermark < flow < pane < text, got \
+             shell={shell} watermark={watermark} flow={flow} pane={pane} text={text}"
+        ));
+    }
+    Outcome::Pass
+}
+
+/// Paint-list index of the first opaque fill in the given color. The fixture
+/// gives each box a distinct color, so the color identifies the box.
+fn solid_color_step(
+    fused: &silksurf_engine::fused_pipeline::FusedResult,
+    r: u8,
+    g: u8,
+    b: u8,
+) -> Option<usize> {
+    let wanted = Color { r, g, b, a: 255 };
+    fused
+        .display_items
+        .iter()
+        .position(|item| matches!(item, DisplayItem::SolidColor { color, .. } if *color == wanted))
 }
 
 fn check_css_media_screen(dom: &Dom, document: NodeId, source: &str) -> Outcome {
