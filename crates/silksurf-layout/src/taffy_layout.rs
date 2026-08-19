@@ -775,9 +775,12 @@ fn length_auto(l: Length) -> LengthPercentageAuto {
     match l {
         Length::Px(px) => LengthPercentageAuto::length(px),
         Length::Percent(p) => LengthPercentageAuto::percent(p / 100.0),
-        Length::Em(_) | Length::Rem(_) => {
-            LengthPercentageAuto::length(unresolved_font_relative_px())
-        }
+        Length::Em(_)
+        | Length::Rem(_)
+        | Length::Vw(_)
+        | Length::Vh(_)
+        | Length::Vmin(_)
+        | Length::Vmax(_) => LengthPercentageAuto::length(unresolved_font_relative_px()),
     }
 }
 
@@ -792,7 +795,12 @@ fn length_pct(l: Length) -> LengthPercentage {
     match l {
         Length::Px(px) => LengthPercentage::length(px),
         Length::Percent(p) => LengthPercentage::percent(p / 100.0),
-        Length::Em(_) | Length::Rem(_) => LengthPercentage::length(unresolved_font_relative_px()),
+        Length::Em(_)
+        | Length::Rem(_)
+        | Length::Vw(_)
+        | Length::Vh(_)
+        | Length::Vmin(_)
+        | Length::Vmax(_) => LengthPercentage::length(unresolved_font_relative_px()),
     }
 }
 
@@ -987,9 +995,14 @@ fn css_to_taffy_style(style: Option<&ComputedStyle>) -> Style {
         FlexBasis::Auto => Dimension::auto(),
         FlexBasis::Length(Length::Px(px)) => Dimension::length(px),
         FlexBasis::Length(Length::Percent(p)) => Dimension::percent(p / 100.0),
-        FlexBasis::Length(Length::Em(_) | Length::Rem(_)) => {
-            Dimension::length(unresolved_font_relative_px())
-        }
+        FlexBasis::Length(
+            Length::Em(_)
+            | Length::Rem(_)
+            | Length::Vw(_)
+            | Length::Vh(_)
+            | Length::Vmin(_)
+            | Length::Vmax(_),
+        ) => Dimension::length(unresolved_font_relative_px()),
     };
 
     let gap_col = LengthPercentage::length(
@@ -1118,9 +1131,14 @@ fn track_size_to_taffy(track: &CssGridTrackSize) -> TrackSizingFunction {
         CssGridTrackSize::MaxContent => TrackSizingFunction::MAX_CONTENT,
         CssGridTrackSize::Length(Length::Px(px)) => length(*px),
         CssGridTrackSize::Length(Length::Percent(p)) => percent(*p / 100.0),
-        CssGridTrackSize::Length(Length::Em(_) | Length::Rem(_)) => {
-            length(unresolved_font_relative_px())
-        }
+        CssGridTrackSize::Length(
+            Length::Em(_)
+            | Length::Rem(_)
+            | Length::Vw(_)
+            | Length::Vh(_)
+            | Length::Vmin(_)
+            | Length::Vmax(_),
+        ) => length(unresolved_font_relative_px()),
         CssGridTrackSize::Fr(fr_val) => fr(*fr_val),
         CssGridTrackSize::Minmax(min, max) => {
             minmax(grid_track_min_to_taffy(*min), grid_track_max_to_taffy(*max))
@@ -1131,11 +1149,16 @@ fn track_size_to_taffy(track: &CssGridTrackSize) -> TrackSizingFunction {
         CssGridTrackSize::FitContent(Length::Percent(p)) => {
             TrackSizingFunction::fit_content(LengthPercentage::percent(*p / 100.0))
         }
-        CssGridTrackSize::FitContent(Length::Em(_) | Length::Rem(_)) => {
-            TrackSizingFunction::fit_content(
-                LengthPercentage::length(unresolved_font_relative_px()),
-            )
-        }
+        CssGridTrackSize::FitContent(
+            Length::Em(_)
+            | Length::Rem(_)
+            | Length::Vw(_)
+            | Length::Vh(_)
+            | Length::Vmin(_)
+            | Length::Vmax(_),
+        ) => TrackSizingFunction::fit_content(LengthPercentage::length(
+            unresolved_font_relative_px(),
+        )),
     }
 }
 
@@ -1146,9 +1169,14 @@ fn grid_track_min_to_taffy(min: CssGridTrackMin) -> MinTrackSizingFunction {
         CssGridTrackMin::MaxContent => MinTrackSizingFunction::MAX_CONTENT,
         CssGridTrackMin::Length(Length::Px(px)) => MinTrackSizingFunction::length(px),
         CssGridTrackMin::Length(Length::Percent(p)) => MinTrackSizingFunction::percent(p / 100.0),
-        CssGridTrackMin::Length(Length::Em(_) | Length::Rem(_)) => {
-            MinTrackSizingFunction::length(unresolved_font_relative_px())
-        }
+        CssGridTrackMin::Length(
+            Length::Em(_)
+            | Length::Rem(_)
+            | Length::Vw(_)
+            | Length::Vh(_)
+            | Length::Vmin(_)
+            | Length::Vmax(_),
+        ) => MinTrackSizingFunction::length(unresolved_font_relative_px()),
     }
 }
 
@@ -1159,9 +1187,14 @@ fn grid_track_max_to_taffy(max: CssGridTrackMax) -> MaxTrackSizingFunction {
         CssGridTrackMax::MaxContent => MaxTrackSizingFunction::MAX_CONTENT,
         CssGridTrackMax::Length(Length::Px(px)) => MaxTrackSizingFunction::length(px),
         CssGridTrackMax::Length(Length::Percent(p)) => MaxTrackSizingFunction::percent(p / 100.0),
-        CssGridTrackMax::Length(Length::Em(_) | Length::Rem(_)) => {
-            MaxTrackSizingFunction::length(unresolved_font_relative_px())
-        }
+        CssGridTrackMax::Length(
+            Length::Em(_)
+            | Length::Rem(_)
+            | Length::Vw(_)
+            | Length::Vh(_)
+            | Length::Vmin(_)
+            | Length::Vmax(_),
+        ) => MaxTrackSizingFunction::length(unresolved_font_relative_px()),
         CssGridTrackMax::Fr(fr_val) => MaxTrackSizingFunction::fr(fr_val),
     }
 }
@@ -1179,9 +1212,14 @@ fn length_or_auto_dim(v: LengthOrAuto) -> Dimension {
         LengthOrAuto::Auto => Dimension::auto(),
         LengthOrAuto::Length(Length::Px(px)) => Dimension::length(px),
         LengthOrAuto::Length(Length::Percent(p)) => Dimension::percent(p / 100.0),
-        LengthOrAuto::Length(Length::Em(_) | Length::Rem(_)) => {
-            Dimension::length(unresolved_font_relative_px())
-        }
+        LengthOrAuto::Length(
+            Length::Em(_)
+            | Length::Rem(_)
+            | Length::Vw(_)
+            | Length::Vh(_)
+            | Length::Vmin(_)
+            | Length::Vmax(_),
+        ) => Dimension::length(unresolved_font_relative_px()),
     }
 }
 
@@ -1189,7 +1227,12 @@ fn length_dim(v: Length) -> Dimension {
     match v {
         Length::Px(px) => Dimension::length(px),
         Length::Percent(p) => Dimension::percent(p / 100.0),
-        Length::Em(_) | Length::Rem(_) => Dimension::length(unresolved_font_relative_px()),
+        Length::Em(_)
+        | Length::Rem(_)
+        | Length::Vw(_)
+        | Length::Vh(_)
+        | Length::Vmin(_)
+        | Length::Vmax(_) => Dimension::length(unresolved_font_relative_px()),
     }
 }
 
@@ -1198,7 +1241,14 @@ fn opt_length_dim(v: Option<Length>) -> Dimension {
         None => Dimension::auto(),
         Some(Length::Px(px)) => Dimension::length(px),
         Some(Length::Percent(p)) => Dimension::percent(p / 100.0),
-        Some(Length::Em(_) | Length::Rem(_)) => Dimension::length(unresolved_font_relative_px()),
+        Some(
+            Length::Em(_)
+            | Length::Rem(_)
+            | Length::Vw(_)
+            | Length::Vh(_)
+            | Length::Vmin(_)
+            | Length::Vmax(_),
+        ) => Dimension::length(unresolved_font_relative_px()),
     }
 }
 

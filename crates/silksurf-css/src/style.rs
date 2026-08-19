@@ -362,6 +362,14 @@ pub enum Length {
     Em(f32),
     /// Relative to the root element's font-size; defaults to 16 px (resolved at cascade time).
     Rem(f32),
+    /// Percent of the viewport's width (resolved at cascade time).
+    Vw(f32),
+    /// Percent of the viewport's height (resolved at cascade time).
+    Vh(f32),
+    /// Percent of the viewport's smaller axis (resolved at cascade time).
+    Vmin(f32),
+    /// Percent of the viewport's larger axis (resolved at cascade time).
+    Vmax(f32),
 }
 
 impl Default for Length {
@@ -380,7 +388,14 @@ impl Length {
     #[must_use]
     pub fn is_zero(&self) -> bool {
         match self {
-            Length::Px(v) | Length::Percent(v) | Length::Em(v) | Length::Rem(v) => *v == 0.0,
+            Length::Px(v)
+            | Length::Percent(v)
+            | Length::Em(v)
+            | Length::Rem(v)
+            | Length::Vw(v)
+            | Length::Vh(v)
+            | Length::Vmin(v)
+            | Length::Vmax(v) => *v == 0.0,
         }
     }
 }
@@ -767,32 +782,49 @@ struct CascadedStyle {
  * for font-size means relative to parent, per CSS spec). All other properties
  * use the element's own resolved font-size as the em base.
  */
-fn resolve_length(l: Length, em_px: f32, rem_px: f32) -> Length {
+fn resolve_length(l: Length, em_px: f32, rem_px: f32, viewport: (f32, f32)) -> Length {
+    let (viewport_width, viewport_height) = viewport;
     match l {
         Length::Px(_) | Length::Percent(_) => l,
         Length::Em(multiplier) => Length::Px(multiplier * em_px),
         Length::Rem(multiplier) => Length::Px(multiplier * rem_px),
+        Length::Vw(percent) => Length::Px(percent / 100.0 * viewport_width),
+        Length::Vh(percent) => Length::Px(percent / 100.0 * viewport_height),
+        Length::Vmin(percent) => Length::Px(percent / 100.0 * viewport_width.min(viewport_height)),
+        Length::Vmax(percent) => Length::Px(percent / 100.0 * viewport_width.max(viewport_height)),
     }
 }
 
-fn resolve_edges(edges: Edges, em_px: f32, rem_px: f32) -> Edges {
+fn resolve_edges(edges: Edges, em_px: f32, rem_px: f32, viewport: (f32, f32)) -> Edges {
     Edges {
-        top: resolve_length(edges.top, em_px, rem_px),
-        right: resolve_length(edges.right, em_px, rem_px),
-        bottom: resolve_length(edges.bottom, em_px, rem_px),
-        left: resolve_length(edges.left, em_px, rem_px),
+        top: resolve_length(edges.top, em_px, rem_px, viewport),
+        right: resolve_length(edges.right, em_px, rem_px, viewport),
+        bottom: resolve_length(edges.bottom, em_px, rem_px, viewport),
+        left: resolve_length(edges.left, em_px, rem_px, viewport),
     }
 }
 
-fn resolve_length_or_auto(l: LengthOrAuto, em_px: f32, rem_px: f32) -> LengthOrAuto {
+fn resolve_length_or_auto(
+    l: LengthOrAuto,
+    em_px: f32,
+    rem_px: f32,
+    viewport: (f32, f32),
+) -> LengthOrAuto {
     match l {
         LengthOrAuto::Auto => LengthOrAuto::Auto,
-        LengthOrAuto::Length(len) => LengthOrAuto::Length(resolve_length(len, em_px, rem_px)),
+        LengthOrAuto::Length(len) => {
+            LengthOrAuto::Length(resolve_length(len, em_px, rem_px, viewport))
+        }
     }
 }
 
-fn resolve_opt_length(l: Option<Length>, em_px: f32, rem_px: f32) -> Option<Length> {
-    l.map(|len| resolve_length(len, em_px, rem_px))
+fn resolve_opt_length(
+    l: Option<Length>,
+    em_px: f32,
+    rem_px: f32,
+    viewport: (f32, f32),
+) -> Option<Length> {
+    l.map(|len| resolve_length(len, em_px, rem_px, viewport))
 }
 
 fn resolve_margins(
@@ -802,12 +834,13 @@ fn resolve_margins(
     left: LengthOrAuto,
     em_px: f32,
     rem_px: f32,
+    viewport: (f32, f32),
 ) -> Margins {
     Margins {
-        top: resolve_length_or_auto(top, em_px, rem_px),
-        right: resolve_length_or_auto(right, em_px, rem_px),
-        bottom: resolve_length_or_auto(bottom, em_px, rem_px),
-        left: resolve_length_or_auto(left, em_px, rem_px),
+        top: resolve_length_or_auto(top, em_px, rem_px, viewport),
+        right: resolve_length_or_auto(right, em_px, rem_px, viewport),
+        bottom: resolve_length_or_auto(bottom, em_px, rem_px, viewport),
+        left: resolve_length_or_auto(left, em_px, rem_px, viewport),
     }
 }
 
@@ -821,7 +854,12 @@ impl CascadedStyle {
      * Copy fields use the static directly; non-Copy (font_family) clones only
      * when needed (rare: only when no cascade value and no parent inheritance).
      */
-    fn resolve(mut self, parent: Option<&ComputedStyle>, rem_base_px: f32) -> ComputedStyle {
+    fn resolve(
+        mut self,
+        parent: Option<&ComputedStyle>,
+        rem_base_px: f32,
+        viewport: (f32, f32),
+    ) -> ComputedStyle {
         use crate::property_id::PropertyId;
         static FALLBACK: std::sync::LazyLock<ComputedStyle> =
             std::sync::LazyLock::new(ComputedStyle::default);
@@ -861,6 +899,9 @@ impl CascadedStyle {
             Length::Rem(m) => Length::Px(m * rem_base_px),
             Length::Percent(p) => Length::Px(p / 100.0 * parent_font_size_px),
             other @ Length::Px(_) => other,
+            // A viewport-relative font-size resolves against the viewport, not
+            // against the parent, so it takes the shared resolver.
+            viewport_relative => resolve_length(viewport_relative, 0.0, rem_base_px, viewport),
         };
         // All non-font-size length properties use the element's own font-size as em base.
         let em_px = match resolved_font_size {
@@ -913,6 +954,7 @@ impl CascadedStyle {
                 },
                 em_px,
                 rem_base_px,
+                viewport,
             ),
             font_family: {
                 let ff_kw = ks.get(&PropertyId::FontFamily);
@@ -962,6 +1004,7 @@ impl CascadedStyle {
                     ),
                     em_px,
                     rem_base_px,
+                    viewport,
                 )
             },
             padding: resolve_edges(
@@ -993,6 +1036,7 @@ impl CascadedStyle {
                 },
                 em_px,
                 rem_base_px,
+                viewport,
             ),
             border: {
                 let zero = Length::Px(0.0);
@@ -1022,7 +1066,7 @@ impl CascadedStyle {
                         zero,
                     ),
                 };
-                resolve_edges(raw, em_px, rem_base_px)
+                resolve_edges(raw, em_px, rem_base_px, viewport)
             },
             flex_container: FlexContainerStyle {
                 direction: resolve_non_inherited_kw(
@@ -1132,6 +1176,7 @@ impl CascadedStyle {
                 ),
                 em_px,
                 rem_base_px,
+                viewport,
             ),
             right: resolve_length_or_auto(
                 resolve_non_inherited_kw(
@@ -1142,6 +1187,7 @@ impl CascadedStyle {
                 ),
                 em_px,
                 rem_base_px,
+                viewport,
             ),
             bottom: resolve_length_or_auto(
                 resolve_non_inherited_kw(
@@ -1152,6 +1198,7 @@ impl CascadedStyle {
                 ),
                 em_px,
                 rem_base_px,
+                viewport,
             ),
             left: resolve_length_or_auto(
                 resolve_non_inherited_kw(
@@ -1162,6 +1209,7 @@ impl CascadedStyle {
                 ),
                 em_px,
                 rem_base_px,
+                viewport,
             ),
             z_index: resolve_non_inherited_kw(
                 self.z_index,
@@ -1178,6 +1226,7 @@ impl CascadedStyle {
                 ),
                 em_px,
                 rem_base_px,
+                viewport,
             ),
             height: resolve_length_or_auto(
                 resolve_non_inherited_kw(
@@ -1188,6 +1237,7 @@ impl CascadedStyle {
                 ),
                 em_px,
                 rem_base_px,
+                viewport,
             ),
             min_width: resolve_length(
                 resolve_non_inherited_kw(
@@ -1198,6 +1248,7 @@ impl CascadedStyle {
                 ),
                 em_px,
                 rem_base_px,
+                viewport,
             ),
             max_width: resolve_opt_length(
                 resolve_non_inherited_kw(
@@ -1208,6 +1259,7 @@ impl CascadedStyle {
                 ),
                 em_px,
                 rem_base_px,
+                viewport,
             ),
             min_height: resolve_length(
                 resolve_non_inherited_kw(
@@ -1218,6 +1270,7 @@ impl CascadedStyle {
                 ),
                 em_px,
                 rem_base_px,
+                viewport,
             ),
             max_height: resolve_opt_length(
                 resolve_non_inherited_kw(
@@ -1228,6 +1281,7 @@ impl CascadedStyle {
                 ),
                 em_px,
                 rem_base_px,
+                viewport,
             ),
             box_sizing: resolve_non_inherited_kw(
                 self.box_sizing,
@@ -2016,6 +2070,7 @@ pub fn compute_styles(
         &mut styles,
         &mut workspace,
         16.0,
+        DEFAULT_VIEWPORT_PX,
     );
     styles
 }
@@ -2139,12 +2194,17 @@ impl StyleCache {
                 styles,
                 &mut workspace,
                 16.0,
+                DEFAULT_VIEWPORT_PX,
             );
         }
 
         Arc::clone(&self.styles)
     }
 }
+
+/// The viewport the convenience entry points assume, matching the default
+/// StyleIndex viewport.
+pub const DEFAULT_VIEWPORT_PX: (f32, f32) = (1280.0, 800.0);
 
 pub fn compute_style_for_node(
     dom: &Dom,
@@ -2163,6 +2223,7 @@ pub fn compute_style_for_node(
         &mut workspace,
         None,
         16.0,
+        DEFAULT_VIEWPORT_PX,
     )
 }
 
@@ -2183,6 +2244,7 @@ pub fn compute_style_for_node_with_index(
         &mut workspace,
         None,
         16.0,
+        DEFAULT_VIEWPORT_PX,
     )
 }
 
@@ -2207,6 +2269,10 @@ pub fn compute_style_for_node_with_workspace(
     workspace: &mut CascadeWorkspace,
     cascade_view: Option<&crate::cascade_view::CascadeView>,
     rem_base_px: f32,
+    // viewport: width and height in CSS pixels, the basis for vw, vh, vmin,
+    // and vmax. CSS Values 4 6.1.2 gives the small, large, and dynamic
+    // viewport the same size in a window with no retracting browser UI.
+    viewport: (f32, f32),
 ) -> ComputedStyle {
     if dom.element_name(node).ok().flatten().is_none() {
         if dom
@@ -2227,7 +2293,7 @@ pub fn compute_style_for_node_with_workspace(
         cascade_view,
         parent,
     )
-    .resolve(parent, rem_base_px)
+    .resolve(parent, rem_base_px, viewport)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2240,6 +2306,7 @@ fn compute_styles_recursive(
     styles: &mut FxHashMap<NodeId, ComputedStyle>,
     workspace: &mut CascadeWorkspace,
     rem_base_px: f32,
+    viewport: (f32, f32),
 ) {
     let style = compute_style_for_node_with_workspace(
         dom,
@@ -2250,6 +2317,7 @@ fn compute_styles_recursive(
         workspace,
         None,
         rem_base_px,
+        viewport,
     );
     styles.insert(node, style.clone());
     // Update rem_base after processing the html element: all descendants
@@ -2278,6 +2346,7 @@ fn compute_styles_recursive(
                 styles,
                 workspace,
                 child_rem_base,
+                viewport,
             );
         }
     }
@@ -4203,8 +4272,31 @@ fn parse_length_token(token: &CssToken) -> Option<Length> {
         CssToken::Dimension { value, unit } if unit.eq_ignore_ascii_case("rem") => {
             value.parse::<f32>().ok().map(Length::Rem)
         }
+        /*
+         * CSS Values 4 6.1.2 defines small, large, and dynamic viewport
+         * variants alongside the plain one. The engine paints into a window
+         * with no retracting browser UI, so all four viewport sizes coincide
+         * and `svh`, `lvh`, and `dvh` take the same arm as `vh`.
+         */
+        CssToken::Dimension { value, unit } => {
+            viewport_unit(unit).and_then(|construct| value.parse::<f32>().ok().map(construct))
+        }
         CssToken::Percentage(value) => value.parse::<f32>().ok().map(Length::Percent),
         CssToken::Number(value) if value == "0" => Some(Length::zero()),
+        _ => None,
+    }
+}
+
+/// The Length constructor a viewport-relative unit names, or None when the
+/// unit is not viewport-relative.
+fn viewport_unit(unit: &str) -> Option<fn(f32) -> Length> {
+    let lowered = unit.to_ascii_lowercase();
+    let axis = lowered.strip_prefix(['s', 'l', 'd']).unwrap_or(&lowered);
+    match axis {
+        "vw" | "vi" => Some(Length::Vw),
+        "vh" | "vb" => Some(Length::Vh),
+        "vmin" => Some(Length::Vmin),
+        "vmax" => Some(Length::Vmax),
         _ => None,
     }
 }
@@ -4326,7 +4418,14 @@ fn parse_box_shadow(tokens: &[CssToken]) -> Option<BoxShadow> {
         return None;
     }
     let px = |l: &Length| match l {
-        Length::Px(v) | Length::Percent(v) | Length::Em(v) | Length::Rem(v) => *v,
+        Length::Px(v)
+        | Length::Percent(v)
+        | Length::Em(v)
+        | Length::Rem(v)
+        | Length::Vw(v)
+        | Length::Vh(v)
+        | Length::Vmin(v)
+        | Length::Vmax(v) => *v,
     };
     Some(BoxShadow {
         offset_x: px(&lengths[0]),

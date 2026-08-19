@@ -24,7 +24,21 @@ impl CalcExpr {
     #[must_use]
     pub fn evaluate(&self, context_px: f32) -> f32 {
         match self {
-            CalcExpr::Value(Length::Px(v) | Length::Em(v) | Length::Rem(v)) => *v,
+            /*
+             * A viewport unit inside calc() evaluates as a bare number
+             * because CalcExpr carries only the percentage context, not the
+             * viewport. It resolves correctly outside calc(); a calc holding
+             * one is the case still to wire.
+             */
+            CalcExpr::Value(
+                Length::Px(v)
+                | Length::Em(v)
+                | Length::Rem(v)
+                | Length::Vw(v)
+                | Length::Vh(v)
+                | Length::Vmin(v)
+                | Length::Vmax(v),
+            ) => *v,
             CalcExpr::Value(Length::Percent(p)) => context_px * p / 100.0,
             CalcExpr::Number(n) => *n,
             CalcExpr::Add(a, b) => a.evaluate(context_px) + b.evaluate(context_px),

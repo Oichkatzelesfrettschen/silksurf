@@ -276,3 +276,68 @@ fn translate3d_contributes_its_two_dimensional_part() {
     assert_eq!(style.transform.x, Length::Px(7.0));
     assert_eq!(style.transform.y, Length::Px(8.0));
 }
+
+/// Compute against an explicit viewport so the viewport-relative units have a
+/// basis the assertion can name.
+fn computed_in_viewport(css: &str, viewport: (f32, f32)) -> ComputedStyle {
+    let stylesheet = parse_stylesheet(css).expect("stylesheet parses");
+    let index = silksurf_css::StyleIndex::for_viewport(&stylesheet, viewport.0, viewport.1);
+    let mut workspace = silksurf_css::CascadeWorkspace::new(index.active_rules.len());
+    let mut dom = Dom::new();
+    let document = dom.create_document();
+    let html = dom.create_element("html");
+    let div = dom.create_element("div");
+    dom.set_attribute(div, "class", "box").expect("class sets");
+    dom.append_child(document, html).expect("html attaches");
+    dom.append_child(html, div).expect("div attaches");
+    silksurf_css::compute_style_for_node_with_workspace(
+        &dom,
+        div,
+        &stylesheet,
+        &index,
+        None,
+        &mut workspace,
+        None,
+        16.0,
+        viewport,
+    )
+}
+
+#[test]
+fn vw_and_vh_resolve_against_the_viewport() {
+    let style = computed_in_viewport(".box { width: 50vw; height: 20vh; }", (1280.0, 800.0));
+    assert_eq!(style.width, LengthOrAuto::Length(Length::Px(640.0)));
+    assert_eq!(style.height, LengthOrAuto::Length(Length::Px(160.0)));
+}
+
+#[test]
+fn vmin_and_vmax_take_the_smaller_and_larger_axis() {
+    let style = computed_in_viewport(".box { width: 10vmin; height: 10vmax; }", (1280.0, 800.0));
+    assert_eq!(style.width, LengthOrAuto::Length(Length::Px(80.0)));
+    assert_eq!(style.height, LengthOrAuto::Length(Length::Px(128.0)));
+}
+
+#[test]
+fn the_dynamic_small_and_large_viewport_variants_share_one_size() {
+    for unit in ["vh", "dvh", "svh", "lvh"] {
+        let style = computed_in_viewport(&format!(".box {{ height: 50{unit}; }}"), (1280.0, 800.0));
+        assert_eq!(
+            style.height,
+            LengthOrAuto::Length(Length::Px(400.0)),
+            "{unit}"
+        );
+    }
+}
+
+#[test]
+fn the_logical_viewport_units_follow_the_horizontal_writing_mode() {
+    let style = computed_in_viewport(".box { width: 25vi; height: 25vb; }", (1280.0, 800.0));
+    assert_eq!(style.width, LengthOrAuto::Length(Length::Px(320.0)));
+    assert_eq!(style.height, LengthOrAuto::Length(Length::Px(200.0)));
+}
+
+#[test]
+fn a_viewport_relative_font_size_resolves_against_the_viewport() {
+    let style = computed_in_viewport(".box { font-size: 5vh; }", (1280.0, 800.0));
+    assert_eq!(style.font_size, Length::Px(40.0));
+}

@@ -170,7 +170,14 @@ pub fn layout_flex_container<S: BuildHasher>(
                     containing.height * pct / 100.0
                 }
             }
-            FlexBasis::Length(Length::Em(_) | Length::Rem(_)) => unresolved_font_relative_px(),
+            FlexBasis::Length(
+                Length::Em(_)
+                | Length::Rem(_)
+                | Length::Vw(_)
+                | Length::Vh(_)
+                | Length::Vmin(_)
+                | Length::Vmax(_),
+            ) => unresolved_font_relative_px(),
             FlexBasis::Auto => {
                 if is_row {
                     content_width

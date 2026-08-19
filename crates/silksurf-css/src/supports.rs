@@ -187,13 +187,17 @@ mod tests {
 
     #[test]
     fn unparsed_value_evaluates_false() {
-        assert!(!evaluate_supports_condition(&prelude("(height: 100dvb)")));
+        // `anchor-size()` is a value function the cascade has no parser for,
+        // so the declaration contributes nothing and the condition is false.
+        assert!(!evaluate_supports_condition(&prelude(
+            "(height: anchor-size(height))"
+        )));
     }
 
     #[test]
     fn negation_inverts_the_declaration_result() {
         assert!(evaluate_supports_condition(&prelude(
-            "not (height: 100dvb)"
+            "not (height: anchor-size(height))"
         )));
         assert!(!evaluate_supports_condition(&prelude(
             "not (display: flex)"

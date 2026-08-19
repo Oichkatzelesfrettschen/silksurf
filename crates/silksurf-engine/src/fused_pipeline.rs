@@ -212,6 +212,7 @@ impl FusedWorkspace {
                 &mut self.cascade_ws,
                 Some(&self.cascade_view),
                 rem_base_px,
+                (viewport.width, viewport.height),
             );
             if root_suppressed {
                 style.display = Display::None;
@@ -476,6 +477,7 @@ pub fn fused_style_layout_paint_with_replaced_sizes(
             &mut cascade_ws,
             None,
             rem_base_px,
+            (viewport.width, viewport.height),
         );
         if root_suppressed {
             style.display = Display::None;
@@ -694,6 +696,9 @@ fn translation_px(length: Length, extent: f32, font_size: Length) -> f32 {
         Length::Percent(value) => extent * value / 100.0,
         Length::Em(value) => value * length_px(font_size, 16.0),
         Length::Rem(value) => value * 16.0,
+        // The cascade resolves viewport units to px, so a translation still
+        // carrying one came from a caller that skipped resolve.
+        Length::Vw(value) | Length::Vh(value) | Length::Vmin(value) | Length::Vmax(value) => value,
     }
 }
 
@@ -703,7 +708,9 @@ fn length_px(length: Length, fallback: f32) -> f32 {
     match length {
         Length::Px(value) => value,
         Length::Em(value) | Length::Rem(value) => value * fallback,
-        Length::Percent(_) => fallback,
+        Length::Percent(_) | Length::Vw(_) | Length::Vh(_) | Length::Vmin(_) | Length::Vmax(_) => {
+            fallback
+        }
     }
 }
 
