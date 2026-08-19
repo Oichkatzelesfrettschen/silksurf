@@ -380,7 +380,10 @@ pub(crate) fn build_browser_page_with_buffers_for_height(
 
     let phase_start = std::time::Instant::now();
     let document_height = browser_frame_height(&display_list.items, BROWSER_CHROME_HEIGHT as u32);
-    display_list = tile_browser_document_display_list(display_list, document_height);
+    // The raster stride is the width the document laid out at, so the tiles,
+    // the viewport raster, and the frame buffer share one row length.
+    let raster_width = viewport.width as u32;
+    display_list = tile_browser_document_display_list(display_list, raster_width, document_height);
     let bitmap_height = browser_page_bitmap_height(document_height, live_window_height);
     trace_navigation_build_phase(trace_build, &payload.url, "tiles", phase_start.elapsed());
     let BrowserFrameBuffers { mut rgba, mut argb } = buffers;
@@ -389,6 +392,7 @@ pub(crate) fn build_browser_page_with_buffers_for_height(
     if rasterize_browser_viewport_argb_direct(
         &display_list,
         0,
+        raster_width,
         bitmap_height,
         &mut argb,
         &mut viewport_item_indices,
@@ -411,6 +415,7 @@ pub(crate) fn build_browser_page_with_buffers_for_height(
         rasterize_browser_viewport_into(
             &display_list,
             0,
+            raster_width,
             bitmap_height,
             &mut rgba,
             &mut viewport_item_indices,
@@ -442,6 +447,7 @@ pub(crate) fn build_browser_page_with_buffers_for_height(
         frame: BrowserFrame {
             url: payload.url,
             argb,
+            raster_width,
             raster_height: document_height,
             bitmap_height,
             bitmap_scroll_y: 0,

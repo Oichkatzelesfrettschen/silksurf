@@ -300,11 +300,13 @@ pub(crate) fn take_focus_retained_buffer_update(
     window_width: u32,
     window_height: u32,
 ) -> Option<silksurf_gui::WinitRetainedBufferUpdate> {
-    if state.frame.focus_viewport_retained_sent || window_width != FRAME_WIDTH {
+    if state.frame.focus_viewport_retained_sent {
         return None;
     }
     let cache = state.frame.focus_viewport_cache.as_ref()?;
-    if cache.bitmap_height != window_height {
+    // The cache is a bitmap the window presents word for word, so it answers
+    // only for the surface geometry it was rastered at.
+    if cache.raster_width != window_width || cache.bitmap_height != window_height {
         return None;
     }
     let pixel_count = surface_pixel_count(window_width, window_height)?;
@@ -373,7 +375,8 @@ pub(crate) fn prepare_scroll_viewport_caches(
     window_width: u32,
     window_height: u32,
 ) {
-    if window_width != FRAME_WIDTH || state.frame.bitmap_height != window_height {
+    let raster_width = state.frame.raster_width;
+    if window_width != raster_width || state.frame.bitmap_height != window_height {
         state.frame.scroll_viewport_caches.clear();
         return;
     }
@@ -394,6 +397,7 @@ pub(crate) fn prepare_scroll_viewport_caches(
     if scroll_viewport_caches_cover_targets(
         &state.frame.scroll_viewport_caches,
         &targets,
+        raster_width,
         window_height,
     ) {
         return;
@@ -407,6 +411,7 @@ pub(crate) fn prepare_scroll_viewport_caches(
         rasterize_browser_viewport_argb_preferred(
             &runtime.display_list,
             scroll_y,
+            raster_width,
             window_height,
             &mut rgba,
             &mut argb,
@@ -414,6 +419,7 @@ pub(crate) fn prepare_scroll_viewport_caches(
         );
         caches.push(ScrollViewportCache {
             scroll_y,
+            raster_width,
             bitmap_height: window_height,
             tag: scroll_retained_tag_for_scroll_y(scroll_y),
             argb,
@@ -435,6 +441,7 @@ pub(crate) fn take_scroll_retained_buffer_update(
         .iter()
         .position(|cache| {
             !cache.retained_sent
+                && cache.raster_width == window_width
                 && cache.bitmap_height == window_height
                 && cache.argb.len() >= pixel_count
         })?;
@@ -465,12 +472,15 @@ pub(crate) fn scroll_retained_targets(current_scroll_y: u32, max_scroll: f32) ->
 pub(crate) fn scroll_viewport_caches_cover_targets(
     caches: &[ScrollViewportCache],
     targets: &[u32],
+    raster_width: u32,
     bitmap_height: u32,
 ) -> bool {
     targets.iter().all(|target| {
-        caches
-            .iter()
-            .any(|cache| cache.scroll_y == *target && cache.bitmap_height == bitmap_height)
+        caches.iter().any(|cache| {
+            cache.scroll_y == *target
+                && cache.raster_width == raster_width
+                && cache.bitmap_height == bitmap_height
+        })
     })
 }
 
@@ -1055,11 +1065,11 @@ mod tests {
 
     #[test]
     fn scroll_exposed_document_rect_tracks_direction() {
-        let down = scroll_exposed_document_rect(48, 100, 4);
+        let down = scroll_exposed_document_rect(48, FRAME_WIDTH, 100, 4);
         assert_eq!(down.y, 144.0);
         assert_eq!(down.height, 4.0);
 
-        let up = scroll_exposed_document_rect(40, 100, -4);
+        let up = scroll_exposed_document_rect(40, FRAME_WIDTH, 100, -4);
         assert_eq!(up.y, 84.0);
         assert_eq!(up.height, 4.0);
     }
@@ -1204,7 +1214,7 @@ mod tests {
     #[test]
     fn focus_viewport_cache_redraw_marks_visible_content_damage() {
         assert_eq!(
-            focus_viewport_cache_redraw_mode(682, 800),
+            focus_viewport_cache_redraw_mode(682, FRAME_WIDTH, 800),
             BrowserRedrawMode::Damage(Rect {
                 x: 0.0,
                 y: BROWSER_CHROME_HEIGHT + 682.0,
@@ -1219,6 +1229,7 @@ mod tests {
         let mut state = test_browser_state("https://example.com/");
         state.frame.focus_viewport_cache = Some(FocusViewportCache {
             scroll_y: 682,
+            raster_width: FRAME_WIDTH,
             bitmap_height: 800,
             argb: vec![0x0102_0304, 0x0506_0708],
         });
@@ -1236,6 +1247,7 @@ mod tests {
         let mut state = test_browser_state("https://example.com/");
         state.frame.focus_viewport_cache = Some(FocusViewportCache {
             scroll_y: 682,
+            raster_width: FRAME_WIDTH,
             bitmap_height: FRAME_HEIGHT,
             argb: vec![0x0102_0304; (FRAME_WIDTH * FRAME_HEIGHT) as usize],
         });
@@ -1337,6 +1349,7 @@ mod tests {
             .scroll_viewport_caches
             .push(ScrollViewportCache {
                 scroll_y: 96,
+                raster_width: FRAME_WIDTH,
                 bitmap_height: FRAME_HEIGHT,
                 tag,
                 argb: vec![0x0102_0304; (FRAME_WIDTH * FRAME_HEIGHT) as usize],
@@ -1366,6 +1379,7 @@ mod tests {
             .scroll_viewport_caches
             .push(ScrollViewportCache {
                 scroll_y: 96,
+                raster_width: FRAME_WIDTH,
                 bitmap_height: FRAME_HEIGHT,
                 tag,
                 argb: vec![0x0102_0304, 0x0506_0708],
@@ -1397,6 +1411,7 @@ mod tests {
             .scroll_viewport_caches
             .push(ScrollViewportCache {
                 scroll_y: 96,
+                raster_width: FRAME_WIDTH,
                 bitmap_height: FRAME_HEIGHT,
                 tag: scroll_retained_tag_for_scroll_y(96),
                 argb: Vec::new(),

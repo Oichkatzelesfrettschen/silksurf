@@ -206,6 +206,10 @@ pub(crate) struct BrowserRenderConfig {
 pub(crate) struct BrowserFrame {
     pub(crate) url: String,
     pub(crate) argb: Vec<u32>,
+    /// Row stride of `argb` in pixels, and the width the page laid out at.
+    /// The window's surface width sets it, so a resize relayouts rather than
+    /// scaling or cropping the 1280-px raster.
+    pub(crate) raster_width: u32,
     pub(crate) raster_height: u32,
     pub(crate) bitmap_height: u32,
     pub(crate) bitmap_scroll_y: u32,
@@ -220,12 +224,17 @@ pub(crate) struct BrowserFrame {
 
 pub(crate) struct FocusViewportCache {
     pub(crate) scroll_y: u32,
+    /// The raster width the cache was captured at. A resize invalidates it,
+    /// because the words are a bitmap whose stride the new width contradicts.
+    pub(crate) raster_width: u32,
     pub(crate) bitmap_height: u32,
     pub(crate) argb: Vec<u32>,
 }
 
 pub(crate) struct ScrollViewportCache {
     pub(crate) scroll_y: u32,
+    /// The raster width the cache was captured at; see `FocusViewportCache`.
+    pub(crate) raster_width: u32,
     pub(crate) bitmap_height: u32,
     pub(crate) tag: silksurf_gui::WinitRetainedBufferTag,
     pub(crate) argb: Vec<u32>,

@@ -37,6 +37,7 @@ pub(crate) fn test_browser_state(url: &str) -> BrowserState {
         frame: BrowserFrame {
             url: url.to_string(),
             argb: Vec::new(),
+            raster_width: FRAME_WIDTH,
             raster_height: FRAME_HEIGHT,
             bitmap_height: FRAME_HEIGHT,
             bitmap_scroll_y: 0,
