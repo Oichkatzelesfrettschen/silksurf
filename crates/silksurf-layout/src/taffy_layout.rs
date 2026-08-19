@@ -81,9 +81,12 @@ pub struct TaffyLayout {
     /// Write cursor into `adopted`, one entry per group. Retained for the same
     /// reason.
     adopted_cursor: Vec<u32>,
-    /// Per-BFS-index: the element has children, so it holds no line box of its
-    /// own. CSS 2.1 10.6.3 gives such a box an auto height of zero, which the
-    /// measure function's line-height floor would otherwise override.
+    /// Per-BFS-index: the element has children in the BFS table. An element
+    /// whose text child merged into it also carries this flag, and
+    /// `measure_taffy_text_node` returns that merged text's size before the
+    /// measure closure consults the flag, so the flag decides only the case
+    /// where no text remains to measure: children whose boxes lay out
+    /// elsewhere. CSS 2.1 10.6.3 gives that box an auto height of zero.
     generates_no_line_box: Vec<bool>,
 }
 
@@ -629,10 +632,13 @@ impl TaffyLayout {
                         return Size::ZERO;
                     }
 
-                    // The element has children whose boxes lay out elsewhere --
+                    // Reaching here means the node measured no text of its
+                    // own. Its children's boxes therefore lay out elsewhere --
                     // absolutely positioned, reparented onto another containing
-                    // block, or suppressed -- so it holds no line box. CSS 2.1
-                    // 10.6.3 gives it an auto height of zero.
+                    // block, or suppressed -- so it holds no line box, and CSS
+                    // 2.1 10.6.3 gives it an auto height of zero. The text
+                    // measure above must stay ahead of this check: an element
+                    // that absorbed its text child carries the same flag.
                     if generates_no_line_box.get(bfs_idx).copied().unwrap_or(false) {
                         return Size {
                             width: known.width.unwrap_or(0.0),
