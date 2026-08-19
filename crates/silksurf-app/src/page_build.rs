@@ -7,8 +7,11 @@
 #[allow(clippy::wildcard_imports)]
 use crate::*;
 
-pub(crate) fn execute_static_inline_scripts(js_ctx: &mut SilkContext, scripts: &[String]) {
-    for (i, script) in scripts.iter().enumerate() {
+pub(crate) fn execute_static_inline_scripts(
+    js_ctx: &mut SilkContext,
+    scripts: &[(Option<silksurf_dom::NodeId>, String)],
+) {
+    for (i, (node, script)) in scripts.iter().enumerate() {
         const MAX_INLINE_SCRIPT: usize = 256 * 1024;
         if script.len() > MAX_INLINE_SCRIPT {
             eprintln!(
@@ -19,6 +22,7 @@ pub(crate) fn execute_static_inline_scripts(js_ctx: &mut SilkContext, scripts: &
         }
         log_static_script_start(i, script);
         let script_start = std::time::Instant::now();
+        js_ctx.set_current_script(*node);
         match js_ctx.eval(script) {
             Ok(()) => eprintln!(
                 "[SilkSurf] Script {i} executed OK ({:?})",
@@ -29,6 +33,7 @@ pub(crate) fn execute_static_inline_scripts(js_ctx: &mut SilkContext, scripts: &
                 script_start.elapsed()
             ),
         }
+        js_ctx.set_current_script(None);
     }
 }
 
@@ -1174,6 +1179,55 @@ pub(crate) fn stylesheet_text_with_user_agent_defaults(document_css: &str) -> St
     css_text.push('\n');
     css_text.push_str(document_css);
     css_text
+}
+
+/*
+ * settle_static_document -- converge the one-shot render on the document a
+ * windowed load would reach.
+ *
+ * The static path has no event loop, so a preload that completes after the
+ * scripts run has nothing to dispatch its load event and a stylesheet the
+ * handler adds never enters the cascade. This drives the same three steps the
+ * repaint tick drives -- dispatch finished preloads, refresh the stylesheet
+ * set, drain host callbacks -- until a pass changes nothing or the deadline
+ * passes, and reports the final concatenated CSS.
+ *
+ * Returns Some(css_text) when the stylesheet list moved, and None when the
+ * document the scripts left is already the final one.
+ */
+pub(crate) fn settle_static_document(
+    js_ctx: &mut SilkContext,
+    dom_arc: &Arc<Mutex<silksurf_dom::Dom>>,
+    doc_node: silksurf_dom::NodeId,
+    sheets: &mut StyleSheetSet,
+    preloads: &mut PreloadLinks,
+    settle_deadline: std::time::Duration,
+) -> Option<String> {
+    let deadline = std::time::Instant::now() + settle_deadline;
+    let mut changed = false;
+    loop {
+        let dispatched = preloads.dispatch_completed(js_ctx);
+        let _ = js_ctx.run_host_callbacks(64);
+        js_ctx.run_pending_jobs();
+        let refreshed = {
+            let dom = dom_arc
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            preloads.refresh(&dom, doc_node);
+            sheets.refresh(&dom, doc_node)
+        };
+        changed |= refreshed;
+        let waiting = preloads.has_pending_fetches() || sheets.has_pending_fetches();
+        if !waiting && dispatched == 0 && !refreshed {
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            eprintln!("[SilkSurf] Static settle: deadline reached with work outstanding");
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(4));
+    }
+    changed.then(|| sheets.css_text())
 }
 
 #[cfg(test)]

@@ -414,7 +414,7 @@ fn run_static_browser_render(
      * requests share HTTP/2 multiplexing and a cached sheet returns without
      * network delay.
      */
-    let sheets = document_stylesheet_set(
+    let mut sheets = document_stylesheet_set(
         renderer,
         &dom,
         doc_node,
@@ -464,8 +464,19 @@ fn run_static_browser_render(
         });
     eprintln!("[SilkSurf] CSS parsed in {:?}", css_start.elapsed());
 
-    // 5. Extract inline script text before wrapping Dom for the JS context.
-    let scripts = extract_inline_scripts(&dom, doc_node);
+    /*
+     * The scripts carry their own `<script>` element so the eval loop can name
+     * it as document.currentScript, which pages read to reach the tag they sit
+     * beside.
+     */
+    let scripts: Vec<(Option<silksurf_dom::NodeId>, String)> =
+        extract_document_script_nodes(&dom, doc_node, &options.url)
+            .into_iter()
+            .filter_map(|script| match script.source {
+                DocumentScriptRef::Inline(text) => Some((Some(script.node), text)),
+                DocumentScriptRef::External(_) => None,
+            })
+            .collect();
     eprintln!("[SilkSurf] Found {} inline script(s)", scripts.len());
 
     // Viewport dimensions used by fused pipeline and rasterizer
@@ -504,6 +515,37 @@ fn run_static_browser_render(
     // 7. Drain pending microtasks and Promise reactions.
     js_ctx.run_pending_jobs();
     drain_initial_host_callbacks(&mut js_ctx);
+
+    /*
+     * Converge on the document a windowed load reaches: a preload that lands
+     * after the scripts run fires its load event, a handler may upgrade a link
+     * to a stylesheet, and the new sheet reparses into the cascade.
+     */
+    let mut preloads = PreloadLinks::new(&options.url, &options.render_config);
+    let stylesheet = match settle_static_document(
+        &mut js_ctx,
+        &dom_arc,
+        doc_node,
+        &mut sheets,
+        &mut preloads,
+        STATIC_SETTLE_BUDGET,
+    ) {
+        Some(settled_css) => {
+            eprintln!(
+                "[SilkSurf] Settled CSS: {} bytes from {} source(s)",
+                settled_css.len(),
+                sheets.source_count()
+            );
+            let dom = dom_arc
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            dom.with_interner_mut(|interner| {
+                renderer.get_or_parse_stylesheet(&settled_css, interner)
+            })
+            .unwrap_or(stylesheet)
+        }
+        None => stylesheet,
+    };
 
     // 8. Fused style+layout+paint: single BFS pass over post-JS DOM.
     //    Replaces separate compute_styles + build_layout_tree + build_display_list calls.

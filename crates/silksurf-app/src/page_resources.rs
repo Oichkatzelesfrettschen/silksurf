@@ -939,31 +939,6 @@ pub(crate) fn script_text_content(dom: &silksurf_dom::Dom, node: silksurf_dom::N
     text
 }
 
-/// Extract text content from inline `<script>` tags.
-pub(crate) fn extract_inline_scripts(
-    dom: &silksurf_dom::Dom,
-    root: silksurf_dom::NodeId,
-) -> Vec<String> {
-    let mut scripts = Vec::new();
-    collect_script_tags(dom, root, &mut scripts);
-    scripts
-}
-
-pub(crate) fn collect_script_tags(
-    dom: &silksurf_dom::Dom,
-    node: silksurf_dom::NodeId,
-    scripts: &mut Vec<String>,
-) {
-    if let Some(DocumentScriptRef::Inline(text)) = script_ref_for_node(dom, node, "") {
-        scripts.push(text);
-    }
-    if let Ok(children) = dom.children(node) {
-        for &child in children {
-            collect_script_tags(dom, child, scripts);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     // Module split from the former single-file binary; the crate root

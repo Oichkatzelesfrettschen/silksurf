@@ -216,6 +216,11 @@ fn preload_fetch_succeeds(config: &BrowserRenderConfig, url: &str, accept: &str)
     }
 }
 
+/// How long the one-shot static render waits for preload and stylesheet
+/// fetches to land before painting. A windowed load has an event loop to keep
+/// converging; the static path has this budget instead.
+pub(crate) const STATIC_SETTLE_BUDGET: std::time::Duration = std::time::Duration::from_millis(2000);
+
 #[cfg(test)]
 mod tests {
     // Module split from the former single-file binary; the crate root
