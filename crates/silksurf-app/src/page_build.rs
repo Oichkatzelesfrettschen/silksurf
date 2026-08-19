@@ -90,6 +90,11 @@ pub(crate) fn load_navigation_payload(
             response.body.len(),
             fetch_elapsed
         ),
+        FetchOrigin::Revalidated => eprintln!(
+            "[SilkSurf] Navigation revalidated 304: {} stored bytes in {:?}",
+            response.body.len(),
+            fetch_elapsed
+        ),
         FetchOrigin::Fresh => match request.method {
             HttpMethod::Get => eprintln!(
                 "[SilkSurf] Navigation fetched: {} bytes in {:?}",

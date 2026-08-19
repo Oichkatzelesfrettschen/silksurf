@@ -345,12 +345,6 @@ separately-landable follow-up):
   module route-splits through `import()`, so its page code never
   evaluates. Wiring it needs load_imported_module to fetch on demand
   rather than report a miss.
-- stale-entry-revalidation -- ResponseCache::get answers only while an
-  entry is fresh, and a stale entry stays in the map carrying its ETag
-  and Last-Modified. Nothing consults conditional_headers on a miss, so
-  a stale entry refetches in full instead of riding a 304. Wiring it
-  needs fetch_or_speculate to send the validators and to rebuild the
-  response from the cached body when the origin answers 304.
 - intl-formatters -- Intl carries Locale and getCanonicalLocales, which
   is what language negotiation reads. DateTimeFormat, NumberFormat,
   Collator, PluralRules, and RelativeTimeFormat stay absent rather than
@@ -554,6 +548,25 @@ element.
 
 Seven cases pair a referrer inside a scope with one outside it, so a lookup
 that applies the scope to every referrer passes the first and fails the second.
+
+## Stale-entry revalidation (landed 2026-08-19)
+
+`ResponseCache::get` answers only while an entry is fresh, and a stale entry
+stayed in the map carrying its ETag and Last-Modified with nothing consulting
+them, so a stale navigation refetched the whole body.
+`SpeculativeRenderer::fetch_or_speculate` now sends
+`ResponseCache::conditional_headers` on the miss path (RFC 9111, 4.3.1); an
+absent entry offers none and the request stays a plain GET.
+
+`ResponseCache::refresh_from_not_modified` turns the origin's 304 into the
+stored representation (RFC 9111, 4.3.4): the 304's headers update the stored
+ones, the freshness window restarts from now because the origin has just
+spoken about the entry, and the body, status, and the validators the 304 omits
+stay. `FetchOrigin::Revalidated` names the outcome, so the navigation trace
+separates one round-trip with no body bytes from a full refetch.
+
+Four cases in `crates/silksurf-net/src/cache.rs`. Dropping the freshness
+restart fails `a_not_modified_answer_serves_the_stored_body`.
 
 ## Open work after the live-resource change
 

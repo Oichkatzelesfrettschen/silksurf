@@ -44,6 +44,10 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+/// The status a conditional GET answers when the stored representation is
+/// still current (RFC 9110, 15.4.5).
+const NOT_MODIFIED: u16 = 304;
+
 /*
  * FetchOrigin -- tracks whether a response came from the cache or the network.
  *
@@ -57,6 +61,10 @@ pub enum FetchOrigin {
     Fresh,
     /// Response was served from the local cache without a network round-trip.
     Cache,
+    /// A stale entry's validators rode a conditional GET, the origin answered
+    /// 304, and the stored body served the navigation. One round-trip, no
+    /// body bytes.
+    Revalidated,
 }
 
 /*
@@ -516,8 +524,16 @@ impl SpeculativeRenderer {
             return Ok((response, FetchOrigin::Cache, t0.elapsed()));
         }
 
-        // Cache miss: fetch live, store in cache
+        /*
+         * A stale entry keeps its ETag and Last-Modified, so its validators
+         * ride this request (RFC 9111, 4.3.1). The origin then answers 304
+         * with no body, and the stored representation serves the navigation.
+         * An absent entry offers no validators and this is a plain GET.
+         */
+        let validators = self.cache.conditional_headers(url);
+        let revalidating = !validators.is_empty();
         let mut headers = extra_headers.to_vec();
+        headers.extend(validators);
         headers.push(("Accept".to_string(), "text/html,*/*".to_string()));
         headers.push((
             "User-Agent".to_string(),
@@ -535,6 +551,12 @@ impl SpeculativeRenderer {
         // the initiator site (`None` = browser-initiated), not the subresource
         // rule.
         let response = self.client.fetch_navigation(&request, initiator_site)?;
+        if revalidating
+            && response.status == NOT_MODIFIED
+            && let Some(refreshed) = self.cache.refresh_from_not_modified(url, &response)
+        {
+            return Ok((refreshed, FetchOrigin::Revalidated, t0.elapsed()));
+        }
         self.cache.put(url.to_string(), &response);
         Ok((response, FetchOrigin::Fresh, t0.elapsed()))
     }
@@ -686,7 +708,7 @@ impl SpeculativeRenderer {
 
             let result = client.fetch(&request).map(|response| {
                 let rtt = t0.elapsed();
-                if response.status == 304 {
+                if response.status == NOT_MODIFIED {
                     // 304 Not Modified: cached content still valid
                     RevalidationResult {
                         changed: false,

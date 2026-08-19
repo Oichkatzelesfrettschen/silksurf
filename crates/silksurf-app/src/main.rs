@@ -400,6 +400,11 @@ fn run_static_browser_render(
             response.body.len(),
             fetch_elapsed
         ),
+        FetchOrigin::Revalidated => eprintln!(
+            "[SilkSurf] REVALIDATED 304: {} stored bytes in {:?} (no body transferred)",
+            response.body.len(),
+            fetch_elapsed
+        ),
     }
 
     /*
