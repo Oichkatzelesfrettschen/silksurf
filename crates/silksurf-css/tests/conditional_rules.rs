@@ -224,3 +224,107 @@ fn an_important_layered_custom_property_takes_the_earlier_layer() {
     // The custom property itself is a normal declaration, so `second` wins it.
     assert_eq!(styles.get(&div).expect("target style").color, BLUE);
 }
+
+/*
+ * `@property` registers a name so that `var()` naming it resolves even when no
+ * rule declares it. These cases separate the registered initial from a plain
+ * unset name, whose declaration is dropped, and pin the `inherits: false`
+ * behavior against the inheriting default.
+ */
+
+#[test]
+fn a_registered_property_supplies_its_initial_value() {
+    assert_eq!(
+        target_color(
+            "@property --ink { syntax: \"<color>\"; inherits: true; initial-value: red; } \
+             #target { color: var(--ink); }"
+        ),
+        RED
+    );
+}
+
+#[test]
+fn an_unregistered_property_with_no_fallback_drops_the_declaration() {
+    // Without a registration the substitution is empty and the declaration
+    // never applies, so the initial `color` stands rather than turning red.
+    assert_ne!(target_color("#target { color: var(--ink); }"), RED);
+}
+
+#[test]
+fn a_declaration_overrides_the_registered_initial() {
+    assert_eq!(
+        target_color(
+            "@property --ink { syntax: \"<color>\"; inherits: true; initial-value: red; } \
+             #target { --ink: blue; color: var(--ink); }"
+        ),
+        BLUE
+    );
+}
+
+#[test]
+fn a_registration_missing_a_required_descriptor_registers_nothing() {
+    // CSS Properties and Values 1, 2: `inherits` is required, so this rule is
+    // invalid and `--ink` stays unregistered.
+    assert_ne!(
+        target_color(
+            "@property --ink { syntax: \"<color>\"; initial-value: red; } \
+             #target { color: var(--ink); }"
+        ),
+        RED
+    );
+}
+
+#[test]
+fn a_universal_syntax_registration_needs_no_initial_value() {
+    // The universal syntax accepts any value, so the registration stands and
+    // `--ink` resolves to the empty initial; the fallback answers instead.
+    assert_eq!(
+        target_color(
+            "@property --ink { syntax: \"*\"; inherits: true; } \
+             #target { color: var(--missing, red); }"
+        ),
+        RED
+    );
+}
+
+#[test]
+fn a_non_inheriting_registration_stops_at_the_child() {
+    // `body` declares `--ink`, and the registration refuses inheritance, so
+    // `#target` takes the initial rather than the declared value.
+    let stylesheet = parse_stylesheet(
+        "@property --ink { syntax: \"<color>\"; inherits: false; initial-value: red; } \
+         body { --ink: blue; } \
+         #target { color: var(--ink); }",
+    )
+    .expect("stylesheet parses");
+    let (dom, doc, div) = document_with_target();
+    let styles = compute_styles(&dom, doc, &stylesheet);
+    assert_eq!(styles.get(&div).expect("target style").color, RED);
+}
+
+#[test]
+fn an_inheriting_registration_carries_the_declared_value_down() {
+    // The same sheet with `inherits: true` is the discriminator: only the
+    // inheritance flag differs, and the child takes the declared value.
+    let stylesheet = parse_stylesheet(
+        "@property --ink { syntax: \"<color>\"; inherits: true; initial-value: red; } \
+         body { --ink: blue; } \
+         #target { color: var(--ink); }",
+    )
+    .expect("stylesheet parses");
+    let (dom, doc, div) = document_with_target();
+    let styles = compute_styles(&dom, doc, &stylesheet);
+    assert_eq!(styles.get(&div).expect("target style").color, BLUE);
+}
+
+#[test]
+fn a_registration_inside_a_layer_still_registers() {
+    assert_eq!(
+        target_color(
+            "@layer base { @property --ink { syntax: \"<color>\"; inherits: true; \
+             initial-value: red; } } \
+             #target { color: var(--ink); }"
+        ),
+        RED
+    );
+}

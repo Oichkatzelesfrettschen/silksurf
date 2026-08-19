@@ -568,15 +568,43 @@ separates one round-trip with no body bytes from a full refetch.
 Four cases in `crates/silksurf-net/src/cache.rs`. Dropping the freshness
 restart fails `a_not_modified_answer_serves_the_stored_body`.
 
+## Registered custom properties (landed 2026-08-19)
+
+`@property` parsed structurally and its descriptors were discarded, so a
+`var(--unset)` with no fallback substituted to nothing and left its declaration
+unapplied. `PropertyRegistration` now reads `syntax`, `inherits`, and
+`initial-value` out of the at-rule's declaration block, and `collect_active_rules`
+collects the registrations on the same walk that flattens the rules, so a
+registration inside `@media`, `@supports`, or `@layer` registers alongside the
+rules that block admits. CSS Properties and Values 1, 2 makes `syntax` and
+`inherits` required and `initial-value` required for every syntax but the
+universal `*`, so a rule missing one registers nothing.
+
+`apply_registrations` puts each initial value into the element's map before its
+own declarations are recorded, which is what makes a registered name answer a
+`var()` at every element that neither declares nor inherits it. The
+registrations are a per-element floor rather than a root seed because the
+document node carries a default `ComputedStyle`, so no element ever cascades
+with `parent: None`. A registration with `inherits: false` overwrites the
+inherited value, which is how the parent's declaration stops at the child; an
+inheriting one fills only a name the map does not already hold. The map is
+rebuilt only when a registration is unsatisfied, so the parent's `Arc` stays
+shared below the element that established the values.
+
+The syntax string is retained without being enforced: a registration's
+observable effect here is the initial value and the inheritance the flag turns
+off. Type-checking a declared value against its registered syntax is named as
+the `registered-property-syntax-enforcement` cut below.
+
+Eight cases in `crates/silksurf-css/tests/conditional_rules.rs`, including the
+pair that differs only in the `inherits` flag. Dropping `apply_registrations`
+fails three of them; making every registration inherit fails
+`a_non_inheriting_registration_stops_at_the_child`.
+
 ## Open work after the live-resource change
 
 Named cuts, each with the mechanism that closes it:
 
-- registered-custom-properties -- `@property` declares a syntax, an inherits
-  flag, and an initial value; the parser discards the at-rule, so an
-  unregistered `var(--unset)` with no fallback leaves its declaration
-  unapplied instead of taking a registered initial. chatgpt.com opens its
-  sheet with four of them.
 - css-transform-beyond-translation -- `transform` contributes its translation
   component to the paint rect; rotate, scale, skew, and matrix contribute
   nothing, because every DisplayItem is an axis-aligned rect. Carrying them
@@ -588,6 +616,13 @@ Named cuts, each with the mechanism that closes it:
   the bar, because `fill_argb_rect` bounds every write to the surface. Closing
   it makes the bar's width the surface minus the button strip and the right
   margin.
+- registered-property-syntax-enforcement -- `PropertyRegistration` retains the
+  `syntax` descriptor without checking a declared value against it, so a
+  declaration whose value does not match the registered grammar applies rather
+  than falling back to the initial value. CSS Properties and Values 1, 5 makes
+  a mismatched value invalid at computed-value time. Closing it needs the
+  syntax string parsed into a component-value grammar the cascade can match a
+  token list against.
 - empty-block-line-height-floor -- the measure closure in
   `TaffyLayout::compute` ends by giving a childless element an auto height of
   one line box. CSS 2.1 10.6.3 gives a block-level non-replaced in-flow box
