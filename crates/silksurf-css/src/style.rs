@@ -364,6 +364,13 @@ pub enum Length {
     Rem(f32),
 }
 
+impl Default for Length {
+    /// The identity length, which every offset-valued property starts from.
+    fn default() -> Self {
+        Length::Px(0.0)
+    }
+}
+
 impl Length {
     #[must_use]
     pub fn zero() -> Self {
@@ -473,6 +480,24 @@ impl Margins {
     }
 }
 
+/*
+ * A 2D translation from the `transform` property.
+ *
+ * CSS Transforms 1 4.1 defines a full 3x2 matrix; the paint list carries an
+ * axis-aligned rect per item, so the engine models the translation component,
+ * which is what moves an element out from under its neighbour. A percentage
+ * resolves against the element's own border box, so it stays a Length until
+ * paint has the rect.
+ *
+ * Rotation, scale, skew, and matrix() parse into no offset: they need the
+ * rasterizer to carry a transform per display item.
+ */
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Translation {
+    pub x: Length,
+    pub y: Length,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComputedStyle {
     /*
@@ -482,6 +507,9 @@ pub struct ComputedStyle {
      * element that actually declares one.
      */
     pub custom_properties: std::sync::Arc<crate::custom_properties::CustomPropertyMap>,
+    /// The `transform` property's translation component, applied to this
+    /// element and its subtree at paint.
+    pub transform: Translation,
     pub display: Display,
     pub color: Color,
     pub background_color: Color,
@@ -541,6 +569,7 @@ impl Default for ComputedStyle {
     fn default() -> Self {
         Self {
             custom_properties: std::sync::Arc::default(),
+            transform: Translation::default(),
             display: Display::Inline,
             color: Color::black(),
             background_color: Color::transparent(),
@@ -640,6 +669,7 @@ impl<T: Clone> ResolvedProperty<T> {
 struct CascadedStyle {
     /// The map this element resolves `var()` against, parent values included.
     custom_properties: std::sync::Arc<crate::custom_properties::CustomPropertyMap>,
+    transform: Option<ResolvedProperty<Translation>>,
     /// CSS-wide keyword overrides (inherit/initial/unset) keyed by `PropertyId`.
     /// When a keyword is set with higher cascade priority than the typed slot,
     /// `resolve()` applies keyword behavior instead of the typed value.
@@ -840,6 +870,9 @@ impl CascadedStyle {
 
         ComputedStyle {
             custom_properties: std::mem::take(&mut self.custom_properties),
+            transform: self
+                .transform
+                .map_or_else(Translation::default, |e| e.value),
             display: resolve_non_inherited_kw(
                 self.display,
                 ks.get(&PropertyId::Display),
@@ -2907,6 +2940,23 @@ fn apply_declaration(
         PropertyId::Font => {
             apply_font_shorthand(cascaded, declaration, specificity, order);
         }
+        /*
+         * `transform` contributes its translation component. A transform list
+         * whose functions are all rotation, scale, or skew resolves to no
+         * offset, which leaves the element where layout placed it rather than
+         * moving it wrongly.
+         */
+        PropertyId::Transform => {
+            if let Some(value) = parse_translation(&declaration.value) {
+                apply_property(
+                    &mut cascaded.transform,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
         // `outline` draws outside the border box and takes no layout space.
         // The paint list has no outline item, so the declaration parses and
         // contributes nothing rather than being mistaken for a border.
@@ -4047,6 +4097,94 @@ fn apply_font_shorthand(
     }
     if let Some(family) = parse_font_family(after_size) {
         apply_property(&mut cascaded.font_family, family, imp, spec, ord);
+    }
+}
+
+/*
+ * parse_translation -- the translation a `transform` value contributes.
+ *
+ * Reads `translate(x[, y])`, `translateX(x)`, `translateY(y)`, and
+ * `translate3d(x, y, z)`, summing every occurrence the way CSS Transforms 1
+ * 7.1 composes a list of translations. A function this engine does not model
+ * contributes nothing, and a value naming only such functions returns None so
+ * the declaration leaves the element where layout placed it.
+ */
+fn parse_translation(tokens: &[CssToken]) -> Option<Translation> {
+    let mut found = false;
+    let mut translation = Translation::default();
+    let mut index = 0usize;
+    while index < tokens.len() {
+        let CssToken::Function(name) = &tokens[index] else {
+            index += 1;
+            continue;
+        };
+        let lowered = name.to_ascii_lowercase();
+        let end = matching_paren(tokens, index);
+        let arguments = comma_separated_lengths(&tokens[index + 1..end]);
+        match lowered.as_str() {
+            "translate" | "translate3d" => {
+                if let Some(x) = arguments.first() {
+                    translation.x = add_lengths(translation.x, *x);
+                    found = true;
+                }
+                if let Some(y) = arguments.get(1) {
+                    translation.y = add_lengths(translation.y, *y);
+                }
+            }
+            "translatex" => {
+                if let Some(x) = arguments.first() {
+                    translation.x = add_lengths(translation.x, *x);
+                    found = true;
+                }
+            }
+            "translatey" => {
+                if let Some(y) = arguments.first() {
+                    translation.y = add_lengths(translation.y, *y);
+                    found = true;
+                }
+            }
+            _ => {}
+        }
+        index = end + 1;
+    }
+    found.then_some(translation)
+}
+
+/// The index of the `)` closing the function at `open`, or the token count.
+fn matching_paren(tokens: &[CssToken], open: usize) -> usize {
+    let mut depth = 0usize;
+    for (offset, token) in tokens[open..].iter().enumerate() {
+        match token {
+            CssToken::Function(_) | CssToken::ParenOpen => depth += 1,
+            CssToken::ParenClose => {
+                depth -= 1;
+                if depth == 0 {
+                    return open + offset;
+                }
+            }
+            _ => {}
+        }
+    }
+    tokens.len()
+}
+
+/// The comma-separated lengths inside a function's argument list.
+fn comma_separated_lengths(tokens: &[CssToken]) -> Vec<Length> {
+    tokens
+        .split(|token| matches!(token, CssToken::Comma))
+        .filter_map(|group| group.iter().find_map(parse_length_token))
+        .collect()
+}
+
+/// Sum two lengths of the same unit; mixed units keep the second, because the
+/// cascade carries no calc tree at this point.
+fn add_lengths(left: Length, right: Length) -> Length {
+    match (left, right) {
+        (Length::Px(a), Length::Px(b)) => Length::Px(a + b),
+        (Length::Percent(a), Length::Percent(b)) => Length::Percent(a + b),
+        (Length::Em(a), Length::Em(b)) => Length::Em(a + b),
+        (Length::Rem(a), Length::Rem(b)) => Length::Rem(a + b),
+        _ => right,
     }
 }
 

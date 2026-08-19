@@ -236,3 +236,43 @@ fn inset_sets_all_four_offsets() {
     assert_eq!(style.bottom, LengthOrAuto::Length(Length::Px(3.0)));
     assert_eq!(style.left, LengthOrAuto::Length(Length::Px(4.0)));
 }
+
+#[test]
+fn transform_translate_reaches_the_computed_style() {
+    let style = computed(".box { transform: translate(200px, 30px); }", None);
+    assert_eq!(style.transform.x, Length::Px(200.0));
+    assert_eq!(style.transform.y, Length::Px(30.0));
+}
+
+#[test]
+fn transform_axis_functions_set_one_component_each() {
+    let x_only = computed(".box { transform: translateX(12px); }", None);
+    assert_eq!(x_only.transform.x, Length::Px(12.0));
+    assert_eq!(x_only.transform.y, Length::Px(0.0));
+    let y_only = computed(".box { transform: translateY(34px); }", None);
+    assert_eq!(y_only.transform.x, Length::Px(0.0));
+    assert_eq!(y_only.transform.y, Length::Px(34.0));
+}
+
+#[test]
+fn a_transform_list_sums_its_translations() {
+    let style = computed(
+        ".box { transform: translateX(10px) rotate(45deg) translateX(5px); }",
+        None,
+    );
+    assert_eq!(style.transform.x, Length::Px(15.0));
+}
+
+#[test]
+fn a_transform_naming_no_translation_leaves_the_element_in_place() {
+    let style = computed(".box { transform: rotate(45deg) scale(2); }", None);
+    assert_eq!(style.transform.x, Length::Px(0.0));
+    assert_eq!(style.transform.y, Length::Px(0.0));
+}
+
+#[test]
+fn translate3d_contributes_its_two_dimensional_part() {
+    let style = computed(".box { transform: translate3d(7px, 8px, 9px); }", None);
+    assert_eq!(style.transform.x, Length::Px(7.0));
+    assert_eq!(style.transform.y, Length::Px(8.0));
+}

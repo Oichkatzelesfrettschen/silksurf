@@ -111,14 +111,15 @@ pub enum PropertyId {
     Font = 79,
     PlaceItems = 80,
     Outline = 81,
+    Transform = 82,
     /// `margin-block`: one or two values for the top and bottom edges.
-    MarginBlock = 82,
+    MarginBlock = 87,
     /// `margin-inline`: one or two values for the left and right edges.
-    MarginInline = 83,
-    PaddingBlock = 84,
-    PaddingInline = 85,
+    MarginInline = 88,
+    PaddingBlock = 89,
+    PaddingInline = 90,
     /// `inset`: the box-shorthand form over top, right, bottom, left.
-    Inset = 86,
+    Inset = 91,
     Unknown = 255,
 }
 
@@ -236,6 +237,7 @@ pub fn lookup_property_id(name: &str) -> PropertyId {
         (b'r', 7) if name.eq_ignore_ascii_case("row-gap") => PropertyId::RowGap,
         // 't' prefix
         (b't', 3) if name.eq_ignore_ascii_case("top") => PropertyId::Top,
+        (b't', 9) if name.eq_ignore_ascii_case("transform") => PropertyId::Transform,
         (b't', 10) if name.eq_ignore_ascii_case("text-align") => PropertyId::TextAlign,
         (b't', 15) if name.eq_ignore_ascii_case("text-decoration") => PropertyId::TextDecoration,
         // 'v' prefix

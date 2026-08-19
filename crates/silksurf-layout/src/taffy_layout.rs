@@ -24,15 +24,15 @@ use silksurf_css::{
     FlexWrap as CssFlexWrap, GridAutoFlow as CssGridAutoFlow, GridLine as CssGridLine,
     GridTrackMax as CssGridTrackMax, GridTrackMin as CssGridTrackMin,
     GridTrackSize as CssGridTrackSize, JustifyContent as CssJustifyContent, Length, LengthOrAuto,
-    WhiteSpace,
+    Position as CssPosition, WhiteSpace,
 };
 use silksurf_dom::{Dom, NodeId as DomNodeId, NodeKind, TagName};
 use taffy::{
     AlignItems, AlignSelf, AvailableSpace, BoxSizing as TaffyBoxSizing, Dimension,
     Display as TaffyDisplay, FlexDirection, FlexWrap, GridAutoFlow, GridPlacement,
     GridTemplateComponent, JustifyContent, LengthPercentage, LengthPercentageAuto, Line,
-    MaxTrackSizingFunction, MinTrackSizingFunction, NodeId as TaffyId, Size, Style, TaffyTree,
-    TrackSizingFunction,
+    MaxTrackSizingFunction, MinTrackSizingFunction, NodeId as TaffyId, Position as TaffyPosition,
+    Size, Style, TaffyTree, TrackSizingFunction,
     geometry::Rect as TaffyRect,
     style_helpers::{
         TaffyAuto as _, TaffyFitContent as _, TaffyMaxContent as _, TaffyMinContent as _, fr,
@@ -946,6 +946,22 @@ fn css_to_taffy_style(style: Option<&ComputedStyle>) -> Style {
         CssJustifyContent::SpaceEvenly => JustifyContent::SpaceEvenly,
     });
 
+    /*
+     * taffy models out-of-flow boxes as Position::Absolute and lays them out
+     * against the containing block's padding box with the `inset` offsets.
+     * CSS `fixed` positions against the viewport instead; the engine has one
+     * scrolling root and no separate fixed containing block, so it takes the
+     * same arm and a fixed element scrolls with the page.
+     * `sticky` computes as `relative` until a scroll-position constraint
+     * exists to relax it against.
+     */
+    let position = match style.position {
+        CssPosition::Absolute | CssPosition::Fixed => TaffyPosition::Absolute,
+        CssPosition::Static | CssPosition::Relative | CssPosition::Sticky => {
+            TaffyPosition::Relative
+        }
+    };
+
     // AlignItems::Baseline does not exist in taffy 0.10; use FlexStart as
     // fallback. Keeping the Baseline arm separate from FlexStart documents
     // the semantic fallback so a future taffy upgrade can replace it.
@@ -1083,6 +1099,13 @@ fn css_to_taffy_style(style: Option<&ComputedStyle>) -> Style {
         grid_auto_flow,
         grid_column,
         grid_row,
+        position,
+        inset: TaffyRect {
+            left: length_or_auto_lpa(style.left),
+            right: length_or_auto_lpa(style.right),
+            top: length_or_auto_lpa(style.top),
+            bottom: length_or_auto_lpa(style.bottom),
+        },
         ..Default::default()
     }
 }
@@ -1181,6 +1204,57 @@ fn opt_length_dim(v: Option<Length>) -> Dimension {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn absolute_and_fixed_position_take_the_box_out_of_flow() {
+        for position in [
+            silksurf_css::Position::Absolute,
+            silksurf_css::Position::Fixed,
+        ] {
+            let style = ComputedStyle {
+                position,
+                ..Default::default()
+            };
+            assert_eq!(
+                css_to_taffy_style(Some(&style)).position,
+                TaffyPosition::Absolute,
+                "{position:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn static_relative_and_sticky_stay_in_flow() {
+        for position in [
+            silksurf_css::Position::Static,
+            silksurf_css::Position::Relative,
+            silksurf_css::Position::Sticky,
+        ] {
+            let style = ComputedStyle {
+                position,
+                ..Default::default()
+            };
+            assert_eq!(
+                css_to_taffy_style(Some(&style)).position,
+                TaffyPosition::Relative,
+                "{position:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_offset_properties_reach_taffy_inset() {
+        let style = ComputedStyle {
+            position: silksurf_css::Position::Absolute,
+            top: LengthOrAuto::Length(Length::Px(20.0)),
+            left: LengthOrAuto::Length(Length::Px(40.0)),
+            ..Default::default()
+        };
+        let taffy_style = css_to_taffy_style(Some(&style));
+        assert_eq!(taffy_style.inset.top, LengthPercentageAuto::length(20.0));
+        assert_eq!(taffy_style.inset.left, LengthPercentageAuto::length(40.0));
+        assert_eq!(taffy_style.inset.right, LengthPercentageAuto::AUTO);
+    }
+
     use super::*;
     use silksurf_dom::Dom;
 
