@@ -1164,6 +1164,7 @@ mod tests {
             )
             .to_string(),
             css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(),
             script_texts: Vec::new(),
             module_texts: Vec::new(),
             images: Vec::new(),

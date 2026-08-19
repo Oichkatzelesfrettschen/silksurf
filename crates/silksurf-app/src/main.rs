@@ -49,6 +49,7 @@ mod page_resources;
 mod profile;
 mod redraw_geometry;
 mod runtime_repaint;
+mod stylesheet_set;
 mod window_frame;
 #[cfg(feature = "accessibility")]
 #[allow(clippy::wildcard_imports)]
@@ -71,6 +72,8 @@ pub(crate) use page_resources::*;
 pub(crate) use redraw_geometry::*;
 #[allow(clippy::wildcard_imports)]
 pub(crate) use runtime_repaint::*;
+#[allow(clippy::wildcard_imports)]
+pub(crate) use stylesheet_set::*;
 #[allow(clippy::wildcard_imports)]
 pub(crate) use window_frame::*;
 #[cfg(test)]
@@ -128,16 +131,25 @@ fn run_winit_browser_page(
         "[SilkSurf] Display backend: configured={display_backend:?} resolved={resolved_display_backend:?}"
     );
 
-    // JS timers drive the event-loop sleep: the backend waits until the
-    // earliest setTimeout/setInterval deadline, then the wake callback drains
-    // the due callbacks through tick_browser_runtime.
+    /*
+     * JS timers drive the event-loop sleep: the backend waits until the
+     * earliest setTimeout/setInterval deadline, then the wake callback drains
+     * the due callbacks through tick_browser_runtime.
+     *
+     * A stylesheet fetch completes on a worker thread and posts no wake, so
+     * an outstanding one arms its own short poll and the earlier deadline
+     * wins.
+     */
     let deadline_state = Rc::clone(&browser_state);
     let window = window.with_host_work_deadline(move || {
-        deadline_state
-            .borrow()
-            .runtime
-            .as_ref()
-            .and_then(|runtime| runtime.js_ctx.next_host_callback_deadline())
+        let state = deadline_state.borrow();
+        let runtime = state.runtime.as_ref()?;
+        let timer = runtime.js_ctx.next_host_callback_deadline();
+        if !runtime.sheets.has_pending_fetches() {
+            return timer;
+        }
+        let poll = std::time::Instant::now() + STYLESHEET_FETCH_POLL_INTERVAL;
+        Some(timer.map_or(poll, |timer| timer.min(poll)))
     });
 
     let render_state = Rc::clone(&browser_state);
@@ -392,21 +404,27 @@ fn run_static_browser_render(
     let dom = document.dom;
     eprintln!("[SilkSurf] DOM parsed successfully");
 
-    // 3. Extract inline CSS from <style> tags + fetch external stylesheets
-    let inline_css = extract_inline_css(&dom, doc_node);
-    let mut css_text = stylesheet_text_with_user_agent_defaults(&inline_css);
-    eprintln!(
-        "[SilkSurf] Extracted {} bytes of inline CSS",
-        inline_css.len()
-    );
-
     /*
-     * fetch_all_or_speculate loads external stylesheet links through the
-     * cache-first resource path. Same-host HTTPS requests share HTTP/2
-     * multiplexing when the server supports it; cached stylesheets return
-     * without network delay.
+     * The document's stylesheets are the <style> elements and the
+     * <link rel=stylesheet> hrefs in tree order. fetch_all_or_speculate loads
+     * the links through the cache-first resource path, so same-host HTTPS
+     * requests share HTTP/2 multiplexing and a cached sheet returns without
+     * network delay.
      */
-    append_static_external_stylesheets(renderer, &dom, doc_node, &options.url, &mut css_text);
+    let sheets = document_stylesheet_set(
+        renderer,
+        &dom,
+        doc_node,
+        &options.url,
+        &options.render_config,
+        "Stylesheet",
+    );
+    let css_text = sheets.css_text();
+    eprintln!(
+        "[SilkSurf] Assembled {} bytes of CSS from {} source(s)",
+        css_text.len(),
+        sheets.source_count()
+    );
 
     let image_urls = extract_image_urls(&dom, doc_node, &options.url);
     let decoded_images = {

@@ -7,45 +7,6 @@
 #[allow(clippy::wildcard_imports)]
 use crate::*;
 
-pub(crate) fn append_static_external_stylesheets(
-    renderer: &mut SpeculativeRenderer,
-    dom: &silksurf_dom::Dom,
-    doc_node: silksurf_dom::NodeId,
-    url: &str,
-    css_text: &mut String,
-) {
-    let stylesheet_urls = extract_stylesheet_urls(dom, doc_node, url);
-    let css_accept_header = [("Accept".to_string(), "text/css,*/*".to_string())];
-    let sheet_requests: Vec<(&str, &[(String, String)])> = stylesheet_urls
-        .iter()
-        .map(|u| (u.as_str(), css_accept_header.as_slice()))
-        .collect();
-
-    let sheet_results = renderer.fetch_all_or_speculate(&sheet_requests);
-    for (result, sheet_url) in sheet_results.into_iter().zip(stylesheet_urls.iter()) {
-        match result {
-            Ok((resp, origin, elapsed)) if resp.status == 200 => {
-                eprintln!(
-                    "[SilkSurf] Stylesheet {sheet_url}: {} bytes ({:?} {:?})",
-                    resp.body.len(),
-                    origin,
-                    elapsed
-                );
-                let sheet_css = String::from_utf8_lossy(&resp.body);
-                css_text.push_str(&sheet_css);
-                css_text.push('\n');
-            }
-            Ok((resp, _, _)) => {
-                eprintln!("[SilkSurf] Stylesheet {sheet_url}: HTTP {}", resp.status);
-            }
-            Err(e) => eprintln!(
-                "[SilkSurf] Stylesheet {sheet_url}: fetch error: {}",
-                e.message
-            ),
-        }
-    }
-}
-
 pub(crate) fn execute_static_inline_scripts(js_ctx: &mut SilkContext, scripts: &[String]) {
     for (i, script) in scripts.iter().enumerate() {
         const MAX_INLINE_SCRIPT: usize = 256 * 1024;
@@ -149,39 +110,11 @@ pub(crate) fn load_navigation_payload(
     let doc_node = document.document;
     let dom = &document.dom;
 
-    let inline_css = extract_inline_css(dom, doc_node);
-    let mut css_text = stylesheet_text_with_user_agent_defaults(&inline_css);
-    let stylesheet_urls = extract_stylesheet_urls(dom, doc_node, url);
-    let css_accept_header = [("Accept".to_string(), "text/css,*/*".to_string())];
-    let sheet_requests: Vec<(&str, &[(String, String)])> = stylesheet_urls
-        .iter()
-        .map(|sheet_url| (sheet_url.as_str(), css_accept_header.as_slice()))
-        .collect();
-    for (result, sheet_url) in renderer
-        .fetch_all_or_speculate(&sheet_requests)
-        .into_iter()
-        .zip(stylesheet_urls.iter())
-    {
-        match result {
-            Ok((resp, _, _)) if resp.status == 200 => {
-                let sheet_css = String::from_utf8_lossy(&resp.body);
-                css_text.push_str(&sheet_css);
-                css_text.push('\n');
-            }
-            Ok((resp, _, _)) => {
-                eprintln!(
-                    "[SilkSurf] Navigation stylesheet {sheet_url}: HTTP {}",
-                    resp.status
-                );
-            }
-            Err(err) => {
-                eprintln!(
-                    "[SilkSurf] Navigation stylesheet {sheet_url}: fetch error: {}",
-                    err.message
-                );
-            }
-        }
-    }
+    let style_sources = collect_style_sources(dom, doc_node, url);
+    let sheet_bodies =
+        fetch_style_source_bodies(&mut renderer, &style_sources, "Navigation stylesheet");
+    let css_text =
+        StyleSheetSet::new(style_sources, sheet_bodies.clone(), url, config, dom).css_text();
 
     let image_urls = extract_image_urls(dom, doc_node, url);
     let images = {
@@ -197,6 +130,7 @@ pub(crate) fn load_navigation_payload(
         url: url.to_string(),
         html,
         css_text,
+        sheet_bodies,
         script_texts,
         module_texts,
         images,
@@ -344,6 +278,25 @@ pub(crate) fn build_browser_page_with_buffers_for_height(
         trace_build,
     );
     trace_navigation_script_phase(trace_build, "module-total", module_start.elapsed());
+    /*
+     * The set collects after the page's scripts have run, so a document that
+     * rewrites a link's rel from preload to stylesheet during startup enters
+     * the list on its first collection. The bodies the payload already fetched
+     * seed it, so an unchanged list costs no refetch.
+     */
+    let sheets = {
+        let dom = dom_arc
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        StyleSheetSet::new(
+            collect_style_sources(&dom, doc_node, &payload.url),
+            payload.sheet_bodies,
+            &payload.url,
+            &payload.render_config,
+            &dom,
+        )
+    };
+
     let trace_body_start = std::time::Instant::now();
     trace_navigation_body_data_fixture(trace_build, &dom_arc);
     trace_navigation_script_phase(trace_build, "trace-body", trace_body_start.elapsed());
@@ -477,6 +430,7 @@ pub(crate) fn build_browser_page_with_buffers_for_height(
             dom: dom_arc,
             document: doc_node,
             stylesheet,
+            sheets,
             style_index,
             viewport,
             js_ctx,
@@ -1187,6 +1141,7 @@ fn build_ephemeral_renderer_from_config(
     Ok(SpeculativeRenderer::new_ephemeral())
 }
 
+#[cfg(test)]
 pub(crate) fn stylesheet_text_with_user_agent_defaults(document_css: &str) -> String {
     let mut css_text =
         String::with_capacity(DEFAULT_USER_AGENT_STYLESHEET.len() + document_css.len() + 1);
@@ -1221,6 +1176,7 @@ mod tests {
             url: "https://example.com/".to_string(),
             html: "<!doctype html><html><body><p>Hello</p></body></html>".to_string(),
             css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(),
             script_texts: Vec::new(),
             module_texts: Vec::new(),
             images: Vec::new(),
@@ -1252,6 +1208,7 @@ mod tests {
             url: "https://example.com/".to_string(),
             html: "<!doctype html><html><body><p>fallback html</p></body></html>".to_string(),
             css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(),
             script_texts: Vec::new(),
             module_texts: Vec::new(),
             images: Vec::new(),
@@ -1303,6 +1260,7 @@ mod tests {
                 inline_css
             ),
             css_text: stylesheet_text_with_user_agent_defaults(inline_css),
+            sheet_bodies: Vec::new(),
             script_texts: Vec::new(),
             module_texts: Vec::new(),
             images: Vec::new(),
@@ -1346,6 +1304,7 @@ mod tests {
             url: "https://example.com/results/".to_string(),
             html: "<!doctype html><html><body><p>Result</p></body></html>".to_string(),
             css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(),
             script_texts: Vec::new(),
             module_texts: Vec::new(),
             images: Vec::new(),
@@ -1376,6 +1335,7 @@ mod tests {
             )
             .to_string(),
             css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(),
             script_texts: Vec::new(),
             module_texts: Vec::new(),
             images: Vec::new(),
@@ -1424,6 +1384,7 @@ mod tests {
             url: "https://example.com/".to_string(),
             html: "<!doctype html><html><body><p id=\"msg\">Hello</p><script>requestAnimationFrame(function(){setTimeout(function(){document.getElementById('msg').firstChild.textContent='Runtime';},0);});</script></body></html>".to_string(),
             css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(),
             script_texts: Vec::new(),
             module_texts: Vec::new(),
             images: Vec::new(),
@@ -1454,6 +1415,7 @@ mod tests {
             url: "https://example.com/".to_string(),
             html: "<!doctype html><html><body><p id=\"msg\">Hello</p><script src=\"/app.js\"></script></body></html>".to_string(),
             css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(),
             script_texts: vec![
                 "document.getElementById('msg').firstChild.textContent='External';".to_string(),
             ],
@@ -1478,6 +1440,7 @@ mod tests {
             url: "https://example.com/".to_string(),
             html: "<!doctype html><html><body><script type=\"module\" src=\"/module.js\"></script></body></html>".to_string(),
             css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(),
             script_texts: Vec::new(),
             module_texts: vec![
                 (
@@ -1518,6 +1481,7 @@ mod tests {
                    </script></body></html>"
                 .to_string(),
             css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(),
             script_texts: Vec::new(),
             module_texts: Vec::new(),
             images: Vec::new(),

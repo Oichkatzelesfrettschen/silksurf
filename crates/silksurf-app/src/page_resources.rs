@@ -3,17 +3,6 @@
 #[allow(clippy::wildcard_imports)]
 use crate::*;
 
-/// Extract href values from `<link rel="stylesheet">` tags.
-pub(crate) fn extract_stylesheet_urls(
-    dom: &silksurf_dom::Dom,
-    root: silksurf_dom::NodeId,
-    base_url: &str,
-) -> Vec<String> {
-    let mut urls = Vec::new();
-    collect_link_resource_urls(dom, root, base_url, "stylesheet", &mut urls);
-    urls
-}
-
 pub(crate) fn extract_modulepreload_urls(
     dom: &silksurf_dom::Dom,
     root: silksurf_dom::NodeId,
@@ -834,37 +823,6 @@ pub(crate) fn resolve_resource_url(base_url: &str, resource_url: &str) -> String
         .unwrap_or_default()
 }
 
-pub(crate) fn extract_inline_css(dom: &silksurf_dom::Dom, root: silksurf_dom::NodeId) -> String {
-    let mut css = String::new();
-    collect_style_tags(dom, root, &mut css);
-    css
-}
-
-pub(crate) fn collect_style_tags(
-    dom: &silksurf_dom::Dom,
-    node: silksurf_dom::NodeId,
-    css: &mut String,
-) {
-    if let Ok(name) = dom.element_name(node)
-        && name == Some("style")
-        && let Ok(children) = dom.children(node)
-    {
-        for &child in children {
-            if let Ok(n) = dom.node(child)
-                && let silksurf_dom::NodeKind::Text { text } = n.kind()
-            {
-                css.push_str(text);
-                css.push('\n');
-            }
-        }
-    }
-    if let Ok(children) = dom.children(node) {
-        for &child in children {
-            collect_style_tags(dom, child, css);
-        }
-    }
-}
-
 pub(crate) fn extract_document_scripts(
     dom: &silksurf_dom::Dom,
     root: silksurf_dom::NodeId,
@@ -1181,8 +1139,13 @@ mod tests {
                 "https://example.com/shared.js".to_string(),
             ]
         );
+        let sheet_urls: Vec<String> =
+            collect_style_sources(&document.dom, document.document, "https://example.com/")
+                .iter()
+                .filter_map(|source| source.link_url().map(str::to_string))
+                .collect();
         assert_eq!(
-            extract_stylesheet_urls(&document.dom, document.document, "https://example.com/"),
+            sheet_urls,
             vec![
                 "https://example.com/shared.js".to_string(),
                 "https://example.com/style.css".to_string(),

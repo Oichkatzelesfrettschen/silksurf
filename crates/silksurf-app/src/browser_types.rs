@@ -229,6 +229,10 @@ pub(crate) struct BrowserPagePayload {
     pub(crate) url: String,
     pub(crate) html: String,
     pub(crate) css_text: String,
+    /// The `<link rel=stylesheet>` bodies the initial fetch produced, keyed
+    /// by resolved URL. The runtime seeds StyleSheetSet from these so a
+    /// document that adds a sheet later refetches only the addition.
+    pub(crate) sheet_bodies: Vec<(String, String)>,
     pub(crate) script_texts: Vec<String>,
     pub(crate) module_texts: Vec<(String, String)>,
     pub(crate) images: Vec<DecodedPageImage>,
@@ -304,6 +308,10 @@ pub(crate) struct BrowserPageRuntime {
     pub(crate) dom: Arc<Mutex<silksurf_dom::Dom>>,
     pub(crate) document: silksurf_dom::NodeId,
     pub(crate) stylesheet: silksurf_css::Stylesheet,
+    /// The document's live stylesheet list. Script that appends a `<style>`,
+    /// rewrites a link's rel, or swaps an href changes it, and the repaint
+    /// tick rebuilds `stylesheet` and `style_index` from the new list.
+    pub(crate) sheets: StyleSheetSet,
     pub(crate) style_index: StyleIndex,
     pub(crate) viewport: Rect,
     pub(crate) js_ctx: SilkContext,
