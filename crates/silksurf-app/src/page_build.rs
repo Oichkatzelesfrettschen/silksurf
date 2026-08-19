@@ -186,7 +186,13 @@ pub(crate) fn build_browser_page_with_buffers_for_height(
     };
     trace_navigation_build_phase(trace_build, &payload.url, "css", phase_start.elapsed());
     let scripts = if payload.script_texts.is_empty() {
-        extract_inline_scripts(&dom, doc_node)
+        extract_document_script_nodes(&dom, doc_node, &payload.url)
+            .into_iter()
+            .filter_map(|script| match script.source {
+                DocumentScriptRef::Inline(text) => Some((Some(script.node), text)),
+                DocumentScriptRef::External(_) => None,
+            })
+            .collect()
     } else {
         payload.script_texts
     };
@@ -222,7 +228,7 @@ pub(crate) fn build_browser_page_with_buffers_for_height(
     let phase_start = std::time::Instant::now();
     let script_phase_start = phase_start;
     let static_eval_start = std::time::Instant::now();
-    for (idx, script) in scripts.iter().enumerate() {
+    for (idx, (node, script)) in scripts.iter().enumerate() {
         if script.len() > max_navigation_script_bytes() {
             eprintln!(
                 "[SilkSurf] Navigation script {idx}: {} bytes skipped",
@@ -232,9 +238,11 @@ pub(crate) fn build_browser_page_with_buffers_for_height(
         }
         trace_navigation_script(trace_build, idx, script.len(), "start", None);
         let script_start = std::time::Instant::now();
+        js_ctx.set_current_script(*node);
         if let Err(err) = js_ctx.eval(script) {
             eprintln!("[SilkSurf] Navigation script {idx} error: {err}");
         }
+        js_ctx.set_current_script(None);
         trace_navigation_script(
             trace_build,
             idx,
@@ -296,6 +304,20 @@ pub(crate) fn build_browser_page_with_buffers_for_height(
             &dom,
         )
     };
+
+    /*
+     * The preload fetches start at build time so the event loop already has a
+     * reason to wake when the first frame presents; a completion posts no wake
+     * of its own, and a document whose only pending work is a preload would
+     * otherwise sleep until an input arrived.
+     */
+    let mut preloads = PreloadLinks::new(&payload.url, &payload.render_config);
+    {
+        let dom = dom_arc
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        preloads.refresh(&dom, doc_node);
+    }
 
     let trace_body_start = std::time::Instant::now();
     trace_navigation_body_data_fixture(trace_build, &dom_arc);
@@ -431,6 +453,7 @@ pub(crate) fn build_browser_page_with_buffers_for_height(
             document: doc_node,
             stylesheet,
             sheets,
+            preloads,
             style_index,
             viewport,
             js_ctx,
@@ -705,7 +728,9 @@ pub(crate) fn execute_dynamic_script_round(
         let Some(text) = dynamic_script_text(base_url, script, &fetched) else {
             continue;
         };
+        js_ctx.set_current_script(Some(script.node));
         execute_dynamic_script_text(js_ctx, trace_build, round, idx, text);
+        js_ctx.set_current_script(None);
     }
     trace_navigation_dynamic_phase(trace_build, round, "eval-total", eval_start.elapsed());
 }
@@ -1416,9 +1441,10 @@ mod tests {
             html: "<!doctype html><html><body><p id=\"msg\">Hello</p><script src=\"/app.js\"></script></body></html>".to_string(),
             css_text: stylesheet_text_with_user_agent_defaults(""),
             sheet_bodies: Vec::new(),
-            script_texts: vec![
+            script_texts: vec![(
+                None,
                 "document.getElementById('msg').firstChild.textContent='External';".to_string(),
-            ],
+            )],
             module_texts: Vec::new(),
             images: Vec::new(),
             render_config: BrowserRenderConfig::default(),

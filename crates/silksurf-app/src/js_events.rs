@@ -244,7 +244,7 @@ mod tests {
             html: html.to_string(),
             css_text: stylesheet_text_with_user_agent_defaults(""),
             sheet_bodies: Vec::new(),
-            script_texts: vec![script.to_string()],
+            script_texts: vec![(None, script.to_string())],
             module_texts: Vec::new(),
             images: Vec::new(),
             render_config: BrowserRenderConfig::default(),

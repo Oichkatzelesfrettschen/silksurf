@@ -247,16 +247,26 @@ pub(crate) struct DocumentScriptNode {
     pub(crate) source: DocumentScriptRef,
 }
 
+/*
+ * load_document_script_texts -- the document's classic scripts, in tree order,
+ * each paired with the `<script>` element that carries it.
+ *
+ * The element is what `document.currentScript` reports while the script runs,
+ * and pages reach their own tag through it -- chatgpt.com's stylesheet swap
+ * reads `document.currentScript.previousElementSibling`. An external script
+ * whose fetch fails drops out of the list with its node, so text and node stay
+ * index-aligned.
+ */
 pub(crate) fn load_document_script_texts(
     renderer: &mut SpeculativeRenderer,
     dom: &silksurf_dom::Dom,
     root: silksurf_dom::NodeId,
     base_url: &str,
-) -> Vec<String> {
-    let scripts = extract_document_scripts(dom, root, base_url);
+) -> Vec<(Option<silksurf_dom::NodeId>, String)> {
+    let scripts = extract_document_script_nodes(dom, root, base_url);
     let external_urls: Vec<String> = scripts
         .iter()
-        .filter_map(|script| match script {
+        .filter_map(|script| match &script.source {
             DocumentScriptRef::External(url) => Some(url.clone()),
             DocumentScriptRef::Inline(_) => None,
         })
@@ -264,13 +274,40 @@ pub(crate) fn load_document_script_texts(
     let fetched = fetch_external_script_texts(renderer, &external_urls);
     scripts
         .into_iter()
-        .filter_map(|script| match script {
-            DocumentScriptRef::Inline(text) => Some(text),
-            DocumentScriptRef::External(url) => fetched
-                .iter()
-                .find_map(|(fetched_url, text)| (fetched_url == &url).then(|| text.clone())),
+        .filter_map(|script| match script.source {
+            DocumentScriptRef::Inline(text) => Some((Some(script.node), text)),
+            DocumentScriptRef::External(url) => fetched.iter().find_map(|(fetched_url, text)| {
+                (fetched_url == &url).then(|| (Some(script.node), text.clone()))
+            }),
         })
         .collect()
+}
+
+/// The document's classic scripts in tree order, each with its element.
+pub(crate) fn extract_document_script_nodes(
+    dom: &silksurf_dom::Dom,
+    root: silksurf_dom::NodeId,
+    base_url: &str,
+) -> Vec<DocumentScriptNode> {
+    let mut scripts = Vec::new();
+    collect_document_script_nodes(dom, root, base_url, &mut scripts);
+    scripts
+}
+
+pub(crate) fn collect_document_script_nodes(
+    dom: &silksurf_dom::Dom,
+    node: silksurf_dom::NodeId,
+    base_url: &str,
+    scripts: &mut Vec<DocumentScriptNode>,
+) {
+    if let Some(source) = script_ref_for_node(dom, node, base_url) {
+        scripts.push(DocumentScriptNode { node, source });
+    }
+    if let Ok(children) = dom.children(node) {
+        for &child in children {
+            collect_document_script_nodes(dom, child, base_url, scripts);
+        }
+    }
 }
 
 pub(crate) fn load_document_module_texts(
@@ -821,32 +858,6 @@ pub(crate) fn resolve_resource_url(base_url: &str, resource_url: &str) -> String
         .and_then(|base| base.join(resource_url))
         .map(|url| url.to_string())
         .unwrap_or_default()
-}
-
-pub(crate) fn extract_document_scripts(
-    dom: &silksurf_dom::Dom,
-    root: silksurf_dom::NodeId,
-    base_url: &str,
-) -> Vec<DocumentScriptRef> {
-    let mut scripts = Vec::new();
-    collect_document_script_refs(dom, root, base_url, &mut scripts);
-    scripts
-}
-
-pub(crate) fn collect_document_script_refs(
-    dom: &silksurf_dom::Dom,
-    node: silksurf_dom::NodeId,
-    base_url: &str,
-    scripts: &mut Vec<DocumentScriptRef>,
-) {
-    if let Some(script) = script_ref_for_node(dom, node, base_url) {
-        scripts.push(script);
-    }
-    if let Ok(children) = dom.children(node) {
-        for &child in children {
-            collect_document_script_refs(dom, child, base_url, scripts);
-        }
-    }
 }
 
 pub(crate) fn collect_classic_script_nodes(

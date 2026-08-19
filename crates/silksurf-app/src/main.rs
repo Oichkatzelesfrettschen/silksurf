@@ -44,6 +44,7 @@ mod dom_hit_test;
 mod engine_process;
 mod input;
 mod js_events;
+mod link_preload;
 mod page_build;
 mod page_resources;
 mod profile;
@@ -64,6 +65,8 @@ pub(crate) use browser_types::*;
 pub(crate) use dom_hit_test::*;
 #[allow(clippy::wildcard_imports)]
 pub(crate) use input::*;
+#[allow(clippy::wildcard_imports)]
+pub(crate) use link_preload::*;
 #[allow(clippy::wildcard_imports)]
 pub(crate) use page_build::*;
 #[allow(clippy::wildcard_imports)]
@@ -145,7 +148,7 @@ fn run_winit_browser_page(
         let state = deadline_state.borrow();
         let runtime = state.runtime.as_ref()?;
         let timer = runtime.js_ctx.next_host_callback_deadline();
-        if !runtime.sheets.has_pending_fetches() {
+        if !runtime.sheets.has_pending_fetches() && !runtime.preloads.has_pending_fetches() {
             return timer;
         }
         let poll = std::time::Instant::now() + STYLESHEET_FETCH_POLL_INTERVAL;

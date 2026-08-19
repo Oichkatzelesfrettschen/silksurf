@@ -99,6 +99,18 @@ pub(crate) fn repaint_runtime_host_callbacks(
         0
     };
 
+    // A preload fetch that finished runs the page's load handler, which is
+    // where a startup script upgrades a link to a stylesheet. It runs before
+    // the dirty set is drained so its mutations ride the same repaint.
+    let preload_events = runtime.preloads.dispatch_completed(&mut runtime.js_ctx);
+    {
+        let dom = runtime
+            .dom
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        runtime.preloads.refresh(&dom, runtime.document);
+    }
+
     let dirty_nodes = {
         let mut dom = runtime
             .dom
@@ -112,7 +124,9 @@ pub(crate) fn repaint_runtime_host_callbacks(
     // riding the dirty-node damage rect.
     if refresh_runtime_stylesheets(runtime) {
         let redraw_mode = repaint_runtime_full_document(runtime, frame);
-        eprintln!("[SilkSurf] Runtime host callbacks: {callback_count} (stylesheet rebuild)");
+        eprintln!(
+            "[SilkSurf] Runtime host callbacks: {callback_count}, preload events: {preload_events} (stylesheet rebuild)"
+        );
         return Ok(Some(redraw_mode));
     }
 
@@ -1179,6 +1193,10 @@ mod tests {
             },
             runtime: Some(BrowserPageRuntime {
                 sheets: StyleSheetSet::empty("https://example.com/"),
+                preloads: PreloadLinks::new(
+                    "https://example.com/",
+                    &BrowserRenderConfig::default(),
+                ),
                 dom: Arc::clone(&dom_arc),
                 document: document.document,
                 stylesheet,
@@ -1293,6 +1311,10 @@ mod tests {
             },
             runtime: Some(BrowserPageRuntime {
                 sheets: StyleSheetSet::empty("https://example.com/"),
+                preloads: PreloadLinks::new(
+                    "https://example.com/",
+                    &BrowserRenderConfig::default(),
+                ),
                 dom: Arc::clone(&dom_arc),
                 document: document.document,
                 stylesheet,

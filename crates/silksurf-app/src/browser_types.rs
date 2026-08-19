@@ -233,7 +233,11 @@ pub(crate) struct BrowserPagePayload {
     /// by resolved URL. The runtime seeds StyleSheetSet from these so a
     /// document that adds a sheet later refetches only the addition.
     pub(crate) sheet_bodies: Vec<(String, String)>,
-    pub(crate) script_texts: Vec<String>,
+    /// The document's classic scripts in tree order, each paired with the
+    /// `<script>` element `document.currentScript` reports while it runs. A
+    /// payload assembled without a parsed document names no element and
+    /// carries None.
+    pub(crate) script_texts: Vec<(Option<silksurf_dom::NodeId>, String)>,
     pub(crate) module_texts: Vec<(String, String)>,
     pub(crate) images: Vec<DecodedPageImage>,
     pub(crate) render_config: BrowserRenderConfig,
@@ -312,6 +316,10 @@ pub(crate) struct BrowserPageRuntime {
     /// rewrites a link's rel, or swaps an href changes it, and the repaint
     /// tick rebuilds `stylesheet` and `style_index` from the new list.
     pub(crate) sheets: StyleSheetSet,
+    /// The document's `<link rel=preload>` fetches. Their load events are what
+    /// a page's startup script waits on before upgrading a link to a
+    /// stylesheet or evaluating a deferred bundle.
+    pub(crate) preloads: PreloadLinks,
     pub(crate) style_index: StyleIndex,
     pub(crate) viewport: Rect,
     pub(crate) js_ctx: SilkContext,
