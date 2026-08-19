@@ -78,6 +78,9 @@ pub struct FusedWorkspace {
     /// retained so a repaint reuses the allocation.
     stacking: StackingOrder,
     paint_order: Vec<u32>,
+    /// Whether each BFS-indexed node generates a box, retained so a repaint
+    /// reuses the allocation.
+    rendered: Vec<bool>,
     /// Cached tree-shape generation for the BFS table.
     table_generation: u64,
     /// Cached selector-input generation for the cascade view.
@@ -109,6 +112,7 @@ impl FusedWorkspace {
             transform_offsets: Vec::new(),
             stacking: StackingOrder::default(),
             paint_order: Vec::new(),
+            rendered: Vec::new(),
             cascade_view: CascadeView::new(),
             cascade_ws: CascadeWorkspace::new(0),
             taffy_layout: TaffyLayout::new(),
@@ -299,6 +303,7 @@ impl FusedWorkspace {
             &mut self.transform_offsets,
             any_transform,
         );
+        mark_rendered_boxes(&self.table, &self.styles, &mut self.rendered);
         let stacked = build_paint_order(
             &self.table,
             &self.styles,
@@ -316,12 +321,12 @@ impl FusedWorkspace {
             let Some(node) = self.table.bfs_order.get(i).copied() else {
                 continue;
             };
+            if !self.rendered[i] {
+                continue;
+            }
             let Some(ref style) = self.styles[i] else {
                 continue;
             };
-            if style.display == Display::None {
-                continue;
-            }
             if text_node_collapses_to_empty_render(dom, &self.table, &self.styles, i) {
                 continue;
             }
@@ -580,6 +585,8 @@ pub fn fused_style_layout_paint_with_replaced_sizes(
     );
     let mut stacking = StackingOrder::default();
     let mut paint_order = Vec::new();
+    let mut rendered = Vec::new();
+    mark_rendered_boxes(&table, &styles, &mut rendered);
     let stacked = build_paint_order(
         &table,
         &styles,
@@ -597,12 +604,12 @@ pub fn fused_style_layout_paint_with_replaced_sizes(
         let Some(node) = table.bfs_order.get(i).copied() else {
             continue;
         };
+        if !rendered[i] {
+            continue;
+        }
         let Some(ref style) = styles[i] else {
             continue;
         };
-        if style.display == Display::None {
-            continue;
-        }
         if text_node_collapses_to_empty_render(dom, &table, &styles, i) {
             continue;
         }
@@ -695,6 +702,42 @@ fn is_image_element(dom: &Dom, node: NodeId) -> bool {
         .ok()
         .flatten()
         .is_some_and(|name| matches!(TagName::from_str(name), TagName::Img | TagName::Canvas))
+}
+
+/*
+ * mark_rendered_boxes -- which nodes generate a box.
+ *
+ * CSS Display 3 3 makes `display: none` suppress the element's box and the
+ * boxes of every descendant, so a subtree under a none-valued ancestor takes
+ * no part in layout or paint. taffy already collapses such a subtree to zero
+ * size, and the paint pass previously tested only the node's own display, so
+ * every descendant emitted its text at the collapsed origin. chatgpt.com
+ * carries its deferred UI that way, and the collapsed subtrees stacked several
+ * hundred text runs into one illegible band.
+ *
+ * BFS order puts a parent before its children, so one forward pass carries the
+ * suppression down the tree.
+ */
+fn mark_rendered_boxes(
+    table: &LayoutNeighborTable,
+    styles: &[Option<ComputedStyle>],
+    rendered: &mut Vec<bool>,
+) {
+    let n = table.len().min(styles.len());
+    rendered.clear();
+    rendered.resize(n, false);
+    for (i, style) in styles.iter().take(n).enumerate() {
+        let generates_box = style
+            .as_ref()
+            .is_some_and(|style| style.display != Display::None);
+        let parent_renders = table
+            .parent_idx
+            .get(i)
+            .copied()
+            .filter(|&parent| (parent as usize) < i)
+            .is_none_or(|parent| rendered[parent as usize]);
+        rendered[i] = generates_box && parent_renders;
+    }
 }
 
 /// The BFS index to paint at `step`: the stacking sequence when one was built,
@@ -1501,6 +1544,38 @@ mod tests {
         );
         let stylesheet = silksurf_css::parse_stylesheet(
             "html, body, main, p { display: block; white-space: normal; }",
+        )
+        .unwrap();
+        let viewport = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 800.0,
+            height: 600.0,
+        };
+
+        let result =
+            fused_style_layout_paint(&document, &stylesheet, NodeId::from_raw(0), viewport);
+        let text_items: Vec<&str> = result
+            .display_items
+            .iter()
+            .filter_map(|item| match item {
+                DisplayItem::Text { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(text_items, vec!["Visible body"]);
+    }
+
+    #[test]
+    fn a_display_none_subtree_emits_no_text() {
+        let document = silksurf_html::parse_html(
+            "<!doctype html><html><body><p>Visible body</p>\
+             <div class=\"gone\"><section><p>Hidden deep</p></section></div>\
+             </body></html>",
+        );
+        let stylesheet = silksurf_css::parse_stylesheet(
+            "html, body, p, div, section { display: block; } .gone { display: none; }",
         )
         .unwrap();
         let viewport = Rect {
