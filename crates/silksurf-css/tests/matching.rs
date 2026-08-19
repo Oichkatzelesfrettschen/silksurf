@@ -44,6 +44,7 @@ fn computes_specificity() {
     assert_eq!(
         specificity,
         Specificity {
+            layer: Specificity::UNLAYERED,
             ids: 1,
             classes: 1,
             elements: 1,
@@ -257,6 +258,7 @@ fn where_contributes_zero_specificity() {
     assert_eq!(
         where_spec,
         Specificity {
+            layer: Specificity::UNLAYERED,
             ids: 0,
             classes: 0,
             elements: 1
@@ -266,6 +268,7 @@ fn where_contributes_zero_specificity() {
     assert_eq!(
         is_spec,
         Specificity {
+            layer: Specificity::UNLAYERED,
             ids: 0,
             classes: 1,
             elements: 1

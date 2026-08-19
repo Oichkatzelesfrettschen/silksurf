@@ -44,7 +44,7 @@ pub(crate) fn collect_module_script_warm_urls(
         urls.push(url);
     }
     if let Some(text) = inline_module_script_text(dom, node) {
-        urls.extend(module_static_import_urls(base_url, &text));
+        urls.extend(module_static_import_urls(base_url, &text, &[]));
     }
     if let Ok(children) = dom.children(node) {
         for &child in children {
@@ -94,21 +94,6 @@ pub(crate) fn module_script_external_url(
     let src = script_src(Some(attrs))?;
     let resolved = resolve_resource_url(base_url, src);
     (!resolved.is_empty()).then_some(resolved)
-}
-
-pub(crate) fn module_path_for_url(module_url: &str) -> String {
-    let Ok(parsed) = url::Url::parse(module_url) else {
-        return module_url.to_string();
-    };
-    let mut path = parsed.path().to_string();
-    if path.is_empty() {
-        path.push('/');
-    }
-    if let Some(query) = parsed.query() {
-        path.push('?');
-        path.push_str(query);
-    }
-    path
 }
 
 pub(crate) fn inline_module_script_text(
@@ -318,7 +303,8 @@ pub(crate) fn load_document_module_texts(
         );
         return Vec::new();
     }
-    let modules = fetch_module_graph_texts(renderer, &roots);
+    let import_map = document_import_map(dom, root);
+    let modules = fetch_module_graph_texts(renderer, &roots, &import_map);
     let total_bytes: usize = modules.iter().map(|(_, text)| text.len()).sum();
     if total_bytes > MAX_NAVIGATION_MODULE_GRAPH_BYTES {
         eprintln!(
@@ -327,14 +313,12 @@ pub(crate) fn load_document_module_texts(
         return Vec::new();
     }
     modules
-        .into_iter()
-        .map(|(module_url, text)| (module_path_for_url(&module_url), text))
-        .collect()
 }
 
 pub(crate) fn fetch_module_graph_texts(
     renderer: &mut SpeculativeRenderer,
     roots: &[String],
+    import_map: &[(String, String)],
 ) -> Vec<(String, String)> {
     let mut seen = HashSet::new();
     let mut pending = dedupe_resource_urls(roots);
@@ -348,7 +332,7 @@ pub(crate) fn fetch_module_graph_texts(
             break;
         }
         let round_fetched = fetch_module_round_texts(renderer, &round_urls, "Module");
-        pending.extend(module_graph_child_urls(&round_fetched));
+        pending.extend(module_graph_child_urls(&round_fetched, import_map));
         fetched.extend(round_fetched);
     }
     fetched
@@ -421,7 +405,7 @@ pub(crate) fn preload_module_scripts_with_renderer(
             return;
         }
         let fetched = preload_module_round(renderer, &round_urls);
-        pending.extend(module_graph_child_urls(&fetched));
+        pending.extend(module_graph_child_urls(&fetched, &[]));
         eprintln!(
             "[SilkSurf] Modulepreload graph round {round}: {} fetched, {} pending",
             fetched.len(),
@@ -478,69 +462,80 @@ pub(crate) fn fetch_module_round_texts(
         .collect()
 }
 
-pub(crate) fn module_graph_child_urls(fetched: &[(String, String)]) -> Vec<String> {
+pub(crate) fn module_graph_child_urls(
+    fetched: &[(String, String)],
+    import_map: &[(String, String)],
+) -> Vec<String> {
     fetched
         .iter()
-        .flat_map(|(module_url, text)| module_static_import_urls(module_url, text))
+        .flat_map(|(module_url, text)| module_static_import_urls(module_url, text, import_map))
         .collect()
 }
 
-pub(crate) fn module_static_import_urls(base_url: &str, source: &str) -> Vec<String> {
-    module_static_import_specifiers(source)
-        .into_iter()
-        .map(|specifier| resolve_resource_url(base_url, &specifier))
-        .filter(|url| !url.is_empty())
-        .collect()
+/*
+ * module_static_import_urls -- the modules one source imports, resolved.
+ *
+ * silksurf_js::module_import_specifiers drives boa's own module parser, so the
+ * answer is what the engine will request at link time. The scanner it replaced
+ * split the source on `;` and required ` from ` with spaces, which no minified
+ * bundle writes: chatgpt.com's entry module imports
+ * `import{r as e}from"./legacy-rolldown-runtime-QTnfLwEv.js"` and the scan
+ * returned nothing, so linking failed with "Module could not be found".
+ *
+ * A source that does not parse as a module yields no imports; the parse error
+ * surfaces where the module is evaluated.
+ */
+pub(crate) fn module_static_import_urls(
+    base_url: &str,
+    source: &str,
+    import_map: &[(String, String)],
+) -> Vec<String> {
+    silksurf_js::module_import_specifiers(base_url, source, import_map).unwrap_or_default()
 }
 
-pub(crate) fn module_static_import_specifiers(source: &str) -> Vec<String> {
-    let mut specifiers = Vec::new();
-    for statement in source.split(';') {
-        let trimmed = statement.trim_start();
-        if trimmed.starts_with("import") {
-            collect_import_statement_specifier(trimmed, &mut specifiers);
-        } else if trimmed.starts_with("export") {
-            collect_export_statement_specifier(trimmed, &mut specifiers);
+/*
+ * document_import_map -- the `imports` entries of the document's import map.
+ *
+ * HTML allows one import map per document, and it must precede the first module
+ * load. The `scopes` member is not read: a scoped mapping changes resolution by
+ * referrer, and applying only the top-level `imports` to every referrer would
+ * resolve a scoped specifier to the wrong module. Tracked in
+ * docs/roadmaps/SPA-CAPABILITY-ROADMAP.md under import-map-scopes.
+ */
+pub(crate) fn document_import_map(
+    dom: &silksurf_dom::Dom,
+    root: silksurf_dom::NodeId,
+) -> Vec<(String, String)> {
+    let mut entries = Vec::new();
+    collect_import_map(dom, root, &mut entries);
+    entries
+}
+
+fn collect_import_map(
+    dom: &silksurf_dom::Dom,
+    node: silksurf_dom::NodeId,
+    entries: &mut Vec<(String, String)>,
+) {
+    if entries.is_empty()
+        && dom.element_name(node).ok().flatten() == Some("script")
+        && script_type_value(dom.attributes(node).ok())
+            .is_some_and(|kind| kind.trim().eq_ignore_ascii_case("importmap"))
+        && let Ok(parsed) =
+            serde_json::from_str::<serde_json::Value>(&script_text_content(dom, node))
+        && let Some(imports) = parsed.get("imports").and_then(serde_json::Value::as_object)
+    {
+        for (specifier, target) in imports {
+            if let Some(target) = target.as_str() {
+                entries.push((specifier.clone(), target.to_string()));
+            }
+        }
+        return;
+    }
+    if let Ok(children) = dom.children(node) {
+        for &child in children {
+            collect_import_map(dom, child, entries);
         }
     }
-    specifiers
-}
-
-pub(crate) fn collect_import_statement_specifier(statement: &str, specifiers: &mut Vec<String>) {
-    let rest = statement.trim_start_matches("import").trim_start();
-    if rest.starts_with('(') {
-        return;
-    }
-    if let Some(specifier) = quoted_prefix(rest) {
-        specifiers.push(specifier);
-        return;
-    }
-    if let Some(from_index) = rest.rfind(" from ") {
-        let after_from = rest[from_index + " from ".len()..].trim_start();
-        if let Some(specifier) = quoted_prefix(after_from) {
-            specifiers.push(specifier);
-        }
-    }
-}
-
-pub(crate) fn collect_export_statement_specifier(statement: &str, specifiers: &mut Vec<String>) {
-    let Some(from_index) = statement.rfind(" from ") else {
-        return;
-    };
-    let after_from = statement[from_index + " from ".len()..].trim_start();
-    if let Some(specifier) = quoted_prefix(after_from) {
-        specifiers.push(specifier);
-    }
-}
-
-pub(crate) fn quoted_prefix(text: &str) -> Option<String> {
-    let quote = text.as_bytes().first().copied()?;
-    if quote != b'\'' && quote != b'"' {
-        return None;
-    }
-    let rest = &text[1..];
-    let end = rest.as_bytes().iter().position(|byte| *byte == quote)?;
-    Some(rest[..end].to_string())
 }
 
 pub(crate) fn module_response_text(
@@ -1218,7 +1213,7 @@ mod tests {
     }
 
     #[test]
-    fn extracts_static_module_import_specifiers() {
+    fn resolves_static_module_imports_including_minified_clauses() {
         let source = r#"
             import "./side-effect.mjs";
             import value from './value.mjs';
@@ -1226,19 +1221,55 @@ mod tests {
             import * as ns from "./namespace.mjs";
             export { y } from "./reexport.mjs";
             export * from './all.mjs';
-            import("./dynamic.mjs");
         "#;
 
+        let mut found = module_static_import_urls("https://example.com/app/entry.mjs", source, &[]);
+        found.sort();
         assert_eq!(
-            module_static_import_specifiers(source),
+            found,
             vec![
-                "./side-effect.mjs".to_string(),
-                "./value.mjs".to_string(),
-                "./named.mjs".to_string(),
-                "./namespace.mjs".to_string(),
-                "./reexport.mjs".to_string(),
-                "./all.mjs".to_string(),
+                "https://example.com/app/all.mjs".to_string(),
+                "https://example.com/app/named.mjs".to_string(),
+                "https://example.com/app/namespace.mjs".to_string(),
+                "https://example.com/app/reexport.mjs".to_string(),
+                "https://example.com/app/side-effect.mjs".to_string(),
+                "https://example.com/app/value.mjs".to_string(),
             ]
+        );
+    }
+
+    #[test]
+    fn a_minified_import_clause_resolves() {
+        assert_eq!(
+            module_static_import_urls(
+                "https://example.com/app/entry.mjs",
+                "import{r as e}from\"./runtime.mjs\";export default e;",
+                &[],
+            ),
+            vec!["https://example.com/app/runtime.mjs".to_string()]
+        );
+    }
+
+    #[test]
+    fn the_document_import_map_supplies_bare_specifier_targets() {
+        let document = silksurf_engine::parse_html(
+            "<html><head>\
+             <script type=\"importmap\">{\"imports\":{\"react\":\"/vendor/react.js\"}}</script>\
+             </head></html>",
+        )
+        .expect("fixture parses");
+        let map = document_import_map(&document.dom, document.document);
+        assert_eq!(
+            map,
+            vec![("react".to_string(), "/vendor/react.js".to_string())]
+        );
+        assert_eq!(
+            module_static_import_urls(
+                "https://example.com/app/entry.mjs",
+                "import React from 'react';",
+                &map,
+            ),
+            vec!["https://example.com/vendor/react.js".to_string()]
         );
     }
 }

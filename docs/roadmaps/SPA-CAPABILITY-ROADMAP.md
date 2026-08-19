@@ -325,6 +325,52 @@ separately-landable follow-up):
   textContent; a real HTML serializer is needed for the getter.
 - open-ws-idle-poll -- an open WebSocket/EventSource holds the 10 ms
   poll cadence; the event-loop waker deferral subsumes this.
+- svg-paint-pipeline -- silksurf-render, silksurf-image, and
+  silksurf-layout carry no SVG handling, so an `<svg>` subtree paints
+  nothing. chatgpt.com draws its logo and every icon as inline SVG, and
+  the shell renders with blank gaps where they sit. A real
+  implementation needs the SVG document structure, path geometry,
+  fill and stroke, transforms, gradients, `viewBox` mapping, and
+  `<svg>` sized as a replaced element in layout. `usvg` plus `resvg`
+  would supply it against the tiny-skia backend silksurf-render already
+  rasterizes through, at a dependency weight the low-resource profile
+  has not accepted.
+- mutation-observer -- MutationObserver is undefined. `Dom::take_dirty_nodes`
+  already records the mutated set the fused pipeline consumes, so the
+  records exist; delivering them needs a per-observer subtree filter and
+  a microtask-checkpoint queue.
+- import-map-scopes -- PageModuleLoader applies the import map's
+  top-level `imports` entries. The `scopes` member changes resolution by
+  referrer, and applying a scoped mapping to every referrer resolves a
+  specifier to the wrong module, so scopes are read as absent. Wiring
+  them needs the referrer URL matched against each scope prefix before
+  the `imports` lookup.
+- dynamic-import-fetch -- the module graph is fetched ahead of
+  evaluation from the static imports boa reports, so `import()` reaches
+  a module the registry does not hold and rejects. chatgpt.com's entry
+  module route-splits through `import()`, so its page code never
+  evaluates. Wiring it needs load_imported_module to fetch on demand
+  rather than report a miss.
+- stale-entry-revalidation -- ResponseCache::get answers only while an
+  entry is fresh, and a stale entry stays in the map carrying its ETag
+  and Last-Modified. Nothing consults conditional_headers on a miss, so
+  a stale entry refetches in full instead of riding a 304. Wiring it
+  needs fetch_or_speculate to send the validators and to rebuild the
+  response from the cached body when the origin answers 304.
+- intl-formatters -- Intl carries Locale and getCanonicalLocales, which
+  is what language negotiation reads. DateTimeFormat, NumberFormat,
+  Collator, PluralRules, and RelativeTimeFormat stay absent rather than
+  wrong: a formatter that ignores the locale produces text a page
+  presents as localized. boa_engine's `intl` feature supplies
+  spec-correct implementations backed by icu4x, at a binary-size and
+  compile-time cost the low-resource profile has not accepted.
+- important-layer-inversion -- `Specificity::layer` orders cascade
+  layers ahead of selector specificity, which is correct for normal
+  declarations. CSS Cascade 5, 6.4.4 inverts layer order for important
+  declarations; `ResolvedProperty::should_override` compares importance
+  before specificity, so two important declarations in different layers
+  resolve by rank rather than by inverted rank. Correcting it needs the
+  importance bit to select between the rank and its complement.
 
 ## Verification checklist (applies to every workstream)
 

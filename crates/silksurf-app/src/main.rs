@@ -473,6 +473,9 @@ fn run_static_browser_render(
         &cookie_top_level_site,
         &cookie_host,
     );
+    // location.href backs every same-origin URL a page builds; page script runs
+    // after the document address is in place.
+    js_ctx.set_document_url(&options.url);
 
     // 7. Execute inline <script> tags.
     execute_static_inline_scripts(&mut js_ctx, &scripts);

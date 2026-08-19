@@ -28,7 +28,6 @@ use boa_engine::{
     Context, JsNativeError, JsObject, JsString, JsValue, Module, NativeFunction, Source,
     builtins::promise::PromiseState,
     js_string,
-    module::MapModuleLoader,
     object::{
         FunctionObjectBuilder, ObjectInitializer,
         builtins::{JsArray, JsFunction, JsPromise},
@@ -39,8 +38,12 @@ use boa_runtime::Console;
 
 mod css_object;
 mod dom_bridge;
+mod dom_interfaces;
 mod event_dispatch;
+mod module_loader;
+pub use module_loader::module_import_specifiers;
 mod net_queue;
+mod platform_globals;
 
 const HOST_CALLBACKS_REGISTRY: &str = "__silksurfHostCallbacks";
 const DEFAULT_HOST_CALLBACK_BUDGET: usize = 256;
@@ -827,7 +830,7 @@ fn call_abort_listener(signal: &JsObject, ctx: &mut Context) -> boa_engine::JsRe
 /// Call `run_pending_jobs()` after all scripts to drain Promise microtasks.
 pub struct SilkContext {
     ctx: Context,
-    module_loader: Rc<MapModuleLoader>,
+    module_loader: Rc<module_loader::PageModuleLoader>,
     scheduler: HostSchedulerRef,
     async_done: AsyncDoneRef,
     start_time: Instant,
@@ -911,13 +914,13 @@ impl SilkContext {
     /// never happen on a freshly-constructed Context).
     #[must_use]
     pub fn new() -> Self {
-        let module_loader = Rc::new(MapModuleLoader::default());
+        let module_loader = Rc::new(module_loader::PageModuleLoader::default());
         let mut ctx = Context::builder()
             .module_loader(Rc::clone(&module_loader))
             .build()
             // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
 
-            .expect("Boa Context builder succeeds with MapModuleLoader");
+            .expect("Boa Context builder succeeds with PageModuleLoader");
         let scheduler = Rc::new(RefCell::new(HostScheduler::new()));
         install_host_scheduler(&mut ctx, &scheduler);
 
@@ -942,6 +945,7 @@ impl SilkContext {
         install_stream_constructors(&mut ctx);
         install_crypto(&mut ctx);
         install_abort_api(&mut ctx);
+        platform_globals::install_platform_globals(&mut ctx);
         install_xml_http_request(&mut ctx);
 
         // -- document stub ----------------------------------------------------
@@ -1008,6 +1012,27 @@ impl SilkContext {
             // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
 
             .expect("document: install on fresh context cannot fail");
+
+        // -- window EventTarget stubs -----------------------------------------
+        // window aliases globalThis, so window.addEventListener resolves as a
+        // global. Without a DOM these accept and drop listeners, matching the
+        // document stub above; dom_bridge::install_window_event_target replaces
+        // them with dispatching versions once a Dom is attached.
+        let _ = ctx.register_global_callable(
+            js_string!("addEventListener"),
+            2,
+            NativeFunction::from_fn_ptr(|_, _, _| Ok(JsValue::undefined())),
+        );
+        let _ = ctx.register_global_callable(
+            js_string!("removeEventListener"),
+            2,
+            NativeFunction::from_fn_ptr(|_, _, _| Ok(JsValue::undefined())),
+        );
+        let _ = ctx.register_global_callable(
+            js_string!("dispatchEvent"),
+            1,
+            NativeFunction::from_fn_ptr(|_, _, _| Ok(JsValue::from(true))),
+        );
 
         // -- window / self aliases -------------------------------------------
         // window and self are aliases for globalThis in a browser context.
@@ -1197,6 +1222,17 @@ impl SilkContext {
         self.viewport.set((width, height));
     }
 
+    /// Point `location` and `document.URL` at the document's address.
+    ///
+    /// The location stub installs with empty fields, and a page reads
+    /// `location.href` and `location.origin` to build API endpoints:
+    /// chatgpt.com's startup script evaluates `new URL(location.href)` and
+    /// throws on the empty string. Embedders call this with the navigation URL
+    /// before running page script. An unparseable URL leaves the stub as it is.
+    pub fn set_document_url(&mut self, url: &str) {
+        platform_globals::set_document_url(&mut self.ctx, url);
+    }
+
     /// Drain the same-document navigations queued by history.pushState and
     /// replaceState since the last call.
     pub fn take_history_intents(&mut self) -> Vec<HistoryIntent> {
@@ -1270,35 +1306,79 @@ impl SilkContext {
         }
     }
 
-    /// Parse, link, and evaluate a bounded module graph already fetched by the browser.
+    /// Set the document's import map, as `(specifier, target)` pairs from the
+    /// `imports` object of a `<script type="importmap">`.
+    pub fn set_import_map(&mut self, entries: Vec<(String, String)>) {
+        self.module_loader.set_import_map(entries);
+    }
+
+    /// Parse, link, and evaluate a bounded module graph already fetched by the
+    /// browser. Modules are keyed by absolute URL, which is the base a relative
+    /// specifier resolves against and the value `import.meta.url` reports.
     pub fn eval_module_graph(
         &mut self,
-        root_path: &str,
+        root_url: &str,
         modules: &[(String, String)],
     ) -> Result<(), String> {
         self.module_loader.clear();
+        self.module_loader.set_document_url(root_url);
         let mut root_module = None;
-        for (module_path, source_text) in modules {
-            let path = PathBuf::from(module_path);
+        for (module_url, source_text) in modules {
+            let path = PathBuf::from(module_url);
             let source = Source::from_bytes(source_text.as_bytes()).with_path(path.as_path());
             let module = Module::parse(source, None, &mut self.ctx)
-                .map_err(|err| format!("module parse {module_path}: {err}"))?;
-            self.module_loader.insert(module_path, module.clone());
-            if module_path == root_path {
+                .map_err(|err| format!("module parse {module_url}: {err}"))?;
+            self.module_loader.insert(module_url, module.clone());
+            if module_url == root_url {
                 root_module = Some(module);
             }
         }
 
         let module =
-            root_module.ok_or_else(|| format!("module root {root_path} was not fetched"))?;
+            root_module.ok_or_else(|| format!("module root {root_url} was not fetched"))?;
         let promise = module.load_link_evaluate(&mut self.ctx);
         let _ = self.ctx.run_jobs();
         match promise.state() {
             PromiseState::Fulfilled(_) => Ok(()),
-            PromiseState::Rejected(reason) => {
-                Err(format!("module evaluation rejected: {reason:?}"))
-            }
+            PromiseState::Rejected(reason) => Err(format!(
+                "module evaluation rejected: {}",
+                self.describe_rejection(&reason)
+            )),
             PromiseState::Pending => Err("module evaluation stayed pending".to_string()),
+        }
+    }
+
+    /// Render a rejection reason as the page would see it.
+    ///
+    /// A rejected module promise carries a `JsValue`, and its Debug form prints
+    /// the erased object pointer rather than the error. Reading `message` and
+    /// `stack` off the thrown object reports which statement failed.
+    fn describe_rejection(&mut self, reason: &JsValue) -> String {
+        let Some(error) = reason.as_object() else {
+            return reason.to_string(&mut self.ctx).map_or_else(
+                |_| "unprintable rejection".to_string(),
+                |s| s.to_std_string_lossy(),
+            );
+        };
+        let text = error
+            .get(js_string!("message"), &mut self.ctx)
+            .ok()
+            .and_then(|value| value.to_string(&mut self.ctx).ok())
+            .map_or_else(String::new, |s| s.to_std_string_lossy());
+        let name = error
+            .get(js_string!("name"), &mut self.ctx)
+            .ok()
+            .and_then(|value| value.to_string(&mut self.ctx).ok())
+            .map_or_else(String::new, |s| s.to_std_string_lossy());
+        let stack = error
+            .get(js_string!("stack"), &mut self.ctx)
+            .ok()
+            .and_then(|value| value.to_string(&mut self.ctx).ok())
+            .map_or_else(String::new, |s| s.to_std_string_lossy());
+        match (name.is_empty(), text.is_empty(), stack.is_empty()) {
+            (true, true, _) => "unprintable rejection".to_string(),
+            (_, _, true) => format!("{name}: {text}"),
+            _ => format!("{name}: {text}\n{stack}"),
         }
     }
 

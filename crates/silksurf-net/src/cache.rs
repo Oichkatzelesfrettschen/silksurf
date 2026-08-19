@@ -31,7 +31,16 @@ use rustc_hash::{FxHashMap, FxHasher};
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
+/*
+ * Storable status codes (RFC 9111, 3, via the heuristically cacheable set in
+ * 4.2.2). A status outside this set carries no reusable representation, so
+ * storing it turns a transient server answer into the page a later navigation
+ * renders: a 426 from chatgpt.com persisted here and served a blank document on
+ * every subsequent load until the file was deleted by hand.
+ */
+const STORABLE_STATUS: &[u16] = &[200, 203, 204, 206, 300, 301, 308, 404, 405, 410, 414, 501];
 
 /*
  * CachedResponseDisk -- the on-disk representation of a cached response.
@@ -52,6 +61,15 @@ struct CachedResponseDisk {
     headers: Vec<(String, String)>,
     etag: Option<String>,
     last_modified: Option<String>,
+    /// Seconds since the Unix epoch at which the response was stored. An entry
+    /// written before this field existed decodes as 0, which reads as expired
+    /// and forces a refetch.
+    #[serde(default)]
+    stored_at_unix: u64,
+    /// Seconds the stored response stays fresh, from `Cache-Control: max-age`
+    /// or `Expires`.
+    #[serde(default)]
+    freshness_secs: u64,
 }
 
 /// A cached HTTP response with validation headers.
@@ -69,8 +87,23 @@ pub struct CachedResponse {
     pub last_modified: Option<String>,
     /// When this entry was cached
     pub cached_at: Instant,
+    /// Seconds this entry stays fresh, counted from `cached_at`.
+    pub freshness_secs: u64,
+    /// Seconds of freshness already spent when the entry loaded from disk.
+    pub prior_age_secs: u64,
     /// URL that produced this response
     pub url: String,
+}
+
+impl CachedResponse {
+    /// True while the stored response may be reused without revalidation
+    /// (RFC 9111, 4.2).
+    #[must_use]
+    pub fn is_fresh(&self) -> bool {
+        self.prior_age_secs
+            .saturating_add(self.cached_at.elapsed().as_secs())
+            < self.freshness_secs
+    }
 }
 
 /// Simple in-memory HTTP response cache with optional disk persistence.
@@ -115,19 +148,35 @@ impl ResponseCache {
         cache
     }
 
-    /// Get a cached response for the given URL, if available.
+    /// Get a cached response for the given URL while it is fresh.
+    ///
+    /// A stale entry stays in the map so `conditional_headers` can still offer
+    /// its validators; it just stops answering navigations on its own.
     #[must_use]
     pub fn get(&self, url: &str) -> Option<&CachedResponse> {
-        self.entries.get(url)
+        self.entries.get(url).filter(|entry| entry.is_fresh())
     }
 
     /*
      * put -- store a response in the in-memory cache and optionally on disk.
      *
+     * A response the origin marked no-store or private, or one whose status
+     * carries no reusable representation, is dropped rather than stored:
+     * `response_is_storable` decides, and a rejected response also evicts any
+     * entry the URL already held, so the cache never answers with a
+     * representation the origin has replaced.
+     *
      * Disk write is best-effort: errors are silently ignored so a read-only
      * filesystem does not prevent in-memory caching from working.
      */
     pub fn put(&mut self, url: String, response: &super::HttpResponse) {
+        if !response_is_storable(response) {
+            self.entries.remove(&url);
+            if let Some(dir) = self.disk_dir.clone() {
+                remove_from_disk(&dir, &url);
+            }
+            return;
+        }
         let etag = response
             .header("etag")
             .map(std::string::ToString::to_string);
@@ -142,6 +191,8 @@ impl ResponseCache {
             etag,
             last_modified,
             cached_at: Instant::now(),
+            freshness_secs: freshness_lifetime(&response.headers),
+            prior_age_secs: 0,
             url: url.clone(),
         };
 
@@ -221,6 +272,10 @@ impl ResponseCache {
                 etag: disk.etag,
                 last_modified: disk.last_modified,
                 cached_at: Instant::now(),
+                freshness_secs: disk.freshness_secs,
+                // Freshness is counted from the write, not from this load, so a
+                // process restart does not reset an entry's age.
+                prior_age_secs: unix_now().saturating_sub(disk.stored_at_unix),
                 url: url.clone(),
             };
             if !disk_entry_is_decoded_text(&cached) {
@@ -258,6 +313,8 @@ fn put_to_disk(dir: &Path, url: &str, entry: &CachedResponse) {
         headers: entry.headers.clone(),
         etag: entry.etag.clone(),
         last_modified: entry.last_modified.clone(),
+        stored_at_unix: unix_now(),
+        freshness_secs: entry.freshness_secs,
     };
 
     let Ok(json) = serde_json::to_vec(&disk) else {
@@ -305,11 +362,271 @@ fn header_value<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a s
         .map(|(_, value)| value.as_str())
 }
 
+fn disk_entry_path(dir: &Path, url: &str) -> PathBuf {
+    let mut hasher = FxHasher::default();
+    url.hash(&mut hasher);
+    dir.join(format!("{:016x}.json", hasher.finish()))
+}
+
+fn remove_from_disk(dir: &Path, url: &str) {
+    let _ = std::fs::remove_file(disk_entry_path(dir, url));
+}
+
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+/*
+ * response_is_storable -- RFC 9111, 3.
+ *
+ * The origin's directives decide first: `no-store` forbids keeping the
+ * response at all, and `private` marks it for a single user's browser cache
+ * that this shared on-disk store is not. What remains is storable only when
+ * the status names a reusable representation.
+ */
+fn response_is_storable(response: &super::HttpResponse) -> bool {
+    let directives = cache_control_directives(&response.headers);
+    if directives.iter().any(|d| d == "no-store" || d == "private") {
+        return false;
+    }
+    STORABLE_STATUS.contains(&response.status)
+}
+
+/*
+ * freshness_lifetime -- RFC 9111, 4.2.1.
+ *
+ * `max-age` wins over `Expires`. `no-cache` stores the response but requires
+ * revalidation before reuse, which is a zero-second lifetime. A response
+ * naming neither also gets zero: heuristic freshness would let this cache
+ * answer navigations from a representation no origin promised was reusable.
+ */
+fn freshness_lifetime(headers: &[(String, String)]) -> u64 {
+    let directives = cache_control_directives(headers);
+    if directives.iter().any(|d| d == "no-cache") {
+        return 0;
+    }
+    for directive in &directives {
+        if let Some(value) = directive.strip_prefix("max-age=") {
+            return value.trim_matches('"').parse().unwrap_or(0);
+        }
+    }
+    let (Some(expires), Some(date)) = (
+        header_value(headers, "expires").and_then(parse_http_date),
+        header_value(headers, "date").and_then(parse_http_date),
+    ) else {
+        return 0;
+    };
+    expires.saturating_sub(date)
+}
+
+fn cache_control_directives(headers: &[(String, String)]) -> Vec<String> {
+    header_value(headers, "cache-control")
+        .map(|value| {
+            value
+                .split(',')
+                .map(|d| d.trim().to_ascii_lowercase())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/*
+ * parse_http_date -- IMF-fixdate to seconds since the Unix epoch.
+ *
+ * HTTP-date is fixed-width in the preferred form RFC 9110, 5.6.7 requires an
+ * origin to send: `Sun, 06 Nov 1994 08:49:37 GMT`. The obsolete RFC 850 and
+ * asctime forms return None, which reads as a zero freshness lifetime.
+ */
+fn parse_http_date(value: &str) -> Option<u64> {
+    let text = value.trim();
+    let rest = text.split_once(", ")?.1;
+    let mut parts = rest.split(' ');
+    let day: u64 = parts.next()?.parse().ok()?;
+    let month = match parts.next()? {
+        "Jan" => 1,
+        "Feb" => 2,
+        "Mar" => 3,
+        "Apr" => 4,
+        "May" => 5,
+        "Jun" => 6,
+        "Jul" => 7,
+        "Aug" => 8,
+        "Sep" => 9,
+        "Oct" => 10,
+        "Nov" => 11,
+        "Dec" => 12,
+        _ => return None,
+    };
+    let year: u64 = parts.next()?.parse().ok()?;
+    let mut clock = parts.next()?.split(':');
+    let hour: u64 = clock.next()?.parse().ok()?;
+    let minute: u64 = clock.next()?.parse().ok()?;
+    let second: u64 = clock.next()?.parse().ok()?;
+    Some(days_from_civil(year, month, day) * 86_400 + hour * 3_600 + minute * 60 + second)
+}
+
+/*
+ * days_from_civil -- Howard Hinnant's civil-to-days algorithm.
+ *
+ * The era arithmetic folds the 400-year leap cycle into one division, so the
+ * conversion needs no table and no loop. Dates before 1970 are outside the
+ * range an HTTP freshness calculation reads, so the function saturates at the
+ * epoch.
+ */
+fn days_from_civil(year: u64, month: u64, day: u64) -> u64 {
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = year / 400;
+    let year_of_era = year - era * 400;
+    let day_of_year = (153 * (if month > 2 { month - 3 } else { month + 9 }) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days_since_civil_epoch = era * 146_097 + day_of_era;
+    days_since_civil_epoch.saturating_sub(719_468)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{CachedResponseDisk, ResponseCache};
+    use super::{CachedResponseDisk, ResponseCache, freshness_lifetime, parse_http_date, unix_now};
     use crate::HttpResponse;
     use std::path::PathBuf;
+
+    fn text_response(status: u16, cache_control: &str) -> HttpResponse {
+        let mut headers = vec![("Content-Type".to_string(), "text/html".to_string())];
+        if !cache_control.is_empty() {
+            headers.push(("Cache-Control".to_string(), cache_control.to_string()));
+        }
+        HttpResponse {
+            status,
+            headers,
+            body: b"<p>body</p>".to_vec(),
+        }
+    }
+
+    #[test]
+    fn an_error_status_is_not_stored() {
+        let mut cache = ResponseCache::new();
+        cache.put(
+            "https://example.test/".to_string(),
+            &text_response(426, "max-age=600"),
+        );
+        assert!(cache.get("https://example.test/").is_none());
+        assert_eq!(cache.len(), 0);
+    }
+
+    #[test]
+    fn a_storable_error_status_is_kept() {
+        let mut cache = ResponseCache::new();
+        cache.put(
+            "https://example.test/missing".to_string(),
+            &text_response(404, "max-age=600"),
+        );
+        assert!(cache.get("https://example.test/missing").is_some());
+    }
+
+    #[test]
+    fn no_store_and_private_responses_are_dropped() {
+        for directive in ["no-store", "private, max-age=600"] {
+            let mut cache = ResponseCache::new();
+            cache.put(
+                "https://example.test/".to_string(),
+                &text_response(200, directive),
+            );
+            assert!(
+                cache.get("https://example.test/").is_none(),
+                "stored a {directive} response"
+            );
+        }
+    }
+
+    #[test]
+    fn an_uncacheable_response_evicts_the_entry_it_replaces() {
+        let mut cache = ResponseCache::new();
+        cache.put(
+            "https://example.test/".to_string(),
+            &text_response(200, "max-age=600"),
+        );
+        assert!(cache.get("https://example.test/").is_some());
+        cache.put("https://example.test/".to_string(), &text_response(503, ""));
+        assert!(cache.get("https://example.test/").is_none());
+    }
+
+    #[test]
+    fn a_response_without_a_lifetime_does_not_answer_a_later_navigation() {
+        let mut cache = ResponseCache::new();
+        cache.put("https://example.test/".to_string(), &text_response(200, ""));
+        assert!(cache.get("https://example.test/").is_none());
+        // The entry survives for its validators even though it cannot be reused.
+        assert_eq!(cache.len(), 1);
+    }
+
+    #[test]
+    fn no_cache_stores_the_response_with_a_zero_lifetime() {
+        let mut cache = ResponseCache::new();
+        cache.put(
+            "https://example.test/".to_string(),
+            &text_response(200, "no-cache, max-age=600"),
+        );
+        assert!(cache.get("https://example.test/").is_none());
+        assert_eq!(cache.len(), 1);
+    }
+
+    #[test]
+    fn max_age_wins_over_expires() {
+        let headers = vec![
+            ("Cache-Control".to_string(), "max-age=42".to_string()),
+            (
+                "Expires".to_string(),
+                "Sun, 06 Nov 1994 08:49:37 GMT".to_string(),
+            ),
+            (
+                "Date".to_string(),
+                "Sun, 06 Nov 1994 08:49:37 GMT".to_string(),
+            ),
+        ];
+        assert_eq!(freshness_lifetime(&headers), 42);
+    }
+
+    #[test]
+    fn expires_minus_date_sets_the_lifetime() {
+        let headers = vec![
+            (
+                "Date".to_string(),
+                "Sun, 06 Nov 1994 08:49:37 GMT".to_string(),
+            ),
+            (
+                "Expires".to_string(),
+                "Sun, 06 Nov 1994 09:49:37 GMT".to_string(),
+            ),
+        ];
+        assert_eq!(freshness_lifetime(&headers), 3_600);
+    }
+
+    #[test]
+    fn imf_fixdate_parses_to_the_documented_epoch_seconds() {
+        // RFC 9110, 5.6.7 gives this date as the preferred-form example.
+        assert_eq!(
+            parse_http_date("Sun, 06 Nov 1994 08:49:37 GMT"),
+            Some(784_111_777)
+        );
+        assert_eq!(parse_http_date("Thu, 01 Jan 1970 00:00:00 GMT"), Some(0));
+        assert_eq!(parse_http_date("Sunday, 06-Nov-94 08:49:37 GMT"), None);
+    }
+
+    #[test]
+    fn a_disk_entry_without_a_stored_time_reads_as_expired() {
+        let dir = temp_cache_dir("legacy");
+        std::fs::create_dir_all(&dir).expect("create cache dir");
+        let json = br#"{"url":"https://example.test/old","status":200,
+            "body_utf8":"<p>old</p>",
+            "headers":[["Content-Type","text/html"]],
+            "etag":null,"last_modified":null}"#;
+        std::fs::write(dir.join("legacy.json"), json).expect("write cache row");
+        let cache = ResponseCache::with_disk(&dir);
+        assert_eq!(cache.len(), 1);
+        assert!(cache.get("https://example.test/old").is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn disk_cache_skips_binary_responses() {
@@ -319,7 +636,10 @@ mod tests {
             "https://example.test/avatar.png".to_string(),
             &HttpResponse {
                 status: 200,
-                headers: vec![("Content-Type".to_string(), "image/png".to_string())],
+                headers: vec![
+                    ("Content-Type".to_string(), "image/png".to_string()),
+                    ("Cache-Control".to_string(), "max-age=60".to_string()),
+                ],
                 body: vec![0x89, b'P', b'N', b'G', 0xff],
             },
         );
@@ -338,7 +658,10 @@ mod tests {
             "https://example.test/style.css".to_string(),
             &HttpResponse {
                 status: 200,
-                headers: vec![("Content-Type".to_string(), "text/css".to_string())],
+                headers: vec![
+                    ("Content-Type".to_string(), "text/css".to_string()),
+                    ("Cache-Control".to_string(), "max-age=60".to_string()),
+                ],
                 body: b"body { color: black; }".to_vec(),
             },
         );
@@ -365,9 +688,12 @@ mod tests {
             headers: vec![
                 ("Content-Type".to_string(), "text/html".to_string()),
                 ("Transfer-Encoding".to_string(), "chunked".to_string()),
+                ("Cache-Control".to_string(), "max-age=60".to_string()),
             ],
             etag: None,
             last_modified: None,
+            stored_at_unix: unix_now(),
+            freshness_secs: 60,
         };
         let json = serde_json::to_vec(&disk).expect("serialize cache row");
         std::fs::write(dir.join("encoded.json"), json).expect("write cache row");
