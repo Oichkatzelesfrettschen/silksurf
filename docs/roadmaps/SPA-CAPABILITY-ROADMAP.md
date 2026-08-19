@@ -339,12 +339,6 @@ separately-landable follow-up):
   already records the mutated set the fused pipeline consumes, so the
   records exist; delivering them needs a per-observer subtree filter and
   a microtask-checkpoint queue.
-- import-map-scopes -- PageModuleLoader applies the import map's
-  top-level `imports` entries. The `scopes` member changes resolution by
-  referrer, and applying a scoped mapping to every referrer resolves a
-  specifier to the wrong module, so scopes are read as absent. Wiring
-  them needs the referrer URL matched against each scope prefix before
-  the `imports` lookup.
 - dynamic-import-fetch -- the module graph is fetched ahead of
   evaluation from the static imports boa reports, so `import()` reaches
   a module the registry does not hold and rejects. chatgpt.com's entry
@@ -542,6 +536,24 @@ Closing this surfaced a separate defect the same tests exposed: an inline
 declaration, because `CssTokenizer::finish` appends `CssToken::Eof` and
 `parse_declarations` carried it into the value where `consume_important`
 reads. Landed separately.
+
+## Import-map scopes (landed 2026-08-19)
+
+`silksurf_js::ImportMap` carries both members of the document's import map.
+`PageModuleLoader::apply_import_map` takes the referrer's URL and consults the
+scopes whose prefix it matches, longest prefix first, before falling through to
+the top-level `imports`; applying a scoped mapping to every referrer resolves
+the specifier to the wrong module, which is why the referrer reaches the lookup
+rather than the specifier alone.
+
+`set_import_map` resolves each scope key against the document's address, which
+is what HTML 8.1.3.8 asks of a scope key before it is compared to a referrer, and
+drops a key that does not resolve because it names no referrer.
+`document_import_map` reads both members out of the `<script type=importmap>`
+element.
+
+Seven cases pair a referrer inside a scope with one outside it, so a lookup
+that applies the scope to every referrer passes the first and fails the second.
 
 ## Open work after the live-resource change
 
