@@ -189,6 +189,52 @@ pub(crate) fn refresh_runtime_stylesheets(
     true
 }
 
+/*
+ * reflow_runtime_for_viewport -- relayout the document at a new CSS viewport.
+ *
+ * The window surface below the browser chrome is the viewport, so a resize
+ * changes three cascade inputs at once: which `@media` branch is active, what
+ * a `vw` or `vh` length resolves to, and what a percentage against the
+ * initial containing block measures. `StyleIndex::for_viewport` evaluates the
+ * media queries when it flattens the active rules, so the index rebuilds
+ * before the fused pipeline reruns; a relayout without that rebuild moves the
+ * geometry and leaves every breakpoint-dependent declaration on the previous
+ * branch.
+ *
+ * `set_viewport` follows the relayout, which keeps matchMedia answering the
+ * size the document is laid out at. matchMedia lists stay static snapshots,
+ * so a script that already ran keeps its earlier answer; that half is the
+ * matchmedia-change-events cut in
+ * docs/roadmaps/SPA-CAPABILITY-ROADMAP.md.
+ *
+ * The retained viewport caches are bitmaps at the old stride, so they are
+ * dropped rather than re-keyed.
+ */
+pub(crate) fn reflow_runtime_for_viewport(
+    runtime: &mut BrowserPageRuntime,
+    frame: &mut BrowserFrame,
+    viewport: Rect,
+) -> BrowserRedrawMode {
+    runtime.viewport = viewport;
+    runtime.style_index =
+        StyleIndex::for_viewport(&runtime.stylesheet, viewport.width, viewport.height);
+    runtime.js_ctx.set_viewport(viewport.width, viewport.height);
+    frame.raster_width = viewport.width as u32;
+    frame.focus_viewport_cache = None;
+    frame.focus_viewport_retained_sent = false;
+    frame.scroll_viewport_caches.clear();
+    let redraw_mode = repaint_runtime_full_document(runtime, frame);
+    // repaint_runtime_full_document rasters into frame.argb at the new
+    // stride, so the bitmap key records it and refresh_browser_frame_bitmap
+    // reads the frame as current.
+    frame.bitmap_raster_width = frame.raster_width;
+    eprintln!(
+        "[SilkSurf] Viewport reflow: {}x{}",
+        viewport.width, viewport.height
+    );
+    redraw_mode
+}
+
 pub(crate) fn repaint_runtime_dirty_nodes(
     runtime: &mut BrowserPageRuntime,
     frame: &mut BrowserFrame,
@@ -1207,6 +1253,7 @@ mod tests {
                 raster_width: FRAME_WIDTH,
                 raster_height,
                 bitmap_height,
+                bitmap_raster_width: FRAME_WIDTH,
                 bitmap_scroll_y: 0,
                 focus_viewport_cache: None,
                 focus_viewport_retained_sent: false,
@@ -1327,6 +1374,7 @@ mod tests {
                 raster_width: FRAME_WIDTH,
                 raster_height,
                 bitmap_height,
+                bitmap_raster_width: FRAME_WIDTH,
                 bitmap_scroll_y: 0,
                 focus_viewport_cache: None,
                 focus_viewport_retained_sent: false,

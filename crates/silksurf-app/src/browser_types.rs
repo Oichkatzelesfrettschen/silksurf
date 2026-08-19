@@ -32,10 +32,12 @@ pub(crate) const ADDRESS_BAR_HEIGHT: u32 = 28;
 pub(crate) const ADDRESS_TEXT_MAX_CHARS: usize = 2048;
 pub(crate) const PAGE_INPUT_TEXT_MAX_CHARS: usize = 4096;
 pub(crate) const DOCUMENT_TILE_SIZE: u32 = 128;
-/// Ceiling on a headless screenshot's height. A 1280-wide RGBA surface costs
-/// 5 MiB per 1024 rows, so a pathological document bounds here rather than in
-/// the allocator.
-pub(crate) const MAX_SCREENSHOT_HEIGHT: u32 = 16_384;
+/// Ceiling on a headless screenshot, in pixels. RGBA costs four bytes each,
+/// so 20.9 M pixels is an 80 MiB surface whatever the aspect: the height a
+/// document rasterizes to divides this by its own width, which is what keeps
+/// the bound honest once the raster width follows the window instead of
+/// standing at 1280.
+pub(crate) const MAX_SCREENSHOT_PIXELS: u32 = 1280 * 16_384;
 // 8 MiB accommodates real-world and benchmark bundles (JetStream/Octane
 // payloads run 2-5 MiB); the cap exists to bound memory on hostile pages,
 // and SILKSURF_MAX_SCRIPT_BYTES overrides it for experiments.
@@ -212,6 +214,10 @@ pub(crate) struct BrowserFrame {
     pub(crate) raster_width: u32,
     pub(crate) raster_height: u32,
     pub(crate) bitmap_height: u32,
+    /// The stride the words in `argb` were rastered at. It trails
+    /// `raster_width` until the next refresh re-rasters, which is what tells
+    /// `refresh_browser_frame_bitmap` that a resize left the bitmap stale.
+    pub(crate) bitmap_raster_width: u32,
     pub(crate) bitmap_scroll_y: u32,
     pub(crate) focus_viewport_cache: Option<FocusViewportCache>,
     pub(crate) focus_viewport_retained_sent: bool,

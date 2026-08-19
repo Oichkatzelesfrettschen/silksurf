@@ -40,6 +40,7 @@ pub(crate) fn test_browser_state(url: &str) -> BrowserState {
             raster_width: FRAME_WIDTH,
             raster_height: FRAME_HEIGHT,
             bitmap_height: FRAME_HEIGHT,
+            bitmap_raster_width: FRAME_WIDTH,
             bitmap_scroll_y: 0,
             focus_viewport_cache: None,
             focus_viewport_retained_sent: false,

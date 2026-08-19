@@ -471,6 +471,59 @@ a block box with no in-flow line box a height of zero, so
 from the closure. A genuinely childless element keeps the existing floor,
 which is recorded as the `empty-block-line-height-floor` cut.
 
+## Window-width reflow (landed 2026-08-19)
+
+`FRAME_WIDTH` was the row stride at every site that read or wrote the page
+bitmap, so the document laid out at 1280 px whatever the window presented.
+`BrowserFrame::raster_width` now carries it and the layout viewport is the
+window surface below the browser chrome (`browser_layout_viewport`), which is
+what a rotated or non-1280 output needs: `--monitor LG` fullscreens onto a
+90-degree-rotated panel and gets a 1440x3440 surface.
+
+A page builds against the live window size when one exists
+(`build_browser_page_with_buffers_for_window`), and
+`reflow_browser_page_for_window` compares the runtime's viewport against the
+surface on every frame and relayouts when they disagree. That comparison is
+what carries the compositor's answer: `WinitWindow::new` requests a size and
+`--monitor` fullscreen overrides it, so the size the window opens at arrives
+through `WindowEvent::Resized` after the first page is already built.
+
+`reflow_runtime_for_viewport` rebuilds `StyleIndex` before the fused pipeline
+reruns, because `StyleIndex::for_viewport` evaluates the media queries when it
+flattens the active rules; a relayout without that rebuild moves the geometry
+and leaves every breakpoint-dependent declaration on the previous branch.
+`set_viewport` follows the relayout, so matchMedia answers the size the
+document is laid out at. matchMedia lists stay static snapshots, so a script
+that already ran keeps its earlier answer -- that half stays the
+matchmedia-change-events deferral.
+
+Three retained mechanisms cached the old width and each needed the stride in
+its key. `refresh_browser_frame_bitmap` compared scroll offset and row count
+only, so a pure-width resize hit its early return and presented the previous
+width's bitmap; `bitmap_raster_width` joins the key and the scroll-reuse path,
+which shifts rows at one stride, refuses a width that moved.
+`FocusViewportCache` and `ScrollViewportCache` are bitmaps the window presents
+word for word, so both record the width they were rastered at and a reflow
+drops them. `FusedWorkspace` gated its taffy rebuild on
+`Dom::structure_generation` and `style_generation` alone, and neither moves
+when the viewport does: the cascade resolves `vw`, `vh`, and the `@media`
+branch against the viewport, so the retained taffy styles held the previous
+width's `ComputedStyle` while the fresh cascade output sat unused. The rebuild
+now fires on a viewport that moved as well.
+
+`MAX_SCREENSHOT_HEIGHT` did its 5-MiB arithmetic against 1280, so it became
+`MAX_SCREENSHOT_PIXELS` and a document divides it by its own raster width.
+
+`crates/silksurf-app/src/window_frame.rs` asserts the discrimination against a
+fixture whose `#box` is 300 px wide only above a 1000 px viewport and whose
+`#fluid` is `50vw`: a reflow that relayouts without rebuilding `StyleIndex`
+moves `#fluid` and leaves `#box` wide. Each mechanism was falsified by
+reverting it -- dropping the taffy viewport gate, the `StyleIndex` rebuild, and
+the stride from the bitmap key each fail their own assertion. Measured with
+`make gui-probe-page-click` over three runs: render min 11.2 to 11.5 us
+against a 11.3 us baseline, and `make gui-probe-attr-reconcile` min 40.7 to
+42.5 us against 52.2 us.
+
 ## Open work after the live-resource change
 
 Named cuts, each with the mechanism that closes it:
@@ -485,16 +538,12 @@ Named cuts, each with the mechanism that closes it:
   nothing, because every DisplayItem is an axis-aligned rect. Carrying them
   needs a transform per display item and a rasterizer that applies it to
   geometry and to shaped glyph runs.
-- window-width-reflow -- `FRAME_WIDTH` pins the windowed page raster, damage
-  sync, and retained presenter to 1280 px, so the page lays out at that width
-  whatever the window is. `set_viewport` therefore reports 1280x800 to
-  matchMedia for the whole session, which at least agrees with layout;
-  reporting the real surface first would make a page pick a narrow branch and
-  then lay it out wide. Closing it makes the raster width follow the window
-  and reissues `set_viewport` on resize, and it is what a rotated or
-  non-1280 output needs: `--monitor LG` fullscreens onto a 90-degree-rotated
-  panel and gets a 1440x3440 surface, which renders correctly at 1280 px with
-  the remainder unpainted.
+- chrome-width-responsive -- the address bar is `ADDRESS_BAR_X` 108 plus
+  `ADDRESS_BAR_WIDTH` 880, so it ends at 988 px whatever the window is. A
+  window wider than that leaves the remainder bare and a narrower one clips
+  the bar, because `fill_argb_rect` bounds every write to the surface. Closing
+  it makes the bar's width the surface minus the button strip and the right
+  margin.
 - empty-block-line-height-floor -- the measure closure in
   `TaffyLayout::compute` ends by giving a childless element an auto height of
   one line box. CSS 2.1 10.6.3 gives a block-level non-replaced in-flow box

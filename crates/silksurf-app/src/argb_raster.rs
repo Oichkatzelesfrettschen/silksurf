@@ -1069,13 +1069,25 @@ pub(crate) fn viewport_damage_rect(damage: Rect, scroll_y: u32) -> Rect {
     }
 }
 
+/*
+ * refresh_browser_frame_bitmap -- bring the window bitmap up to date.
+ *
+ * Scroll offset, row count, and row stride together decide whether the words
+ * in `frame.argb` still describe the surface. A pure width change leaves the
+ * first two equal, so the stride joins the key; without it a resize presents
+ * the previous width's bitmap. The scroll-reuse path shifts rows at one
+ * stride, so a width that moved skips it and re-rasters.
+ */
 pub(crate) fn refresh_browser_frame_bitmap(
     state: &mut BrowserState,
     scroll_y: u32,
     bitmap_height: u32,
 ) -> BrowserBitmapRefresh {
     let raster_width = state.frame.raster_width;
-    if state.frame.bitmap_scroll_y == scroll_y && state.frame.bitmap_height == bitmap_height {
+    if state.frame.bitmap_scroll_y == scroll_y
+        && state.frame.bitmap_height == bitmap_height
+        && state.frame.bitmap_raster_width == raster_width
+    {
         return BrowserBitmapRefresh::Clean;
     }
     if let Some(damage) = scroll_browser_frame_bitmap(state, scroll_y, bitmap_height) {
@@ -1098,6 +1110,7 @@ pub(crate) fn refresh_browser_frame_bitmap(
         &mut runtime.viewport_item_indices,
     );
     state.frame.bitmap_height = bitmap_height;
+    state.frame.bitmap_raster_width = raster_width;
     state.frame.bitmap_scroll_y = scroll_y;
     BrowserBitmapRefresh::Full
 }
@@ -1108,7 +1121,10 @@ pub(crate) fn scroll_browser_frame_bitmap(
     bitmap_height: u32,
 ) -> Option<Rect> {
     let raster_width = state.frame.raster_width;
-    if state.frame.bitmap_height != bitmap_height || state.runtime.is_none() {
+    if state.frame.bitmap_height != bitmap_height
+        || state.frame.bitmap_raster_width != raster_width
+        || state.runtime.is_none()
+    {
         return None;
     }
     let old_scroll_y = state.frame.bitmap_scroll_y;
