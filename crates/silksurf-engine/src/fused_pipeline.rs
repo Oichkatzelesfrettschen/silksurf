@@ -196,6 +196,7 @@ impl FusedWorkspace {
         // processes parents before children).
         let phase_start = std::time::Instant::now();
         let mut rem_base_px = 16.0_f32;
+        let mut any_transform = false;
         for (i, &node) in self.table.bfs_order.iter().enumerate() {
             let pidx = self.table.parent_idx[i];
             let parent_style = if pidx == u32::MAX {
@@ -217,6 +218,7 @@ impl FusedWorkspace {
             if root_suppressed {
                 style.display = Display::None;
             }
+            any_transform |= style.transform != silksurf_css::Translation::default();
             apply_replaced_size(dom, node, &mut style, replaced_sizes);
             if dom
                 .element_name(node)
@@ -286,6 +288,7 @@ impl FusedWorkspace {
             &self.styles,
             &self.node_rects,
             &mut self.transform_offsets,
+            any_transform,
         );
         for (i, &node) in self.table.bfs_order.iter().enumerate() {
             let Some(ref style) = self.styles[i] else {
@@ -461,6 +464,7 @@ pub fn fused_style_layout_paint_with_replaced_sizes(
     // Pass 1: cascade
     let phase_start = std::time::Instant::now();
     let mut rem_base_px = 16.0_f32;
+    let mut any_transform = false;
     for (i, &node) in table.bfs_order.iter().enumerate() {
         let pidx = table.parent_idx[i];
         let parent_style = if pidx == u32::MAX {
@@ -482,6 +486,7 @@ pub fn fused_style_layout_paint_with_replaced_sizes(
         if root_suppressed {
             style.display = Display::None;
         }
+        any_transform |= style.transform != silksurf_css::Translation::default();
         apply_replaced_size(dom, node, &mut style, replaced_sizes);
         if dom
             .element_name(node)
@@ -539,7 +544,13 @@ pub fn fused_style_layout_paint_with_replaced_sizes(
     // Pass 3: paint
     let phase_start = std::time::Instant::now();
     let mut transform_offsets = Vec::new();
-    let transformed = apply_transform_offsets(&table, &styles, &node_rects, &mut transform_offsets);
+    let transformed = apply_transform_offsets(
+        &table,
+        &styles,
+        &node_rects,
+        &mut transform_offsets,
+        any_transform,
+    );
     for (i, &node) in table.bfs_order.iter().enumerate() {
         let Some(ref style) = styles[i] else {
             continue;
@@ -645,6 +656,10 @@ fn is_image_element(dom: &Dom, node: NodeId) -> bool {
  * apply_transform_offsets -- move each node's rect by its inherited
  * translation.
  *
+ * `any_transform` is the cascade's report that at least one node resolved a
+ * non-identity translation; false skips the pass entirely, which keeps the
+ * repaint hot path at the cost it had before transforms existed.
+ *
  * CSS Transforms 1 3 makes a transform apply to the element and everything it
  * contains, so the offset accumulates down the tree. BFS order guarantees a
  * parent is resolved before its children, which is what lets one forward pass
@@ -660,7 +675,14 @@ fn apply_transform_offsets(
     styles: &[Option<ComputedStyle>],
     node_rects: &[Rect],
     offsets: &mut Vec<(f32, f32)>,
+    any_transform: bool,
 ) -> bool {
+    // The cascade pass already visited every node and reported whether any
+    // resolved a translation, so a document with none pays one bool here
+    // rather than a second walk of the tree on the repaint path.
+    if !any_transform {
+        return false;
+    }
     offsets.clear();
     offsets.resize(node_rects.len(), (0.0, 0.0));
     let mut any = false;
