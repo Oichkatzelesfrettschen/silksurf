@@ -82,6 +82,9 @@ pub(crate) const ACCESSIBILITY_INPUT_BASE_ID: u64 = 20_000;
 pub(crate) const DEFAULT_USER_AGENT_STYLESHEET: &str = "
 html, body { display: block; }
 head, title, meta, link, style, script { display: none; }
+noscript, template, datalist, param, source, track { display: none; }
+[hidden] { display: none; }
+dialog:not([open]) { display: none; }
 body {
   margin: 8px;
   color: black;

@@ -103,13 +103,6 @@ pub(crate) fn repaint_runtime_host_callbacks(
     // where a startup script upgrades a link to a stylesheet. It runs before
     // the dirty set is drained so its mutations ride the same repaint.
     let preload_events = runtime.preloads.dispatch_completed(&mut runtime.js_ctx);
-    {
-        let dom = runtime
-            .dom
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        runtime.preloads.refresh(&dom, runtime.document);
-    }
 
     let dirty_nodes = {
         let mut dom = runtime
@@ -118,11 +111,20 @@ pub(crate) fn repaint_runtime_host_callbacks(
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         dom.take_dirty_nodes()
     };
+    {
+        let dom = runtime
+            .dom
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        runtime
+            .preloads
+            .refresh(&dom, runtime.document, &dirty_nodes);
+    }
 
     // A stylesheet that arrived or a source list that moved changes the
     // cascade for the whole document, so it forces a full repaint rather than
     // riding the dirty-node damage rect.
-    if refresh_runtime_stylesheets(runtime) {
+    if refresh_runtime_stylesheets(runtime, &dirty_nodes) {
         let redraw_mode = repaint_runtime_full_document(runtime, frame);
         eprintln!(
             "[SilkSurf] Runtime host callbacks: {callback_count}, preload events: {preload_events} (stylesheet rebuild)"
@@ -143,18 +145,23 @@ pub(crate) fn repaint_runtime_host_callbacks(
  * refresh_runtime_stylesheets -- rebuild the cascade when the document's
  * stylesheet list changed.
  *
- * StyleSheetSet::refresh gates on Dom::generation, so an unchanged document
- * costs one integer comparison. When the list moved or a fetched body landed,
+ * StyleSheetSet::refresh walks the tree only when the tree shape moved or a
+ * dirty node is a `<style>` or `<link>`, so a reconcile that touches neither
+ * costs one integer comparison plus a scan of the dirty set. When the list
+ * moved or a fetched body landed,
  * the concatenated text reparses and StyleIndex rebuilds against it, which is
  * what a page that swaps a link's rel from preload to stylesheet needs.
  */
-pub(crate) fn refresh_runtime_stylesheets(runtime: &mut BrowserPageRuntime) -> bool {
+pub(crate) fn refresh_runtime_stylesheets(
+    runtime: &mut BrowserPageRuntime,
+    dirty_nodes: &[silksurf_dom::NodeId],
+) -> bool {
     let changed = {
         let dom = runtime
             .dom
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        runtime.sheets.refresh(&dom, runtime.document)
+        runtime.sheets.refresh(&dom, runtime.document, dirty_nodes)
     };
     if !changed {
         return false;

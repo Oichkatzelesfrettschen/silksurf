@@ -119,6 +119,16 @@ fn style_source_for_node(
     }
 }
 
+/// Whether a node is an element whose attributes can add or remove a
+/// stylesheet source. A tick whose dirty set holds none of these skips the
+/// tree walk entirely, which is what keeps a React reconcile off it.
+pub(crate) fn is_style_source_element(dom: &silksurf_dom::Dom, node: silksurf_dom::NodeId) -> bool {
+    matches!(
+        dom.element_name(node).ok().flatten(),
+        Some("style" | "link")
+    )
+}
+
 /// The concatenated text children of a `<style>` element.
 pub(crate) fn style_element_text(dom: &silksurf_dom::Dom, node: silksurf_dom::NodeId) -> String {
     let mut text = String::new();
@@ -164,9 +174,11 @@ pub(crate) struct StyleSheetSet {
     requested: HashSet<String>,
     completions: Receiver<StyleSheetFetch>,
     sender: Sender<StyleSheetFetch>,
-    /// Dom::style_generation at the last collection. Attribute and tree-shape
-    /// edits advance it, which is every edit that can add or remove a source.
-    style_generation: u64,
+    /// Dom::structure_generation at the last collection. A `<style>` or
+    /// `<link>` enters the document through a tree-shape edit, so a stable
+    /// counter means the source list can only have changed through an
+    /// attribute on a node the caller reports as dirty.
+    structure_generation: u64,
     /// Dom::generation at the last inline-text read. Text-only edits advance
     /// it alone, so a `<style>` rewritten through textContent is caught by
     /// re-reading the owners already collected rather than by a tree walk.
@@ -203,7 +215,7 @@ impl StyleSheetSet {
             requested,
             completions,
             sender,
-            style_generation: dom.style_generation(),
+            structure_generation: dom.structure_generation(),
             dom_generation: dom.generation(),
             base_url: base_url.to_string(),
             config: config.clone(),
@@ -276,10 +288,20 @@ impl StyleSheetSet {
      * Returns true when the source list differs or a fetched body landed,
      * which is the condition for rebuilding Stylesheet and StyleIndex.
      */
-    pub(crate) fn refresh(&mut self, dom: &silksurf_dom::Dom, root: silksurf_dom::NodeId) -> bool {
+    pub(crate) fn refresh(
+        &mut self,
+        dom: &silksurf_dom::Dom,
+        root: silksurf_dom::NodeId,
+        dirty_nodes: &[silksurf_dom::NodeId],
+    ) -> bool {
         let mut changed = self.drain_completions();
-        if dom.style_generation() != self.style_generation {
-            self.style_generation = dom.style_generation();
+        let structure_moved = dom.structure_generation() != self.structure_generation;
+        if structure_moved
+            || dirty_nodes
+                .iter()
+                .any(|&node| is_style_source_element(dom, node))
+        {
+            self.structure_generation = dom.structure_generation();
             let sources = collect_style_sources(dom, root, &self.base_url);
             if sources != self.sources {
                 self.sources = sources;
@@ -608,7 +630,7 @@ mod tests {
             .dom
             .set_attribute(link, "rel", "stylesheet")
             .expect("rel rewrites");
-        assert!(set.refresh(&document.dom, document.document));
+        assert!(set.refresh(&document.dom, document.document, &[link]));
         assert_eq!(set.source_count(), 1);
     }
 
@@ -624,7 +646,7 @@ mod tests {
             &BrowserRenderConfig::default(),
             &document.dom,
         );
-        assert!(!set.refresh(&document.dom, document.document));
+        assert!(!set.refresh(&document.dom, document.document, &[]));
     }
 
     #[test]
@@ -652,7 +674,7 @@ mod tests {
             .dom
             .append_child(head, style)
             .expect("style attaches");
-        assert!(set.refresh(&document.dom, document.document));
+        assert!(set.refresh(&document.dom, document.document, &[]));
         assert!(set.css_text().contains("p{color:teal}"));
     }
 
@@ -676,7 +698,7 @@ mod tests {
             .dom
             .set_text_content(style, "a{color:lime}")
             .expect("text rewrites");
-        assert!(set.refresh(&document.dom, document.document));
+        assert!(set.refresh(&document.dom, document.document, &[style]));
         let css = set.css_text();
         assert!(css.contains("a{color:lime}"), "{css}");
         assert!(!css.contains("a{color:red}"), "{css}");

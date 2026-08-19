@@ -321,7 +321,7 @@ pub(crate) fn build_browser_page_with_buffers_for_height(
         let dom = dom_arc
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        preloads.refresh(&dom, doc_node);
+        preloads.refresh(&dom, doc_node, &[]);
     }
 
     let trace_body_start = std::time::Instant::now();
@@ -1209,12 +1209,15 @@ pub(crate) fn settle_static_document(
         let dispatched = preloads.dispatch_completed(js_ctx);
         let _ = js_ctx.run_host_callbacks(64);
         js_ctx.run_pending_jobs();
+        // The settle loop drains the dirty set so a rel a load handler
+        // rewrote reaches the collectors' dirty-node check.
+        let dirty = take_dom_dirty_nodes(dom_arc);
         let refreshed = {
             let dom = dom_arc
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            preloads.refresh(&dom, doc_node);
-            sheets.refresh(&dom, doc_node)
+            preloads.refresh(&dom, doc_node, &dirty);
+            sheets.refresh(&dom, doc_node, &dirty)
         };
         changed |= refreshed;
         let waiting = preloads.has_pending_fetches() || sheets.has_pending_fetches();

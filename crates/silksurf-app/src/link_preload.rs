@@ -102,7 +102,10 @@ pub(crate) struct PreloadLinks {
     outstanding: usize,
     completions: Receiver<PreloadCompletion>,
     sender: Sender<PreloadCompletion>,
-    style_generation: u64,
+    /// Dom::structure_generation at the last collection. A preload link
+    /// enters the document through a tree-shape edit, so a stable counter
+    /// means only an attribute on a reported-dirty node can have changed it.
+    structure_generation: u64,
     base_url: String,
     config: BrowserRenderConfig,
 }
@@ -122,7 +125,7 @@ impl PreloadLinks {
             sender,
             // A fresh set has collected nothing, so the first refresh always
             // walks the tree whatever the document's generation is.
-            style_generation: u64::MAX,
+            structure_generation: u64::MAX,
             base_url: base_url.to_string(),
             config: config.clone(),
         }
@@ -134,11 +137,21 @@ impl PreloadLinks {
     }
 
     /// Start the fetch for every preload link not started yet.
-    pub(crate) fn refresh(&mut self, dom: &silksurf_dom::Dom, root: silksurf_dom::NodeId) {
-        if dom.style_generation() == self.style_generation {
+    pub(crate) fn refresh(
+        &mut self,
+        dom: &silksurf_dom::Dom,
+        root: silksurf_dom::NodeId,
+        dirty_nodes: &[silksurf_dom::NodeId],
+    ) {
+        let structure_moved = dom.structure_generation() != self.structure_generation;
+        if !structure_moved
+            && !dirty_nodes
+                .iter()
+                .any(|&node| is_style_source_element(dom, node))
+        {
             return;
         }
-        self.style_generation = dom.style_generation();
+        self.structure_generation = dom.structure_generation();
         for link in collect_preload_links(dom, root, &self.base_url) {
             if !self.started.insert(link.owner) {
                 continue;
