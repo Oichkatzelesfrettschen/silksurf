@@ -39,11 +39,14 @@ use smallvec::SmallVec;
 use smol_str::SmolStr;
 use std::sync::Arc;
 
+/// The `style` attribute carries no selector, so its rank is the
+/// element-attached step of CSS Cascade 5, 6.4.3 rather than a selector count.
 const INLINE_STYLE_SPECIFICITY: Specificity = Specificity {
+    element_attached: true,
     layer: Specificity::UNLAYERED,
-    ids: u32::MAX,
-    classes: u32::MAX,
-    elements: u32::MAX,
+    ids: 0,
+    classes: 0,
+    elements: 0,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -673,8 +676,10 @@ impl<T: Clone> ResolvedProperty<T> {
         if self.important != candidate.important {
             return candidate.important;
         }
-        if self.specificity != candidate.specificity {
-            return candidate.specificity > self.specificity;
+        let held = self.specificity.cascade_key(self.important);
+        let offered = candidate.specificity.cascade_key(candidate.important);
+        if held != offered {
+            return offered > held;
         }
         candidate.order > self.order
     }
@@ -2505,7 +2510,9 @@ fn record_custom_property<'a>(
     }
 }
 
-/// Importance first, then specificity, then document order.
+/// Importance first, then the importance-adjusted cascade key, then document
+/// order. `Specificity::cascade_key` carries the layer reversal that CSS
+/// Cascade 5, 6.4.4 applies to important declarations.
 fn custom_property_wins(
     candidate: (bool, Specificity, usize),
     current: (bool, Specificity, usize),
@@ -2513,7 +2520,10 @@ fn custom_property_wins(
     match (candidate.0, current.0) {
         (true, false) => true,
         (false, true) => false,
-        _ => (candidate.1, candidate.2) >= (current.1, current.2),
+        _ => {
+            (candidate.1.cascade_key(candidate.0), candidate.2)
+                >= (current.1.cascade_key(current.0), current.2)
+        }
     }
 }
 

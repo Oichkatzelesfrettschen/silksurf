@@ -153,3 +153,74 @@ fn keyframe_blocks_stay_out_of_the_selector_cascade() {
         Color::black()
     );
 }
+
+/*
+ * CSS Cascade 5, 6.4.4 reverses layer order for important declarations. These
+ * cases pin the reversal against the normal-declaration order the tests above
+ * fix, so a comparison that ignores importance fails one set or the other.
+ */
+
+#[test]
+fn earlier_declared_layers_win_over_later_ones_for_important() {
+    assert_eq!(
+        target_color(
+            "@layer first { #target { color: red !important; } } \
+             @layer second { #target { color: blue !important; } }"
+        ),
+        RED
+    );
+}
+
+#[test]
+fn a_layer_statement_fixes_the_reversed_order_of_important_declarations() {
+    // `@layer second, first;` declares `first` last, so for important
+    // declarations `second` is the earlier layer and its rules win.
+    assert_eq!(
+        target_color(
+            "@layer second, first; \
+             @layer first { #target { color: red !important; } } \
+             @layer second { #target { color: blue !important; } }"
+        ),
+        BLUE
+    );
+}
+
+#[test]
+fn a_layered_important_declaration_wins_over_an_unlayered_one() {
+    // The mirror of unlayered_rules_win_over_layered_rules_of_higher_specificity:
+    // UNLAYERED is the maximum rank, so its complement is the minimum.
+    assert_eq!(
+        target_color(
+            "#target { color: green !important; } \
+             @layer base { div { color: red !important; } }"
+        ),
+        RED
+    );
+}
+
+#[test]
+fn an_important_style_attribute_wins_over_an_important_layered_rule() {
+    // The element-attached step of CSS Cascade 5, 6.4.3 sits outside the
+    // layer reversal, so the attribute keeps its precedence.
+    let stylesheet = parse_stylesheet("@layer base { #target { color: red !important; } }")
+        .expect("stylesheet parses");
+    let (mut dom, doc, div) = document_with_target();
+    dom.set_attribute(div, "style", "color: blue !important")
+        .unwrap();
+    let styles = compute_styles(&dom, doc, &stylesheet);
+    assert_eq!(styles.get(&div).expect("target style").color, BLUE);
+}
+
+#[test]
+fn an_important_layered_custom_property_takes_the_earlier_layer() {
+    let stylesheet = parse_stylesheet(
+        "@layer first { :root { --ink: red; } } \
+         @layer second { :root { --ink: blue; } } \
+         @layer first { #target { color: var(--ink) !important; } }",
+    )
+    .expect("stylesheet parses");
+    let (dom, doc, div) = document_with_target();
+    let styles = compute_styles(&dom, doc, &stylesheet);
+    // The custom property itself is a normal declaration, so `second` wins it.
+    assert_eq!(styles.get(&div).expect("target style").color, BLUE);
+}

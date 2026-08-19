@@ -364,13 +364,6 @@ separately-landable follow-up):
   presents as localized. boa_engine's `intl` feature supplies
   spec-correct implementations backed by icu4x, at a binary-size and
   compile-time cost the low-resource profile has not accepted.
-- important-layer-inversion -- `Specificity::layer` orders cascade
-  layers ahead of selector specificity, which is correct for normal
-  declarations. CSS Cascade 5, 6.4.4 inverts layer order for important
-  declarations; `ResolvedProperty::should_override` compares importance
-  before specificity, so two important declarations in different layers
-  resolve by rank rather than by inverted rank. Correcting it needs the
-  importance bit to select between the rank and its complement.
 
 ## Live document resources (landed 2026-08-19)
 
@@ -523,6 +516,32 @@ the stride from the bitmap key each fail their own assertion. Measured with
 `make gui-probe-page-click` over three runs: render min 11.2 to 11.5 us
 against a 11.3 us baseline, and `make gui-probe-attr-reconcile` min 40.7 to
 42.5 us against 52.2 us.
+
+## Important-declaration layer inversion (landed 2026-08-19)
+
+`Specificity::cascade_key` takes the importance bit and returns the layer rank
+or its complement, which is what CSS Cascade 5, 6.4.4 asks for: an important
+declaration in an earlier layer beats one in a later layer, and an unlayered
+important declaration loses to every layered one. The complement carries both,
+because `UNLAYERED` is `u32::MAX` and complements to the minimum while the
+first layer's rank 0 complements to the maximum.
+
+`Specificity` gains an `element_attached` field ahead of `layer`, so the
+`style` attribute keeps the element-attached step of CSS Cascade 5, 6.4.3 in
+both importance classes rather than riding the selector counts of `u32::MAX`
+it previously carried. Leaving it inside the reversal would have made an
+important layered rule beat an important `style` attribute.
+
+`ResolvedProperty::should_override` and `custom_property_wins` both read the
+key. Five cases in `crates/silksurf-css/tests/conditional_rules.rs` mirror the
+normal-declaration ordering the existing layer tests fix, so a comparison that
+ignores importance fails one set or the other.
+
+Closing this surfaced a separate defect the same tests exposed: an inline
+`!important` written without a trailing semicolon parsed as a normal
+declaration, because `CssTokenizer::finish` appends `CssToken::Eof` and
+`parse_declarations` carried it into the value where `consume_important`
+reads. Landed separately.
 
 ## Open work after the live-resource change
 

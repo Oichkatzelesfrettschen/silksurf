@@ -36,13 +36,21 @@ use silksurf_dom::{Attribute, AttributeName, Dom, NodeId, NodeKind};
 /// Cascade sort key for one declaration within an origin, ordered by derived
 /// `Ord` over its fields in declaration order.
 ///
-/// `layer` leads because cascade layers outrank selector specificity (CSS
+/// `element_attached` leads: a `style` attribute carries no selector and CSS
+/// Cascade 5, 6.4.3 sorts it above every style rule of its origin, in both
+/// importance classes.
+///
+/// `layer` follows because cascade layers outrank selector specificity (CSS
 /// Cascade 5, 6.4.4): a later-declared layer beats an earlier one whatever the
 /// selectors say, and unlayered declarations beat every layer. `UNLAYERED`
 /// carries that last rule as the maximum value, so a rule that never enters a
 /// layer sorts above all layered rules without a special case.
+///
+/// Importance reverses the layer comparison, which is what `cascade_key`
+/// applies; the derived `Ord` answers the normal-declaration ordering alone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Specificity {
+    pub element_attached: bool,
     pub layer: u32,
     pub ids: u32,
     pub classes: u32,
@@ -56,11 +64,34 @@ impl Specificity {
     #[must_use]
     pub fn zero() -> Self {
         Self {
+            element_attached: false,
             layer: Self::UNLAYERED,
             ids: 0,
             classes: 0,
             elements: 0,
         }
+    }
+
+    /// The comparison key for a declaration of the given importance.
+    ///
+    /// CSS Cascade 5, 6.4.4 reverses layer order for important declarations:
+    /// an important declaration in an earlier layer beats one in a later
+    /// layer, and an unlayered important declaration loses to every layered
+    /// one. The complement of the rank carries both, because `UNLAYERED` is
+    /// `u32::MAX` and complements to the minimum while the first layer's rank
+    /// 0 complements to the maximum. `element_attached` stays outside the
+    /// reversal, so an important `style` attribute keeps beating an important
+    /// style rule whatever layer that rule sits in.
+    #[must_use]
+    pub fn cascade_key(self, important: bool) -> (bool, u32, u32, u32, u32) {
+        let layer = if important { !self.layer } else { self.layer };
+        (
+            self.element_attached,
+            layer,
+            self.ids,
+            self.classes,
+            self.elements,
+        )
     }
 }
 
