@@ -7,8 +7,9 @@
  */
 
 use silksurf_css::{
-    CascadeView, CascadeWorkspace, ComputedStyle, Display, Length, LengthOrAuto, StyleIndex,
-    Stylesheet, WhiteSpace, compute_style_for_node_with_workspace,
+    CascadeView, CascadeWorkspace, ComputedStyle, Display, Length, LengthOrAuto,
+    Position as CssPosition, StyleIndex, Stylesheet, WhiteSpace,
+    compute_style_for_node_with_workspace,
 };
 use silksurf_dom::{Dom, NodeId, NodeKind, TagName};
 use silksurf_layout::Rect;
@@ -73,6 +74,10 @@ pub struct FusedWorkspace {
     /// Accumulated transform translation per BFS-indexed node, retained so a
     /// repaint reuses the allocation.
     transform_offsets: Vec<(f32, f32)>,
+    /// Stacking-context scratch and the resulting paint sequence, both
+    /// retained so a repaint reuses the allocation.
+    stacking: StackingOrder,
+    paint_order: Vec<u32>,
     /// Cached tree-shape generation for the BFS table.
     table_generation: u64,
     /// Cached selector-input generation for the cascade view.
@@ -102,6 +107,8 @@ impl FusedWorkspace {
         Self {
             table: LayoutNeighborTable::default(),
             transform_offsets: Vec::new(),
+            stacking: StackingOrder::default(),
+            paint_order: Vec::new(),
             cascade_view: CascadeView::new(),
             cascade_ws: CascadeWorkspace::new(0),
             taffy_layout: TaffyLayout::new(),
@@ -197,6 +204,7 @@ impl FusedWorkspace {
         let phase_start = std::time::Instant::now();
         let mut rem_base_px = 16.0_f32;
         let mut any_transform = false;
+        let mut any_positioned = false;
         for (i, &node) in self.table.bfs_order.iter().enumerate() {
             let pidx = self.table.parent_idx[i];
             let parent_style = if pidx == u32::MAX {
@@ -219,6 +227,7 @@ impl FusedWorkspace {
                 style.display = Display::None;
             }
             any_transform |= style.transform != silksurf_css::Translation::default();
+            any_positioned |= style.position != CssPosition::Static;
             apply_replaced_size(dom, node, &mut style, replaced_sizes);
             if dom
                 .element_name(node)
@@ -290,7 +299,23 @@ impl FusedWorkspace {
             &mut self.transform_offsets,
             any_transform,
         );
-        for (i, &node) in self.table.bfs_order.iter().enumerate() {
+        let stacked = build_paint_order(
+            &self.table,
+            &self.styles,
+            &mut self.stacking,
+            &mut self.paint_order,
+            any_positioned,
+        );
+        let paint_steps = if stacked {
+            self.paint_order.len()
+        } else {
+            self.table.len()
+        };
+        for step in 0..paint_steps {
+            let i = paint_step(&self.paint_order, stacked, step);
+            let Some(node) = self.table.bfs_order.get(i).copied() else {
+                continue;
+            };
             let Some(ref style) = self.styles[i] else {
                 continue;
             };
@@ -465,6 +490,7 @@ pub fn fused_style_layout_paint_with_replaced_sizes(
     let phase_start = std::time::Instant::now();
     let mut rem_base_px = 16.0_f32;
     let mut any_transform = false;
+    let mut any_positioned = false;
     for (i, &node) in table.bfs_order.iter().enumerate() {
         let pidx = table.parent_idx[i];
         let parent_style = if pidx == u32::MAX {
@@ -487,6 +513,7 @@ pub fn fused_style_layout_paint_with_replaced_sizes(
             style.display = Display::None;
         }
         any_transform |= style.transform != silksurf_css::Translation::default();
+        any_positioned |= style.position != CssPosition::Static;
         apply_replaced_size(dom, node, &mut style, replaced_sizes);
         if dom
             .element_name(node)
@@ -551,7 +578,25 @@ pub fn fused_style_layout_paint_with_replaced_sizes(
         &mut transform_offsets,
         any_transform,
     );
-    for (i, &node) in table.bfs_order.iter().enumerate() {
+    let mut stacking = StackingOrder::default();
+    let mut paint_order = Vec::new();
+    let stacked = build_paint_order(
+        &table,
+        &styles,
+        &mut stacking,
+        &mut paint_order,
+        any_positioned,
+    );
+    let paint_steps = if stacked {
+        paint_order.len()
+    } else {
+        table.len()
+    };
+    for step in 0..paint_steps {
+        let i = paint_step(&paint_order, stacked, step);
+        let Some(node) = table.bfs_order.get(i).copied() else {
+            continue;
+        };
         let Some(ref style) = styles[i] else {
             continue;
         };
@@ -650,6 +695,266 @@ fn is_image_element(dom: &Dom, node: NodeId) -> bool {
         .ok()
         .flatten()
         .is_some_and(|name| matches!(TagName::from_str(name), TagName::Img | TagName::Canvas))
+}
+
+/// The BFS index to paint at `step`: the stacking sequence when one was built,
+/// and plain tree order otherwise. One predictable branch per node keeps a
+/// document of ordinary flow content off the indirect-call path.
+#[inline]
+fn paint_step(order: &[u32], stacked: bool, step: usize) -> usize {
+    if stacked { order[step] as usize } else { step }
+}
+
+/*
+ * StackingOrder -- the sequence in which nodes hand their display items to
+ * the painter.
+ *
+ * CSS 2.1 Appendix E orders one stacking context as: the context element's own
+ * box, then descendant contexts with a negative z-index, then the context's
+ * in-flow content, then descendant contexts with a zero or positive z-index,
+ * each z group in tree order. Contexts nest, so the sequence is a depth-first
+ * walk of the context tree rather than one flat sort -- a z-index-3 pane paints
+ * its own background before the subtree it contains, and that subtree stays
+ * above it however its members' own z-index reads.
+ *
+ * `ComputedStyle::z_index` resolves `auto` to 0, so this treats every
+ * positioned element as establishing a context. The spec lets a positioned
+ * z-auto element's positioned descendants escape into the ancestor context;
+ * `docs/roadmaps/SPA-CAPABILITY-ROADMAP.md` carries that as
+ * z-index-auto-context-escape.
+ *
+ * Every buffer is retained across repaints, and the whole pass runs only when
+ * the cascade reports a positioned node.
+ */
+#[derive(Default)]
+pub(crate) struct StackingOrder {
+    /// Nearest positioned ancestor-or-self per BFS index; `context[i] == i`
+    /// marks a context root, and index 0 is the root context.
+    context: Vec<u32>,
+    /// The context holding each context root, which is the context of its DOM
+    /// parent. Index 0 carries itself.
+    parent_context: Vec<u32>,
+    /// Computed z-index per BFS index, read while ordering child contexts.
+    z: Vec<i32>,
+    /// BFS indices grouped by context, each run in tree order.
+    members: Vec<u32>,
+    /// First `members` slot belonging to the context rooted at this index.
+    member_start: Vec<u32>,
+    /// Context roots grouped by parent context, each run ordered by z-index
+    /// then tree order.
+    children: Vec<u32>,
+    /// First `children` slot belonging to the context rooted at this index.
+    child_start: Vec<u32>,
+    /// Depth-first walk state, one frame per open context.
+    frames: Vec<StackingFrame>,
+}
+
+#[derive(Clone, Copy)]
+struct StackingFrame {
+    context: u32,
+    child: usize,
+    child_end: usize,
+    member: usize,
+    member_end: usize,
+    members_emitted: bool,
+}
+
+/*
+ * build_paint_order -- sequence the BFS indices by stacking context.
+ *
+ * `any_positioned` is the cascade's report that at least one node resolved a
+ * position other than static; false leaves `order` untouched and the caller
+ * walks `bfs_order` directly, which keeps a document of ordinary flow content
+ * at the cost it had before stacking existed.
+ */
+fn build_paint_order(
+    table: &LayoutNeighborTable,
+    styles: &[Option<ComputedStyle>],
+    state: &mut StackingOrder,
+    order: &mut Vec<u32>,
+    any_positioned: bool,
+) -> bool {
+    if !any_positioned {
+        return false;
+    }
+    let n = table.len().min(styles.len());
+    if n == 0 {
+        return false;
+    }
+    assign_contexts(table, styles, state, n);
+    group_members_by_context(state, n);
+    group_children_by_parent_context(state, n);
+    emit_stacking_order(state, order, n);
+    true
+}
+
+/// A node's stacking context: itself when it is positioned, and its parent's
+/// context otherwise. BFS order puts a parent before its children, so one
+/// forward pass resolves the whole tree.
+fn assign_contexts(
+    table: &LayoutNeighborTable,
+    styles: &[Option<ComputedStyle>],
+    state: &mut StackingOrder,
+    n: usize,
+) {
+    state.context.clear();
+    state.context.resize(n, 0);
+    state.parent_context.clear();
+    state.parent_context.resize(n, 0);
+    state.z.clear();
+    state.z.resize(n, 0);
+    for (i, style) in styles.iter().take(n).enumerate() {
+        let index = u32::try_from(i).unwrap_or(u32::MAX);
+        let style = style.as_ref();
+        let positioned = style.is_some_and(|style| style.position != CssPosition::Static);
+        state.z[i] = style.map_or(0, |style| style.z_index);
+        let parent_context = table
+            .parent_idx
+            .get(i)
+            .copied()
+            .filter(|&parent| (parent as usize) < i)
+            .map_or(0, |parent| state.context[parent as usize]);
+        state.parent_context[i] = parent_context;
+        state.context[i] = if i == 0 || positioned {
+            index
+        } else {
+            parent_context
+        };
+    }
+}
+
+/// `members` holds every BFS index grouped into a contiguous run per context,
+/// tree order preserved inside each run; `member_start` indexes those runs by
+/// context root.
+fn group_members_by_context(state: &mut StackingOrder, n: usize) {
+    state.members.clear();
+    state
+        .members
+        .extend(0..u32::try_from(n).unwrap_or(u32::MAX));
+    let context = &state.context;
+    state.members.sort_unstable_by_key(|&i| context[i as usize]);
+    state.member_start.clear();
+    state.member_start.resize(n + 1, u32::MAX);
+    for (slot, &i) in state.members.iter().enumerate() {
+        let context_root = state.context[i as usize] as usize;
+        let slot = u32::try_from(slot).unwrap_or(u32::MAX);
+        if state.member_start[context_root] == u32::MAX {
+            state.member_start[context_root] = slot;
+        }
+    }
+}
+
+/// `children` holds every context root except the root context, grouped into a
+/// contiguous run per parent context and ordered by z-index then tree order;
+/// `child_start` indexes those runs by parent context root.
+fn group_children_by_parent_context(state: &mut StackingOrder, n: usize) {
+    state.children.clear();
+    for i in 1..n {
+        if state.context[i] as usize == i {
+            state.children.push(u32::try_from(i).unwrap_or(u32::MAX));
+        }
+    }
+    let (parent_context, z) = (&state.parent_context, &state.z);
+    state
+        .children
+        .sort_unstable_by_key(|&i| (parent_context[i as usize], z[i as usize], i));
+    state.child_start.clear();
+    state.child_start.resize(n + 1, u32::MAX);
+    for (slot, &i) in state.children.iter().enumerate() {
+        let owner = state.parent_context[i as usize] as usize;
+        let slot = u32::try_from(slot).unwrap_or(u32::MAX);
+        if state.child_start[owner] == u32::MAX {
+            state.child_start[owner] = slot;
+        }
+    }
+}
+
+/// The half-open `slots` run that starts at `start[key]`, ending where the run
+/// of a different key begins.
+fn run_of(start: &[u32], slots: &[u32], owner: impl Fn(u32) -> u32, key: u32) -> (usize, usize) {
+    let Some(&first) = start.get(key as usize).filter(|&&s| s != u32::MAX) else {
+        return (0, 0);
+    };
+    let mut end = first as usize;
+    while end < slots.len() && owner(slots[end]) == key {
+        end += 1;
+    }
+    (first as usize, end)
+}
+
+/// Walk the context tree depth-first, writing the painting sequence into
+/// `order`. An explicit frame stack keeps a deep document off the call stack.
+fn emit_stacking_order(state: &mut StackingOrder, order: &mut Vec<u32>, n: usize) {
+    order.clear();
+    order.reserve(n);
+    state.frames.clear();
+    order.push(0);
+    state.frames.push(open_context(state, 0));
+    while let Some(&frame) = state.frames.last() {
+        let mut frame = frame;
+        // A negative z-index context paints between the parent context's own
+        // box and the parent's in-flow content.
+        let next_child = (frame.child < frame.child_end).then(|| state.children[frame.child]);
+        if !frame.members_emitted
+            && let Some(child) = next_child
+            && state.z[child as usize] < 0
+        {
+            frame.child += 1;
+            *replace_top(state) = frame;
+            order.push(child);
+            let opened = open_context(state, child);
+            state.frames.push(opened);
+            continue;
+        }
+        if !frame.members_emitted {
+            while frame.member < frame.member_end {
+                let member = state.members[frame.member];
+                frame.member += 1;
+                if member != frame.context {
+                    order.push(member);
+                }
+            }
+            frame.members_emitted = true;
+        }
+        if frame.child < frame.child_end {
+            let child = state.children[frame.child];
+            frame.child += 1;
+            *replace_top(state) = frame;
+            order.push(child);
+            let opened = open_context(state, child);
+            state.frames.push(opened);
+            continue;
+        }
+        state.frames.pop();
+    }
+}
+
+fn replace_top(state: &mut StackingOrder) -> &mut StackingFrame {
+    let top = state.frames.len() - 1;
+    &mut state.frames[top]
+}
+
+fn open_context(state: &StackingOrder, context: u32) -> StackingFrame {
+    let (member, member_end) = run_of(
+        &state.member_start,
+        &state.members,
+        |i| state.context[i as usize],
+        context,
+    );
+    let (child, child_end) = run_of(
+        &state.child_start,
+        &state.children,
+        |i| state.parent_context[i as usize],
+        context,
+    );
+    StackingFrame {
+        context,
+        child,
+        child_end,
+        member,
+        member_end,
+        members_emitted: false,
+    }
 }
 
 /*
@@ -1330,5 +1635,124 @@ mod tests {
 
         assert!(text_items.contains(&"New"));
         assert!(!text_items.contains(&"Old"));
+    }
+}
+
+#[cfg(test)]
+mod paint_order_tests {
+    use super::*;
+    use silksurf_dom::Dom;
+
+    /// document > [flow, outer > inner, later_flow]
+    ///
+    /// BFS indices: 0 document, 1 flow, 2 outer, 3 later_flow, 4 inner.
+    fn four_child_document() -> LayoutNeighborTable {
+        let mut dom = Dom::new();
+        let root = dom.create_document();
+        let flow = dom.create_element("div");
+        let outer = dom.create_element("div");
+        let inner = dom.create_element("div");
+        let later_flow = dom.create_element("div");
+        // UNWRAP-OK: every id came from this Dom, so no append can fail.
+        dom.append_child(root, flow).unwrap();
+        dom.append_child(root, outer).unwrap();
+        dom.append_child(outer, inner).unwrap();
+        dom.append_child(root, later_flow).unwrap();
+        LayoutNeighborTable::build(&dom, root)
+    }
+
+    fn positioned(z: i32) -> ComputedStyle {
+        ComputedStyle {
+            position: CssPosition::Absolute,
+            z_index: z,
+            ..Default::default()
+        }
+    }
+
+    fn order_for(styles: &[Option<ComputedStyle>], table: &LayoutNeighborTable) -> Vec<u32> {
+        let mut state = StackingOrder::default();
+        let mut order = Vec::new();
+        assert!(build_paint_order(
+            table, styles, &mut state, &mut order, true
+        ));
+        order
+    }
+
+    #[test]
+    fn a_positioned_subtree_paints_after_later_in_flow_content() {
+        let table = four_child_document();
+        let mut styles = vec![Some(ComputedStyle::default()); 5];
+        styles[2] = Some(ComputedStyle {
+            position: CssPosition::Fixed,
+            ..Default::default()
+        });
+        assert_eq!(order_for(&styles, &table), vec![0, 1, 3, 2, 4]);
+    }
+
+    #[test]
+    fn a_negative_z_index_sinks_below_in_flow_content() {
+        let table = four_child_document();
+        let mut styles = vec![Some(ComputedStyle::default()); 5];
+        styles[2] = Some(positioned(-1));
+        assert_eq!(order_for(&styles, &table), vec![0, 2, 4, 1, 3]);
+    }
+
+    #[test]
+    fn a_higher_z_index_paints_above_a_lower_one() {
+        let table = four_child_document();
+        let mut styles = vec![Some(ComputedStyle::default()); 5];
+        styles[2] = Some(positioned(1));
+        styles[3] = Some(positioned(5));
+        assert_eq!(order_for(&styles, &table), vec![0, 1, 2, 4, 3]);
+    }
+
+    #[test]
+    fn a_nested_context_paints_above_the_ancestor_that_contains_it() {
+        let table = four_child_document();
+        let mut styles = vec![Some(ComputedStyle::default()); 5];
+        // The inner box carries the lower z-index, but it is inside the outer
+        // context, so it still paints above the outer box.
+        styles[2] = Some(positioned(3));
+        styles[4] = Some(positioned(1));
+        assert_eq!(order_for(&styles, &table), vec![0, 1, 3, 2, 4]);
+    }
+
+    #[test]
+    fn a_negative_z_child_stays_inside_its_parent_context() {
+        let table = four_child_document();
+        let mut styles = vec![Some(ComputedStyle::default()); 5];
+        styles[2] = Some(positioned(3));
+        styles[4] = Some(positioned(-1));
+        // The inner box sinks below the outer box's in-flow content, and the
+        // outer box's own background still precedes it.
+        assert_eq!(order_for(&styles, &table), vec![0, 1, 3, 2, 4]);
+    }
+
+    #[test]
+    fn a_document_of_static_boxes_keeps_tree_order() {
+        let table = four_child_document();
+        let styles = vec![Some(ComputedStyle::default()); 5];
+        let mut state = StackingOrder::default();
+        let mut order = Vec::new();
+        assert!(!build_paint_order(
+            &table, &styles, &mut state, &mut order, false
+        ));
+        assert!(order.is_empty(), "the caller walks bfs_order directly");
+        assert!(build_paint_order(
+            &table, &styles, &mut state, &mut order, true
+        ));
+        assert_eq!(order, vec![0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn every_node_appears_exactly_once() {
+        let table = four_child_document();
+        let mut styles = vec![Some(ComputedStyle::default()); 5];
+        styles[2] = Some(positioned(2));
+        styles[3] = Some(positioned(-3));
+        styles[4] = Some(positioned(7));
+        let mut order = order_for(&styles, &table);
+        order.sort_unstable();
+        assert_eq!(order, vec![0, 1, 2, 3, 4]);
     }
 }
