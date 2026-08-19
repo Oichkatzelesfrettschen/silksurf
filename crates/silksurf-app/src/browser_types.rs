@@ -32,6 +32,10 @@ pub(crate) const ADDRESS_BAR_HEIGHT: u32 = 28;
 pub(crate) const ADDRESS_TEXT_MAX_CHARS: usize = 2048;
 pub(crate) const PAGE_INPUT_TEXT_MAX_CHARS: usize = 4096;
 pub(crate) const DOCUMENT_TILE_SIZE: u32 = 128;
+/// Ceiling on a headless screenshot's height. A 1280-wide RGBA surface costs
+/// 5 MiB per 1024 rows, so a pathological document bounds here rather than in
+/// the allocator.
+pub(crate) const MAX_SCREENSHOT_HEIGHT: u32 = 16_384;
 // 8 MiB accommodates real-world and benchmark bundles (JetStream/Octane
 // payloads run 2-5 MiB); the cap exists to bound memory on hostile pages,
 // and SILKSURF_MAX_SCRIPT_BYTES overrides it for experiments.
@@ -390,6 +394,10 @@ pub(crate) struct AppOptions {
     pub(crate) headless: bool,
     pub(crate) display_backend: silksurf_gui::WinitDisplayBackend,
     pub(crate) url: String,
+    /// Where the headless render writes its frame as PNG. A rendering claim
+    /// backed by a file a reviewer opens is a different evidence class from
+    /// one backed by a paint-item count.
+    pub(crate) screenshot: Option<std::path::PathBuf>,
     pub(crate) render_config: BrowserRenderConfig,
 }
 

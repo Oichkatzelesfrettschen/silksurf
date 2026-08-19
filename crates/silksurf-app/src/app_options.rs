@@ -31,12 +31,13 @@ pub(crate) fn positional_url_arg(args: &[String]) -> Option<String> {
             continue;
         }
         match arg.as_str() {
-            "--backend" | "--tls-ca-file" | "--display-backend" => {
+            "--backend" | "--tls-ca-file" | "--display-backend" | "--screenshot" => {
                 skip_next = true;
             }
             _ if arg.starts_with("--backend=")
                 || arg.starts_with("--tls-ca-file=")
-                || arg.starts_with("--display-backend=") => {}
+                || arg.starts_with("--display-backend=")
+                || arg.starts_with("--screenshot=") => {}
             _ if arg.starts_with('-') => {}
             _ => return Some(arg.clone()),
         }
@@ -83,6 +84,7 @@ pub(crate) fn parse_app_options(args: &[String]) -> Result<AppOptions, String> {
     let headless = args.iter().any(|arg| arg == "--headless");
     let display_backend = parse_display_backend_arg(args)?;
     let tls_ca_file = parse_tls_ca_file_arg(args);
+    let screenshot = parse_path_arg(args, "--screenshot");
     let url = positional_url_arg(args).unwrap_or_else(|| "https://example.com".to_string());
     log_startup_options(insecure, platform_verifier, tls_ca_file.as_ref());
     Ok(AppOptions {
@@ -91,6 +93,7 @@ pub(crate) fn parse_app_options(args: &[String]) -> Result<AppOptions, String> {
         headless,
         display_backend,
         url,
+        screenshot,
         render_config: BrowserRenderConfig {
             insecure,
             platform_verifier,
@@ -103,13 +106,17 @@ pub(crate) fn parse_app_options(args: &[String]) -> Result<AppOptions, String> {
 }
 
 pub(crate) fn parse_tls_ca_file_arg(args: &[String]) -> Option<std::path::PathBuf> {
+    parse_path_arg(args, "--tls-ca-file")
+}
+
+/// A path option in either spelling: `--name value` or `--name=value`.
+pub(crate) fn parse_path_arg(args: &[String], name: &str) -> Option<std::path::PathBuf> {
+    let equals_form = format!("{name}=");
     args.windows(2)
-        .find_map(|window| {
-            (window[0] == "--tls-ca-file").then(|| std::path::PathBuf::from(&window[1]))
-        })
+        .find_map(|window| (window[0] == name).then(|| std::path::PathBuf::from(&window[1])))
         .or_else(|| {
             args.iter().find_map(|arg| {
-                arg.strip_prefix("--tls-ca-file=")
+                arg.strip_prefix(equals_form.as_str())
                     .map(std::path::PathBuf::from)
             })
         })
@@ -193,6 +200,42 @@ mod tests {
         assert!(
             parse_display_backend_arg(&args(&["silksurf-app", "--display-backend", "quartz"]))
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn a_screenshot_path_parses_in_both_spellings() {
+        assert_eq!(
+            parse_path_arg(
+                &args(&["silksurf-app", "--screenshot", "/out/frame.png"]),
+                "--screenshot"
+            ),
+            Some(std::path::PathBuf::from("/out/frame.png"))
+        );
+        assert_eq!(
+            parse_path_arg(
+                &args(&["silksurf-app", "--screenshot=/out/frame.png"]),
+                "--screenshot"
+            ),
+            Some(std::path::PathBuf::from("/out/frame.png"))
+        );
+        assert_eq!(
+            parse_path_arg(&args(&["silksurf-app"]), "--screenshot"),
+            None
+        );
+    }
+
+    #[test]
+    fn a_screenshot_path_is_not_the_positional_url() {
+        assert_eq!(
+            positional_url_arg(&args(&[
+                "silksurf-app",
+                "--headless",
+                "--screenshot",
+                "/out/frame.png",
+                "https://example.com/"
+            ])),
+            Some("https://example.com/".to_string())
         );
     }
 

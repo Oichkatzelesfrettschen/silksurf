@@ -1230,6 +1230,34 @@ pub(crate) fn settle_static_document(
     changed.then(|| sheets.css_text())
 }
 
+/*
+ * write_static_screenshot -- the headless frame as a PNG file.
+ *
+ * The frame the budget measures covers the viewport; a screenshot covers the
+ * whole document, so this rasterizes at the document's own height into a
+ * buffer of its own. A rendering claim backed by an image a reviewer opens is
+ * a different evidence class from one backed by a paint-item count.
+ */
+pub(crate) fn write_static_screenshot(
+    display_list: &silksurf_render::DisplayList,
+    path: &std::path::Path,
+) {
+    let height = browser_frame_height(&display_list.items, 0).min(MAX_SCREENSHOT_HEIGHT);
+    let mut rgba: Vec<u8> = Vec::new();
+    silksurf_render::rasterize_skia_into(display_list, FRAME_WIDTH, height, &mut rgba);
+    match silksurf_image::encode_png(&rgba, FRAME_WIDTH, height) {
+        Ok(png) => match std::fs::write(path, &png) {
+            Ok(()) => eprintln!(
+                "[SilkSurf] Screenshot: {} ({FRAME_WIDTH}x{height}, {} bytes)",
+                path.display(),
+                png.len()
+            ),
+            Err(err) => eprintln!("[SilkSurf] Screenshot {}: {err}", path.display()),
+        },
+        Err(err) => eprintln!("[SilkSurf] Screenshot encode: {}", err.message),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     // Module split from the former single-file binary; the crate root

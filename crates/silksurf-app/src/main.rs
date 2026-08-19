@@ -3,7 +3,8 @@
 //! Pipeline: fetch URL -> parse HTML -> load CSS/JS resources -> create VM
 //! with DOM bridge -> run scripts -> layout -> render.
 //!
-//! Usage: silksurf-app \[--headless\] \[--display-backend=auto|wayland|x11\] \[URL\]
+//! Usage: silksurf-app \[--headless\] \[--screenshot PATH\]
+//!          \[--display-backend=auto|wayland|x11\] \[URL\]
 //! Default URL: `https://example.com`. The windowed browser is the default;
 //! `--headless` runs the one-shot static render pipeline instead.
 
@@ -613,6 +614,10 @@ fn run_static_browser_render(
         raster_buf.len(),
         raster_elapsed
     );
+
+    if let Some(path) = options.screenshot.as_ref() {
+        write_static_screenshot(&display_list, path);
+    }
 
     eprintln!("\n=== PROCESSING BUDGET (excludes network) ===");
     eprintln!(

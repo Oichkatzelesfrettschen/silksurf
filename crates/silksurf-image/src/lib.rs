@@ -1,7 +1,8 @@
 //! Image decode boundary for browser resources.
 //!
 //! The crate decodes compressed image bytes into a tightly bounded RGBA8
-//! surface. Callers own fetch, cache, layout, and paint integration.
+//! surface and encodes an RGBA8 surface back to PNG. Callers own fetch,
+//! cache, layout, and paint integration.
 
 use image_webp::WebPDecoder;
 use std::io::Cursor;
@@ -39,6 +40,47 @@ impl ImageError {
             message: message.into(),
         }
     }
+}
+
+/*
+ * encode_png -- an RGBA8 surface as PNG bytes.
+ *
+ * The headless render writes its frame through this, which turns a rendering
+ * claim into a file a reviewer can open. `rgba` is tightly packed at four
+ * bytes per pixel, so its length fixes the surface the header declares.
+ *
+ * # Errors
+ *
+ * Returns an error when `rgba` is not exactly `width * height * 4` bytes, or
+ * when the encoder rejects the stream.
+ */
+pub fn encode_png(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>, ImageError> {
+    let expected = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or_else(|| ImageError::new("PNG encode: surface dimensions overflow"))?;
+    if rgba.len() != expected {
+        return Err(ImageError::new(format!(
+            "PNG encode: {} bytes for a {width}x{height} surface needing {expected}",
+            rgba.len()
+        )));
+    }
+    let mut out = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut out, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder
+            .write_header()
+            .map_err(|err| ImageError::new(format!("PNG encode header: {err}")))?;
+        writer
+            .write_image_data(rgba)
+            .map_err(|err| ImageError::new(format!("PNG encode data: {err}")))?;
+        writer
+            .finish()
+            .map_err(|err| ImageError::new(format!("PNG encode finish: {err}")))?;
+    }
+    Ok(out)
 }
 
 pub fn decode_image(bytes: &[u8], content_type: Option<&str>) -> Result<DecodedImage, ImageError> {
@@ -195,6 +237,23 @@ fn gray_alpha_to_rgba(gray_alpha: &[u8]) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_encoded_surface_decodes_back_to_its_pixels() {
+        let rgba: Vec<u8> = vec![
+            255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 128,
+        ];
+        let png = super::encode_png(&rgba, 2, 2).expect("2x2 surface encodes");
+        let decoded = super::decode_image(&png, Some("image/png")).expect("PNG decodes");
+        assert_eq!((decoded.width, decoded.height), (2, 2));
+        assert_eq!(decoded.rgba, rgba);
+    }
+
+    #[test]
+    fn a_surface_of_the_wrong_length_is_refused() {
+        let error = super::encode_png(&[0, 0, 0], 2, 2).expect_err("short buffer is refused");
+        assert!(error.message.contains("needing 16"), "{}", error.message);
+    }
+
     use super::{ImageFormat, decode_image, sniff_format};
 
     const PNG_2X1_RGBA: &[u8] = &[
