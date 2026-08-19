@@ -58,6 +58,50 @@ pub struct TaffyLayout {
     /// Text measurement cache keyed by BFS index and guarded by DOM generation.
     text_measure_cache: Vec<CachedTextMeasures>,
     text_measure_generation: u64,
+    /// Second taffy root sized to the viewport, holding the `position: fixed`
+    /// subtrees. `None` for a document that declares no fixed box.
+    viewport_root: Option<TaffyId>,
+    /// Per-BFS-index placement of a box whose containing block is the viewport.
+    anchors: Vec<ViewportAnchor>,
+}
+
+/*
+ * A `position: fixed` box takes the viewport as its containing block (CSS
+ * Position 3 2.1), so its insets and percentages resolve against the viewport
+ * rather than against whatever ancestor happens to hold it in the DOM.  taffy
+ * resolves an absolutely positioned child against its taffy parent, so the
+ * fixed box hangs off `viewport_root` -- a second taffy root whose style
+ * carries the viewport as a definite size -- instead of off its DOM parent.
+ * The document root keeps `size: auto` and lays out exactly as before, which
+ * is what keeps in-flow geometry unchanged by this split.
+ *
+ * `static_x` and `static_y` mark the axes where both insets compute to auto.
+ * CSS keeps the static position in that case, and the DOM parent's origin is
+ * the position `write_rects` restores.
+ */
+#[derive(Clone, Copy, Default)]
+struct ViewportAnchor {
+    anchored: bool,
+    static_x: bool,
+    static_y: bool,
+}
+
+impl ViewportAnchor {
+    fn for_style(style: Option<&ComputedStyle>) -> Self {
+        let Some(style) = style else {
+            return Self::default();
+        };
+        if style.position != CssPosition::Fixed {
+            return Self::default();
+        }
+        Self {
+            anchored: true,
+            static_x: matches!(style.left, LengthOrAuto::Auto)
+                && matches!(style.right, LengthOrAuto::Auto),
+            static_y: matches!(style.top, LengthOrAuto::Auto)
+                && matches!(style.bottom, LengthOrAuto::Auto),
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -168,6 +212,8 @@ impl TaffyLayout {
             child_ids_scratch: Vec::new(),
             text_measure_cache: Vec::new(),
             text_measure_generation: u64::MAX,
+            viewport_root: None,
+            anchors: Vec::new(),
         }
     }
 
@@ -191,6 +237,15 @@ impl TaffyLayout {
         self.taffy_nodes.clear();
         self.taffy_nodes.resize(n, None);
         self.taffy_to_bfs.clear();
+        self.viewport_root = None;
+        self.anchors.clear();
+        self.anchors.resize(n, ViewportAnchor::default());
+        // Index 0 is the document root; anchoring it would leave the tree
+        // without the in-flow root that sizes the page.
+        for i in 1..n {
+            self.anchors[i] = ViewportAnchor::for_style(styles.get(i).and_then(Option::as_ref));
+        }
+        let any_anchored = self.anchors.iter().any(|anchor| anchor.anchored);
 
         // Process in reverse BFS order: children before parents so
         // taffy node IDs are available when we build the parent node.
@@ -213,8 +268,11 @@ impl TaffyLayout {
             if first_child != u32::MAX {
                 let start = first_child as usize;
                 let end = start + usize::from(table.child_count[i]);
-                self.child_ids_scratch
-                    .extend((start..end).filter_map(|child_idx| self.taffy_nodes[child_idx]));
+                self.child_ids_scratch.extend(
+                    (start..end)
+                        .filter(|&child_idx| !self.anchors[child_idx].anchored)
+                        .filter_map(|child_idx| self.taffy_nodes[child_idx]),
+                );
             }
             record_elapsed(&mut stats.child_time, child_start);
 
@@ -242,6 +300,27 @@ impl TaffyLayout {
                 self.taffy_nodes[i] = Some(tn);
                 record_elapsed(&mut stats.map_time, map_start);
             }
+        }
+        if any_anchored {
+            self.child_ids_scratch.clear();
+            self.child_ids_scratch.extend(
+                (0..n)
+                    .filter(|&i| self.anchors[i].anchored)
+                    .filter_map(|i| self.taffy_nodes[i]),
+            );
+            // compute() overwrites the size with the live viewport before it
+            // lays this root out; block display gives the fixed children a
+            // containing block rather than a flex line.
+            self.viewport_root = self
+                .tree
+                .new_with_children(
+                    Style {
+                        display: TaffyDisplay::Block,
+                        ..Default::default()
+                    },
+                    &self.child_ids_scratch,
+                )
+                .ok();
         }
         if trace_taffy {
             stats.created = self.taffy_to_bfs.len();
@@ -290,84 +369,111 @@ impl TaffyLayout {
             tree,
             taffy_to_bfs,
             text_measure_cache,
+            viewport_root,
             ..
         } = self;
 
-        let result = tree.compute_layout_with_measure(
-            root,
-            available,
-            |known, avail, taffy_node_id, _context, _style| {
-                if let Some(stats) = trace_stats.as_mut() {
-                    stats.calls += 1;
-                }
-                if let Some(size) = known_measure_size(known) {
+        // The viewport root exists only for `position: fixed` subtrees, and it
+        // carries the viewport as a definite size so `inset` and percentage
+        // lengths inside those subtrees resolve against the viewport.  The
+        // document root keeps `size: auto`, so this second pass leaves in-flow
+        // geometry untouched.
+        if let Some(anchored_root) = *viewport_root {
+            let _ = tree.set_style(
+                anchored_root,
+                Style {
+                    display: TaffyDisplay::Block,
+                    size: Size {
+                        width: Dimension::length(viewport.width),
+                        height: Dimension::length(viewport.height),
+                    },
+                    ..Default::default()
+                },
+            );
+        }
+        let mut laid_out = true;
+        for target in [Some(root), *viewport_root].into_iter().flatten() {
+            let result = tree.compute_layout_with_measure(
+                target,
+                available,
+                |known, avail, taffy_node_id, _context, _style| {
                     if let Some(stats) = trace_stats.as_mut() {
-                        stats.known_size_hits += 1;
+                        stats.calls += 1;
                     }
-                    return size;
-                }
-                let Some(&bfs_idx) = taffy_to_bfs.get(&taffy_node_id) else {
-                    return Size::ZERO;
-                };
-
-                let font_size = styles
-                    .get(bfs_idx)
-                    .and_then(Option::as_ref)
-                    .map_or(16.0, |s| match s.font_size {
-                        Length::Px(px) => px,
-                        _ => 16.0,
-                    });
-
-                let max_w = match avail.width {
-                    AvailableSpace::Definite(w) => Some(w),
-                    _ => None,
-                };
-
-                if let Some((size, text_len, elapsed, cache_hit)) = measure_taffy_text_node(
-                    dom,
-                    bfs_order,
-                    bfs_idx,
-                    font_size,
-                    max_w,
-                    text_measure_cache,
-                    trace_taffy,
-                ) {
-                    if let Some(stats) = trace_stats.as_mut() {
-                        if cache_hit {
-                            stats.text_cache_hits += 1;
-                        } else {
-                            stats.text_elapsed += elapsed;
+                    if let Some(size) = known_measure_size(known) {
+                        if let Some(stats) = trace_stats.as_mut() {
+                            stats.known_size_hits += 1;
                         }
-                        stats.text_calls += 1;
-                        stats.text_bytes += text_len;
-                        stats.max_text_bytes = stats.max_text_bytes.max(text_len);
+                        return size;
                     }
-                    return size;
-                }
-
-                if bfs_order.get(bfs_idx).is_none() {
-                    return Size::ZERO;
-                }
-
-                if let Some(line_h) = styles.get(bfs_idx).and_then(Option::as_ref).map(|s| match s
-                    .line_height
-                {
-                    Length::Px(px) => px,
-                    _ => 16.0,
-                }) {
-                    return Size {
-                        width: known.width.unwrap_or(0.0),
-                        height: known.height.unwrap_or(line_h),
+                    let Some(&bfs_idx) = taffy_to_bfs.get(&taffy_node_id) else {
+                        return Size::ZERO;
                     };
-                }
 
-                // Element leaf node with no text: use line_height as minimum height.
-                Size {
-                    width: known.width.unwrap_or(0.0),
-                    height: known.height.unwrap_or(16.0),
-                }
-            },
-        );
+                    let font_size =
+                        styles
+                            .get(bfs_idx)
+                            .and_then(Option::as_ref)
+                            .map_or(16.0, |s| match s.font_size {
+                                Length::Px(px) => px,
+                                _ => 16.0,
+                            });
+
+                    let max_w = match avail.width {
+                        AvailableSpace::Definite(w) => Some(w),
+                        _ => None,
+                    };
+
+                    if let Some((size, text_len, elapsed, cache_hit)) = measure_taffy_text_node(
+                        dom,
+                        bfs_order,
+                        bfs_idx,
+                        font_size,
+                        max_w,
+                        text_measure_cache,
+                        trace_taffy,
+                    ) {
+                        if let Some(stats) = trace_stats.as_mut() {
+                            if cache_hit {
+                                stats.text_cache_hits += 1;
+                            } else {
+                                stats.text_elapsed += elapsed;
+                            }
+                            stats.text_calls += 1;
+                            stats.text_bytes += text_len;
+                            stats.max_text_bytes = stats.max_text_bytes.max(text_len);
+                        }
+                        return size;
+                    }
+
+                    if bfs_order.get(bfs_idx).is_none() {
+                        return Size::ZERO;
+                    }
+
+                    if let Some(line_h) =
+                        styles
+                            .get(bfs_idx)
+                            .and_then(Option::as_ref)
+                            .map(|s| match s.line_height {
+                                Length::Px(px) => px,
+                                _ => 16.0,
+                            })
+                    {
+                        return Size {
+                            width: known.width.unwrap_or(0.0),
+                            height: known.height.unwrap_or(line_h),
+                        };
+                    }
+
+                    // Element leaf node with no text: use line_height as minimum height.
+                    Size {
+                        width: known.width.unwrap_or(0.0),
+                        height: known.height.unwrap_or(16.0),
+                    }
+                },
+            );
+            laid_out &= result.is_ok();
+        }
         if let Some(stats) = trace_stats {
             eprintln!(
                 "[SilkSurf] taffy measure: calls={}, known_size_hits={}, text_calls={}, text_cache_hits={}, text_bytes={}, max_text_bytes={}, text_time={:?}",
@@ -380,7 +486,7 @@ impl TaffyLayout {
                 stats.text_elapsed
             );
         }
-        result.is_ok()
+        laid_out
     }
 
     fn refresh_text_measure_cache(&mut self, generation: u64) {
@@ -413,20 +519,48 @@ impl TaffyLayout {
                 continue;
             };
 
-            let (parent_x, parent_y) = if parent_idx[i] == u32::MAX {
-                (viewport.x, viewport.y)
+            let dom_parent = (parent_idx[i] != u32::MAX)
+                .then(|| parent_idx[i] as usize)
+                .filter(|&p| p < node_rects.len());
+            let (dom_parent_x, dom_parent_y) = dom_parent.map_or((viewport.x, viewport.y), |p| {
+                (node_rects[p].x, node_rects[p].y)
+            });
+
+            // A viewport-anchored box was laid out under `viewport_root`, so
+            // taffy's location is already relative to the viewport origin.  An
+            // axis whose insets both compute to auto keeps the CSS static
+            // position instead, which the DOM parent's origin supplies.
+            let anchor = self.anchors.get(i).copied().unwrap_or_default();
+            let (parent_x, parent_y) = if anchor.anchored {
+                (
+                    if anchor.static_x {
+                        dom_parent_x
+                    } else {
+                        viewport.x
+                    },
+                    if anchor.static_y {
+                        dom_parent_y
+                    } else {
+                        viewport.y
+                    },
+                )
             } else {
-                let p = parent_idx[i] as usize;
-                if p < node_rects.len() {
-                    (node_rects[p].x, node_rects[p].y)
-                } else {
-                    (viewport.x, viewport.y)
-                }
+                (dom_parent_x, dom_parent_y)
             };
 
             node_rects[i] = Rect {
-                x: parent_x + layout.location.x,
-                y: parent_y + layout.location.y,
+                x: parent_x
+                    + if anchor.static_x {
+                        0.0
+                    } else {
+                        layout.location.x
+                    },
+                y: parent_y
+                    + if anchor.static_y {
+                        0.0
+                    } else {
+                        layout.location.y
+                    },
                 width: layout.size.width,
                 height: layout.size.height,
             };
@@ -1713,5 +1847,158 @@ mod tests {
         let grid_style = css_to_taffy_style_for_index(&table, &styles, grid_idx);
 
         assert_eq!(grid_style.display, TaffyDisplay::Grid);
+    }
+}
+
+#[cfg(test)]
+mod viewport_anchor_tests {
+    use super::*;
+    use silksurf_dom::Dom;
+
+    /// document > spacer(200px tall) > holder(margin-left 80px) > fixed
+    fn fixed_under_offset_ancestor(
+        fixed_style: ComputedStyle,
+    ) -> (Dom, LayoutNeighborTable, Vec<Option<ComputedStyle>>) {
+        let mut dom = Dom::new();
+        let root = dom.create_document();
+        let spacer = dom.create_element("div");
+        let holder = dom.create_element("div");
+        let fixed = dom.create_element("div");
+        // UNWRAP-OK: every id came from this Dom, so no append can fail.
+        dom.append_child(root, spacer).unwrap();
+        dom.append_child(root, holder).unwrap();
+        dom.append_child(holder, fixed).unwrap();
+        let table = LayoutNeighborTable::build(&dom, root);
+        let block = |width: f32, height: f32, margin_left: f32| ComputedStyle {
+            display: silksurf_css::Display::Block,
+            width: LengthOrAuto::Length(Length::Px(width)),
+            height: LengthOrAuto::Length(Length::Px(height)),
+            margin: silksurf_css::Margins {
+                top: LengthOrAuto::Length(Length::Px(0.0)),
+                right: LengthOrAuto::Length(Length::Px(0.0)),
+                bottom: LengthOrAuto::Length(Length::Px(0.0)),
+                left: LengthOrAuto::Length(Length::Px(margin_left)),
+            },
+            ..Default::default()
+        };
+        let styles = vec![
+            Some(block(1000.0, 400.0, 0.0)),
+            Some(block(1000.0, 200.0, 0.0)),
+            Some(block(500.0, 100.0, 80.0)),
+            Some(fixed_style),
+        ];
+        (dom, table, styles)
+    }
+
+    fn rects(
+        dom: &Dom,
+        table: &LayoutNeighborTable,
+        styles: &[Option<ComputedStyle>],
+        viewport: Rect,
+    ) -> Vec<Rect> {
+        let mut layout = TaffyLayout::new();
+        layout.rebuild(dom, table, styles);
+        assert!(layout.compute(dom, styles, &table.bfs_order, viewport));
+        let mut node_rects = vec![Rect::default(); table.len()];
+        layout.write_rects(&table.parent_idx, &mut node_rects, viewport);
+        node_rects
+    }
+
+    /// taffy resolves inset arithmetic in f32, so a laid-out coordinate is
+    /// compared within a sub-pixel tolerance rather than bit-for-bit.
+    #[track_caller]
+    fn assert_px(actual: f32, expected: f32) {
+        assert!(
+            (actual - expected).abs() < 0.01,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    const VIEWPORT: Rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        width: 1000.0,
+        height: 600.0,
+    };
+
+    #[test]
+    fn a_fixed_box_with_inset_zero_fills_the_viewport() {
+        let zero = LengthOrAuto::Length(Length::Px(0.0));
+        let (dom, table, styles) = fixed_under_offset_ancestor(ComputedStyle {
+            position: CssPosition::Fixed,
+            left: zero,
+            right: zero,
+            top: zero,
+            bottom: zero,
+            ..Default::default()
+        });
+        let node_rects = rects(&dom, &table, &styles, VIEWPORT);
+        assert_px(node_rects[3].x, 0.0);
+        assert_px(node_rects[3].y, 0.0);
+        assert_px(node_rects[3].width, 1000.0);
+        assert_px(node_rects[3].height, 600.0);
+    }
+
+    #[test]
+    fn a_fixed_inset_resolves_against_the_viewport_rather_than_the_dom_parent() {
+        let ten = LengthOrAuto::Length(Length::Px(10.0));
+        let (dom, table, styles) = fixed_under_offset_ancestor(ComputedStyle {
+            position: CssPosition::Fixed,
+            right: ten,
+            top: ten,
+            width: LengthOrAuto::Length(Length::Px(100.0)),
+            height: LengthOrAuto::Length(Length::Px(40.0)),
+            ..Default::default()
+        });
+        let node_rects = rects(&dom, &table, &styles, VIEWPORT);
+        // The holder sits at x=80, y=200; a viewport-anchored box ignores both.
+        assert_px(node_rects[2].x, 80.0);
+        assert_px(node_rects[2].y, 200.0);
+        assert_px(node_rects[3].x, 1000.0 - 10.0 - 100.0);
+        assert_px(node_rects[3].y, 10.0);
+    }
+
+    #[test]
+    fn a_percentage_height_inside_a_fixed_box_resolves_against_the_viewport() {
+        let zero = LengthOrAuto::Length(Length::Px(0.0));
+        let (dom, table, styles) = fixed_under_offset_ancestor(ComputedStyle {
+            position: CssPosition::Fixed,
+            left: zero,
+            top: zero,
+            width: LengthOrAuto::Length(Length::Px(50.0)),
+            height: LengthOrAuto::Length(Length::Percent(100.0)),
+            ..Default::default()
+        });
+        let node_rects = rects(&dom, &table, &styles, VIEWPORT);
+        assert_px(node_rects[3].height, 600.0);
+    }
+
+    #[test]
+    fn a_fixed_box_with_auto_insets_keeps_its_static_position() {
+        let (dom, table, styles) = fixed_under_offset_ancestor(ComputedStyle {
+            position: CssPosition::Fixed,
+            width: LengthOrAuto::Length(Length::Px(100.0)),
+            height: LengthOrAuto::Length(Length::Px(40.0)),
+            ..Default::default()
+        });
+        let node_rects = rects(&dom, &table, &styles, VIEWPORT);
+        assert_px(node_rects[3].x, 80.0);
+        assert_px(node_rects[3].y, 200.0);
+    }
+
+    #[test]
+    fn a_document_without_a_fixed_box_lays_out_unchanged() {
+        let (dom, table, styles) = fixed_under_offset_ancestor(ComputedStyle {
+            display: silksurf_css::Display::Block,
+            width: LengthOrAuto::Length(Length::Px(100.0)),
+            height: LengthOrAuto::Length(Length::Px(40.0)),
+            ..Default::default()
+        });
+        let mut layout = TaffyLayout::new();
+        layout.rebuild(&dom, &table, &styles);
+        assert!(layout.viewport_root.is_none());
+        let node_rects = rects(&dom, &table, &styles, VIEWPORT);
+        assert_px(node_rects[3].x, 80.0);
+        assert_px(node_rects[3].y, 200.0);
     }
 }
