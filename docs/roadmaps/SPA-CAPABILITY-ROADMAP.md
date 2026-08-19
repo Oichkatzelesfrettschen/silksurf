@@ -441,6 +441,36 @@ in BFS order gives pane=5 against flow=9, and resolving the fixed insets
 against the document root gives `#shell` a 76.8 px height at y=38.4.
 Scorecard 70/70 to 71/71.
 
+## Absolute containing block (landed 2026-08-19)
+
+`position: absolute` mapped to taffy's `Position::Absolute`, which resolves
+against the taffy parent, so a box whose DOM parent is static took that
+parent's origin and size rather than the nearest positioned ancestor's. CSS
+Position 3 2.1 names the nearest ancestor whose position is not static, and
+the initial containing block when no ancestor qualifies.
+
+`ContainingBlock` now records which block owns each box, `assign_placements`
+resolves it in one forward BFS pass, and `group_adopted_by_ancestor` groups
+the reparented boxes so `rebuild` reads one contiguous run per taffy node it
+builds. A reparented box becomes a taffy child of that block; a box whose DOM
+parent already is the block keeps taffy's own placement unchanged. An absolute
+box with no positioned ancestor joins `viewport_root`, which carries the
+initial containing block and the viewport alike until scrolling separates them.
+
+The share of absolute boxes this moves, counted per document: chatgpt.com 5 of
+20, en.wikipedia.org 5 of 8, github.com 16 of 19, example.com 0 of 0. Against
+the before-and-after headless renders that is 1591 differing pixels on
+chatgpt.com and 356094 on github.com, whose skip link moves to the initial
+containing block origin; a mid-page crop is pixel-identical, so the difference
+localizes to the positioned boxes.
+
+Reparenting empties a wrapper whose only child was absolute, and the measure
+closure gave a childless element a one-line auto height. CSS 2.1 10.6.3 gives
+a block box with no in-flow line box a height of zero, so
+`generates_no_line_box` marks any element that has children and returns zero
+from the closure. A genuinely childless element keeps the existing floor,
+which is recorded as the `empty-block-line-height-floor` cut.
+
 ## Open work after the live-resource change
 
 Named cuts, each with the mechanism that closes it:
@@ -465,13 +495,13 @@ Named cuts, each with the mechanism that closes it:
   non-1280 output needs: `--monitor LG` fullscreens onto a 90-degree-rotated
   panel and gets a 1440x3440 surface, which renders correctly at 1280 px with
   the remainder unpainted.
-- absolute-containing-block -- `position: absolute` maps to taffy's Absolute
-  and resolves against its taffy parent, which is the DOM parent whether or
-  not that parent is positioned. CSS Position 3 2.1 names the nearest ancestor
-  whose position is not static. Closing it reparents an absolute box onto that
-  ancestor's taffy node the way `fixed` now reparents onto the viewport root,
-  and it moves every absolutely positioned box on every page, so it lands with
-  its own before-and-after evidence.
+- empty-block-line-height-floor -- the measure closure in
+  `TaffyLayout::compute` ends by giving a childless element an auto height of
+  one line box. CSS 2.1 10.6.3 gives a block-level non-replaced in-flow box
+  with `height: auto` and no in-flow line box a height of zero. An element
+  with children reaches the zero already, through `generates_no_line_box`; a
+  genuinely childless one keeps the 16 px floor, and removing it moves in-flow
+  geometry on every page carrying an empty element.
 - fixed-position-scrolling -- a `position: fixed` box now resolves against the
   viewport, and the static render has one scroll origin, so nothing yet holds
   it still while the page scrolls. The windowed browser scrolls by offsetting
