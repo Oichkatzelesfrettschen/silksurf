@@ -874,8 +874,12 @@ fn group_members_by_context(state: &mut StackingOrder, n: usize) {
     state
         .members
         .extend(0..u32::try_from(n).unwrap_or(u32::MAX));
+    // The BFS index is the second key: an unstable sort reorders equal keys,
+    // and emit_stacking_order reads each run as tree order.
     let context = &state.context;
-    state.members.sort_unstable_by_key(|&i| context[i as usize]);
+    state
+        .members
+        .sort_unstable_by_key(|&i| (context[i as usize], i));
     state.member_start.clear();
     state.member_start.resize(n + 1, u32::MAX);
     for (slot, &i) in state.members.iter().enumerate() {
@@ -1817,6 +1821,70 @@ mod paint_order_tests {
             &table, &styles, &mut state, &mut order, true
         ));
         assert_eq!(order, vec![0, 1, 2, 3, 4]);
+    }
+
+    /*
+     * document > [left, right], each positioned, each with `width` in-flow
+     * children that each carry one in-flow grandchild.
+     *
+     * BFS order interleaves the two contexts -- left owns the child band and
+     * the grandchild band, right owns the slots between them -- so a context's
+     * members are not contiguous in index order. That is the shape where an
+     * unstable sort keyed on the context alone can reorder a context's members
+     * against tree order.
+     */
+    fn interleaved_contexts(width: usize) -> (LayoutNeighborTable, Vec<Option<ComputedStyle>>) {
+        let mut dom = Dom::new();
+        let root = dom.create_document();
+        let mut branches = Vec::new();
+        for _ in 0..2 {
+            let branch = dom.create_element("div");
+            // UNWRAP-OK: every id came from this Dom, so no append can fail.
+            dom.append_child(root, branch).unwrap();
+            branches.push(branch);
+        }
+        for &branch in &branches {
+            for _ in 0..width {
+                let child = dom.create_element("div");
+                let grandchild = dom.create_element("div");
+                // UNWRAP-OK: every id came from this Dom, so no append can fail.
+                dom.append_child(branch, child).unwrap();
+                dom.append_child(child, grandchild).unwrap();
+            }
+        }
+        let table = LayoutNeighborTable::build(&dom, root);
+        let mut styles = vec![Some(ComputedStyle::default()); table.len()];
+        styles[1] = Some(positioned(0));
+        styles[2] = Some(positioned(0));
+        (table, styles)
+    }
+
+    #[test]
+    fn each_context_emits_its_members_in_tree_order() {
+        let (table, styles) = interleaved_contexts(24);
+        let order = order_for(&styles, &table);
+        assert_eq!(order.len(), table.len());
+        // Within one stacking context, a member never precedes an earlier one.
+        let mut state = StackingOrder::default();
+        let mut ignored = Vec::new();
+        assert!(build_paint_order(
+            &table,
+            &styles,
+            &mut state,
+            &mut ignored,
+            true
+        ));
+        let mut last_seen = vec![None::<u32>; table.len()];
+        for &i in &order {
+            let context = state.context[i as usize] as usize;
+            if let Some(previous) = last_seen[context] {
+                assert!(
+                    previous < i,
+                    "context {context} emitted {i} after {previous}"
+                );
+            }
+            last_seen[context] = Some(i);
+        }
     }
 
     #[test]

@@ -429,6 +429,16 @@ Named cuts, each with the mechanism that closes it:
   nothing, because every DisplayItem is an axis-aligned rect. Carrying them
   needs a transform per display item and a rasterizer that applies it to
   geometry and to shaped glyph runs.
+- window-width-reflow -- `FRAME_WIDTH` pins the windowed page raster, damage
+  sync, and retained presenter to 1280 px, so the page lays out at that width
+  whatever the window is. `set_viewport` therefore reports 1280x800 to
+  matchMedia for the whole session, which at least agrees with layout;
+  reporting the real surface first would make a page pick a narrow branch and
+  then lay it out wide. Closing it makes the raster width follow the window
+  and reissues `set_viewport` on resize, and it is what a rotated or
+  non-1280 output needs: `--monitor LG` fullscreens onto a 90-degree-rotated
+  panel and gets a 1440x3440 surface, which renders correctly at 1280 px with
+  the remainder unpainted.
 - absolute-containing-block -- `position: absolute` maps to taffy's Absolute
   and resolves against its taffy parent, which is the DOM parent whether or
   not that parent is positioned. CSS Position 3 2.1 names the nearest ancestor
