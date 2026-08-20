@@ -645,10 +645,23 @@ Named cuts, each with the mechanism that closes it:
   computed-style arena. `CascadedStyle::resolve` normalizes em/rem and
   viewport units, while layout supplies the percentage basis for the retained
   tree.
-- document-stylesheets-cssom -- `StyleSheetSet` is engine state with no
-  scripted object model, so `document.styleSheets`, `CSSStyleSheet`, and
-  `insertRule` are absent. A page that installs styles through the CSSOM
-  rather than through a `<style>` element contributes nothing to the cascade.
+- document-stylesheets-cssom -- `document.styleSheets`, `CSSStyleSheet`, and
+  `HTMLStyleElement.sheet` are undefined, so Emotion's sheet accessor raises a
+  TypeError outside the `try` that guards its `insertRule` call and every rule
+  chatgpt.com's components write is lost. AD-030 carries the design: an
+  ordered sheet list behind a shared handle, `insertRule` splicing the
+  retained `Vec<Rule>`, and a dirty flag the repaint tick drains.
+- constructed-stylesheets-and-adoption -- `new CSSStyleSheet`, `replaceSync`,
+  and `adoptedStyleSheets` stay undefined by AD-030. Their only observed
+  consumer attaches a shadow root, and CodeMirror's StyleModule gates its
+  working `<style>` text fallback on `adoptedStyleSheets` being absent.
+- cssom-synchronous-restyle -- an `insertRule` followed by `getComputedStyle`
+  in the same script observes the pre-insert cascade, because AD-030 rebuilds
+  `StyleIndex` on the repaint tick rather than inside the JS call.
+- cssom-grouping-rules -- `CSSMediaRule` and `CSSSupportsRule` carry no
+  `parentRule` or `parentStyleSheet` walk. The session recorder in
+  `2340486e-eab5bn2wcgxcv5rd.js` reads them to emit mutation records and
+  paints nothing.
 - backdrop-filter-and-mask -- `backdrop-filter`, `mask-image`, and
   `mask-composite` parse to nothing; the paint list carries no filter or mask
   stage.
