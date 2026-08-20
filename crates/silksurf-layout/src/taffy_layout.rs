@@ -58,48 +58,116 @@ pub struct TaffyLayout {
     /// Text measurement cache keyed by BFS index and guarded by DOM generation.
     text_measure_cache: Vec<CachedTextMeasures>,
     text_measure_generation: u64,
-    /// Second taffy root sized to the viewport, holding the `position: fixed`
-    /// subtrees. `None` for a document that declares no fixed box.
+    /// Second taffy root sized to the viewport, holding the subtrees whose
+    /// containing block is the viewport or the initial containing block.
+    /// `None` for a document that reparents no box onto it.
     viewport_root: Option<TaffyId>,
-    /// Per-BFS-index placement of a box whose containing block is the viewport.
-    anchors: Vec<ViewportAnchor>,
+    /// Per-BFS-index containing block and static-position axes.
+    placements: Vec<Placement>,
+    /// Absolute boxes reparented onto a positioned ancestor, grouped by that
+    /// ancestor's BFS index. `adopted_start[i]..adopted_start[i + 1]` indexes
+    /// the run belonging to `i`.
+    adopted: Vec<u32>,
+    adopted_start: Vec<u32>,
+    /// Per-BFS-index result of `taffy_node_merges_into_parent`, computed once
+    /// per rebuild. `assign_placements` reads it to skip merged ancestors when
+    /// it walks for a containing block, and the tree-building pass reads the
+    /// same entry to decide whether the node exists at all, so an adopted run
+    /// can never name a node the build skipped.
+    merges_into_parent: Vec<bool>,
+    /// Nearest ancestor-or-none whose position is not static, per BFS index.
+    /// Retained so a rebuild reuses the allocation.
+    positioned_ancestor: Vec<Option<u32>>,
+    /// Write cursor into `adopted`, one entry per group. Retained for the same
+    /// reason.
+    adopted_cursor: Vec<u32>,
+    /// Per-BFS-index: the element has children in the BFS table. An element
+    /// whose text child merged into it also carries this flag, and
+    /// `measure_taffy_text_node` returns that merged text's size before the
+    /// measure closure consults the flag, so the flag decides only the case
+    /// where no text remains to measure: children whose boxes lay out
+    /// elsewhere. CSS 2.1 10.6.3 gives that box an auto height of zero.
+    generates_no_line_box: Vec<bool>,
 }
 
 /*
- * A `position: fixed` box takes the viewport as its containing block (CSS
- * Position 3 2.1), so its insets and percentages resolve against the viewport
- * rather than against whatever ancestor happens to hold it in the DOM.  taffy
- * resolves an absolutely positioned child against its taffy parent, so the
- * fixed box hangs off `viewport_root` -- a second taffy root whose style
- * carries the viewport as a definite size -- instead of off its DOM parent.
- * The document root keeps `size: auto` and lays out exactly as before, which
- * is what keeps in-flow geometry unchanged by this split.
- *
+ * CSS Position 3 2.1 gives a positioned box a containing block that the DOM
+ * parent need not supply: the viewport for `position: fixed`, and the nearest
+ * ancestor whose position is not static for `position: absolute`.  taffy
+ * resolves an absolutely positioned child against its taffy parent, so a box
+ * whose containing block is not its DOM parent hangs off the taffy node of
+ * the block that owns it.
+ */
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum ContainingBlock {
+    /// The box resolves against its DOM parent, which is what taffy already
+    /// does. Every in-flow box and every absolute box whose DOM parent is
+    /// itself positioned lands here.
+    #[default]
+    DomParent,
+    /// `position: fixed` resolves against the viewport.
+    Viewport,
+    /// `position: absolute` with no positioned ancestor resolves against the
+    /// initial containing block: the viewport rect anchored at the document
+    /// origin. It coincides with the viewport until the page scrolls, and
+    /// `viewport_root` carries both.
+    InitialBlock,
+    /// `position: absolute` resolves against the nearest ancestor whose
+    /// position is not static, named by its BFS index.
+    Ancestor(u32),
+}
+
+/*
  * `static_x` and `static_y` mark the axes where both insets compute to auto.
- * CSS keeps the static position in that case, and the DOM parent's origin is
- * the position `write_rects` restores.
+ * CSS keeps the static position in that case, which is the position the box
+ * would occupy in its own flow parent rather than in the containing block it
+ * was reparented onto. `write_rects` restores it from the DOM parent's origin.
  */
 #[derive(Clone, Copy, Default)]
-struct ViewportAnchor {
-    anchored: bool,
+struct Placement {
+    block: ContainingBlock,
     static_x: bool,
     static_y: bool,
 }
 
-impl ViewportAnchor {
-    fn for_style(style: Option<&ComputedStyle>) -> Self {
+impl Placement {
+    /// `positioned_ancestor` is the nearest ancestor-or-none whose position is
+    /// not static and whose box survives into the taffy tree.
+    fn for_style(style: Option<&ComputedStyle>, positioned_ancestor: Option<u32>) -> Self {
         let Some(style) = style else {
             return Self::default();
         };
-        if style.position != CssPosition::Fixed {
-            return Self::default();
-        }
+        let block = match style.position {
+            CssPosition::Fixed => ContainingBlock::Viewport,
+            CssPosition::Absolute => positioned_ancestor
+                .map_or(ContainingBlock::InitialBlock, |ancestor| {
+                    ContainingBlock::Ancestor(ancestor)
+                }),
+            _ => return Self::default(),
+        };
         Self {
-            anchored: true,
+            block,
             static_x: matches!(style.left, LengthOrAuto::Auto)
                 && matches!(style.right, LengthOrAuto::Auto),
             static_y: matches!(style.top, LengthOrAuto::Auto)
                 && matches!(style.bottom, LengthOrAuto::Auto),
+        }
+    }
+}
+
+impl ContainingBlock {
+    /// A box whose containing block is the viewport or the initial containing
+    /// block lays out under `viewport_root`.
+    fn is_viewport_rooted(self) -> bool {
+        matches!(self, Self::Viewport | Self::InitialBlock)
+    }
+
+    /// The BFS index whose taffy node adopts this box, when the containing
+    /// block is an ancestor other than the DOM parent.
+    fn adopting_ancestor(self, dom_parent: u32) -> Option<u32> {
+        match self {
+            Self::Ancestor(ancestor) if ancestor != dom_parent => Some(ancestor),
+            _ => None,
         }
     }
 }
@@ -213,13 +281,116 @@ impl TaffyLayout {
             text_measure_cache: Vec::new(),
             text_measure_generation: u64::MAX,
             viewport_root: None,
-            anchors: Vec::new(),
+            placements: Vec::new(),
+            adopted: Vec::new(),
+            adopted_start: Vec::new(),
+            merges_into_parent: Vec::new(),
+            positioned_ancestor: Vec::new(),
+            adopted_cursor: Vec::new(),
+            generates_no_line_box: Vec::new(),
         }
     }
 
     /// Reconstruct the taffy tree from BFS table + computed styles.
     ///
     /// Must be called before `compute()` whenever the DOM or styles have changed.
+    /*
+     * Resolve every box's containing block in one forward BFS pass.
+     *
+     * `parent_idx[i] < i` holds for the BFS table, so the nearest positioned
+     * ancestor of `i` is the DOM parent when that parent is positioned and the
+     * parent's own nearest positioned ancestor otherwise. A node that merges
+     * into its parent contributes no taffy node, so it cannot adopt anything
+     * and the walk passes through it.
+     *
+     * Returns whether any box lays out under `viewport_root`.
+     */
+    fn assign_placements(
+        &mut self,
+        dom: &Dom,
+        table: &LayoutNeighborTable,
+        styles: &[Option<ComputedStyle>],
+    ) -> bool {
+        let n = table.len();
+        self.merges_into_parent.clear();
+        self.merges_into_parent
+            .extend((0..n).map(|i| taffy_node_merges_into_parent(dom, table, styles, i)));
+        self.placements.clear();
+        self.placements.resize(n, Placement::default());
+        self.positioned_ancestor.clear();
+        self.positioned_ancestor.reserve(n);
+        let mut any_viewport_rooted = false;
+        for i in 0..n {
+            let parent = table
+                .parent_idx
+                .get(i)
+                .copied()
+                .filter(|&p| (p as usize) < i);
+            let inherited = parent.and_then(|p| {
+                let p = p as usize;
+                let parent_positioned = styles
+                    .get(p)
+                    .and_then(Option::as_ref)
+                    .is_some_and(|style| style.position != CssPosition::Static)
+                    && !self.merges_into_parent[p];
+                if parent_positioned {
+                    Some(p as u32)
+                } else {
+                    self.positioned_ancestor[p]
+                }
+            });
+            self.positioned_ancestor.push(inherited);
+            // Index 0 is the document root; reparenting it would leave the
+            // tree without the in-flow root that sizes the page.
+            if i == 0 {
+                continue;
+            }
+            self.placements[i] =
+                Placement::for_style(styles.get(i).and_then(Option::as_ref), inherited);
+            any_viewport_rooted |= self.placements[i].block.is_viewport_rooted();
+        }
+        any_viewport_rooted
+    }
+
+    /// Group the reparented absolute boxes by the BFS index that adopts them,
+    /// so `rebuild` reads one contiguous run per taffy node it builds.
+    fn group_adopted_by_ancestor(&mut self, table: &LayoutNeighborTable) {
+        let n = table.len();
+        self.adopted.clear();
+        self.adopted_start.clear();
+        // A document that reparents nothing leaves the table empty, and
+        // `adopted_run_bounds` reads an empty run for every index.
+        if !self
+            .placements
+            .iter()
+            .any(|placement| matches!(placement.block, ContainingBlock::Ancestor(_)))
+        {
+            return;
+        }
+        self.adopted_start.resize(n + 1, 0);
+        for i in 0..n {
+            let dom_parent = table.parent_idx.get(i).copied().unwrap_or(u32::MAX);
+            if let Some(ancestor) = self.placements[i].block.adopting_ancestor(dom_parent) {
+                self.adopted_start[ancestor as usize + 1] += 1;
+            }
+        }
+        for i in 0..n {
+            self.adopted_start[i + 1] += self.adopted_start[i];
+        }
+        self.adopted
+            .resize(self.adopted_start[n] as usize, u32::MAX);
+        self.adopted_cursor.clear();
+        self.adopted_cursor.extend_from_slice(&self.adopted_start);
+        for i in 0..n {
+            let dom_parent = table.parent_idx.get(i).copied().unwrap_or(u32::MAX);
+            if let Some(ancestor) = self.placements[i].block.adopting_ancestor(dom_parent) {
+                let slot = &mut self.adopted_cursor[ancestor as usize];
+                self.adopted[*slot as usize] = i as u32;
+                *slot += 1;
+            }
+        }
+    }
+
     pub fn rebuild(
         &mut self,
         dom: &Dom,
@@ -238,20 +409,17 @@ impl TaffyLayout {
         self.taffy_nodes.resize(n, None);
         self.taffy_to_bfs.clear();
         self.viewport_root = None;
-        self.anchors.clear();
-        self.anchors.resize(n, ViewportAnchor::default());
-        // Index 0 is the document root; anchoring it would leave the tree
-        // without the in-flow root that sizes the page.
-        for i in 1..n {
-            self.anchors[i] = ViewportAnchor::for_style(styles.get(i).and_then(Option::as_ref));
-        }
-        let any_anchored = self.anchors.iter().any(|anchor| anchor.anchored);
+        let any_viewport_rooted = self.assign_placements(dom, table, styles);
+        self.group_adopted_by_ancestor(table);
+        self.generates_no_line_box.clear();
+        self.generates_no_line_box
+            .extend((0..n).map(|i| table.child_count[i] > 0));
 
         // Process in reverse BFS order: children before parents so
         // taffy node IDs are available when we build the parent node.
         for i in (0..n).rev() {
             let skip_start = trace_start(trace_taffy);
-            let node_merges_into_parent = taffy_node_merges_into_parent(dom, table, styles, i);
+            let node_merges_into_parent = self.merges_into_parent[i];
             record_elapsed(&mut stats.skip_time, skip_start);
             if node_merges_into_parent {
                 if trace_taffy {
@@ -270,10 +438,23 @@ impl TaffyLayout {
                 let end = start + usize::from(table.child_count[i]);
                 self.child_ids_scratch.extend(
                     (start..end)
-                        .filter(|&child_idx| !self.anchors[child_idx].anchored)
+                        .filter(|&child_idx| {
+                            self.placements[child_idx].block == ContainingBlock::DomParent
+                                || self.placements[child_idx].block
+                                    == ContainingBlock::Ancestor(i as u32)
+                        })
                         .filter_map(|child_idx| self.taffy_nodes[child_idx]),
                 );
             }
+            // An absolute box whose nearest positioned ancestor is not its DOM
+            // parent joins that ancestor's taffy children instead, so taffy
+            // resolves its insets against the box CSS names.
+            let adopted_run = adopted_run_bounds(&self.adopted_start, i);
+            self.child_ids_scratch.extend(
+                self.adopted[adopted_run]
+                    .iter()
+                    .filter_map(|&adopted| self.taffy_nodes[adopted as usize]),
+            );
             record_elapsed(&mut stats.child_time, child_start);
 
             if trace_taffy {
@@ -301,15 +482,15 @@ impl TaffyLayout {
                 record_elapsed(&mut stats.map_time, map_start);
             }
         }
-        if any_anchored {
+        if any_viewport_rooted {
             self.child_ids_scratch.clear();
             self.child_ids_scratch.extend(
                 (0..n)
-                    .filter(|&i| self.anchors[i].anchored)
+                    .filter(|&i| self.placements[i].block.is_viewport_rooted())
                     .filter_map(|i| self.taffy_nodes[i]),
             );
             // compute() overwrites the size with the live viewport before it
-            // lays this root out; block display gives the fixed children a
+            // lays this root out; block display gives these children a
             // containing block rather than a flex line.
             self.viewport_root = self
                 .tree
@@ -370,6 +551,7 @@ impl TaffyLayout {
             taffy_to_bfs,
             text_measure_cache,
             viewport_root,
+            generates_no_line_box,
             ..
         } = self;
 
@@ -450,6 +632,20 @@ impl TaffyLayout {
                         return Size::ZERO;
                     }
 
+                    // Reaching here means the node measured no text of its
+                    // own. Its children's boxes therefore lay out elsewhere --
+                    // absolutely positioned, reparented onto another containing
+                    // block, or suppressed -- so it holds no line box, and CSS
+                    // 2.1 10.6.3 gives it an auto height of zero. The text
+                    // measure above must stay ahead of this check: an element
+                    // that absorbed its text child carries the same flag.
+                    if generates_no_line_box.get(bfs_idx).copied().unwrap_or(false) {
+                        return Size {
+                            width: known.width.unwrap_or(0.0),
+                            height: known.height.unwrap_or(0.0),
+                        };
+                    }
+
                     if let Some(line_h) =
                         styles
                             .get(bfs_idx)
@@ -526,41 +722,40 @@ impl TaffyLayout {
                 (node_rects[p].x, node_rects[p].y)
             });
 
-            // A viewport-anchored box was laid out under `viewport_root`, so
-            // taffy's location is already relative to the viewport origin.  An
-            // axis whose insets both compute to auto keeps the CSS static
+            // taffy reports a location relative to the taffy parent, which is
+            // the node of the containing block the box was reparented onto.
+            // An axis whose insets both compute to auto keeps the CSS static
             // position instead, which the DOM parent's origin supplies.
-            let anchor = self.anchors.get(i).copied().unwrap_or_default();
-            let (parent_x, parent_y) = if anchor.anchored {
-                (
-                    if anchor.static_x {
-                        dom_parent_x
-                    } else {
-                        viewport.x
-                    },
-                    if anchor.static_y {
-                        dom_parent_y
-                    } else {
-                        viewport.y
-                    },
-                )
-            } else {
-                (dom_parent_x, dom_parent_y)
+            let placement = self.placements.get(i).copied().unwrap_or_default();
+            let (block_x, block_y) = match placement.block {
+                ContainingBlock::DomParent => (dom_parent_x, dom_parent_y),
+                ContainingBlock::Viewport | ContainingBlock::InitialBlock => {
+                    (viewport.x, viewport.y)
+                }
+                // An ancestor holds a lower BFS index than the box it
+                // contains, so BFS order has already written its rect.
+                ContainingBlock::Ancestor(ancestor) => {
+                    let ancestor = ancestor as usize;
+                    node_rects
+                        .get(ancestor)
+                        .map_or((dom_parent_x, dom_parent_y), |rect| (rect.x, rect.y))
+                }
             };
+            let reparented = placement.block != ContainingBlock::DomParent;
+            let static_x = reparented && placement.static_x;
+            let static_y = reparented && placement.static_y;
 
             node_rects[i] = Rect {
-                x: parent_x
-                    + if anchor.static_x {
-                        0.0
-                    } else {
-                        layout.location.x
-                    },
-                y: parent_y
-                    + if anchor.static_y {
-                        0.0
-                    } else {
-                        layout.location.y
-                    },
+                x: if static_x {
+                    dom_parent_x
+                } else {
+                    block_x + layout.location.x
+                },
+                y: if static_y {
+                    dom_parent_y
+                } else {
+                    block_y + layout.location.y
+                },
                 width: layout.size.width,
                 height: layout.size.height,
             };
@@ -683,6 +878,15 @@ fn single_direct_text_child(dom: &Dom, node_id: DomNodeId) -> Option<&str> {
         }
     }
     text
+}
+
+/// Range of `adopted` holding the boxes that BFS index `i` adopts. Empty when
+/// `i` adopts nothing, and empty for an index past the grouped table.
+fn adopted_run_bounds(adopted_start: &[u32], i: usize) -> std::ops::Range<usize> {
+    let (Some(&start), Some(&end)) = (adopted_start.get(i), adopted_start.get(i + 1)) else {
+        return 0..0;
+    };
+    start as usize..end as usize
 }
 
 fn taffy_node_merges_into_parent(
@@ -1847,6 +2051,199 @@ mod tests {
         let grid_style = css_to_taffy_style_for_index(&table, &styles, grid_idx);
 
         assert_eq!(grid_style.display, TaffyDisplay::Grid);
+    }
+}
+
+#[cfg(test)]
+mod absolute_containing_block_tests {
+    use super::*;
+    use silksurf_dom::Dom;
+
+    const VIEWPORT: Rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        width: 1000.0,
+        height: 600.0,
+    };
+
+    #[track_caller]
+    fn assert_px(actual: f32, expected: f32) {
+        assert!(
+            (actual - expected).abs() < 0.01,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    fn block(width: LengthOrAuto, height: LengthOrAuto, margin_left: f32) -> ComputedStyle {
+        ComputedStyle {
+            display: silksurf_css::Display::Block,
+            width,
+            height,
+            margin: silksurf_css::Margins {
+                top: LengthOrAuto::Length(Length::Px(0.0)),
+                right: LengthOrAuto::Length(Length::Px(0.0)),
+                bottom: LengthOrAuto::Length(Length::Px(0.0)),
+                left: LengthOrAuto::Length(Length::Px(margin_left)),
+            },
+            ..Default::default()
+        }
+    }
+
+    fn px(value: f32) -> LengthOrAuto {
+        LengthOrAuto::Length(Length::Px(value))
+    }
+
+    /// Builds document -> host(relative, margin-left 40) -> mid(static,
+    /// margin-left 25) -> target. `mid` offsets the target from `host`, so the
+    /// two candidate containing blocks sit at different origins.
+    fn target_under_static_wrapper(
+        host_position: CssPosition,
+        target_style: ComputedStyle,
+    ) -> (Dom, LayoutNeighborTable, Vec<Option<ComputedStyle>>) {
+        let mut dom = Dom::new();
+        let root = dom.create_document();
+        let host = dom.create_element("div");
+        let mid = dom.create_element("div");
+        let target = dom.create_element("div");
+        // UNWRAP-OK: every id came from this Dom, so no append can fail.
+        dom.append_child(root, host).unwrap();
+        // UNWRAP-OK: every id came from this Dom, so no append can fail.
+        dom.append_child(host, mid).unwrap();
+        // UNWRAP-OK: every id came from this Dom, so no append can fail.
+        dom.append_child(mid, target).unwrap();
+        let table = LayoutNeighborTable::build(&dom, root);
+        let styles = vec![
+            Some(block(px(1000.0), px(600.0), 0.0)),
+            Some(ComputedStyle {
+                position: host_position,
+                ..block(px(400.0), px(200.0), 40.0)
+            }),
+            Some(block(px(300.0), LengthOrAuto::Auto, 25.0)),
+            Some(target_style),
+        ];
+        (dom, table, styles)
+    }
+
+    fn rects(
+        dom: &Dom,
+        table: &LayoutNeighborTable,
+        styles: &[Option<ComputedStyle>],
+    ) -> Vec<Rect> {
+        let mut layout = TaffyLayout::new();
+        layout.rebuild(dom, table, styles);
+        assert!(layout.compute(dom, styles, &table.bfs_order, VIEWPORT));
+        let mut node_rects = vec![Rect::default(); table.len()];
+        layout.write_rects(&table.parent_idx, &mut node_rects, VIEWPORT);
+        node_rects
+    }
+
+    /// CSS Position 3 2.1 names the nearest ancestor whose position is not
+    /// static. `mid` is static, so `host` at x=40 supplies the origin and the
+    /// target lands at 40 + 20, not at `mid`'s 65 + 20.
+    #[test]
+    fn an_absolute_inset_resolves_against_the_nearest_positioned_ancestor() {
+        let (dom, table, styles) = target_under_static_wrapper(
+            CssPosition::Relative,
+            ComputedStyle {
+                position: CssPosition::Absolute,
+                left: px(20.0),
+                top: px(10.0),
+                ..block(px(50.0), px(50.0), 0.0)
+            },
+        );
+        let node_rects = rects(&dom, &table, &styles);
+        assert_px(node_rects[1].x, 40.0);
+        assert_px(node_rects[2].x, 65.0);
+        assert_px(node_rects[3].x, 60.0);
+        assert_px(node_rects[3].y, 10.0);
+    }
+
+    /// A percentage inset resolves against the containing block's size, which
+    /// is what proves the box was reparented rather than merely re-offset:
+    /// `host` is 400x200 while the static wrapper is 300 wide.
+    #[test]
+    fn an_absolute_percentage_resolves_against_the_containing_block_size() {
+        let (dom, table, styles) = target_under_static_wrapper(
+            CssPosition::Relative,
+            ComputedStyle {
+                position: CssPosition::Absolute,
+                left: LengthOrAuto::Length(Length::Percent(50.0)),
+                top: LengthOrAuto::Length(Length::Percent(25.0)),
+                ..block(px(50.0), px(50.0), 0.0)
+            },
+        );
+        let node_rects = rects(&dom, &table, &styles);
+        // 50% of host's 400 gives 200, offset from host's own x=40.
+        assert_px(node_rects[3].x, 240.0);
+        // 25% of host's 200 gives 50.
+        assert_px(node_rects[3].y, 50.0);
+    }
+
+    /// With no positioned ancestor the containing block is the initial
+    /// containing block, which sits at the viewport origin.
+    #[test]
+    fn an_absolute_box_without_a_positioned_ancestor_takes_the_initial_block() {
+        let (dom, table, styles) = target_under_static_wrapper(
+            CssPosition::Static,
+            ComputedStyle {
+                position: CssPosition::Absolute,
+                left: px(20.0),
+                top: px(10.0),
+                ..block(px(50.0), px(50.0), 0.0)
+            },
+        );
+        let node_rects = rects(&dom, &table, &styles);
+        assert_px(node_rects[3].x, 20.0);
+        assert_px(node_rects[3].y, 10.0);
+    }
+
+    /// An absolute box whose DOM parent is already the containing block keeps
+    /// taffy's own placement, so this path is unchanged by the reparenting.
+    #[test]
+    fn an_absolute_box_under_a_positioned_parent_keeps_its_taffy_placement() {
+        let mut dom = Dom::new();
+        let root = dom.create_document();
+        let host = dom.create_element("div");
+        let target = dom.create_element("div");
+        // UNWRAP-OK: every id came from this Dom, so no append can fail.
+        dom.append_child(root, host).unwrap();
+        // UNWRAP-OK: every id came from this Dom, so no append can fail.
+        dom.append_child(host, target).unwrap();
+        let table = LayoutNeighborTable::build(&dom, root);
+        let styles = vec![
+            Some(block(px(1000.0), px(600.0), 0.0)),
+            Some(ComputedStyle {
+                position: CssPosition::Relative,
+                ..block(px(400.0), px(200.0), 40.0)
+            }),
+            Some(ComputedStyle {
+                position: CssPosition::Absolute,
+                left: px(20.0),
+                top: px(10.0),
+                ..block(px(50.0), px(50.0), 0.0)
+            }),
+        ];
+        let node_rects = rects(&dom, &table, &styles);
+        assert_px(node_rects[2].x, 60.0);
+        assert_px(node_rects[2].y, 10.0);
+    }
+
+    /// CSS 2.1 10.6.3 gives a block box with no in-flow line box an auto
+    /// height of zero. The static wrapper's only child lays out under `host`,
+    /// so the wrapper collapses instead of taking the line-height floor.
+    #[test]
+    fn a_wrapper_emptied_by_reparenting_collapses_to_zero_height() {
+        let (dom, table, styles) = target_under_static_wrapper(
+            CssPosition::Relative,
+            ComputedStyle {
+                position: CssPosition::Absolute,
+                left: px(20.0),
+                top: px(10.0),
+                ..block(px(50.0), px(50.0), 0.0)
+            },
+        );
+        let node_rects = rects(&dom, &table, &styles);
+        assert_px(node_rects[2].height, 0.0);
     }
 }
 
