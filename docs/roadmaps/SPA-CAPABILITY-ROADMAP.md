@@ -601,6 +601,55 @@ pair that differs only in the `inherits` flag. Dropping `apply_registrations`
 fails three of them; making every registration inherit fails
 `a_non_inheriting_registration_stops_at_the_child`.
 
+## Document stylesheets and the CSSOM (landed 2026-08-20)
+
+`document.styleSheets`, `CSSStyleSheet`, and `HTMLStyleElement.sheet` were
+undefined. Emotion, which styles chatgpt.com, reaches its sheet through
+`if (e.sheet) return e.sheet; for (var t = 0; t < document.styleSheets.length; t++)`
+and the accessor call sits outside the `try` guarding its `insertRule`, so the
+undefined list raised a TypeError out of the page's own style path and every
+component rule was lost. Seven of the 1163 chunks reachable from
+`/cdn/assets/manifest-56d12409.js` touch the CSSOM; Emotion is the one that
+paints. AD-030 carries the design.
+
+`silksurf_css::SheetSet` keeps one `Stylesheet` per source beside the owner
+node, href, and media it carries, and answers `insert_rule`, `delete_rule`, and
+`set_disabled` by index. `StyleIndex::for_viewport_sheets` flattens the set's
+active sheets in list order, which is what walking one concatenation already
+produced, and one `LayerOrder` spans the list because CSS Cascade 5, 6.4.4
+gives a layer name one rank per document. `serialize.rs` turns a parsed rule
+back into text for `cssText`, `selectorText`, and `CSSStyleDeclaration.cssText`,
+which the crate could not do in any form.
+
+`SheetSet::script_generation` is the whole signal a splice leaves: an
+`insertRule` call touches no DOM node, so neither `Dom::structure_generation`
+nor `Dom::generation` reports it and `StyleSheetSet::refresh` sees nothing.
+`drain_scripted_stylesheets` compares the generation the current `StyleIndex`
+was built from, which costs one integer comparison on a tick that spliced
+nothing. The set is built before the document's scripts run, so a startup
+script reaches `document.styleSheets` at the point Emotion asks for it.
+
+`install_computed_style_provider` took a `Stylesheet` cloned once at page build
+and was called once, so `getComputedStyle` answered from a parse-time snapshot
+and observed neither a CSSOM splice nor the AD-028 rebuild. It now shares the
+handle the rebuild writes.
+
+Two defects surfaced while testing this. `FusedWorkspace` rebuilt its retained
+taffy styles on a DOM generation or a viewport change, and a CSSOM splice moves
+neither, so `StyleIndex` carries a monotonic `build_id` the gate compares.
+`CascadeWorkspace::prepare` grew `matched_by_rule` with `Vec::resize`, which
+leaves the existing elements alone, so a rule list that gained an entry carried
+the previous run's match cache into indices the new index had reassigned --
+`html` painted with the declarations of a rule selecting `#box`.
+
+Eight cases in `silksurf-js/tests/style_sheets.rs`, including Emotion's
+accessor and insert in the shape the bundle ships, eight in
+`crates/silksurf-css/tests/cssom_sheet_set.rs`, nine in
+`crates/silksurf-css/tests/rule_serialization.rs` including a round-trip
+through the parser, and two end-to-end cases in `crates/silksurf-app`.
+Removing `set_style_sheets` reproduces the original TypeError; reverting the
+`matched_by_rule` clear reproduces the misattribution.
+
 ## Open work after the live-resource change
 
 Named cuts, each with the mechanism that closes it:
@@ -645,12 +694,6 @@ Named cuts, each with the mechanism that closes it:
   computed-style arena. `CascadedStyle::resolve` normalizes em/rem and
   viewport units, while layout supplies the percentage basis for the retained
   tree.
-- document-stylesheets-cssom -- `document.styleSheets`, `CSSStyleSheet`, and
-  `HTMLStyleElement.sheet` are undefined, so Emotion's sheet accessor raises a
-  TypeError outside the `try` that guards its `insertRule` call and every rule
-  chatgpt.com's components write is lost. AD-030 carries the design: an
-  ordered sheet list behind a shared handle, `insertRule` splicing the
-  retained `Vec<Rule>`, and a dirty flag the repaint tick drains.
 - constructed-stylesheets-and-adoption -- `new CSSStyleSheet`, `replaceSync`,
   and `adoptedStyleSheets` stay undefined by AD-030. Their only observed
   consumer attaches a shadow root, and CodeMirror's StyleModule gates its

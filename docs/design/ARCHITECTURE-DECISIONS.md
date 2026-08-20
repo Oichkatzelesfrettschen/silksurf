@@ -1900,7 +1900,7 @@ ordinary cascade rebuild.
 
 ## AD-030: CSSOM Style Sheets as the Scripted View of Live Sheet State
 
-**Status**: Accepted (design; implementation on branch document-stylesheets-cssom)
+**Status**: Accepted (implemented on branch document-stylesheets-cssom)
 **Date**: 2026-08-19
 **Deciders**: Public web page load repairs
 
