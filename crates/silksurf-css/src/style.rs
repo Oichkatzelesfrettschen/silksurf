@@ -1838,22 +1838,27 @@ fn collect_active_rules(
 /// order, paired with the layer rank each rule carries into `Specificity` and
 /// the `@property` registrations the same walk collects.
 fn flatten_active_rules(
-    stylesheet: &Stylesheet,
+    sheets: &[Stylesheet],
     viewport_w: f32,
     viewport_h: f32,
 ) -> (Vec<StyleRule>, Vec<u32>, Vec<PropertyRegistration>) {
     let mut ranked: Vec<(u32, StyleRule)> = Vec::new();
     let mut order = LayerOrder::new();
     let mut registrations = Vec::new();
-    collect_active_rules(
-        &stylesheet.rules,
-        viewport_w,
-        viewport_h,
-        "",
-        &mut order,
-        &mut ranked,
-        &mut registrations,
-    );
+    // One LayerOrder spans the whole list: CSS Cascade 5, 6.4.4 gives a layer
+    // name one rank per document, so the same `@layer` name in two sheets
+    // names one layer rather than two.
+    for stylesheet in sheets {
+        collect_active_rules(
+            &stylesheet.rules,
+            viewport_w,
+            viewport_h,
+            "",
+            &mut order,
+            &mut ranked,
+            &mut registrations,
+        );
+    }
     let mut rules = Vec::with_capacity(ranked.len());
     let mut ranks = Vec::with_capacity(ranked.len());
     for (rank, rule) in ranked {
@@ -2003,10 +2008,21 @@ impl StyleIndex {
     /// the rules). This matches media.rs `evaluate_media_query` semantics.
     #[must_use]
     pub fn for_viewport(stylesheet: &Stylesheet, viewport_w: f32, viewport_h: f32) -> Self {
-        // Flatten stylesheet into a contiguous Vec<StyleRule> of active rules.
+        Self::for_viewport_sheets(std::slice::from_ref(stylesheet), viewport_w, viewport_h)
+    }
+
+    /// Build a `StyleIndex` over an ordered list of sheets.
+    ///
+    /// Cascade order across sheets is list order, which is what walking one
+    /// concatenation of the same sheets already produced. The list form is what
+    /// lets a sheet keep its own rule vector, so `CSSStyleSheet::insertRule`
+    /// splices one sheet rather than reparsing the document's whole CSS text.
+    #[must_use]
+    pub fn for_viewport_sheets(sheets: &[Stylesheet], viewport_w: f32, viewport_h: f32) -> Self {
+        // Flatten the sheets into a contiguous Vec<StyleRule> of active rules.
         // rule_index fields in IndexedSelector index into this vec.
         let (active_rules, layer_ranks, registrations) =
-            flatten_active_rules(stylesheet, viewport_w, viewport_h);
+            flatten_active_rules(sheets, viewport_w, viewport_h);
 
         // Build tag/id/class/universal selector index over active_rules.
         // Separating collection from indexing avoids a borrow conflict
