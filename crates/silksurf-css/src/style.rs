@@ -1987,9 +1987,25 @@ pub struct StyleIndex {
     /// than seeding one root map: the document node carries a default
     /// `ComputedStyle`, so no element ever cascades with no parent.
     registrations: Vec<PropertyRegistration>,
+    /// Distinguishes this index from every other one the process builds. A
+    /// consumer retaining structures derived from an index -- the fused
+    /// pipeline's taffy styles -- compares it to learn the cascade input
+    /// changed while both DOM generations stood still, which is what a
+    /// stylesheet rebuild, a viewport change, and a CSSOM splice each do.
+    build_id: u64,
 }
 
+/// Source of `StyleIndex::build_id`. Monotonic per process, so two indexes
+/// never share an id and a retained derivation never mistakes one for another.
+static STYLE_INDEX_BUILDS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 impl StyleIndex {
+    /// Identifies this index among the indexes the process built.
+    #[must_use]
+    pub fn build_id(&self) -> u64 {
+        self.build_id
+    }
+
     /// Construct with the default 1280x800 viewport (matches typical desktop
     /// render target; callers with a known viewport should use `for_viewport`).
     #[must_use]
@@ -2088,6 +2104,7 @@ impl StyleIndex {
             total_selector_pairs: pair_id as usize,
             declares_custom_properties,
             registrations: deduped,
+            build_id: STYLE_INDEX_BUILDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         }
     }
 }
