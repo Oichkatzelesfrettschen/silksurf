@@ -1837,11 +1837,14 @@ fn collect_active_rules(
 /// Flatten a stylesheet into the rules the cascade selects against, in document
 /// order, paired with the layer rank each rule carries into `Specificity` and
 /// the `@property` registrations the same walk collects.
-fn flatten_active_rules(
-    sheets: &[Stylesheet],
+fn flatten_active_rules<'a, I>(
+    sheets: I,
     viewport_w: f32,
     viewport_h: f32,
-) -> (Vec<StyleRule>, Vec<u32>, Vec<PropertyRegistration>) {
+) -> (Vec<StyleRule>, Vec<u32>, Vec<PropertyRegistration>)
+where
+    I: IntoIterator<Item = &'a Stylesheet>,
+{
     let mut ranked: Vec<(u32, StyleRule)> = Vec::new();
     let mut order = LayerOrder::new();
     let mut registrations = Vec::new();
@@ -2018,7 +2021,10 @@ impl StyleIndex {
     /// lets a sheet keep its own rule vector, so `CSSStyleSheet::insertRule`
     /// splices one sheet rather than reparsing the document's whole CSS text.
     #[must_use]
-    pub fn for_viewport_sheets(sheets: &[Stylesheet], viewport_w: f32, viewport_h: f32) -> Self {
+    pub fn for_viewport_sheets<'a, I>(sheets: I, viewport_w: f32, viewport_h: f32) -> Self
+    where
+        I: IntoIterator<Item = &'a Stylesheet>,
+    {
         // Flatten the sheets into a contiguous Vec<StyleRule> of active rules.
         // rule_index fields in IndexedSelector index into this vec.
         let (active_rules, layer_ranks, registrations) =
