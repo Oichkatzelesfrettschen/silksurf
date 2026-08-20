@@ -31,13 +31,14 @@ pub(crate) fn positional_url_arg(args: &[String]) -> Option<String> {
             continue;
         }
         match arg.as_str() {
-            "--backend" | "--tls-ca-file" | "--display-backend" | "--screenshot" => {
+            "--backend" | "--tls-ca-file" | "--display-backend" | "--screenshot" | "--monitor" => {
                 skip_next = true;
             }
             _ if arg.starts_with("--backend=")
                 || arg.starts_with("--tls-ca-file=")
                 || arg.starts_with("--display-backend=")
-                || arg.starts_with("--screenshot=") => {}
+                || arg.starts_with("--screenshot=")
+                || arg.starts_with("--monitor=") => {}
             _ if arg.starts_with('-') => {}
             _ => return Some(arg.clone()),
         }
@@ -85,6 +86,7 @@ pub(crate) fn parse_app_options(args: &[String]) -> Result<AppOptions, String> {
     let display_backend = parse_display_backend_arg(args)?;
     let tls_ca_file = parse_tls_ca_file_arg(args);
     let screenshot = parse_path_arg(args, "--screenshot");
+    let monitor = parse_monitor_arg(args, std::env::var("SILKSURF_MONITOR").ok().as_deref());
     let url = positional_url_arg(args).unwrap_or_else(|| "https://example.com".to_string());
     log_startup_options(insecure, platform_verifier, tls_ca_file.as_ref());
     Ok(AppOptions {
@@ -92,6 +94,7 @@ pub(crate) fn parse_app_options(args: &[String]) -> Result<AppOptions, String> {
         window_mode,
         headless,
         display_backend,
+        monitor,
         url,
         screenshot,
         render_config: BrowserRenderConfig {
@@ -103,6 +106,35 @@ pub(crate) fn parse_app_options(args: &[String]) -> Result<AppOptions, String> {
             top_level_site: String::new(),
         },
     })
+}
+
+/*
+ * Which monitor shows the browser window.
+ *
+ * `--list-monitors` prints the names the display server reports and exits.
+ * `--monitor <name>` selects one of them. `SILKSURF_MONITOR` supplies the
+ * default, so the connector name for a particular host lives in that host's
+ * environment rather than in a checked-in file.
+ */
+pub(crate) fn parse_monitor_arg(
+    args: &[String],
+    env_default: Option<&str>,
+) -> silksurf_gui::WinitMonitorChoice {
+    if args.iter().any(|arg| arg == "--list-monitors") {
+        return silksurf_gui::WinitMonitorChoice::List;
+    }
+    let flag = args
+        .windows(2)
+        .find_map(|window| (window[0] == "--monitor").then_some(window[1].as_str()))
+        .or_else(|| args.iter().find_map(|arg| arg.strip_prefix("--monitor=")));
+    match flag
+        .or(env_default)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        Some(selector) => silksurf_gui::WinitMonitorChoice::Named(selector.to_string()),
+        None => silksurf_gui::WinitMonitorChoice::Compositor,
+    }
 }
 
 pub(crate) fn parse_tls_ca_file_arg(args: &[String]) -> Option<std::path::PathBuf> {
@@ -233,6 +265,59 @@ mod tests {
                 "--headless",
                 "--screenshot",
                 "/out/frame.png",
+                "https://example.com/"
+            ])),
+            Some("https://example.com/".to_string())
+        );
+    }
+
+    #[test]
+    fn a_monitor_selector_parses_in_both_spellings_and_from_the_environment() {
+        assert_eq!(
+            parse_monitor_arg(&args(&["silksurf-app", "--monitor", "DP-2"]), None),
+            silksurf_gui::WinitMonitorChoice::Named("DP-2".to_string())
+        );
+        assert_eq!(
+            parse_monitor_arg(&args(&["silksurf-app", "--monitor=LG"]), None),
+            silksurf_gui::WinitMonitorChoice::Named("LG".to_string())
+        );
+        // The flag wins over the environment default.
+        assert_eq!(
+            parse_monitor_arg(&args(&["silksurf-app", "--monitor=LG"]), Some("DP-1")),
+            silksurf_gui::WinitMonitorChoice::Named("LG".to_string())
+        );
+        assert_eq!(
+            parse_monitor_arg(&args(&["silksurf-app"]), Some("DP-1")),
+            silksurf_gui::WinitMonitorChoice::Named("DP-1".to_string())
+        );
+        assert_eq!(
+            parse_monitor_arg(&args(&["silksurf-app"]), Some("  ")),
+            silksurf_gui::WinitMonitorChoice::Compositor
+        );
+        assert_eq!(
+            parse_monitor_arg(&args(&["silksurf-app"]), None),
+            silksurf_gui::WinitMonitorChoice::Compositor
+        );
+    }
+
+    #[test]
+    fn listing_monitors_overrides_a_selector() {
+        assert_eq!(
+            parse_monitor_arg(
+                &args(&["silksurf-app", "--monitor", "DP-2", "--list-monitors"]),
+                Some("DP-1")
+            ),
+            silksurf_gui::WinitMonitorChoice::List
+        );
+    }
+
+    #[test]
+    fn a_monitor_selector_is_not_the_positional_url() {
+        assert_eq!(
+            positional_url_arg(&args(&[
+                "silksurf-app",
+                "--monitor",
+                "DP-2",
                 "https://example.com/"
             ])),
             Some("https://example.com/".to_string())

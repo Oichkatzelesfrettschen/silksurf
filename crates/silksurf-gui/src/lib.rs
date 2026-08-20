@@ -29,7 +29,7 @@ pub mod winit_backend;
 #[cfg(feature = "winit-backend")]
 pub use winit_backend::{
     WinitCursorShape, WinitDamageRect, WinitDisplayBackend, WinitInput, WinitInputResult,
-    WinitPresentDamage, WinitPresentedFrame, WinitRenderAction, WinitRetainedBufferTag,
-    WinitRetainedBufferUpdate, WinitWakeHandle, WinitWaylandPresenter, WinitWindow,
-    resolve_winit_wayland_presenter,
+    WinitMonitorChoice, WinitPresentDamage, WinitPresentedFrame, WinitRenderAction,
+    WinitRetainedBufferTag, WinitRetainedBufferUpdate, WinitWakeHandle, WinitWaylandPresenter,
+    WinitWindow, resolve_winit_wayland_presenter,
 };
