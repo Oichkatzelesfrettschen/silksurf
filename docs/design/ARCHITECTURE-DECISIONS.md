@@ -2024,6 +2024,108 @@ API stays absent so feature detection keeps choosing the path that works.
 
 ---
 
+## AD-031: Transforms Baked Into the Paint Rect as an Axis-Aligned Affine
+
+**Status**: Accepted (implemented on branch css-transform-affine-subset)
+**Date**: 2026-08-20
+**Deciders**: Public web page load repairs
+
+### Context
+
+`parse_translation` (crates/silksurf-css/src/style.rs:4548) matches
+`translate`, `translate3d`, `translateX`, and `translateY` and drops every
+other function through its `_ => {}` arm, so `ComputedStyle::transform` is a
+`Translation { x: Length, y: Length }` and nothing else survives the cascade.
+Measured against the tree:
+
+```
+translate(-50%)              -> Translation { x: Percent(-50.0), y: Px(0.0) }
+scale(0)                     -> Translation { x: Px(0.0), y: Px(0.0) }
+scale(.82)                   -> Translation { x: Px(0.0), y: Px(0.0) }
+rotate(45deg)                -> Translation { x: Px(0.0), y: Px(0.0) }
+matrix(1, 0, 0, 1, 10, 20)   -> Translation { x: Px(0.0), y: Px(0.0) }
+none                         -> Translation { x: Px(0.0), y: Px(0.0) }
+```
+
+`scale(0)` is byte-identical to `none`, so an element the page collapses to
+nothing paints at full size. `matrix()` drops the translation component it
+carries, which is the one transform kind the engine claims to support.
+
+chatgpt.com's author CSS names six distinct transform values across its two
+sheets: `translate(-50%)`, `translate(-50%, .25rem)`, `translateY(var(--...))`,
+`scale(0)`, `scale(.82)`, and `scale(100%) rotate(-90deg)`. There is no
+`matrix()`, no `skew()`, and no 3D. The load is percentage translate, which
+`translation_px` (crates/silksurf-engine/src/fused_pipeline.rs:1086) already
+resolves against the node's own border box, plus scale, which contributes
+nothing today.
+
+Six surfaces assume an axis-aligned rect. `DisplayItem`
+(crates/silksurf-render/src/lib.rs:72) carries a `Rect` on every variant and no
+matrix. Three independent rasterizers draw those rects: `paint_skia_item`
+(crates/silksurf-render/src/lib.rs:1246) through tiny-skia with
+`Transform::identity()` at every call, the scalar `rasterize`
+(crates/silksurf-render/src/lib.rs:228), and the ARGB-word path
+(crates/silksurf-app/src/argb_raster.rs:769) with its own 5x7 bitmap font.
+`build_tiles` (crates/silksurf-render/src/lib.rs:311) buckets by rect,
+`rect_contains` (crates/silksurf-app/src/dom_hit_test.rs:238) is a
+point-in-rect test, and `union_rect`
+(crates/silksurf-app/src/redraw_geometry.rs:217) unions damage.
+
+### Decision
+
+Retain the parsed function list and compose it at paint into the affine that
+keeps a rect a rect.
+
+`TransformFunction` records `translate`, `scale`, `rotate`, `skew`, and
+`matrix` as the parser reads them, and `ComputedStyle` holds the list behind an
+`Arc` so an element declaring no transform shares one empty list.
+Percentage translate stays a `Length` in the retained form because CSS
+Transforms 1, 3 resolves it against the element's own border box, which the
+cascade does not know.
+
+The paint pass composes each node's list about its border-box centre into
+`(scale_x, scale_y, dx, dy)` and multiplies it into the accumulated parent
+value, replacing the `(dx, dy)` addition that `apply_transform_offsets`
+(crates/silksurf-engine/src/fused_pipeline.rs:1045) performs today.
+Composition is `sx = parent.sx * child.sx` and `dx = parent.dx + parent.sx *
+child.dx`, so a child of a `scale(.5)` parent that declares `translate(100px)`
+moves 50 px. `transformed_rect` scales the width and height it already
+offsets, and a text item's `font_size` scales with the vertical factor, which
+re-rasterizes the run through cosmic-text rather than magnifying a coverage
+bitmap.
+
+Baking into the rect is what leaves the six axis-aligned surfaces untouched. A
+matrix per `DisplayItem` reaches all three rasterizers, the tiling, the
+hit-test, and the damage union; a scale folded into `Rect` reaches none of
+them, because that is what the translation offset already does.
+`scale(0)` yields a zero-area rect, which `sk_rect`
+(crates/silksurf-render/src/lib.rs:1474) and `pixel_rect_from_rect`
+(crates/silksurf-app/src/runtime_repaint.rs:867) both answer `None` for, so
+the element paints nothing.
+
+### Consequences
+
+A page that collapses a popover with `scale(0)` stops painting it at full size,
+and one that shrinks a control with `scale(.82)` paints it at the size it asks
+for. A `matrix()` contributes its translation and scale components rather than
+nothing.
+
+Three pieces are cut by name. `transform-rotation-and-skew` leaves `rotate`,
+`skew`, and a `matrix` with a non-zero `b` or `c` term contributing nothing:
+such a matrix's `a` and `d` terms are cosines rather than scale factors, so
+reading them as scale would shrink the box toward zero at 90 degrees, and
+painting a rotated element as its axis-aligned bounding box would put a
+wrong-sized box on screen for anything non-square. `transform-origin-property` leaves
+the origin at the `50% 50%` default CSS Transforms 1, 6 specifies, because the
+property parses nowhere in the workspace today.
+`transformed-rect-hit-test-and-damage` records that `LinkTarget` reads the
+transformed paint rect (crates/silksurf-app/src/dom_hit_test.rs:6) while
+`InputTarget` and both damage rects read the untransformed `node_rects`
+(crates/silksurf-app/src/redraw_geometry.rs:212), which is a pre-existing
+inconsistency that a scale widens.
+
+---
+
 ## Future ADRs
 
 Planned (renumbered after the 2026-04-30 batch):
