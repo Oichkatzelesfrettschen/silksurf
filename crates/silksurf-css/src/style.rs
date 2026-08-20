@@ -520,6 +520,79 @@ pub struct Translation {
     pub y: Length,
 }
 
+/*
+ * TransformFunction -- one `transform` function as the parser read it.
+ *
+ * CSS Transforms 1, 3 resolves a percentage translation against the element's
+ * own border box, which the cascade does not know, so the list survives to
+ * paint rather than collapsing to a matrix at parse time. Angles arrive in
+ * degrees whatever unit the author wrote.
+ */
+#[derive(Debug, Clone, PartialEq)]
+pub enum TransformFunction {
+    Translate {
+        x: Length,
+        y: Length,
+    },
+    Scale {
+        x: f32,
+        y: f32,
+    },
+    Rotate {
+        degrees: f32,
+    },
+    Skew {
+        x_degrees: f32,
+        y_degrees: f32,
+    },
+    Matrix {
+        a: f32,
+        b: f32,
+        c: f32,
+        d: f32,
+        e: f32,
+        f: f32,
+    },
+}
+
+/*
+ * Transform -- the `transform` property's retained function list.
+ *
+ * The list rides an Option so an element declaring no transform costs a null
+ * pointer rather than an Arc allocation, which every default ComputedStyle
+ * would otherwise pay.
+ */
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Transform {
+    functions: Option<Arc<Vec<TransformFunction>>>,
+}
+
+impl Transform {
+    #[must_use]
+    pub fn from_functions(functions: Vec<TransformFunction>) -> Self {
+        if functions.is_empty() {
+            return Self::default();
+        }
+        Self {
+            functions: Some(Arc::new(functions)),
+        }
+    }
+
+    /// The functions in the order the author wrote them, which is the order
+    /// CSS Transforms 1, 7.1 multiplies them in.
+    #[must_use]
+    pub fn functions(&self) -> &[TransformFunction] {
+        self.functions.as_deref().map_or(&[], Vec::as_slice)
+    }
+
+    /// True for `transform: none` and for a value naming no function this
+    /// engine reads.
+    #[must_use]
+    pub fn is_none(&self) -> bool {
+        self.functions.is_none()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComputedStyle {
     /// Calculation trees retained for lengths whose percentage basis belongs
@@ -532,9 +605,9 @@ pub struct ComputedStyle {
      * element that actually declares one.
      */
     pub custom_properties: std::sync::Arc<crate::custom_properties::CustomPropertyMap>,
-    /// The `transform` property's translation component, applied to this
-    /// element and its subtree at paint.
-    pub transform: Translation,
+    /// The `transform` property's retained function list, composed at paint
+    /// and applied to this element and its subtree.
+    pub transform: Transform,
     pub display: Display,
     pub color: Color,
     pub background_color: Color,
@@ -595,7 +668,7 @@ impl Default for ComputedStyle {
         Self {
             calc_expressions: Arc::default(),
             custom_properties: std::sync::Arc::default(),
-            transform: Translation::default(),
+            transform: Transform::default(),
             display: Display::Inline,
             color: Color::black(),
             background_color: Color::transparent(),
@@ -716,7 +789,7 @@ struct CascadedStyle {
     calc_expressions: Vec<CalcExpr>,
     /// The map this element resolves `var()` against, parent values included.
     custom_properties: std::sync::Arc<crate::custom_properties::CustomPropertyMap>,
-    transform: Option<ResolvedProperty<Translation>>,
+    transform: Option<ResolvedProperty<Transform>>,
     /// CSS-wide keyword overrides (inherit/initial/unset) keyed by `PropertyId`.
     /// When a keyword is set with higher cascade priority than the typed slot,
     /// `resolve()` applies keyword behavior instead of the typed value.
@@ -994,26 +1067,15 @@ impl CascadedStyle {
         ComputedStyle {
             calc_expressions: calc_expressions.clone(),
             custom_properties: std::mem::take(&mut self.custom_properties),
-            transform: self
-                .transform
-                .map_or_else(Translation::default, |e| Translation {
-                    x: resolve_length(
-                        e.value.x,
-                        calc_expressions.as_slice(),
-                        em_px,
-                        rem_base_px,
-                        viewport,
-                        None,
-                    ),
-                    y: resolve_length(
-                        e.value.y,
-                        calc_expressions.as_slice(),
-                        em_px,
-                        rem_base_px,
-                        viewport,
-                        None,
-                    ),
-                }),
+            transform: self.transform.map_or_else(Transform::default, |e| {
+                resolve_transform_lengths(
+                    &e.value,
+                    calc_expressions.as_slice(),
+                    em_px,
+                    rem_base_px,
+                    viewport,
+                )
+            }),
             display: resolve_non_inherited_kw(
                 self.display,
                 ks.get(&PropertyId::Display),
@@ -3334,8 +3396,7 @@ fn apply_declaration(
          * moving it wrongly.
          */
         PropertyId::Transform => {
-            if let Some(value) =
-                parse_translation(&declaration.value, &mut cascaded.calc_expressions)
+            if let Some(value) = parse_transform(&declaration.value, &mut cascaded.calc_expressions)
             {
                 apply_property(
                     &mut cascaded.transform,
@@ -4545,58 +4606,184 @@ fn apply_font_shorthand(
 }
 
 /*
- * parse_translation -- the translation a `transform` value contributes.
+ * parse_transform -- the `transform` property's function list.
  *
- * Reads `translate(x[, y])`, `translateX(x)`, `translateY(y)`, and
- * `translate3d(x, y, z)`, summing every occurrence the way CSS Transforms 1
- * 7.1 composes a list of translations. A function this engine does not model
- * contributes nothing, and a value naming only such functions returns None so
- * the declaration leaves the element where layout placed it.
+ * Every function CSS Transforms 1, 7.1 defines in two dimensions is recorded
+ * in the order the author wrote it, which is the order the paint pass
+ * multiplies them in. A translation stays a `Length` because a percentage
+ * resolves against the element's own border box, which the cascade does not
+ * know. A value naming no readable function returns None, so the declaration
+ * leaves the element where layout placed it.
  */
-fn parse_translation(
-    tokens: &[CssToken],
-    calc_expressions: &mut Vec<CalcExpr>,
-) -> Option<Translation> {
-    let mut found = false;
-    let mut translation = Translation::default();
+fn parse_transform(tokens: &[CssToken], calc_expressions: &mut Vec<CalcExpr>) -> Option<Transform> {
+    let mut functions = Vec::new();
     let mut index = 0usize;
     while index < tokens.len() {
         let CssToken::Function(name) = &tokens[index] else {
             index += 1;
             continue;
         };
-        let lowered = name.to_ascii_lowercase();
         let end = matching_paren(tokens, index)?;
-        match lowered.as_str() {
-            "translate" | "translate3d" => {
-                let arguments = comma_separated_lengths(&tokens[index + 1..end], calc_expressions)?;
-                if let Some(x) = arguments.first() {
-                    translation.x = add_lengths(translation.x, *x, calc_expressions)?;
-                    found = true;
-                }
-                if let Some(y) = arguments.get(1) {
-                    translation.y = add_lengths(translation.y, *y, calc_expressions)?;
-                }
-            }
-            "translatex" => {
-                let arguments = comma_separated_lengths(&tokens[index + 1..end], calc_expressions)?;
-                if let Some(x) = arguments.first() {
-                    translation.x = add_lengths(translation.x, *x, calc_expressions)?;
-                    found = true;
-                }
-            }
-            "translatey" => {
-                let arguments = comma_separated_lengths(&tokens[index + 1..end], calc_expressions)?;
-                if let Some(y) = arguments.first() {
-                    translation.y = add_lengths(translation.y, *y, calc_expressions)?;
-                    found = true;
-                }
-            }
-            _ => {}
+        let arguments = &tokens[index + 1..end];
+        if let Some(function) =
+            parse_transform_function(&name.to_ascii_lowercase(), arguments, calc_expressions)
+        {
+            functions.push(function);
         }
         index = end + 1;
     }
-    found.then_some(translation)
+    (!functions.is_empty()).then(|| Transform::from_functions(functions))
+}
+
+fn parse_transform_function(
+    name: &str,
+    arguments: &[CssToken],
+    calc_expressions: &mut Vec<CalcExpr>,
+) -> Option<TransformFunction> {
+    parse_translate_function(name, arguments, calc_expressions)
+        .or_else(|| parse_scale_function(name, arguments))
+        .or_else(|| parse_rotate_or_skew_function(name, arguments))
+        .or_else(|| parse_matrix_function(name, arguments))
+}
+
+fn parse_translate_function(
+    name: &str,
+    arguments: &[CssToken],
+    calc_expressions: &mut Vec<CalcExpr>,
+) -> Option<TransformFunction> {
+    let lengths = match name {
+        // translate3d's z component moves nothing in a two-dimensional paint.
+        "translate" | "translate3d" | "translatex" | "translatey" => {
+            comma_separated_lengths(arguments, calc_expressions)?
+        }
+        _ => return None,
+    };
+    let first = *lengths.first()?;
+    let zero = Length::Px(0.0);
+    Some(match name {
+        "translatex" => TransformFunction::Translate { x: first, y: zero },
+        "translatey" => TransformFunction::Translate { x: zero, y: first },
+        _ => TransformFunction::Translate {
+            x: first,
+            y: lengths.get(1).copied().unwrap_or(zero),
+        },
+    })
+}
+
+fn parse_scale_function(name: &str, arguments: &[CssToken]) -> Option<TransformFunction> {
+    let factors = match name {
+        "scale" | "scale3d" | "scalex" | "scaley" => comma_separated_factors(arguments)?,
+        _ => return None,
+    };
+    let first = *factors.first()?;
+    Some(match name {
+        "scalex" => TransformFunction::Scale { x: first, y: 1.0 },
+        "scaley" => TransformFunction::Scale { x: 1.0, y: first },
+        // CSS Transforms 1, 7.1 makes a one-argument scale uniform.
+        _ => TransformFunction::Scale {
+            x: first,
+            y: factors.get(1).copied().unwrap_or(first),
+        },
+    })
+}
+
+fn parse_rotate_or_skew_function(name: &str, arguments: &[CssToken]) -> Option<TransformFunction> {
+    match name {
+        // rotate3d turns about an arbitrary axis; the z-axis rotation a
+        // two-dimensional paint models is rotate() and rotateZ().
+        "rotate" | "rotatez" => Some(TransformFunction::Rotate {
+            degrees: transform_angle(arguments)?,
+        }),
+        "skewx" => Some(TransformFunction::Skew {
+            x_degrees: transform_angle(arguments)?,
+            y_degrees: 0.0,
+        }),
+        "skewy" => Some(TransformFunction::Skew {
+            x_degrees: 0.0,
+            y_degrees: transform_angle(arguments)?,
+        }),
+        "skew" => {
+            let angles: Vec<&[CssToken]> = arguments
+                .split(|token| matches!(token, CssToken::Comma))
+                .collect();
+            Some(TransformFunction::Skew {
+                x_degrees: transform_angle(angles.first()?)?,
+                y_degrees: angles
+                    .get(1)
+                    .and_then(|a| transform_angle(a))
+                    .unwrap_or(0.0),
+            })
+        }
+        _ => None,
+    }
+}
+
+fn parse_matrix_function(name: &str, arguments: &[CssToken]) -> Option<TransformFunction> {
+    if name != "matrix" {
+        return None;
+    }
+    let terms = comma_separated_factors(arguments)?;
+    let [a, b, c, d, e, f] = <[f32; 6]>::try_from(terms).ok()?;
+    Some(TransformFunction::Matrix { a, b, c, d, e, f })
+}
+
+/// Comma-separated bare numbers or percentages, which is what a scale factor
+/// and a `matrix()` term are written as. CSS Values 4 makes `100%` the
+/// identity factor.
+fn comma_separated_factors(tokens: &[CssToken]) -> Option<Vec<f32>> {
+    tokens
+        .split(|token| matches!(token, CssToken::Comma))
+        .map(|group| {
+            group.iter().find_map(|token| match token {
+                CssToken::Number(value) => value.parse::<f32>().ok(),
+                CssToken::Percentage(value) => value.parse::<f32>().ok().map(|p| p / 100.0),
+                _ => None,
+            })
+        })
+        .collect()
+}
+
+/// An angle in degrees, whatever unit the author wrote. A bare `0` is an
+/// angle per CSS Values 4, and every other bare number is invalid.
+fn transform_angle(tokens: &[CssToken]) -> Option<f32> {
+    tokens.iter().find_map(|token| match token {
+        CssToken::Dimension { value, unit } => {
+            let magnitude = value.parse::<f32>().ok()?;
+            match unit.to_ascii_lowercase().as_str() {
+                "deg" => Some(magnitude),
+                "grad" => Some(magnitude * 0.9),
+                "rad" => Some(magnitude.to_degrees()),
+                "turn" => Some(magnitude * 360.0),
+                _ => None,
+            }
+        }
+        CssToken::Number(value) if value.parse::<f32>() == Ok(0.0) => Some(0.0),
+        _ => None,
+    })
+}
+
+/// Resolve every retained translation length against the element's font sizes
+/// and the viewport. A percentage stays a percentage: its basis is the
+/// element's own border box, which paint supplies.
+fn resolve_transform_lengths(
+    transform: &Transform,
+    calc_expressions: &[CalcExpr],
+    em_px: f32,
+    rem_base_px: f32,
+    viewport: (f32, f32),
+) -> Transform {
+    let resolved: Vec<TransformFunction> = transform
+        .functions()
+        .iter()
+        .map(|function| match function {
+            TransformFunction::Translate { x, y } => TransformFunction::Translate {
+                x: resolve_length(*x, calc_expressions, em_px, rem_base_px, viewport, None),
+                y: resolve_length(*y, calc_expressions, em_px, rem_base_px, viewport, None),
+            },
+            other => other.clone(),
+        })
+        .collect();
+    Transform::from_functions(resolved)
 }
 
 /// The index of the `)` closing the function at `open`, or the token count.
@@ -4629,36 +4816,6 @@ fn comma_separated_lengths(
         .split(|token| matches!(token, CssToken::Comma))
         .map(|group| parse_length(group, calc_expressions))
         .collect()
-}
-
-/// Sum same-unit lengths directly and retain a calculation when either term
-/// already carries an expression tree.
-fn add_lengths(
-    left: Length,
-    right: Length,
-    calc_expressions: &mut Vec<CalcExpr>,
-) -> Option<Length> {
-    match (left, right) {
-        (Length::Px(a), Length::Px(b)) => Some(Length::Px(a + b)),
-        (Length::Percent(a), Length::Percent(b)) => Some(Length::Percent(a + b)),
-        (Length::Em(a), Length::Em(b)) => Some(Length::Em(a + b)),
-        (Length::Rem(a), Length::Rem(b)) => Some(Length::Rem(a + b)),
-        (left, right) if matches!(left, Length::Calc(_)) || matches!(right, Length::Calc(_)) => {
-            let left = length_as_calc_expr(left, calc_expressions)?;
-            let right = length_as_calc_expr(right, calc_expressions)?;
-            let expression_id = calc_expressions.len() as u32;
-            calc_expressions.push(CalcExpr::Add(Box::new(left), Box::new(right)));
-            Some(Length::Calc(expression_id))
-        }
-        (_, right) => Some(right),
-    }
-}
-
-fn length_as_calc_expr(length: Length, calc_expressions: &[CalcExpr]) -> Option<CalcExpr> {
-    match length {
-        Length::Calc(expression_id) => calc_expressions.get(expression_id as usize).cloned(),
-        length => Some(CalcExpr::Value(length)),
-    }
 }
 
 fn parse_length(tokens: &[CssToken], calc_expressions: &mut Vec<CalcExpr>) -> Option<Length> {
