@@ -73,7 +73,7 @@ pub struct FusedWorkspace {
     pub display_items: Vec<DisplayItem>,
     /// Accumulated transform translation per BFS-indexed node, retained so a
     /// repaint reuses the allocation.
-    transform_offsets: Vec<(f32, f32)>,
+    node_transforms: Vec<PaintTransform>,
     /// Stacking-context scratch and the resulting paint sequence, both
     /// retained so a repaint reuses the allocation.
     stacking: StackingOrder,
@@ -118,7 +118,7 @@ impl FusedWorkspace {
     pub fn new() -> Self {
         Self {
             table: LayoutNeighborTable::default(),
-            transform_offsets: Vec::new(),
+            node_transforms: Vec::new(),
             stacking: StackingOrder::default(),
             paint_order: Vec::new(),
             rendered: Vec::new(),
@@ -246,7 +246,7 @@ impl FusedWorkspace {
             if root_suppressed {
                 style.display = Display::None;
             }
-            any_transform |= style.transform != silksurf_css::Translation::default();
+            any_transform |= !style.transform.is_none();
             any_positioned |= style.position != CssPosition::Static;
             apply_replaced_size(dom, node, &mut style, replaced_sizes);
             if dom
@@ -316,11 +316,11 @@ impl FusedWorkspace {
 
         // Pass 3: paint -- emit display items for each visible node.
         let phase_start = std::time::Instant::now();
-        let transformed = apply_transform_offsets(
+        let transformed = accumulate_paint_transforms(
             &self.table,
             &self.styles,
             &self.node_rects,
-            &mut self.transform_offsets,
+            &mut self.node_transforms,
             any_transform,
         );
         mark_rendered_boxes(&self.table, &self.styles, &mut self.rendered);
@@ -350,12 +350,20 @@ impl FusedWorkspace {
             if text_node_collapses_to_empty_render(dom, &self.table, &self.styles, i) {
                 continue;
             }
-            let rect = if transformed {
-                transformed_rect(self.node_rects[i], self.transform_offsets[i])
+            let paint_transform = if transformed {
+                self.node_transforms[i]
             } else {
-                self.node_rects[i]
+                PaintTransform::IDENTITY
             };
-            emit_workspace_paint(dom, node, style, rect, &mut self.display_items);
+            let rect = paint_transform.apply(self.node_rects[i]);
+            emit_workspace_paint(
+                dom,
+                node,
+                style,
+                rect,
+                paint_transform.font_scale(),
+                &mut self.display_items,
+            );
         }
         trace_fused_phase(
             trace_fused,
@@ -537,7 +545,7 @@ pub fn fused_style_layout_paint_with_replaced_sizes(
         if root_suppressed {
             style.display = Display::None;
         }
-        any_transform |= style.transform != silksurf_css::Translation::default();
+        any_transform |= !style.transform.is_none();
         any_positioned |= style.position != CssPosition::Static;
         apply_replaced_size(dom, node, &mut style, replaced_sizes);
         if dom
@@ -595,12 +603,12 @@ pub fn fused_style_layout_paint_with_replaced_sizes(
 
     // Pass 3: paint
     let phase_start = std::time::Instant::now();
-    let mut transform_offsets = Vec::new();
-    let transformed = apply_transform_offsets(
+    let mut node_transforms = Vec::new();
+    let transformed = accumulate_paint_transforms(
         &table,
         &styles,
         &node_rects,
-        &mut transform_offsets,
+        &mut node_transforms,
         any_transform,
     );
     let mut stacking = StackingOrder::default();
@@ -633,12 +641,20 @@ pub fn fused_style_layout_paint_with_replaced_sizes(
         if text_node_collapses_to_empty_render(dom, &table, &styles, i) {
             continue;
         }
-        let rect = if transformed {
-            transformed_rect(node_rects[i], transform_offsets[i])
+        let paint_transform = if transformed {
+            node_transforms[i]
         } else {
-            node_rects[i]
+            PaintTransform::IDENTITY
         };
-        emit_allocating_paint(dom, node, style, rect, &mut display_items);
+        let rect = paint_transform.apply(node_rects[i]);
+        emit_allocating_paint(
+            dom,
+            node,
+            style,
+            rect,
+            paint_transform.font_scale(),
+            &mut display_items,
+        );
     }
     trace_fused_phase(
         trace_fused,
@@ -1025,61 +1041,183 @@ fn open_context(state: &StackingOrder, context: u32) -> StackingFrame {
 }
 
 /*
- * apply_transform_offsets -- move each node's rect by its inherited
- * translation.
+ * PaintTransform -- the part of a CSS transform that keeps a rect a rect.
  *
- * `any_transform` is the cascade's report that at least one node resolved a
- * non-identity translation; false skips the pass entirely, which keeps the
- * repaint hot path at the cost it had before transforms existed.
+ * A scale and a translation map an axis-aligned rect onto another axis-aligned
+ * rect, so they fold into the `Rect` every DisplayItem already carries and
+ * reach neither the three rasterizers nor the tiling, hit-test, and damage
+ * code that assume axis alignment. Rotation and skew do not, and AD-031 cuts
+ * them by name as `transform-rotation-and-skew`.
  *
- * CSS Transforms 1 3 makes a transform apply to the element and everything it
- * contains, so the offset accumulates down the tree. BFS order guarantees a
+ * The mapping is `x' = scale_x * x + dx` on each axis.
+ */
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PaintTransform {
+    scale_x: f32,
+    scale_y: f32,
+    dx: f32,
+    dy: f32,
+}
+
+impl PaintTransform {
+    const IDENTITY: Self = Self {
+        scale_x: 1.0,
+        scale_y: 1.0,
+        dx: 0.0,
+        dy: 0.0,
+    };
+
+    fn is_identity(self) -> bool {
+        self == Self::IDENTITY
+    }
+
+    /// `self` applied to the result of `inner`, which is the order CSS
+    /// Transforms 1, 7.1 multiplies a function list in and the order an
+    /// ancestor's transform applies to a descendant's.
+    fn then(self, inner: Self) -> Self {
+        Self {
+            scale_x: self.scale_x * inner.scale_x,
+            scale_y: self.scale_y * inner.scale_y,
+            dx: self.scale_x * inner.dx + self.dx,
+            dy: self.scale_y * inner.dy + self.dy,
+        }
+    }
+
+    /// Recentre on `origin`, which is where CSS Transforms 1, 6 anchors a
+    /// transform. The default `50% 50%` is the only origin this engine reads.
+    fn about(self, origin: (f32, f32)) -> Self {
+        Self {
+            scale_x: self.scale_x,
+            scale_y: self.scale_y,
+            dx: self.dx + origin.0 * (1.0 - self.scale_x),
+            dy: self.dy + origin.1 * (1.0 - self.scale_y),
+        }
+    }
+
+    fn apply(self, rect: Rect) -> Rect {
+        Rect {
+            x: self.scale_x * rect.x + self.dx,
+            y: self.scale_y * rect.y + self.dy,
+            width: self.scale_x * rect.width,
+            height: self.scale_y * rect.height,
+        }
+    }
+
+    /// The factor a glyph run's font size takes. cosmic-text re-rasterizes at
+    /// the new size rather than magnifying a coverage bitmap, so a scaled run
+    /// is shaped rather than resampled.
+    fn font_scale(self) -> f32 {
+        self.scale_y
+    }
+}
+
+/// One node's own transform, composed from its function list about its
+/// border-box centre.
+fn local_paint_transform(style: &ComputedStyle, rect: Rect) -> PaintTransform {
+    let mut composed = PaintTransform::IDENTITY;
+    for function in style.transform.functions() {
+        composed = composed.then(paint_transform_for(style, function, rect));
+    }
+    composed.about((rect.x + rect.width / 2.0, rect.y + rect.height / 2.0))
+}
+
+fn paint_transform_for(
+    style: &ComputedStyle,
+    function: &silksurf_css::TransformFunction,
+    rect: Rect,
+) -> PaintTransform {
+    match function {
+        silksurf_css::TransformFunction::Translate { x, y } => PaintTransform {
+            dx: translation_px(style, *x, rect.width),
+            dy: translation_px(style, *y, rect.height),
+            ..PaintTransform::IDENTITY
+        },
+        silksurf_css::TransformFunction::Scale { x, y } => PaintTransform {
+            scale_x: *x,
+            scale_y: *y,
+            ..PaintTransform::IDENTITY
+        },
+        // A matrix whose b or c term is non-zero rotates or skews, and its a
+        // and d terms are then cosines rather than scale factors: reading them
+        // as scale would shrink the box toward zero at 90 degrees.
+        silksurf_css::TransformFunction::Matrix { a, b, c, d, e, f } if *b == 0.0 && *c == 0.0 => {
+            PaintTransform {
+                scale_x: *a,
+                scale_y: *d,
+                dx: *e,
+                dy: *f,
+            }
+        }
+        silksurf_css::TransformFunction::Rotate { .. }
+        | silksurf_css::TransformFunction::Skew { .. }
+        | silksurf_css::TransformFunction::Matrix { .. } => PaintTransform::IDENTITY,
+    }
+}
+
+/*
+ * accumulate_paint_transforms -- compose each node's transform with its
+ * ancestors' and record the result per node.
+ *
+ * `any_transform` is the cascade's report that at least one node declared a
+ * transform; false skips the pass entirely, which keeps the repaint hot path
+ * at the cost it had before transforms existed.
+ *
+ * CSS Transforms 1, 3 makes a transform apply to the element and everything it
+ * contains, so the transform composes down the tree. BFS order guarantees a
  * parent is resolved before its children, which is what lets one forward pass
- * over `bfs_order` carry the sum. A percentage resolves against the element's
- * own border box, which is the rect this pass already holds.
+ * over `bfs_order` carry the product. A parent scale multiplies a child's
+ * translation as well as its size, which plain offset addition could not
+ * express.
  *
  * The rects layout produced stay the input to hit testing and damage; only
  * the paint rect moves, matching the CSS rule that a transform takes no
  * layout space.
  */
-fn apply_transform_offsets(
+fn accumulate_paint_transforms(
     table: &LayoutNeighborTable,
     styles: &[Option<ComputedStyle>],
     node_rects: &[Rect],
-    offsets: &mut Vec<(f32, f32)>,
+    transforms: &mut Vec<PaintTransform>,
     any_transform: bool,
 ) -> bool {
     // The cascade pass already visited every node and reported whether any
-    // resolved a translation, so a document with none pays one bool here
-    // rather than a second walk of the tree on the repaint path.
+    // declared a transform, so a document with none pays one bool here rather
+    // than a second walk of the tree on the repaint path.
     if !any_transform {
         return false;
     }
-    offsets.clear();
-    offsets.resize(node_rects.len(), (0.0, 0.0));
+    transforms.clear();
+    transforms.resize(node_rects.len(), PaintTransform::IDENTITY);
     let mut any = false;
     for (i, _) in table.bfs_order.iter().enumerate() {
         // parent_idx carries u32::MAX for the root, which has no ancestor
-        // translation to inherit.
+        // transform to inherit.
         let parent = table
             .parent_idx
             .get(i)
             .copied()
-            .filter(|&parent| (parent as usize) < offsets.len());
-        let (mut dx, mut dy) = parent.map_or((0.0, 0.0), |p| offsets[p as usize]);
-        if let Some(style) = styles[i].as_ref() {
-            let rect = node_rects[i];
-            let own_x = translation_px(style, style.transform.x, rect.width);
-            let own_y = translation_px(style, style.transform.y, rect.height);
-            if own_x != 0.0 || own_y != 0.0 {
-                any = true;
-                dx += own_x;
-                dy += own_y;
-            }
-        }
-        offsets[i] = (dx, dy);
+            .filter(|&parent| (parent as usize) < transforms.len());
+        let inherited = parent.map_or(PaintTransform::IDENTITY, |p| transforms[p as usize]);
+        let combined = styles[i].as_ref().map_or(inherited, |style| {
+            inherited.then(local_paint_transform(style, node_rects[i]))
+        });
+        any |= !combined.is_identity();
+        transforms[i] = combined;
     }
     any
+}
+
+/// A length in pixels, with `fallback` standing in for a relative unit whose
+/// basis this pass does not carry.
+fn length_px(length: Length, fallback: f32) -> f32 {
+    match length {
+        Length::Px(value) => value,
+        Length::Em(value) | Length::Rem(value) => value * fallback,
+        Length::Percent(_) | Length::Vw(_) | Length::Vh(_) | Length::Vmin(_) | Length::Vmax(_) => {
+            fallback
+        }
+        Length::Calc(_) => fallback,
+    }
 }
 
 /// One translation component in pixels. A percentage resolves against the
@@ -1099,41 +1237,18 @@ fn translation_px(style: &ComputedStyle, length: Length, extent: f32) -> f32 {
     }
 }
 
-/// A length in pixels, with `fallback` standing in for a relative unit whose
-/// basis this pass does not carry.
-fn length_px(length: Length, fallback: f32) -> f32 {
-    match length {
-        Length::Px(value) => value,
-        Length::Em(value) | Length::Rem(value) => value * fallback,
-        Length::Percent(_) | Length::Vw(_) | Length::Vh(_) | Length::Vmin(_) | Length::Vmax(_) => {
-            fallback
-        }
-        Length::Calc(_) => fallback,
-    }
-}
-
-/// The rect a node paints into: its layout rect moved by the accumulated
-/// transform.
-fn transformed_rect(rect: Rect, offset: (f32, f32)) -> Rect {
-    Rect {
-        x: rect.x + offset.0,
-        y: rect.y + offset.1,
-        width: rect.width,
-        height: rect.height,
-    }
-}
-
 fn emit_workspace_paint(
     dom: &Dom,
     node: NodeId,
     style: &ComputedStyle,
     content_rect: Rect,
+    font_scale: f32,
     display_items: &mut Vec<DisplayItem>,
 ) {
     emit_box_shadow(style, content_rect, display_items);
     emit_rounded_background(style, content_rect, display_items);
-    emit_text_content(dom, node, style, content_rect, display_items);
-    emit_form_control_text(dom, node, style, content_rect, display_items);
+    emit_text_content(dom, node, style, content_rect, font_scale, display_items);
+    emit_form_control_text(dom, node, style, content_rect, font_scale, display_items);
 }
 
 fn emit_allocating_paint(
@@ -1141,11 +1256,12 @@ fn emit_allocating_paint(
     node: NodeId,
     style: &ComputedStyle,
     content_rect: Rect,
+    font_scale: f32,
     display_items: &mut Vec<DisplayItem>,
 ) {
     emit_square_background(style, content_rect, display_items);
-    emit_text_content(dom, node, style, content_rect, display_items);
-    emit_form_control_text(dom, node, style, content_rect, display_items);
+    emit_text_content(dom, node, style, content_rect, font_scale, display_items);
+    emit_form_control_text(dom, node, style, content_rect, font_scale, display_items);
 }
 
 fn emit_box_shadow(style: &ComputedStyle, rect: Rect, display_items: &mut Vec<DisplayItem>) {
@@ -1212,6 +1328,7 @@ fn emit_text_content(
     node: NodeId,
     style: &ComputedStyle,
     rect: Rect,
+    font_scale: f32,
     display_items: &mut Vec<DisplayItem>,
 ) {
     if let Ok(dom_node) = dom.node(node)
@@ -1222,7 +1339,7 @@ fn emit_text_content(
             node,
             text_len: text.len() as u32,
             text: text.clone(),
-            font_size: font_size_px(style),
+            font_size: font_size_px(style) * font_scale,
             color: style.color,
         });
     }
@@ -1233,6 +1350,7 @@ fn emit_form_control_text(
     node: NodeId,
     style: &ComputedStyle,
     content_rect: Rect,
+    font_scale: f32,
     display_items: &mut Vec<DisplayItem>,
 ) {
     if is_form_control(dom, node)
@@ -1249,7 +1367,7 @@ fn emit_form_control_text(
             node,
             text_len: text.len() as u32,
             text,
-            font_size: font_size_px(style),
+            font_size: font_size_px(style) * font_scale,
             color: style.color,
         });
     }

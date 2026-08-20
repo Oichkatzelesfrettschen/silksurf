@@ -66,8 +66,8 @@ pub use style::{
     FlexWrap, FontStyle, FontWeight, GridAutoFlow, GridContainerStyle, GridItemStyle, GridLine,
     GridTrackMax, GridTrackMin, GridTrackSize, JustifyContent, Length, LengthOrAuto,
     LinearGradient, Margins, Overflow, Position, StyleCache, StyleIndex, TextAlign, TextDecoration,
-    Translation, Visibility, WhiteSpace, compute_style_for_node, compute_style_for_node_with_index,
-    compute_style_for_node_with_workspace, compute_styles,
+    Transform, TransformFunction, Translation, Visibility, WhiteSpace, compute_style_for_node,
+    compute_style_for_node_with_index, compute_style_for_node_with_workspace, compute_styles,
 };
 
 /*

@@ -4,7 +4,10 @@
 //! declaration should have set, so a value that parses but never reaches the
 //! computed style fails here rather than silently painting nothing.
 
-use silksurf_css::{ComputedStyle, Length, LengthOrAuto, compute_style_for_node, parse_stylesheet};
+use silksurf_css::{
+    ComputedStyle, Length, LengthOrAuto, TransformFunction, compute_style_for_node,
+    parse_stylesheet,
+};
 use silksurf_dom::{Dom, NodeId};
 
 fn computed(css: &str, style_attribute: Option<&str>) -> ComputedStyle {
@@ -240,41 +243,76 @@ fn inset_sets_all_four_offsets() {
 #[test]
 fn transform_translate_reaches_the_computed_style() {
     let style = computed(".box { transform: translate(200px, 30px); }", None);
-    assert_eq!(style.transform.x, Length::Px(200.0));
-    assert_eq!(style.transform.y, Length::Px(30.0));
+    assert_eq!(
+        style.transform.functions(),
+        [TransformFunction::Translate {
+            x: Length::Px(200.0),
+            y: Length::Px(30.0),
+        }]
+    );
 }
 
 #[test]
 fn transform_axis_functions_set_one_component_each() {
     let x_only = computed(".box { transform: translateX(12px); }", None);
-    assert_eq!(x_only.transform.x, Length::Px(12.0));
-    assert_eq!(x_only.transform.y, Length::Px(0.0));
+    assert_eq!(
+        x_only.transform.functions(),
+        [TransformFunction::Translate {
+            x: Length::Px(12.0),
+            y: Length::Px(0.0),
+        }]
+    );
     let y_only = computed(".box { transform: translateY(34px); }", None);
-    assert_eq!(y_only.transform.x, Length::Px(0.0));
-    assert_eq!(y_only.transform.y, Length::Px(34.0));
+    assert_eq!(
+        y_only.transform.functions(),
+        [TransformFunction::Translate {
+            x: Length::Px(0.0),
+            y: Length::Px(34.0),
+        }]
+    );
 }
 
+/// The list retains every function in author order. Composing them is the
+/// paint pass's work, because a percentage translation resolves against the
+/// element's own border box.
 #[test]
-fn a_transform_list_sums_its_translations() {
+fn a_transform_list_retains_every_function() {
     let style = computed(
         ".box { transform: translateX(10px) rotate(45deg) translateX(5px); }",
         None,
     );
-    assert_eq!(style.transform.x, Length::Px(15.0));
+    assert_eq!(
+        style.transform.functions(),
+        [
+            TransformFunction::Translate {
+                x: Length::Px(10.0),
+                y: Length::Px(0.0),
+            },
+            TransformFunction::Rotate { degrees: 45.0 },
+            TransformFunction::Translate {
+                x: Length::Px(5.0),
+                y: Length::Px(0.0),
+            },
+        ]
+    );
 }
 
 #[test]
-fn a_transform_naming_no_translation_leaves_the_element_in_place() {
-    let style = computed(".box { transform: rotate(45deg) scale(2); }", None);
-    assert_eq!(style.transform.x, Length::Px(0.0));
-    assert_eq!(style.transform.y, Length::Px(0.0));
+fn a_transform_naming_no_readable_function_stays_empty() {
+    let style = computed(".box { transform: perspective(500px); }", None);
+    assert!(style.transform.is_none());
 }
 
 #[test]
 fn translate3d_contributes_its_two_dimensional_part() {
     let style = computed(".box { transform: translate3d(7px, 8px, 9px); }", None);
-    assert_eq!(style.transform.x, Length::Px(7.0));
-    assert_eq!(style.transform.y, Length::Px(8.0));
+    assert_eq!(
+        style.transform.functions(),
+        [TransformFunction::Translate {
+            x: Length::Px(7.0),
+            y: Length::Px(8.0),
+        }]
+    );
 }
 
 /// Compute against an explicit viewport so the viewport-relative units have a

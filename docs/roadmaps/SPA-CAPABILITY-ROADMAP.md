@@ -654,11 +654,17 @@ Removing `set_style_sheets` reproduces the original TypeError; reverting the
 
 Named cuts, each with the mechanism that closes it:
 
-- css-transform-beyond-translation -- `transform` contributes its translation
-  component to the paint rect; rotate, scale, skew, and matrix contribute
-  nothing, because every DisplayItem is an axis-aligned rect. Carrying them
-  needs a transform per display item and a rasterizer that applies it to
-  geometry and to shaped glyph runs.
+- transform-rotation-and-skew -- `rotate`, `skew`, and a `matrix` with a
+  non-zero `b` or `c` term contribute nothing to the paint rect. AD-031 folds
+  the scale and translation an axis-aligned rect can carry into the rect
+  itself; a rotation needs a matrix per display item that all three
+  rasterizers, the tiling, the hit test, and the damage union would read.
+- transform-origin-property -- `transform-origin` parses nowhere, so every
+  transform anchors at the `50% 50%` default CSS Transforms 1, 6 specifies.
+- transformed-rect-hit-test-and-damage -- `LinkTarget` reads the transformed
+  paint rect while `InputTarget` and both damage rects read the untransformed
+  `node_rects`, so a transformed input is clickable where layout put it and a
+  transformed element's damage rect misses where it paints.
 - chrome-width-responsive -- the address bar is `ADDRESS_BAR_X` 108 plus
   `ADDRESS_BAR_WIDTH` 880, so it ends at 988 px whatever the window is. A
   window wider than that leaves the remainder bare and a narrower one clips
