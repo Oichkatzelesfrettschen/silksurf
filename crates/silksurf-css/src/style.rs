@@ -2258,17 +2258,16 @@ impl CascadeWorkspace {
      * candidates and class_keys are cleared with O(1) capacity-preserving clear().
      */
     fn prepare(&mut self, rules_len: usize, total_selector_pairs: usize) {
-        if self.matched_by_rule.len() < rules_len {
-            self.matched_by_rule.resize(rules_len, None);
-        } else {
-            self.matched_by_rule[..rules_len].fill(None);
-        }
+        // Both buffers clear before they grow. `Vec::resize` appends the fill
+        // value and leaves the existing elements alone, so a rule list that
+        // grew -- a CSSOM insertRule, a `<style>` the document gained --
+        // would otherwise carry the previous run's match cache into rule
+        // indices the new StyleIndex assigned to different rules.
+        self.matched_by_rule.clear();
+        self.matched_by_rule.resize(rules_len, None);
         let words_needed = total_selector_pairs.div_ceil(64);
-        if self.seen_bits.len() < words_needed {
-            self.seen_bits.resize(words_needed, 0);
-        } else if words_needed > 0 {
-            self.seen_bits[..words_needed].fill(0);
-        }
+        self.seen_bits.clear();
+        self.seen_bits.resize(words_needed, 0);
         self.candidates.clear();
         self.class_keys.clear();
     }
