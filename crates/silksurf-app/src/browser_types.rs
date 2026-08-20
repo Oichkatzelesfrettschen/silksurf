@@ -338,6 +338,16 @@ pub(crate) struct BrowserPageRuntime {
     /// rewrites a link's rel, or swaps an href changes it, and the repaint
     /// tick rebuilds `stylesheet` and `style_index` from the new list.
     pub(crate) sheets: StyleSheetSet,
+    /// The same sheet set `document.styleSheets` addresses. A rule script
+    /// splices lands here, and `cssom_generation` records the value the
+    /// current `style_index` was built from.
+    pub(crate) cssom: Arc<Mutex<silksurf_css::SheetSet>>,
+    pub(crate) cssom_generation: u64,
+    /// The stylesheet the `getComputedStyle` provider reads. It holds the same
+    /// rules as `stylesheet` and is shared with the JS context, which is what
+    /// lets a query answer from the current cascade rather than the snapshot
+    /// page build cloned.
+    pub(crate) provider_stylesheet: Arc<Mutex<silksurf_css::Stylesheet>>,
     /// The document's `<link rel=preload>` fetches. Their load events are what
     /// a page's startup script waits on before upgrading a link to a
     /// stylesheet or evaluating a deferred bundle.

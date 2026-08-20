@@ -124,7 +124,10 @@ pub(crate) fn repaint_runtime_host_callbacks(
     // A stylesheet that arrived or a source list that moved changes the
     // cascade for the whole document, so it forces a full repaint rather than
     // riding the dirty-node damage rect.
-    if refresh_runtime_stylesheets(runtime, &dirty_nodes) {
+    // A scripted splice moves no DOM generation, so it is drained beside the
+    // DOM-visible refresh rather than inside it.
+    let scripted = drain_scripted_stylesheets(runtime);
+    if refresh_runtime_stylesheets(runtime, &dirty_nodes) || scripted {
         let redraw_mode = repaint_runtime_full_document(runtime, frame);
         eprintln!(
             "[SilkSurf] Runtime host callbacks: {callback_count}, preload events: {preload_events} (stylesheet rebuild)"
@@ -166,27 +169,96 @@ pub(crate) fn refresh_runtime_stylesheets(
     if !changed {
         return false;
     }
-    let css_text = runtime.sheets.css_text();
-    let dom = runtime
-        .dom
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let Some(stylesheet) = dom.with_interner_mut(|interner| {
-        silksurf_css::parse_stylesheet_with_interner(&css_text, interner).ok()
-    }) else {
-        eprintln!("[SilkSurf] Stylesheet rebuild: CSS parse failed");
-        return false;
-    };
-    drop(dom);
+    {
+        let dom = runtime
+            .dom
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let live = runtime.sheets.live_sheets(&dom);
+        runtime
+            .cssom
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .replace(live);
+    }
+    rebuild_cascade_from_sheets(runtime);
     eprintln!(
         "[SilkSurf] Stylesheet rebuild: {} source(s), {} rules",
         runtime.sheets.source_count(),
-        stylesheet.rules.len()
+        runtime.stylesheet.rules.len()
     );
-    runtime.style_index =
-        StyleIndex::for_viewport(&stylesheet, runtime.viewport.width, runtime.viewport.height);
-    runtime.stylesheet = stylesheet;
     true
+}
+
+/*
+ * drain_scripted_stylesheets -- rebuild the cascade when script spliced a sheet.
+ *
+ * CSSStyleSheet::insertRule and deleteRule move SheetSet::script_generation and
+ * no DOM generation, so StyleSheetSet::refresh reports nothing and the change
+ * would sit in the set unread. Comparing the generation the current StyleIndex
+ * was built from is the whole signal; an untouched set costs one integer
+ * comparison per tick.
+ */
+pub(crate) fn drain_scripted_stylesheets(runtime: &mut BrowserPageRuntime) -> bool {
+    let generation = runtime
+        .cssom
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .script_generation();
+    if generation == runtime.cssom_generation {
+        return false;
+    }
+    {
+        let dom = runtime
+            .dom
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut set = runtime
+            .cssom
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // A rule parsed without the document's interner carries no atom, so
+        // the class and id buckets would match it by string alone.
+        dom.with_interner_mut(|interner| set.intern_scripted(interner));
+    }
+    rebuild_cascade_from_sheets(runtime);
+    eprintln!(
+        "[SilkSurf] CSSOM rebuild: {} rules",
+        runtime.stylesheet.rules.len()
+    );
+    true
+}
+
+/*
+ * rebuild_cascade_from_sheets -- derive the cascade inputs from the sheet set.
+ *
+ * StyleIndex reads the set's active sheets in list order. `stylesheet` holds
+ * the same rules flattened, which is what the fused pipeline and the
+ * getComputedStyle provider take; the provider's copy is shared with the JS
+ * context so a query answers from the rules the last rebuild produced.
+ */
+fn rebuild_cascade_from_sheets(runtime: &mut BrowserPageRuntime) {
+    let set = runtime
+        .cssom
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    runtime.style_index = StyleIndex::for_viewport_sheets(
+        set.active_sheets(),
+        runtime.viewport.width,
+        runtime.viewport.height,
+    );
+    let mut rules = Vec::new();
+    for sheet in set.active_sheets() {
+        rules.extend(sheet.rules.iter().cloned());
+    }
+    runtime.cssom_generation = set.script_generation();
+    drop(set);
+    runtime.stylesheet = silksurf_css::Stylesheet { rules };
+    runtime
+        .provider_stylesheet
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone_from(&runtime.stylesheet);
 }
 
 /*
@@ -1265,6 +1337,9 @@ mod tests {
             },
             runtime: Some(BrowserPageRuntime {
                 sheets: StyleSheetSet::empty("https://example.com/"),
+                cssom: Arc::new(Mutex::new(silksurf_css::SheetSet::new())),
+                cssom_generation: 0,
+                provider_stylesheet: Arc::new(Mutex::new(stylesheet.clone())),
                 preloads: PreloadLinks::new(
                     "https://example.com/",
                     &BrowserRenderConfig::default(),
@@ -1386,6 +1461,9 @@ mod tests {
             },
             runtime: Some(BrowserPageRuntime {
                 sheets: StyleSheetSet::empty("https://example.com/"),
+                cssom: Arc::new(Mutex::new(silksurf_css::SheetSet::new())),
+                cssom_generation: 0,
+                provider_stylesheet: Arc::new(Mutex::new(stylesheet.clone())),
                 preloads: PreloadLinks::new(
                     "https://example.com/",
                     &BrowserRenderConfig::default(),
