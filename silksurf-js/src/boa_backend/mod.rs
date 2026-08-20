@@ -41,7 +41,7 @@ mod dom_bridge;
 mod dom_interfaces;
 mod event_dispatch;
 mod module_loader;
-pub use module_loader::module_import_specifiers;
+pub use module_loader::{ImportMap, module_import_specifiers};
 mod net_queue;
 mod platform_globals;
 
@@ -1323,8 +1323,8 @@ impl SilkContext {
 
     /// Set the document's import map, as `(specifier, target)` pairs from the
     /// `imports` object of a `<script type="importmap">`.
-    pub fn set_import_map(&mut self, entries: Vec<(String, String)>) {
-        self.module_loader.set_import_map(entries);
+    pub fn set_import_map(&mut self, map: ImportMap) {
+        self.module_loader.set_import_map(map);
     }
 
     /// Parse, link, and evaluate a bounded module graph already fetched by the

@@ -90,6 +90,11 @@ pub(crate) fn load_navigation_payload(
             response.body.len(),
             fetch_elapsed
         ),
+        FetchOrigin::Revalidated => eprintln!(
+            "[SilkSurf] Navigation revalidated 304: {} stored bytes in {:?}",
+            response.body.len(),
+            fetch_elapsed
+        ),
         FetchOrigin::Fresh => match request.method {
             HttpMethod::Get => eprintln!(
                 "[SilkSurf] Navigation fetched: {} bytes in {:?}",
@@ -153,14 +158,15 @@ pub(crate) fn build_browser_page_with_buffers(
     payload: BrowserPagePayload,
     buffers: BrowserFrameBuffers,
 ) -> Result<BrowserPage, BrowserPageBuildError> {
-    build_browser_page_with_buffers_for_height(payload, buffers, None)
+    build_browser_page_with_buffers_for_window(payload, buffers, None)
 }
 
-pub(crate) fn build_browser_page_with_buffers_for_height(
+pub(crate) fn build_browser_page_with_buffers_for_window(
     mut payload: BrowserPagePayload,
     buffers: BrowserFrameBuffers,
-    live_window_height: Option<u32>,
+    live_window_size: Option<(u32, u32)>,
 ) -> Result<BrowserPage, BrowserPageBuildError> {
+    let live_window_height = live_window_size.map(|(_, height)| height);
     let trace_build = std::env::var_os("SILKSURF_TRACE_APP_FRAME").is_some()
         || std::env::var_os("SILKSURF_TRACE_NAV_BUILD").is_some();
     let build_start = std::time::Instant::now();
@@ -202,12 +208,7 @@ pub(crate) fn build_browser_page_with_buffers_for_height(
         payload.script_texts
     };
     let mut executed_script_nodes = initial_executed_script_nodes(&dom, doc_node, &payload.url);
-    let viewport = Rect {
-        x: 0.0,
-        y: BROWSER_CHROME_HEIGHT,
-        width: FRAME_WIDTH as f32,
-        height: FRAME_HEIGHT as f32 - BROWSER_CHROME_HEIGHT,
-    };
+    let viewport = browser_layout_viewport(live_window_size);
     let style_index = StyleIndex::for_viewport(&stylesheet, viewport.width, viewport.height);
     let dom_arc = Arc::new(Mutex::new(dom));
     let cookie_host = url::Url::parse(&payload.url)
@@ -380,7 +381,10 @@ pub(crate) fn build_browser_page_with_buffers_for_height(
 
     let phase_start = std::time::Instant::now();
     let document_height = browser_frame_height(&display_list.items, BROWSER_CHROME_HEIGHT as u32);
-    display_list = tile_browser_document_display_list(display_list, document_height);
+    // The raster stride is the width the document laid out at, so the tiles,
+    // the viewport raster, and the frame buffer share one row length.
+    let raster_width = viewport.width as u32;
+    display_list = tile_browser_document_display_list(display_list, raster_width, document_height);
     let bitmap_height = browser_page_bitmap_height(document_height, live_window_height);
     trace_navigation_build_phase(trace_build, &payload.url, "tiles", phase_start.elapsed());
     let BrowserFrameBuffers { mut rgba, mut argb } = buffers;
@@ -389,6 +393,7 @@ pub(crate) fn build_browser_page_with_buffers_for_height(
     if rasterize_browser_viewport_argb_direct(
         &display_list,
         0,
+        raster_width,
         bitmap_height,
         &mut argb,
         &mut viewport_item_indices,
@@ -411,6 +416,7 @@ pub(crate) fn build_browser_page_with_buffers_for_height(
         rasterize_browser_viewport_into(
             &display_list,
             0,
+            raster_width,
             bitmap_height,
             &mut rgba,
             &mut viewport_item_indices,
@@ -442,8 +448,10 @@ pub(crate) fn build_browser_page_with_buffers_for_height(
         frame: BrowserFrame {
             url: payload.url,
             argb,
+            raster_width,
             raster_height: document_height,
             bitmap_height,
+            bitmap_raster_width: raster_width,
             bitmap_scroll_y: 0,
             focus_viewport_cache: None,
             focus_viewport_retained_sent: false,
@@ -471,6 +479,29 @@ pub(crate) fn build_browser_page_with_buffers_for_height(
             viewport_item_indices,
         },
     })
+}
+
+/*
+ * browser_layout_viewport -- the CSS viewport a page lays out against.
+ *
+ * The window surface below the browser chrome is the viewport, so a page
+ * built while a window is open lays out at the width that window presents.
+ * A build with no window -- the headless path and every fixture test -- takes
+ * the FRAME_WIDTH by FRAME_HEIGHT default. The height floor keeps the content
+ * area positive when a window is shorter than its own chrome.
+ */
+pub(crate) fn browser_layout_viewport(live_window_size: Option<(u32, u32)>) -> Rect {
+    let chrome = BROWSER_CHROME_HEIGHT as u32;
+    let (width, height) = live_window_size
+        .map_or((FRAME_WIDTH, FRAME_HEIGHT), |(width, height)| {
+            (width.max(1), height.max(chrome + 1))
+        });
+    Rect {
+        x: 0.0,
+        y: BROWSER_CHROME_HEIGHT,
+        width: width as f32,
+        height: height as f32 - BROWSER_CHROME_HEIGHT,
+    }
 }
 
 pub(crate) fn browser_page_bitmap_height(
@@ -1243,15 +1274,17 @@ pub(crate) fn settle_static_document(
  */
 pub(crate) fn write_static_screenshot(
     display_list: &silksurf_render::DisplayList,
+    raster_width: u32,
     path: &std::path::Path,
 ) {
-    let height = browser_frame_height(&display_list.items, 0).min(MAX_SCREENSHOT_HEIGHT);
+    let height = browser_frame_height(&display_list.items, 0)
+        .min(MAX_SCREENSHOT_PIXELS / raster_width.max(1));
     let mut rgba: Vec<u8> = Vec::new();
-    silksurf_render::rasterize_skia_into(display_list, FRAME_WIDTH, height, &mut rgba);
-    match silksurf_image::encode_png(&rgba, FRAME_WIDTH, height) {
+    silksurf_render::rasterize_skia_into(display_list, raster_width, height, &mut rgba);
+    match silksurf_image::encode_png(&rgba, raster_width, height) {
         Ok(png) => match std::fs::write(path, &png) {
             Ok(()) => eprintln!(
-                "[SilkSurf] Screenshot: {} ({FRAME_WIDTH}x{height}, {} bytes)",
+                "[SilkSurf] Screenshot: {} ({raster_width}x{height}, {} bytes)",
                 path.display(),
                 png.len()
             ),
@@ -1422,10 +1455,10 @@ mod tests {
             parsed_document: None,
         };
 
-        let page = build_browser_page_with_buffers_for_height(
+        let page = build_browser_page_with_buffers_for_window(
             payload,
             BrowserFrameBuffers::default(),
-            Some(FRAME_HEIGHT),
+            Some((FRAME_WIDTH, FRAME_HEIGHT)),
         )
         .expect("payload builds page");
 

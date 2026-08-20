@@ -29,7 +29,7 @@ use crate::browser_types::{
     BrowserFrameBuffers, BrowserNavigationRequest, BrowserPage, BrowserRenderConfig, FRAME_HEIGHT,
     FRAME_WIDTH, ImageResourceCache, NavigationResult,
 };
-use crate::{build_browser_page_with_buffers_for_height, load_navigation_payload};
+use crate::{build_browser_page_with_buffers_for_window, load_navigation_payload};
 use silksurf_core::engine_protocol::{
     Command as ProtocolCommand, CrashReason, ENVELOPE_HEADER_BYTES, Event, LoadState,
     MAX_MESSAGE_BYTES, MAX_STRING_BYTES, Message, ProfileId, ProtocolError, ViewId, Viewport,
@@ -790,9 +790,9 @@ impl NativeEngineWorker {
             }
         };
         let url = payload.url.clone();
-        let height = entry.viewport.height;
+        let window_size = (entry.viewport.width, entry.viewport.height);
         let buffers = entry.take_build_buffers();
-        match build_browser_page_with_buffers_for_height(payload, buffers, Some(height)) {
+        match build_browser_page_with_buffers_for_window(payload, buffers, Some(window_size)) {
             Ok(page) => {
                 entry.page = Some(page);
                 write_event(writer, Event::UrlChanged { view, url })?;

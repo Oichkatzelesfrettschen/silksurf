@@ -514,7 +514,12 @@ fn parse_declarations(tokens: &[CssToken]) -> Vec<Declaration> {
                     cursor += 1;
                     break;
                 }
-                CssToken::CurlyClose => break,
+                // CssTokenizer::finish appends Eof, so a declaration list that
+                // ends without a semicolon carries it into the value. Ending
+                // the value here keeps it off the tail, where consume_important
+                // reads the `!important` that a `style` attribute writes
+                // without a terminator.
+                CssToken::CurlyClose | CssToken::Eof => break,
                 _ => {
                     value.push(tokens[cursor].clone());
                     cursor += 1;

@@ -206,6 +206,7 @@ fn run_winit_browser_page(
     let wake_state = Rc::clone(&browser_state);
     let wake_navigation_rx = Rc::clone(&navigation_rx);
     let wake_scroll = Rc::clone(&scroll_y);
+    let wake_last_width = Rc::clone(&last_render_width);
     let wake_last_height = Rc::clone(&last_render_height);
 
     window.run_with_input_wake_and_render_actions(
@@ -276,7 +277,7 @@ fn run_winit_browser_page(
                 &wake_state,
                 &wake_navigation_rx,
                 &wake_scroll,
-                wake_last_height.get(),
+                (wake_last_width.get(), wake_last_height.get()),
             )
         },
     );
@@ -396,6 +397,11 @@ fn run_static_browser_render(
         ),
         FetchOrigin::Fresh => eprintln!(
             "[SilkSurf] FETCHED: {} bytes in {:?} (now cached)",
+            response.body.len(),
+            fetch_elapsed
+        ),
+        FetchOrigin::Revalidated => eprintln!(
+            "[SilkSurf] REVALIDATED 304: {} stored bytes in {:?} (no body transferred)",
             response.body.len(),
             fetch_elapsed
         ),
@@ -649,7 +655,7 @@ fn run_static_browser_render(
     );
 
     if let Some(path) = options.screenshot.as_ref() {
-        write_static_screenshot(&display_list, path);
+        write_static_screenshot(&display_list, viewport.width as u32, path);
     }
 
     eprintln!("\n=== PROCESSING BUDGET (excludes network) ===");

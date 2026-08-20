@@ -39,11 +39,14 @@ use smallvec::SmallVec;
 use smol_str::SmolStr;
 use std::sync::Arc;
 
+/// The `style` attribute carries no selector, so its rank is the
+/// element-attached step of CSS Cascade 5, 6.4.3 rather than a selector count.
 const INLINE_STYLE_SPECIFICITY: Specificity = Specificity {
+    element_attached: true,
     layer: Specificity::UNLAYERED,
-    ids: u32::MAX,
-    classes: u32::MAX,
-    elements: u32::MAX,
+    ids: 0,
+    classes: 0,
+    elements: 0,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -673,8 +676,10 @@ impl<T: Clone> ResolvedProperty<T> {
         if self.important != candidate.important {
             return candidate.important;
         }
-        if self.specificity != candidate.specificity {
-            return candidate.specificity > self.specificity;
+        let held = self.specificity.cascade_key(self.important);
+        let offered = candidate.specificity.cascade_key(candidate.important);
+        if held != offered {
+            return offered > held;
         }
         candidate.order > self.order
     }
@@ -1639,6 +1644,7 @@ fn collect_active_rules(
     layer_path: &str,
     order: &mut LayerOrder,
     out: &mut Vec<(u32, StyleRule)>,
+    registrations: &mut Vec<PropertyRegistration>,
 ) {
     for rule in rules {
         match rule {
@@ -1662,6 +1668,15 @@ fn collect_active_rules(
                                 order.rank_of(&qualify(layer_path, &path));
                             }
                         }
+                        // `@property` carries descriptors rather than rules,
+                        // so it registers here and never reaches selection.
+                        if name == "property"
+                            && let Some(AtRuleBlock::Declarations(descriptors)) = &at.block
+                            && let Some(registration) =
+                                PropertyRegistration::parse(&at.prelude, descriptors)
+                        {
+                            registrations.push(registration);
+                        }
                         continue;
                     }
                 };
@@ -1669,14 +1684,26 @@ fn collect_active_rules(
                     "media" => {
                         if crate::media::evaluate_media_query(&at.prelude, viewport_w, viewport_h) {
                             collect_active_rules(
-                                children, viewport_w, viewport_h, layer_path, order, out,
+                                children,
+                                viewport_w,
+                                viewport_h,
+                                layer_path,
+                                order,
+                                out,
+                                registrations,
                             );
                         }
                     }
                     "supports" => {
                         if crate::supports::evaluate_supports_condition(&at.prelude) {
                             collect_active_rules(
-                                children, viewport_w, viewport_h, layer_path, order, out,
+                                children,
+                                viewport_w,
+                                viewport_h,
+                                layer_path,
+                                order,
+                                out,
+                                registrations,
                             );
                         }
                     }
@@ -1694,6 +1721,7 @@ fn collect_active_rules(
                             &child_path,
                             order,
                             out,
+                            registrations,
                         );
                     }
                     // @keyframes, @scope, @container, and the rest carry rules
@@ -1706,14 +1734,16 @@ fn collect_active_rules(
 }
 
 /// Flatten a stylesheet into the rules the cascade selects against, in document
-/// order, paired with the layer rank each rule carries into `Specificity`.
+/// order, paired with the layer rank each rule carries into `Specificity` and
+/// the `@property` registrations the same walk collects.
 fn flatten_active_rules(
     stylesheet: &Stylesheet,
     viewport_w: f32,
     viewport_h: f32,
-) -> (Vec<StyleRule>, Vec<u32>) {
+) -> (Vec<StyleRule>, Vec<u32>, Vec<PropertyRegistration>) {
     let mut ranked: Vec<(u32, StyleRule)> = Vec::new();
     let mut order = LayerOrder::new();
+    let mut registrations = Vec::new();
     collect_active_rules(
         &stylesheet.rules,
         viewport_w,
@@ -1721,6 +1751,7 @@ fn flatten_active_rules(
         "",
         &mut order,
         &mut ranked,
+        &mut registrations,
     );
     let mut rules = Vec::with_capacity(ranked.len());
     let mut ranks = Vec::with_capacity(ranked.len());
@@ -1728,7 +1759,77 @@ fn flatten_active_rules(
         ranks.push(rank);
         rules.push(rule);
     }
-    (rules, ranks)
+    (rules, ranks, registrations)
+}
+
+/*
+ * PropertyRegistration -- one `@property` rule's descriptors.
+ *
+ * CSS Properties and Values 1, 2 requires `syntax` and `inherits` on every
+ * registration, and `initial-value` on every one whose syntax is not the
+ * universal `*`. A rule missing a required descriptor is invalid and registers
+ * nothing, so `parse` answers None rather than registering a partial rule.
+ *
+ * The syntax string is retained without being enforced: a registration's
+ * observable effect here is the initial value a `var()` takes when nothing
+ * declares the property, and the inheritance the flag turns off.
+ */
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PropertyRegistration {
+    pub(crate) name: String,
+    pub(crate) inherits: bool,
+    pub(crate) initial: Vec<CssToken>,
+}
+
+impl PropertyRegistration {
+    fn parse(prelude: &[CssToken], descriptors: &[Declaration]) -> Option<Self> {
+        let name = prelude.iter().find_map(|token| match token {
+            CssToken::Ident(ident) if ident.starts_with("--") => Some(ident.to_string()),
+            _ => None,
+        })?;
+        let mut syntax = None;
+        let mut inherits = None;
+        let mut initial = None;
+        for descriptor in descriptors {
+            match descriptor.name.to_ascii_lowercase().as_str() {
+                "syntax" => syntax = descriptor_string(&descriptor.value),
+                "inherits" => {
+                    inherits = first_ident(&descriptor.value).and_then(|value| {
+                        match value.to_ascii_lowercase().as_str() {
+                            "true" => Some(true),
+                            "false" => Some(false),
+                            _ => None,
+                        }
+                    });
+                }
+                "initial-value" => initial = Some(descriptor.value.clone()),
+                _ => {}
+            }
+        }
+        let syntax = syntax?;
+        let inherits = inherits?;
+        // The universal syntax accepts any value, so it is the one syntax that
+        // needs no initial value; every other registration requires one.
+        let initial = match initial {
+            Some(tokens) => tokens,
+            None if syntax.trim() == "*" => Vec::new(),
+            None => return None,
+        };
+        Some(Self {
+            name,
+            inherits,
+            initial,
+        })
+    }
+}
+
+/// The contents of a descriptor written as a quoted string, which is how
+/// `syntax` carries its grammar.
+fn descriptor_string(tokens: &[CssToken]) -> Option<String> {
+    tokens.iter().find_map(|token| match token {
+        CssToken::String(value) => Some(value.clone()),
+        _ => None,
+    })
 }
 
 /*
@@ -1771,6 +1872,12 @@ pub struct StyleIndex {
     /// declares none skips the custom-property pass entirely, so the cascade
     /// iterates the rule list once per element rather than twice.
     pub declares_custom_properties: bool,
+    /// The document's `@property` registrations. A registered property answers
+    /// a `var()` from its initial value at every element that neither declares
+    /// nor inherits it, so the registrations enter each element's map rather
+    /// than seeding one root map: the document node carries a default
+    /// `ComputedStyle`, so no element ever cascades with no parent.
+    registrations: Vec<PropertyRegistration>,
 }
 
 impl StyleIndex {
@@ -1797,7 +1904,8 @@ impl StyleIndex {
     pub fn for_viewport(stylesheet: &Stylesheet, viewport_w: f32, viewport_h: f32) -> Self {
         // Flatten stylesheet into a contiguous Vec<StyleRule> of active rules.
         // rule_index fields in IndexedSelector index into this vec.
-        let (active_rules, layer_ranks) = flatten_active_rules(stylesheet, viewport_w, viewport_h);
+        let (active_rules, layer_ranks, registrations) =
+            flatten_active_rules(stylesheet, viewport_w, viewport_h);
 
         // Build tag/id/class/universal selector index over active_rules.
         // Separating collection from indexing avoids a borrow conflict
@@ -1842,6 +1950,12 @@ impl StyleIndex {
                 .iter()
                 .any(|declaration| declaration.name.starts_with("--"))
         });
+        // A later `@property` for the same name replaces the earlier one.
+        let mut deduped: Vec<PropertyRegistration> = Vec::new();
+        for registration in registrations {
+            deduped.retain(|held| held.name != registration.name);
+            deduped.push(registration);
+        }
         StyleIndex {
             tag_rules,
             id_rules,
@@ -1850,6 +1964,7 @@ impl StyleIndex {
             active_rules,
             total_selector_pairs: pair_id as usize,
             declares_custom_properties,
+            registrations: deduped,
         }
     }
 }
@@ -2419,6 +2534,11 @@ fn cascade_for_node(
  * costs no allocation. Declarations compete by importance, then specificity,
  * then document order, the same precedence apply_property enforces for typed
  * properties.
+ *
+ * The root element starts from the `@property` initial values instead of an
+ * empty map, so a registered property that nothing declares answers a `var()`
+ * through the ordinary lookup. `reset_non_inheriting` then stops an inherited
+ * value at any element whose registration says the property does not inherit.
  */
 fn resolve_custom_properties(
     dom: &Dom,
@@ -2430,6 +2550,7 @@ fn resolve_custom_properties(
     let inherited = parent.map_or_else(std::sync::Arc::default, |style| {
         std::sync::Arc::clone(&style.custom_properties)
     });
+    let inherited = apply_registrations(index, inherited);
     // A document declaring no custom property anywhere pays one bool per
     // element and inherits the parent's Arc unchanged.
     if !index.declares_custom_properties && !element_declares_custom_property(dom, node) {
@@ -2505,7 +2626,52 @@ fn record_custom_property<'a>(
     }
 }
 
-/// Importance first, then specificity, then document order.
+/*
+ * apply_registrations -- put each `@property` initial value into the map.
+ *
+ * CSS Properties and Values 1, 2.3: a registered property takes its initial
+ * value at every element that does not have a declared value for it, and a
+ * registration whose `inherits` descriptor is `false` takes that initial value
+ * even where the parent declared one, so the inherited value stops at the
+ * child. An inheriting registration fills only a name the map does not already
+ * hold, so an inherited declaration survives.
+ *
+ * The element's own declarations are recorded after this, so they overwrite
+ * the initial in both cases. The map is rebuilt only when a registration is
+ * actually unsatisfied, which keeps the parent's Arc shared everywhere below
+ * the element that established the values.
+ */
+fn apply_registrations(
+    index: &StyleIndex,
+    inherited: std::sync::Arc<crate::custom_properties::CustomPropertyMap>,
+) -> std::sync::Arc<crate::custom_properties::CustomPropertyMap> {
+    if index.registrations.is_empty() {
+        return inherited;
+    }
+    let unsatisfied = index.registrations.iter().any(|registration| {
+        let held = inherited.get(&registration.name);
+        if registration.inherits {
+            held.is_none()
+        } else {
+            held != Some(registration.initial.as_slice())
+        }
+    });
+    if !unsatisfied {
+        return inherited;
+    }
+    let mut map = (*inherited).clone();
+    for registration in &index.registrations {
+        if registration.inherits && map.get(&registration.name).is_some() {
+            continue;
+        }
+        map.set(&registration.name, registration.initial.clone());
+    }
+    std::sync::Arc::new(map)
+}
+
+/// Importance first, then the importance-adjusted cascade key, then document
+/// order. `Specificity::cascade_key` carries the layer reversal that CSS
+/// Cascade 5, 6.4.4 applies to important declarations.
 fn custom_property_wins(
     candidate: (bool, Specificity, usize),
     current: (bool, Specificity, usize),
@@ -2513,7 +2679,10 @@ fn custom_property_wins(
     match (candidate.0, current.0) {
         (true, false) => true,
         (false, true) => false,
-        _ => (candidate.1, candidate.2) >= (current.1, current.2),
+        _ => {
+            (candidate.1.cascade_key(candidate.0), candidate.2)
+                >= (current.1.cascade_key(current.0), current.2)
+        }
     }
 }
 

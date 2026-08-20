@@ -93,12 +93,14 @@ pub(crate) fn prepare_browser_bitmap_for_window(
     scroll: f32,
     trace_app_frame: bool,
 ) {
-    let exposes_unpainted_area = window_size_exposes_unpainted_area(
-        last_width.get(),
-        last_height.get(),
-        window_width,
-        window_height,
-    );
+    let reflowed = reflow_browser_page_for_window(state, window_width, window_height);
+    let exposes_unpainted_area = reflowed
+        || window_size_exposes_unpainted_area(
+            last_width.get(),
+            last_height.get(),
+            window_width,
+            window_height,
+        );
     let refresh_start = std::time::Instant::now();
     let bitmap_refresh = refresh_browser_frame_bitmap(
         state,
@@ -113,6 +115,40 @@ pub(crate) fn prepare_browser_bitmap_for_window(
     } else if let BrowserBitmapRefresh::ScrollReuse(damage) = bitmap_refresh {
         mark_redraw(state, BrowserRedrawMode::Damage(damage));
     }
+}
+
+/*
+ * reflow_browser_page_for_window -- relayout when the surface geometry moved.
+ *
+ * The layout viewport is the window surface below the chrome, so the frame
+ * path compares the runtime's viewport against the current surface and
+ * relayouts when they disagree. A window opened at a size the page was not
+ * built for -- `--monitor` fullscreens onto whatever the compositor reports,
+ * which the initial `WinitWindow::new` request does not decide -- reaches the
+ * first present through this comparison.
+ *
+ * A state with no runtime keeps its raster width: the words already in
+ * `frame.argb` are an error page at the previous stride, and no display list
+ * exists to re-raster them at another.
+ */
+pub(crate) fn reflow_browser_page_for_window(
+    state: &mut BrowserState,
+    window_width: u32,
+    window_height: u32,
+) -> bool {
+    if window_width == 0 || window_height == 0 {
+        return false;
+    }
+    let viewport = browser_layout_viewport(Some((window_width, window_height)));
+    let BrowserState { frame, runtime, .. } = state;
+    let Some(runtime) = runtime.as_mut() else {
+        return false;
+    };
+    if runtime.viewport == viewport {
+        return false;
+    }
+    reflow_runtime_for_viewport(runtime, frame, viewport);
+    true
 }
 
 pub(crate) fn blit_browser_window_frame(
@@ -300,11 +336,13 @@ pub(crate) fn take_focus_retained_buffer_update(
     window_width: u32,
     window_height: u32,
 ) -> Option<silksurf_gui::WinitRetainedBufferUpdate> {
-    if state.frame.focus_viewport_retained_sent || window_width != FRAME_WIDTH {
+    if state.frame.focus_viewport_retained_sent {
         return None;
     }
     let cache = state.frame.focus_viewport_cache.as_ref()?;
-    if cache.bitmap_height != window_height {
+    // The cache is a bitmap the window presents word for word, so it answers
+    // only for the surface geometry it was rastered at.
+    if cache.raster_width != window_width || cache.bitmap_height != window_height {
         return None;
     }
     let pixel_count = surface_pixel_count(window_width, window_height)?;
@@ -373,7 +411,8 @@ pub(crate) fn prepare_scroll_viewport_caches(
     window_width: u32,
     window_height: u32,
 ) {
-    if window_width != FRAME_WIDTH || state.frame.bitmap_height != window_height {
+    let raster_width = state.frame.raster_width;
+    if window_width != raster_width || state.frame.bitmap_height != window_height {
         state.frame.scroll_viewport_caches.clear();
         return;
     }
@@ -394,6 +433,7 @@ pub(crate) fn prepare_scroll_viewport_caches(
     if scroll_viewport_caches_cover_targets(
         &state.frame.scroll_viewport_caches,
         &targets,
+        raster_width,
         window_height,
     ) {
         return;
@@ -407,6 +447,7 @@ pub(crate) fn prepare_scroll_viewport_caches(
         rasterize_browser_viewport_argb_preferred(
             &runtime.display_list,
             scroll_y,
+            raster_width,
             window_height,
             &mut rgba,
             &mut argb,
@@ -414,6 +455,7 @@ pub(crate) fn prepare_scroll_viewport_caches(
         );
         caches.push(ScrollViewportCache {
             scroll_y,
+            raster_width,
             bitmap_height: window_height,
             tag: scroll_retained_tag_for_scroll_y(scroll_y),
             argb,
@@ -435,6 +477,7 @@ pub(crate) fn take_scroll_retained_buffer_update(
         .iter()
         .position(|cache| {
             !cache.retained_sent
+                && cache.raster_width == window_width
                 && cache.bitmap_height == window_height
                 && cache.argb.len() >= pixel_count
         })?;
@@ -465,12 +508,15 @@ pub(crate) fn scroll_retained_targets(current_scroll_y: u32, max_scroll: f32) ->
 pub(crate) fn scroll_viewport_caches_cover_targets(
     caches: &[ScrollViewportCache],
     targets: &[u32],
+    raster_width: u32,
     bitmap_height: u32,
 ) -> bool {
     targets.iter().all(|target| {
-        caches
-            .iter()
-            .any(|cache| cache.scroll_y == *target && cache.bitmap_height == bitmap_height)
+        caches.iter().any(|cache| {
+            cache.scroll_y == *target
+                && cache.raster_width == raster_width
+                && cache.bitmap_height == bitmap_height
+        })
     })
 }
 
@@ -544,7 +590,7 @@ pub(crate) fn handle_browser_wake(
     state_ref: &Rc<RefCell<BrowserState>>,
     navigation_rx: &Rc<RefCell<Option<mpsc::Receiver<NavigationMessage>>>>,
     scroll: &Cell<f32>,
-    live_window_height: u32,
+    live_window_size: (u32, u32),
 ) -> bool {
     let result = navigation_rx
         .borrow_mut()
@@ -553,7 +599,7 @@ pub(crate) fn handle_browser_wake(
     let mut state = state_ref.borrow_mut();
     if let Some(result) = result {
         *navigation_rx.borrow_mut() = None;
-        return apply_navigation_result(&mut state, result, scroll, live_window_height);
+        return apply_navigation_result(&mut state, result, scroll, live_window_size);
     }
     tick_browser_runtime(&mut state)
 }
@@ -562,7 +608,7 @@ pub(crate) fn apply_navigation_result(
     state: &mut BrowserState,
     result: NavigationMessage,
     scroll: &Cell<f32>,
-    live_window_height: u32,
+    live_window_size: (u32, u32),
 ) -> bool {
     let (generation, result) = result;
     if generation != state.navigation_generation {
@@ -570,7 +616,7 @@ pub(crate) fn apply_navigation_result(
     }
     state.navigation_pending = false;
     match result {
-        Ok(payload) => apply_navigation_payload(state, payload, scroll, live_window_height),
+        Ok(payload) => apply_navigation_payload(state, payload, scroll, live_window_size),
         Err(message) => {
             eprintln!("[SilkSurf] Navigation error: {message}");
             mark_navigation_error(state);
@@ -583,12 +629,13 @@ pub(crate) fn apply_navigation_payload(
     state: &mut BrowserState,
     payload: BrowserPagePayload,
     scroll: &Cell<f32>,
-    live_window_height: u32,
+    live_window_size: (u32, u32),
 ) -> bool {
     let render_config = payload.render_config.clone();
     let buffers = take_browser_frame_buffers(state);
-    let live_window_height = (live_window_height > 0).then_some(live_window_height);
-    match build_browser_page_with_buffers_for_height(payload, buffers, live_window_height) {
+    let (window_width, window_height) = live_window_size;
+    let live_window_size = (window_width > 0 && window_height > 0).then_some(live_window_size);
+    match build_browser_page_with_buffers_for_window(payload, buffers, live_window_size) {
         Ok(page) => {
             eprintln!("[SilkSurf] Navigation complete: {}", page.frame.url);
             let modulepreload_urls = runtime_module_warm_urls(&page.runtime, &page.frame.url);
@@ -1055,11 +1102,11 @@ mod tests {
 
     #[test]
     fn scroll_exposed_document_rect_tracks_direction() {
-        let down = scroll_exposed_document_rect(48, 100, 4);
+        let down = scroll_exposed_document_rect(48, FRAME_WIDTH, 100, 4);
         assert_eq!(down.y, 144.0);
         assert_eq!(down.height, 4.0);
 
-        let up = scroll_exposed_document_rect(40, 100, -4);
+        let up = scroll_exposed_document_rect(40, FRAME_WIDTH, 100, -4);
         assert_eq!(up.y, 84.0);
         assert_eq!(up.height, 4.0);
     }
@@ -1204,7 +1251,7 @@ mod tests {
     #[test]
     fn focus_viewport_cache_redraw_marks_visible_content_damage() {
         assert_eq!(
-            focus_viewport_cache_redraw_mode(682, 800),
+            focus_viewport_cache_redraw_mode(682, FRAME_WIDTH, 800),
             BrowserRedrawMode::Damage(Rect {
                 x: 0.0,
                 y: BROWSER_CHROME_HEIGHT + 682.0,
@@ -1219,6 +1266,7 @@ mod tests {
         let mut state = test_browser_state("https://example.com/");
         state.frame.focus_viewport_cache = Some(FocusViewportCache {
             scroll_y: 682,
+            raster_width: FRAME_WIDTH,
             bitmap_height: 800,
             argb: vec![0x0102_0304, 0x0506_0708],
         });
@@ -1236,6 +1284,7 @@ mod tests {
         let mut state = test_browser_state("https://example.com/");
         state.frame.focus_viewport_cache = Some(FocusViewportCache {
             scroll_y: 682,
+            raster_width: FRAME_WIDTH,
             bitmap_height: FRAME_HEIGHT,
             argb: vec![0x0102_0304; (FRAME_WIDTH * FRAME_HEIGHT) as usize],
         });
@@ -1337,6 +1386,7 @@ mod tests {
             .scroll_viewport_caches
             .push(ScrollViewportCache {
                 scroll_y: 96,
+                raster_width: FRAME_WIDTH,
                 bitmap_height: FRAME_HEIGHT,
                 tag,
                 argb: vec![0x0102_0304; (FRAME_WIDTH * FRAME_HEIGHT) as usize],
@@ -1366,6 +1416,7 @@ mod tests {
             .scroll_viewport_caches
             .push(ScrollViewportCache {
                 scroll_y: 96,
+                raster_width: FRAME_WIDTH,
                 bitmap_height: FRAME_HEIGHT,
                 tag,
                 argb: vec![0x0102_0304, 0x0506_0708],
@@ -1397,6 +1448,7 @@ mod tests {
             .scroll_viewport_caches
             .push(ScrollViewportCache {
                 scroll_y: 96,
+                raster_width: FRAME_WIDTH,
                 bitmap_height: FRAME_HEIGHT,
                 tag: scroll_retained_tag_for_scroll_y(96),
                 argb: Vec::new(),
@@ -1653,5 +1705,158 @@ mod tests {
                 a: 255,
             },
         }
+    }
+
+    /*
+     * A page laid out at one width and presented at another must reselect its
+     * media branch, not merely re-raster. The fixture makes the two
+     * distinguishable: `#box` is 300 px wide only while the viewport is at
+     * least 1000 px, and `#fluid` is half the viewport whatever the width. A
+     * reflow that relayouts without rebuilding StyleIndex moves `#fluid` and
+     * leaves `#box` at the wide branch, which is the failure this asserts
+     * against.
+     */
+    fn media_branch_page() -> BrowserPagePayload {
+        BrowserPagePayload {
+            url: "https://example.com/reflow".to_string(),
+            html: concat!(
+                "<!doctype html><html><body>",
+                "<div id=\"box\"></div><div id=\"fluid\"></div>",
+                "</body></html>"
+            )
+            .to_string(),
+            css_text: stylesheet_text_with_user_agent_defaults(concat!(
+                "#box { width: 100px; height: 10px; background: #00ff00; }",
+                "@media (min-width: 1000px) { #box { width: 300px; } }",
+                "#fluid { width: 50vw; height: 10px; background: #0000ff; }"
+            )),
+            sheet_bodies: Vec::new(),
+            script_texts: Vec::new(),
+            module_texts: Vec::new(),
+            images: Vec::new(),
+            render_config: BrowserRenderConfig::default(),
+            parsed_document: None,
+        }
+    }
+
+    fn solid_color_width(
+        items: &[silksurf_render::DisplayItem],
+        want: (u8, u8, u8),
+    ) -> Option<f32> {
+        items.iter().find_map(|item| match item {
+            silksurf_render::DisplayItem::SolidColor { rect, color }
+                if (color.r, color.g, color.b) == want =>
+            {
+                Some(rect.width)
+            }
+            _ => None,
+        })
+    }
+
+    fn reflow_state(window: (u32, u32)) -> BrowserState {
+        let page = build_browser_page_with_buffers_for_window(
+            media_branch_page(),
+            BrowserFrameBuffers::default(),
+            Some(window),
+        )
+        .expect("payload builds page");
+        let mut state = test_browser_state("https://example.com/reflow");
+        state.frame = page.frame;
+        state.runtime = Some(page.runtime);
+        state
+    }
+
+    #[test]
+    fn a_page_builds_against_the_live_window_width() {
+        let wide = reflow_state((1200, 600));
+        let narrow = reflow_state((900, 600));
+
+        let wide_items = &wide.runtime.as_ref().expect("runtime").display_list.items;
+        let narrow_items = &narrow.runtime.as_ref().expect("runtime").display_list.items;
+
+        assert_eq!(solid_color_width(wide_items, (0, 255, 0)), Some(300.0));
+        assert_eq!(solid_color_width(narrow_items, (0, 255, 0)), Some(100.0));
+        assert_eq!(solid_color_width(wide_items, (0, 0, 255)), Some(600.0));
+        assert_eq!(solid_color_width(narrow_items, (0, 0, 255)), Some(450.0));
+        assert_eq!(wide.frame.raster_width, 1200);
+        assert_eq!(narrow.frame.raster_width, 900);
+    }
+
+    #[test]
+    fn a_narrower_window_reselects_the_media_branch_and_relayouts() {
+        let mut state = reflow_state((1200, 600));
+        assert_eq!(
+            solid_color_width(
+                &state.runtime.as_ref().expect("runtime").display_list.items,
+                (0, 255, 0)
+            ),
+            Some(300.0)
+        );
+
+        assert!(reflow_browser_page_for_window(&mut state, 900, 600));
+
+        let runtime = state.runtime.as_ref().expect("runtime");
+        assert_eq!(
+            solid_color_width(&runtime.display_list.items, (0, 255, 0)),
+            Some(100.0),
+            "the min-width: 1000px branch must drop out at 900 px"
+        );
+        assert_eq!(
+            solid_color_width(&runtime.display_list.items, (0, 0, 255)),
+            Some(450.0),
+            "50vw must resolve against the new viewport"
+        );
+        assert_eq!(runtime.viewport.width, 900.0);
+        assert_eq!(state.frame.raster_width, 900);
+        assert_eq!(state.frame.bitmap_raster_width, 900);
+    }
+
+    #[test]
+    fn a_reflow_drops_the_retained_viewport_caches() {
+        let mut state = reflow_state((1200, 600));
+        state.frame.focus_viewport_cache = Some(FocusViewportCache {
+            scroll_y: 0,
+            raster_width: 1200,
+            bitmap_height: 600,
+            argb: vec![0x0102_0304; 4],
+        });
+        state
+            .frame
+            .scroll_viewport_caches
+            .push(ScrollViewportCache {
+                scroll_y: 0,
+                raster_width: 1200,
+                bitmap_height: 600,
+                tag: scroll_retained_tag_for_scroll_y(0),
+                argb: vec![0x0102_0304; 4],
+                retained_sent: false,
+            });
+
+        assert!(reflow_browser_page_for_window(&mut state, 900, 600));
+
+        assert!(state.frame.focus_viewport_cache.is_none());
+        assert!(state.frame.scroll_viewport_caches.is_empty());
+    }
+
+    #[test]
+    fn an_unchanged_window_size_relayouts_nothing() {
+        let mut state = reflow_state((1200, 600));
+        assert!(!reflow_browser_page_for_window(&mut state, 1200, 600));
+    }
+
+    #[test]
+    fn a_resize_leaves_the_previous_width_bitmap_stale() {
+        let mut state = reflow_state((1200, 600));
+        state.frame.bitmap_raster_width = 1200;
+        state.frame.bitmap_height = 600;
+        state.frame.bitmap_scroll_y = 0;
+        state.frame.raster_width = 900;
+
+        assert_eq!(
+            refresh_browser_frame_bitmap(&mut state, 0, 600),
+            BrowserBitmapRefresh::Full,
+            "scroll and height agree, so only the stride can force the re-raster"
+        );
+        assert_eq!(state.frame.bitmap_raster_width, 900);
     }
 }

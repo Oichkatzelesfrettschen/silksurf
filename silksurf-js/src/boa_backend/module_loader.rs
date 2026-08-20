@@ -27,14 +27,37 @@ use boa_engine::{
 };
 use rustc_hash::FxHashMap;
 
+/// A document's import map: the top-level `imports` and the `scopes` that
+/// override them by referrer (HTML 8.1.3.8).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ImportMap {
+    /// `imports` entries as (specifier key, target).
+    pub imports: Vec<(String, String)>,
+    /// `scopes` entries as (scope prefix, that scope's `imports`). The prefix
+    /// is a URL; a scope applies to a referrer whose URL it prefixes.
+    pub scopes: Vec<(String, Vec<(String, String)>)>,
+}
+
+impl ImportMap {
+    /// The map holding only top-level `imports`.
+    #[must_use]
+    pub fn from_imports(imports: Vec<(String, String)>) -> Self {
+        Self {
+            imports,
+            scopes: Vec::new(),
+        }
+    }
+}
+
 /// Registry of fetched modules plus the specifiers that missed it.
 #[derive(Default)]
 pub(super) struct PageModuleLoader {
     modules: RefCell<FxHashMap<String, Module>>,
     missing: RefCell<Vec<String>>,
-    /// Import map `imports` entries, longest key first, applied before URL
-    /// resolution per HTML's resolve-a-module-specifier.
-    import_map: RefCell<Vec<(String, String)>>,
+    /// The document's import map, both member lists sorted longest key first
+    /// so a prefix never shadows a longer, more specific match. It applies
+    /// before URL resolution per HTML's resolve-a-module-specifier.
+    import_map: RefCell<ImportMap>,
     /// The document's address, the referrer for a specifier named by page
     /// script rather than by another module.
     document_url: RefCell<String>,
@@ -58,12 +81,31 @@ impl PageModuleLoader {
         *self.document_url.borrow_mut() = url.to_string();
     }
 
-    /// Replace the import map. Entries sort by descending key length so a
-    /// prefix mapping never shadows a longer, more specific one.
-    pub(super) fn set_import_map(&self, entries: Vec<(String, String)>) {
-        let mut entries = entries;
-        entries.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
-        *self.import_map.borrow_mut() = entries;
+    /// Replace the import map.
+    ///
+    /// Both member lists sort by descending key length so a prefix mapping
+    /// never shadows a longer, more specific one. A scope key is a URL, which
+    /// HTML resolves against the document's address before it is compared to a
+    /// referrer; a key that does not resolve names no referrer and is dropped.
+    pub(super) fn set_import_map(&self, map: ImportMap) {
+        let base = url::Url::parse(&self.document_url.borrow()).ok();
+        let mut map = map;
+        map.imports.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+        map.scopes = map
+            .scopes
+            .into_iter()
+            .filter_map(|(prefix, mut entries)| {
+                entries.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+                let resolved = base
+                    .as_ref()
+                    .and_then(|base| base.join(&prefix).ok())
+                    .map(|url| url.to_string())
+                    .or_else(|| url::Url::parse(&prefix).ok().map(|url| url.to_string()))?;
+                Some((resolved, entries))
+            })
+            .collect();
+        map.scopes.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+        *self.import_map.borrow_mut() = map;
     }
 
     fn referrer_url(&self, referrer: &Referrer) -> String {
@@ -78,8 +120,8 @@ impl PageModuleLoader {
 
     /// Apply the import map, then resolve against the referrer's URL.
     fn resolve(&self, referrer: &Referrer, specifier: &str) -> Option<String> {
-        let mapped = self.apply_import_map(specifier);
         let base = self.referrer_url(referrer);
+        let mapped = self.apply_import_map(&base, specifier);
         if let Ok(absolute) = url::Url::parse(&mapped) {
             return Some(absolute.to_string());
         }
@@ -87,21 +129,40 @@ impl PageModuleLoader {
         base.join(&mapped).ok().map(|url| url.to_string())
     }
 
-    /// HTML's import-map lookup: an exact key wins, then the longest key ending
-    /// in `/` that prefixes the specifier, with the remainder appended.
-    fn apply_import_map(&self, specifier: &str) -> String {
-        for (key, value) in self.import_map.borrow().iter() {
-            if key == specifier {
-                return value.clone();
-            }
-            if key.ends_with('/')
-                && let Some(rest) = specifier.strip_prefix(key.as_str())
+    /// HTML's import-map lookup, scoped by referrer.
+    ///
+    /// The scopes whose prefix matches the referrer's URL are consulted first,
+    /// longest prefix first, and the top-level `imports` answer when none of
+    /// them holds the specifier. Applying a scoped mapping to every referrer
+    /// would resolve the specifier to the wrong module, which is why the
+    /// referrer reaches this lookup rather than the specifier alone.
+    fn apply_import_map(&self, referrer_url: &str, specifier: &str) -> String {
+        let map = self.import_map.borrow();
+        for (prefix, entries) in &map.scopes {
+            if referrer_url.starts_with(prefix.as_str())
+                && let Some(mapped) = lookup_specifier(entries, specifier)
             {
-                return format!("{value}{rest}");
+                return mapped;
             }
         }
-        specifier.to_string()
+        lookup_specifier(&map.imports, specifier).unwrap_or_else(|| specifier.to_string())
     }
+}
+
+/// One import-map lookup: an exact key wins, then the longest key ending in
+/// `/` that prefixes the specifier, with the remainder appended.
+fn lookup_specifier(entries: &[(String, String)], specifier: &str) -> Option<String> {
+    for (key, value) in entries {
+        if key == specifier {
+            return Some(value.clone());
+        }
+        if key.ends_with('/')
+            && let Some(rest) = specifier.strip_prefix(key.as_str())
+        {
+            return Some(format!("{value}{rest}"));
+        }
+    }
+    None
 }
 
 impl ModuleLoader for PageModuleLoader {
@@ -155,11 +216,11 @@ impl ModuleLoader for PageModuleLoader {
 pub fn module_import_specifiers(
     module_url: &str,
     source: &str,
-    import_map: &[(String, String)],
+    import_map: &ImportMap,
 ) -> Result<Vec<String>, String> {
     let loader = Rc::new(PageModuleLoader::default());
     loader.set_document_url(module_url);
-    loader.set_import_map(import_map.to_vec());
+    loader.set_import_map(import_map.clone());
     let mut context = Context::builder()
         .module_loader(Rc::clone(&loader))
         .build()
@@ -178,11 +239,24 @@ pub fn module_import_specifiers(
 
 #[cfg(test)]
 mod tests {
-    use super::module_import_specifiers;
+    use super::{ImportMap, module_import_specifiers};
 
     fn specifiers(source: &str) -> Vec<String> {
-        module_import_specifiers("https://example.test/app/main.js", source, &[])
-            .expect("module parses")
+        module_import_specifiers(
+            "https://example.test/app/main.js",
+            source,
+            &ImportMap::default(),
+        )
+        .expect("module parses")
+    }
+
+    fn imports(entries: &[(&str, &str)]) -> ImportMap {
+        ImportMap::from_imports(
+            entries
+                .iter()
+                .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+                .collect(),
+        )
     }
 
     #[test]
@@ -227,7 +301,7 @@ mod tests {
 
     #[test]
     fn an_import_map_rewrites_a_bare_specifier() {
-        let map = vec![("react".to_string(), "/vendor/react.js".to_string())];
+        let map = imports(&[("react", "/vendor/react.js")]);
         let found = module_import_specifiers(
             "https://example.test/app/main.js",
             "import React from 'react';",
@@ -239,7 +313,7 @@ mod tests {
 
     #[test]
     fn an_import_map_prefix_key_maps_the_remainder() {
-        let map = vec![("lib/".to_string(), "/vendor/lib/".to_string())];
+        let map = imports(&[("lib/", "/vendor/lib/")]);
         let found = module_import_specifiers(
             "https://example.test/app/main.js",
             "import x from 'lib/deep/mod.js';",
@@ -251,10 +325,10 @@ mod tests {
 
     #[test]
     fn a_longer_import_map_key_wins_over_a_shorter_prefix() {
-        let map = vec![
-            ("lib/".to_string(), "/vendor/lib/".to_string()),
-            ("lib/special/".to_string(), "/vendor/special/".to_string()),
-        ];
+        let map = imports(&[
+            ("lib/", "/vendor/lib/"),
+            ("lib/special/", "/vendor/special/"),
+        ]);
         let found = module_import_specifiers(
             "https://example.test/app/main.js",
             "import x from 'lib/special/mod.js';",
@@ -269,8 +343,98 @@ mod tests {
         let result = module_import_specifiers(
             "https://example.test/app/main.js",
             "import {{{ from 'broken';",
-            &[],
+            &ImportMap::default(),
         );
         assert!(result.is_err());
+    }
+
+    /*
+     * A scope rewrites a specifier only for referrers its prefix covers, so
+     * these cases pair one referrer inside the scope with one outside it. A
+     * lookup that applied the scope to every referrer passes the first and
+     * fails the second.
+     */
+    fn scoped(scopes: &[(&str, &[(&str, &str)])], top: &[(&str, &str)]) -> ImportMap {
+        ImportMap {
+            imports: top
+                .iter()
+                .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+                .collect(),
+            scopes: scopes
+                .iter()
+                .map(|(prefix, entries)| {
+                    (
+                        (*prefix).to_string(),
+                        entries
+                            .iter()
+                            .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+                            .collect(),
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn a_scope_rewrites_a_specifier_for_a_referrer_it_covers() {
+        let map = scoped(
+            &[("/app/", &[("react", "/vendor/react-18.js")])],
+            &[("react", "/vendor/react-17.js")],
+        );
+        let found = module_import_specifiers(
+            "https://example.test/app/main.js",
+            "import React from 'react';",
+            &map,
+        )
+        .expect("module parses");
+        assert_eq!(found, vec!["https://example.test/vendor/react-18.js"]);
+    }
+
+    #[test]
+    fn a_referrer_outside_every_scope_takes_the_top_level_mapping() {
+        let map = scoped(
+            &[("/app/", &[("react", "/vendor/react-18.js")])],
+            &[("react", "/vendor/react-17.js")],
+        );
+        let found = module_import_specifiers(
+            "https://example.test/legacy/main.js",
+            "import React from 'react';",
+            &map,
+        )
+        .expect("module parses");
+        assert_eq!(found, vec!["https://example.test/vendor/react-17.js"]);
+    }
+
+    #[test]
+    fn the_longest_matching_scope_wins() {
+        let map = scoped(
+            &[
+                ("/app/", &[("dep", "/vendor/outer.js")]),
+                ("/app/inner/", &[("dep", "/vendor/inner.js")]),
+            ],
+            &[("dep", "/vendor/top.js")],
+        );
+        let found = module_import_specifiers(
+            "https://example.test/app/inner/main.js",
+            "import d from 'dep';",
+            &map,
+        )
+        .expect("module parses");
+        assert_eq!(found, vec!["https://example.test/vendor/inner.js"]);
+    }
+
+    #[test]
+    fn a_scope_that_omits_the_specifier_falls_through_to_imports() {
+        let map = scoped(
+            &[("/app/", &[("other", "/vendor/other.js")])],
+            &[("react", "/vendor/react-17.js")],
+        );
+        let found = module_import_specifiers(
+            "https://example.test/app/main.js",
+            "import React from 'react';",
+            &map,
+        )
+        .expect("module parses");
+        assert_eq!(found, vec!["https://example.test/vendor/react-17.js"]);
     }
 }

@@ -283,27 +283,35 @@ pub(crate) fn browser_frame_height(
 
 pub(crate) fn tile_browser_document_display_list(
     display_list: silksurf_render::DisplayList,
+    raster_width: u32,
     document_height: u32,
 ) -> silksurf_render::DisplayList {
-    display_list.with_tiles(FRAME_WIDTH, document_height, DOCUMENT_TILE_SIZE)
+    display_list.with_tiles(raster_width, document_height, DOCUMENT_TILE_SIZE)
 }
 
 pub(crate) fn rasterize_browser_viewport_into(
     display_list: &silksurf_render::DisplayList,
     scroll_y: u32,
+    raster_width: u32,
     bitmap_height: u32,
     rgba: &mut Vec<u8>,
     item_indices: &mut Vec<usize>,
 ) {
-    let viewport_list =
-        browser_viewport_display_list(display_list, scroll_y, bitmap_height, item_indices);
-    silksurf_render::rasterize_skia_into(&viewport_list, FRAME_WIDTH, bitmap_height, rgba);
-    fill_browser_toolbar_background_rgba(rgba, FRAME_WIDTH, bitmap_height);
+    let viewport_list = browser_viewport_display_list(
+        display_list,
+        scroll_y,
+        raster_width,
+        bitmap_height,
+        item_indices,
+    );
+    silksurf_render::rasterize_skia_into(&viewport_list, raster_width, bitmap_height, rgba);
+    fill_browser_toolbar_background_rgba(rgba, raster_width, bitmap_height);
 }
 
 pub(crate) fn rasterize_browser_viewport_argb_preferred(
     display_list: &silksurf_render::DisplayList,
     scroll_y: u32,
+    raster_width: u32,
     bitmap_height: u32,
     rgba: &mut Vec<u8>,
     argb: &mut Vec<u32>,
@@ -312,13 +320,21 @@ pub(crate) fn rasterize_browser_viewport_argb_preferred(
     if rasterize_browser_viewport_argb_direct(
         display_list,
         scroll_y,
+        raster_width,
         bitmap_height,
         argb,
         item_indices,
     ) {
         return true;
     }
-    rasterize_browser_viewport_into(display_list, scroll_y, bitmap_height, rgba, item_indices);
+    rasterize_browser_viewport_into(
+        display_list,
+        scroll_y,
+        raster_width,
+        bitmap_height,
+        rgba,
+        item_indices,
+    );
     rgba_bytes_to_argb_words_into(rgba, argb);
     false
 }
@@ -338,6 +354,7 @@ pub(crate) fn first_prepared_focus_target(
 pub(crate) fn render_focus_viewport_cache(
     display_list: &silksurf_render::DisplayList,
     scroll_y: u32,
+    raster_width: u32,
     bitmap_height: u32,
 ) -> FocusViewportCache {
     let mut rgba = Vec::new();
@@ -346,6 +363,7 @@ pub(crate) fn render_focus_viewport_cache(
     rasterize_browser_viewport_argb_preferred(
         display_list,
         scroll_y,
+        raster_width,
         bitmap_height,
         &mut rgba,
         &mut argb,
@@ -353,6 +371,7 @@ pub(crate) fn render_focus_viewport_cache(
     );
     FocusViewportCache {
         scroll_y,
+        raster_width,
         bitmap_height,
         argb,
     }
@@ -385,6 +404,7 @@ pub(crate) fn focus_target_scroll(
 pub(crate) fn rasterize_browser_document_damage_into(
     display_list: &silksurf_render::DisplayList,
     scroll_y: u32,
+    raster_width: u32,
     bitmap_height: u32,
     damage: Rect,
     rgba: &mut Vec<u8>,
@@ -392,7 +412,7 @@ pub(crate) fn rasterize_browser_document_damage_into(
 ) {
     silksurf_render::rasterize_skia_translated_damage_into(
         display_list,
-        FRAME_WIDTH,
+        raster_width,
         bitmap_height,
         viewport_damage_rect(damage, scroll_y),
         damage,
@@ -405,13 +425,14 @@ pub(crate) fn rasterize_browser_document_damage_into(
 pub(crate) fn rasterize_browser_document_damage_scratch(
     display_list: &silksurf_render::DisplayList,
     scroll_y: u32,
+    raster_width: u32,
     bitmap_height: u32,
     damage: Rect,
     scratch: &mut silksurf_render::DamageScratch,
 ) {
     silksurf_render::rasterize_skia_translated_damage_scratch(
         display_list,
-        FRAME_WIDTH,
+        raster_width,
         bitmap_height,
         viewport_damage_rect(damage, scroll_y),
         damage,
@@ -502,13 +523,14 @@ pub(crate) fn fill_browser_toolbar_background_argb(pixels: &mut [u32], width: u3
 pub(crate) fn rasterize_browser_viewport_argb_direct(
     display_list: &silksurf_render::DisplayList,
     scroll_y: u32,
+    raster_width: u32,
     bitmap_height: u32,
     pixels: &mut Vec<u32>,
     item_indices: &mut Vec<usize>,
 ) -> bool {
     let trace_argb = trace_argb_direct_enabled();
     let source_start = std::time::Instant::now();
-    let viewport = scroll_visible_document_rect(scroll_y, bitmap_height);
+    let viewport = scroll_visible_document_rect(scroll_y, raster_width, bitmap_height);
     browser_viewport_source_item_indices(display_list, viewport, item_indices);
     let source_elapsed = source_start.elapsed();
     let support_start = std::time::Instant::now();
@@ -519,7 +541,7 @@ pub(crate) fn rasterize_browser_viewport_argb_direct(
         return false;
     }
     let resize_start = std::time::Instant::now();
-    resize_argb_words_uninit(pixels, FRAME_WIDTH as usize * bitmap_height as usize);
+    resize_argb_words_uninit(pixels, raster_width as usize * bitmap_height as usize);
     let resize_elapsed = resize_start.elapsed();
     let fill_start = std::time::Instant::now();
     let default_filled =
@@ -529,14 +551,14 @@ pub(crate) fn rasterize_browser_viewport_argb_direct(
     }
     let fill_elapsed = fill_start.elapsed();
     let toolbar_start = std::time::Instant::now();
-    fill_browser_toolbar_background_argb(pixels, FRAME_WIDTH, bitmap_height);
+    fill_browser_toolbar_background_argb(pixels, raster_width, bitmap_height);
     let toolbar_elapsed = toolbar_start.elapsed();
     let paint_start = std::time::Instant::now();
     let mut painted_items = 0usize;
     for item in display_items_for_indices(display_list, item_indices) {
         if display_item_intersects_viewport(item, viewport) {
             painted_items += 1;
-            paint_viewport_argb_direct_item(pixels, bitmap_height, item, scroll_y);
+            paint_viewport_argb_direct_item(pixels, raster_width, bitmap_height, item, scroll_y);
         }
     }
     trace_argb_direct_phases(
@@ -581,13 +603,14 @@ pub(crate) fn trace_argb_direct_phases(
 pub(crate) fn rasterize_browser_document_damage_argb_direct(
     display_list: &silksurf_render::DisplayList,
     scroll_y: u32,
+    raster_width: u32,
     bitmap_height: u32,
     damage: Rect,
     pixels: &mut [u32],
     item_indices: &mut Vec<usize>,
 ) -> bool {
     let viewport_damage = viewport_damage_rect(damage, scroll_y);
-    let Some(clip) = pixel_rect_from_rect(viewport_damage, FRAME_WIDTH, bitmap_height) else {
+    let Some(clip) = pixel_rect_from_rect(viewport_damage, raster_width, bitmap_height) else {
         return true;
     };
     browser_viewport_source_item_indices(display_list, damage, item_indices);
@@ -598,7 +621,7 @@ pub(crate) fn rasterize_browser_document_damage_argb_direct(
     if viewport_argb_direct_needs_default_fill(display_list, item_indices, damage) {
         fill_argb_rect(
             pixels,
-            FRAME_WIDTH,
+            raster_width,
             bitmap_height,
             clip.x,
             clip.y,
@@ -609,7 +632,14 @@ pub(crate) fn rasterize_browser_document_damage_argb_direct(
     }
     for item in display_items_for_indices(display_list, item_indices) {
         if display_item_intersects_viewport(item, damage) {
-            paint_viewport_argb_direct_item_clipped(pixels, bitmap_height, item, scroll_y, clip);
+            paint_viewport_argb_direct_item_clipped(
+                pixels,
+                raster_width,
+                bitmap_height,
+                item,
+                scroll_y,
+                clip,
+            );
         }
     }
     true
@@ -738,6 +768,7 @@ pub(crate) fn trace_viewport_argb_direct_miss(
 
 pub(crate) fn paint_viewport_argb_direct_item(
     pixels: &mut [u32],
+    raster_width: u32,
     bitmap_height: u32,
     item: &silksurf_render::DisplayItem,
     scroll_y: u32,
@@ -747,6 +778,7 @@ pub(crate) fn paint_viewport_argb_direct_item(
         | silksurf_render::DisplayItem::RoundedRect { rect, color, .. } => {
             fill_shifted_argb_rect(
                 pixels,
+                raster_width,
                 bitmap_height,
                 *rect,
                 scroll_y,
@@ -762,6 +794,7 @@ pub(crate) fn paint_viewport_argb_direct_item(
         } => {
             draw_shifted_argb_text(
                 pixels,
+                raster_width,
                 bitmap_height,
                 *rect,
                 scroll_y,
@@ -771,7 +804,7 @@ pub(crate) fn paint_viewport_argb_direct_item(
             );
         }
         silksurf_render::DisplayItem::Image { rect, image } => {
-            blit_shifted_argb_image(pixels, bitmap_height, *rect, scroll_y, image);
+            blit_shifted_argb_image(pixels, raster_width, bitmap_height, *rect, scroll_y, image);
         }
         silksurf_render::DisplayItem::BoxShadow { .. }
         | silksurf_render::DisplayItem::LinearGradient { .. } => {}
@@ -780,6 +813,7 @@ pub(crate) fn paint_viewport_argb_direct_item(
 
 pub(crate) fn paint_viewport_argb_direct_item_clipped(
     pixels: &mut [u32],
+    raster_width: u32,
     bitmap_height: u32,
     item: &silksurf_render::DisplayItem,
     scroll_y: u32,
@@ -790,6 +824,7 @@ pub(crate) fn paint_viewport_argb_direct_item_clipped(
         | silksurf_render::DisplayItem::RoundedRect { rect, color, .. } => {
             fill_shifted_argb_rect_clipped(
                 pixels,
+                raster_width,
                 bitmap_height,
                 *rect,
                 scroll_y,
@@ -806,6 +841,7 @@ pub(crate) fn paint_viewport_argb_direct_item_clipped(
         } => {
             draw_shifted_argb_text_clipped(
                 pixels,
+                raster_width,
                 bitmap_height,
                 *rect,
                 scroll_y,
@@ -816,7 +852,15 @@ pub(crate) fn paint_viewport_argb_direct_item_clipped(
             );
         }
         silksurf_render::DisplayItem::Image { rect, image } => {
-            blit_shifted_argb_image_clipped(pixels, bitmap_height, *rect, scroll_y, image, clip);
+            blit_shifted_argb_image_clipped(
+                pixels,
+                raster_width,
+                bitmap_height,
+                *rect,
+                scroll_y,
+                image,
+                clip,
+            );
         }
         silksurf_render::DisplayItem::BoxShadow { .. }
         | silksurf_render::DisplayItem::LinearGradient { .. } => {}
@@ -825,16 +869,17 @@ pub(crate) fn paint_viewport_argb_direct_item_clipped(
 
 pub(crate) fn fill_shifted_argb_rect(
     pixels: &mut [u32],
+    raster_width: u32,
     bitmap_height: u32,
     rect: Rect,
     scroll_y: u32,
     color: u32,
 ) {
     let shifted = viewport_damage_rect(rect, scroll_y);
-    if let Some(pixel_rect) = pixel_rect_from_rect(shifted, FRAME_WIDTH, bitmap_height) {
+    if let Some(pixel_rect) = pixel_rect_from_rect(shifted, raster_width, bitmap_height) {
         fill_argb_rect(
             pixels,
-            FRAME_WIDTH,
+            raster_width,
             bitmap_height,
             pixel_rect.x,
             pixel_rect.y,
@@ -847,6 +892,7 @@ pub(crate) fn fill_shifted_argb_rect(
 
 pub(crate) fn fill_shifted_argb_rect_clipped(
     pixels: &mut [u32],
+    raster_width: u32,
     bitmap_height: u32,
     rect: Rect,
     scroll_y: u32,
@@ -854,7 +900,7 @@ pub(crate) fn fill_shifted_argb_rect_clipped(
     clip: PixelRect,
 ) {
     let shifted = viewport_damage_rect(rect, scroll_y);
-    let Some(pixel_rect) = pixel_rect_from_rect(shifted, FRAME_WIDTH, bitmap_height) else {
+    let Some(pixel_rect) = pixel_rect_from_rect(shifted, raster_width, bitmap_height) else {
         return;
     };
     let Some(pixel_rect) = pixel_rect_intersection(pixel_rect, clip) else {
@@ -862,7 +908,7 @@ pub(crate) fn fill_shifted_argb_rect_clipped(
     };
     fill_argb_rect(
         pixels,
-        FRAME_WIDTH,
+        raster_width,
         bitmap_height,
         pixel_rect.x,
         pixel_rect.y,
@@ -874,6 +920,7 @@ pub(crate) fn fill_shifted_argb_rect_clipped(
 
 pub(crate) fn draw_shifted_argb_text(
     pixels: &mut [u32],
+    raster_width: u32,
     bitmap_height: u32,
     rect: Rect,
     scroll_y: u32,
@@ -882,10 +929,10 @@ pub(crate) fn draw_shifted_argb_text(
     color: silksurf_css::Color,
 ) {
     let shifted = viewport_damage_rect(rect, scroll_y);
-    if let Some(pixel_rect) = pixel_rect_from_rect(shifted, FRAME_WIDTH, bitmap_height) {
+    if let Some(pixel_rect) = pixel_rect_from_rect(shifted, raster_width, bitmap_height) {
         let _ = draw_page_bitmap_text_clipped(
             pixels,
-            FRAME_WIDTH,
+            raster_width,
             bitmap_height,
             shifted.x,
             shifted.y,
@@ -899,6 +946,7 @@ pub(crate) fn draw_shifted_argb_text(
 
 pub(crate) fn draw_shifted_argb_text_clipped(
     pixels: &mut [u32],
+    raster_width: u32,
     bitmap_height: u32,
     rect: Rect,
     scroll_y: u32,
@@ -910,7 +958,7 @@ pub(crate) fn draw_shifted_argb_text_clipped(
     let shifted = viewport_damage_rect(rect, scroll_y);
     let _ = draw_page_bitmap_text_clipped(
         pixels,
-        FRAME_WIDTH,
+        raster_width,
         bitmap_height,
         shifted.x,
         shifted.y,
@@ -923,20 +971,22 @@ pub(crate) fn draw_shifted_argb_text_clipped(
 
 pub(crate) fn blit_shifted_argb_image(
     pixels: &mut [u32],
+    raster_width: u32,
     bitmap_height: u32,
     rect: Rect,
     scroll_y: u32,
     image: &silksurf_render::ImageSurface,
 ) {
     let shifted = viewport_damage_rect(rect, scroll_y);
-    let Some(dst) = pixel_rect_from_rect(shifted, FRAME_WIDTH, bitmap_height) else {
+    let Some(dst) = pixel_rect_from_rect(shifted, raster_width, bitmap_height) else {
         return;
     };
-    blit_argb_image_rect(pixels, shifted, image, dst);
+    blit_argb_image_rect(pixels, raster_width, shifted, image, dst);
 }
 
 pub(crate) fn blit_shifted_argb_image_clipped(
     pixels: &mut [u32],
+    raster_width: u32,
     bitmap_height: u32,
     rect: Rect,
     scroll_y: u32,
@@ -944,17 +994,18 @@ pub(crate) fn blit_shifted_argb_image_clipped(
     clip: PixelRect,
 ) {
     let shifted = viewport_damage_rect(rect, scroll_y);
-    let Some(dst) = pixel_rect_from_rect(shifted, FRAME_WIDTH, bitmap_height) else {
+    let Some(dst) = pixel_rect_from_rect(shifted, raster_width, bitmap_height) else {
         return;
     };
     let Some(dst) = pixel_rect_intersection(dst, clip) else {
         return;
     };
-    blit_argb_image_rect(pixels, shifted, image, dst);
+    blit_argb_image_rect(pixels, raster_width, shifted, image, dst);
 }
 
 pub(crate) fn blit_argb_image_rect(
     pixels: &mut [u32],
+    raster_width: u32,
     shifted: Rect,
     image: &silksurf_render::ImageSurface,
     dst: PixelRect,
@@ -967,7 +1018,7 @@ pub(crate) fn blit_argb_image_rect(
         for x in dst.x..dst.x + dst.width {
             let src_x = image_source_coord_argb(x as f32 - shifted.x, dst_width, image.width);
             let src = (src_y as usize * surface_width + src_x as usize) * 4;
-            let dst = y as usize * FRAME_WIDTH as usize + x as usize;
+            let dst = y as usize * raster_width as usize + x as usize;
             copy_image_pixel_argb(pixels, dst, &image.rgba, src);
         }
     }
@@ -1018,12 +1069,25 @@ pub(crate) fn viewport_damage_rect(damage: Rect, scroll_y: u32) -> Rect {
     }
 }
 
+/*
+ * refresh_browser_frame_bitmap -- bring the window bitmap up to date.
+ *
+ * Scroll offset, row count, and row stride together decide whether the words
+ * in `frame.argb` still describe the surface. A pure width change leaves the
+ * first two equal, so the stride joins the key; without it a resize presents
+ * the previous width's bitmap. The scroll-reuse path shifts rows at one
+ * stride, so a width that moved skips it and re-rasters.
+ */
 pub(crate) fn refresh_browser_frame_bitmap(
     state: &mut BrowserState,
     scroll_y: u32,
     bitmap_height: u32,
 ) -> BrowserBitmapRefresh {
-    if state.frame.bitmap_scroll_y == scroll_y && state.frame.bitmap_height == bitmap_height {
+    let raster_width = state.frame.raster_width;
+    if state.frame.bitmap_scroll_y == scroll_y
+        && state.frame.bitmap_height == bitmap_height
+        && state.frame.bitmap_raster_width == raster_width
+    {
         return BrowserBitmapRefresh::Clean;
     }
     if let Some(damage) = scroll_browser_frame_bitmap(state, scroll_y, bitmap_height) {
@@ -1034,17 +1098,19 @@ pub(crate) fn refresh_browser_frame_bitmap(
     };
     trace_visible_document_raster(
         &runtime.display_list,
-        scroll_visible_document_rect(scroll_y, bitmap_height),
+        scroll_visible_document_rect(scroll_y, raster_width, bitmap_height),
     );
     rasterize_browser_viewport_argb_preferred(
         &runtime.display_list,
         scroll_y,
+        raster_width,
         bitmap_height,
         &mut runtime.rgba,
         &mut state.frame.argb,
         &mut runtime.viewport_item_indices,
     );
     state.frame.bitmap_height = bitmap_height;
+    state.frame.bitmap_raster_width = raster_width;
     state.frame.bitmap_scroll_y = scroll_y;
     BrowserBitmapRefresh::Full
 }
@@ -1054,7 +1120,11 @@ pub(crate) fn scroll_browser_frame_bitmap(
     scroll_y: u32,
     bitmap_height: u32,
 ) -> Option<Rect> {
-    if state.frame.bitmap_height != bitmap_height || state.runtime.is_none() {
+    let raster_width = state.frame.raster_width;
+    if state.frame.bitmap_height != bitmap_height
+        || state.frame.bitmap_raster_width != raster_width
+        || state.runtime.is_none()
+    {
         return None;
     }
     let old_scroll_y = state.frame.bitmap_scroll_y;
@@ -1072,17 +1142,19 @@ pub(crate) fn scroll_browser_frame_bitmap(
     let runtime = state.runtime.as_mut()?;
     if !shift_browser_argb_content_rows(
         &mut state.frame.argb,
-        FRAME_WIDTH,
+        raster_width,
         chrome_rows,
         content_rows,
         scroll_delta,
     ) {
         return None;
     }
-    let exposed_damage = scroll_exposed_document_rect(scroll_y, bitmap_height, scroll_delta);
+    let exposed_damage =
+        scroll_exposed_document_rect(scroll_y, raster_width, bitmap_height, scroll_delta);
     if !rasterize_browser_document_damage_argb_direct(
         &runtime.display_list,
         scroll_y,
+        raster_width,
         bitmap_height,
         exposed_damage,
         &mut state.frame.argb,
@@ -1091,6 +1163,7 @@ pub(crate) fn scroll_browser_frame_bitmap(
         rasterize_browser_document_damage_into(
             &runtime.display_list,
             scroll_y,
+            raster_width,
             bitmap_height,
             exposed_damage,
             &mut runtime.rgba,
@@ -1099,12 +1172,12 @@ pub(crate) fn scroll_browser_frame_bitmap(
         if !sync_argb_damage_from_scratch(
             &runtime.damage_scratch,
             &mut state.frame.argb,
-            FRAME_WIDTH,
+            raster_width,
         ) {
             sync_argb_damage_from_rgba(
                 &runtime.rgba,
                 &mut state.frame.argb,
-                FRAME_WIDTH,
+                raster_width,
                 bitmap_height,
                 viewport_damage_rect(exposed_damage, scroll_y),
             );
@@ -1120,6 +1193,7 @@ pub(crate) fn scroll_reuse_is_profitable(content_rows: u32, delta_rows: u32) -> 
 
 pub(crate) fn scroll_exposed_document_rect(
     scroll_y: u32,
+    raster_width: u32,
     bitmap_height: u32,
     scroll_delta: i64,
 ) -> Rect {
@@ -1136,17 +1210,21 @@ pub(crate) fn scroll_exposed_document_rect(
     Rect {
         x: 0.0,
         y: y as f32,
-        width: FRAME_WIDTH as f32,
+        width: raster_width as f32,
         height: delta_rows as f32,
     }
 }
 
-pub(crate) fn scroll_visible_document_rect(scroll_y: u32, bitmap_height: u32) -> Rect {
+pub(crate) fn scroll_visible_document_rect(
+    scroll_y: u32,
+    raster_width: u32,
+    bitmap_height: u32,
+) -> Rect {
     let chrome_rows = BROWSER_CHROME_HEIGHT as u32;
     Rect {
         x: 0.0,
         y: chrome_rows.saturating_add(scroll_y) as f32,
-        width: FRAME_WIDTH as f32,
+        width: raster_width as f32,
         height: bitmap_height.saturating_sub(chrome_rows) as f32,
     }
 }
@@ -1229,13 +1307,14 @@ pub(crate) fn trace_browser_bitmap_refresh(
 pub(crate) fn browser_viewport_display_list(
     display_list: &silksurf_render::DisplayList,
     scroll_y: u32,
+    raster_width: u32,
     bitmap_height: u32,
     item_indices: &mut Vec<usize>,
 ) -> silksurf_render::DisplayList {
     let viewport = Rect {
         x: 0.0,
         y: BROWSER_CHROME_HEIGHT + scroll_y as f32,
-        width: FRAME_WIDTH as f32,
+        width: raster_width as f32,
         height: bitmap_height.saturating_sub(BROWSER_CHROME_HEIGHT as u32) as f32,
     };
     browser_viewport_source_item_indices(display_list, viewport, item_indices);
@@ -3350,6 +3429,7 @@ mod tests {
         assert!(rasterize_browser_viewport_argb_direct(
             &display_list,
             0,
+            FRAME_WIDTH,
             96,
             &mut pixels,
             &mut item_indices
@@ -3386,6 +3466,7 @@ mod tests {
         assert!(!rasterize_browser_viewport_argb_direct(
             &display_list,
             0,
+            FRAME_WIDTH,
             96,
             &mut pixels,
             &mut item_indices
@@ -3414,6 +3495,7 @@ mod tests {
         assert!(rasterize_browser_viewport_argb_preferred(
             &display_list,
             0,
+            FRAME_WIDTH,
             96,
             &mut rgba,
             &mut argb,
@@ -3445,6 +3527,7 @@ mod tests {
         assert!(!rasterize_browser_viewport_argb_preferred(
             &display_list,
             0,
+            FRAME_WIDTH,
             96,
             &mut rgba,
             &mut argb,
@@ -3480,6 +3563,7 @@ mod tests {
         assert!(rasterize_browser_document_damage_argb_direct(
             &display_list,
             0,
+            FRAME_WIDTH,
             96,
             damage,
             &mut pixels,
@@ -3526,6 +3610,7 @@ mod tests {
         assert!(!rasterize_browser_document_damage_argb_direct(
             &display_list,
             0,
+            FRAME_WIDTH,
             96,
             damage,
             &mut pixels,

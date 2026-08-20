@@ -33,7 +33,11 @@ pub(crate) fn collect_module_script_warm_urls(
         urls.push(url);
     }
     if let Some(text) = inline_module_script_text(dom, node) {
-        urls.extend(module_static_import_urls(base_url, &text, &[]));
+        urls.extend(module_static_import_urls(
+            base_url,
+            &text,
+            &silksurf_js::ImportMap::default(),
+        ));
     }
     if let Ok(children) = dom.children(node) {
         for &child in children {
@@ -344,7 +348,7 @@ pub(crate) fn load_document_module_texts(
 pub(crate) fn fetch_module_graph_texts(
     renderer: &mut SpeculativeRenderer,
     roots: &[String],
-    import_map: &[(String, String)],
+    import_map: &silksurf_js::ImportMap,
 ) -> Vec<(String, String)> {
     let mut seen = HashSet::new();
     let mut pending = dedupe_resource_urls(roots);
@@ -431,7 +435,10 @@ pub(crate) fn preload_module_scripts_with_renderer(
             return;
         }
         let fetched = preload_module_round(renderer, &round_urls);
-        pending.extend(module_graph_child_urls(&fetched, &[]));
+        pending.extend(module_graph_child_urls(
+            &fetched,
+            &silksurf_js::ImportMap::default(),
+        ));
         eprintln!(
             "[SilkSurf] Modulepreload graph round {round}: {} fetched, {} pending",
             fetched.len(),
@@ -490,7 +497,7 @@ pub(crate) fn fetch_module_round_texts(
 
 pub(crate) fn module_graph_child_urls(
     fetched: &[(String, String)],
-    import_map: &[(String, String)],
+    import_map: &silksurf_js::ImportMap,
 ) -> Vec<String> {
     fetched
         .iter()
@@ -514,52 +521,75 @@ pub(crate) fn module_graph_child_urls(
 pub(crate) fn module_static_import_urls(
     base_url: &str,
     source: &str,
-    import_map: &[(String, String)],
+    import_map: &silksurf_js::ImportMap,
 ) -> Vec<String> {
     silksurf_js::module_import_specifiers(base_url, source, import_map).unwrap_or_default()
 }
 
 /*
- * document_import_map -- the `imports` entries of the document's import map.
+ * document_import_map -- the document's import map, both members.
  *
- * HTML allows one import map per document, and it must precede the first module
- * load. The `scopes` member is not read: a scoped mapping changes resolution by
- * referrer, and applying only the top-level `imports` to every referrer would
- * resolve a scoped specifier to the wrong module. Tracked in
- * docs/roadmaps/SPA-CAPABILITY-ROADMAP.md under import-map-scopes.
+ * HTML allows one import map per document, and it must precede the first
+ * module load. `imports` maps a specifier for every referrer; `scopes` maps it
+ * for the referrers one URL prefix covers, and `PageModuleLoader` consults the
+ * longest matching scope before falling through to `imports`.
  */
 pub(crate) fn document_import_map(
     dom: &silksurf_dom::Dom,
     root: silksurf_dom::NodeId,
-) -> Vec<(String, String)> {
-    let mut entries = Vec::new();
-    collect_import_map(dom, root, &mut entries);
-    entries
+) -> silksurf_js::ImportMap {
+    let mut map = silksurf_js::ImportMap::default();
+    let mut found = false;
+    collect_import_map(dom, root, &mut map, &mut found);
+    map
+}
+
+/// The (specifier, target) pairs of one import-map member object. A target
+/// that is not a string names no module and is dropped.
+fn import_map_entries(object: &serde_json::Value) -> Vec<(String, String)> {
+    object
+        .as_object()
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|(specifier, target)| {
+                    target
+                        .as_str()
+                        .map(|target| (specifier.clone(), target.to_string()))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn collect_import_map(
     dom: &silksurf_dom::Dom,
     node: silksurf_dom::NodeId,
-    entries: &mut Vec<(String, String)>,
+    map: &mut silksurf_js::ImportMap,
+    found: &mut bool,
 ) {
-    if entries.is_empty()
+    if !*found
         && dom.element_name(node).ok().flatten() == Some("script")
         && script_type_value(dom.attributes(node).ok())
             .is_some_and(|kind| kind.trim().eq_ignore_ascii_case("importmap"))
         && let Ok(parsed) =
             serde_json::from_str::<serde_json::Value>(&script_text_content(dom, node))
-        && let Some(imports) = parsed.get("imports").and_then(serde_json::Value::as_object)
     {
-        for (specifier, target) in imports {
-            if let Some(target) = target.as_str() {
-                entries.push((specifier.clone(), target.to_string()));
-            }
+        *found = true;
+        if let Some(imports) = parsed.get("imports") {
+            map.imports = import_map_entries(imports);
+        }
+        if let Some(scopes) = parsed.get("scopes").and_then(serde_json::Value::as_object) {
+            map.scopes = scopes
+                .iter()
+                .map(|(prefix, entries)| (prefix.clone(), import_map_entries(entries)))
+                .collect();
         }
         return;
     }
     if let Ok(children) = dom.children(node) {
         for &child in children {
-            collect_import_map(dom, child, entries);
+            collect_import_map(dom, child, map, found);
         }
     }
 }
@@ -1172,7 +1202,11 @@ mod tests {
             export * from './all.mjs';
         "#;
 
-        let mut found = module_static_import_urls("https://example.com/app/entry.mjs", source, &[]);
+        let mut found = module_static_import_urls(
+            "https://example.com/app/entry.mjs",
+            source,
+            &silksurf_js::ImportMap::default(),
+        );
         found.sort();
         assert_eq!(
             found,
@@ -1193,7 +1227,7 @@ mod tests {
             module_static_import_urls(
                 "https://example.com/app/entry.mjs",
                 "import{r as e}from\"./runtime.mjs\";export default e;",
-                &[],
+                &silksurf_js::ImportMap::default(),
             ),
             vec!["https://example.com/app/runtime.mjs".to_string()]
         );
@@ -1210,7 +1244,10 @@ mod tests {
         let map = document_import_map(&document.dom, document.document);
         assert_eq!(
             map,
-            vec![("react".to_string(), "/vendor/react.js".to_string())]
+            silksurf_js::ImportMap::from_imports(vec![(
+                "react".to_string(),
+                "/vendor/react.js".to_string()
+            )])
         );
         assert_eq!(
             module_static_import_urls(
@@ -1219,6 +1256,36 @@ mod tests {
                 &map,
             ),
             vec!["https://example.com/vendor/react.js".to_string()]
+        );
+    }
+
+    #[test]
+    fn the_document_import_map_supplies_scoped_targets() {
+        let document = silksurf_engine::parse_html(
+            "<html><head>\
+             <script type=\"importmap\">{\
+             \"imports\":{\"react\":\"/vendor/react-17.js\"},\
+             \"scopes\":{\"/app/\":{\"react\":\"/vendor/react-18.js\"}}}</script>\
+             </head></html>",
+        )
+        .expect("fixture parses");
+        let map = document_import_map(&document.dom, document.document);
+        assert_eq!(map.scopes.len(), 1);
+        assert_eq!(
+            module_static_import_urls(
+                "https://example.com/app/entry.mjs",
+                "import React from 'react';",
+                &map,
+            ),
+            vec!["https://example.com/vendor/react-18.js".to_string()]
+        );
+        assert_eq!(
+            module_static_import_urls(
+                "https://example.com/legacy/entry.mjs",
+                "import React from 'react';",
+                &map,
+            ),
+            vec!["https://example.com/vendor/react-17.js".to_string()]
         );
     }
 }

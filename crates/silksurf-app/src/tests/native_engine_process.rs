@@ -411,7 +411,7 @@ fn stop_discards_a_stale_navigation_completion() {
 fn replacement_navigation_reuses_the_previous_viewport_buffers() {
     let request = BrowserNavigationRequest::get("about:blank#buffers".to_string());
     let payload = fixture_payload(request, BrowserRenderConfig::default());
-    let mut page = build_browser_page_with_buffers_for_height(
+    let mut page = build_browser_page_with_buffers_for_window(
         payload,
         BrowserFrameBuffers::default(),
         None,

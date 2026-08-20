@@ -152,3 +152,41 @@ body { content: ""#
         vec![CssToken::String("\u{0160}".to_string())]
     );
 }
+
+/*
+ * `CssTokenizer::finish` appends Eof, and `parse_declaration_list` hands the
+ * whole stream to the declaration parser. A `style` attribute whose last
+ * declaration carries no terminator therefore ended with Eof sitting after
+ * `important`, where `consume_important` reads for it. These cases pin the
+ * value's end at the stream's end.
+ */
+
+#[test]
+fn a_final_declaration_without_a_terminator_keeps_its_importance() {
+    let declarations =
+        silksurf_css::parse_declaration_list("color: red !important").expect("declarations parse");
+    assert_eq!(declarations.len(), 1);
+    assert!(declarations[0].important);
+}
+
+#[test]
+fn a_final_declaration_without_a_terminator_carries_no_eof_token() {
+    let declarations =
+        silksurf_css::parse_declaration_list("color: red").expect("declarations parse");
+    assert_eq!(declarations.len(), 1);
+    assert!(
+        !declarations[0]
+            .value
+            .iter()
+            .any(|token| matches!(token, silksurf_css::CssToken::Eof))
+    );
+}
+
+#[test]
+fn a_terminated_and_an_unterminated_declaration_parse_alike() {
+    let terminated =
+        silksurf_css::parse_declaration_list("color: red !important;").expect("declarations parse");
+    let bare =
+        silksurf_css::parse_declaration_list("color: red !important").expect("declarations parse");
+    assert_eq!(terminated, bare);
+}

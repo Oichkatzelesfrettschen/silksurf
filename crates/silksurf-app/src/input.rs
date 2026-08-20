@@ -77,9 +77,10 @@ pub(crate) fn apply_browser_scroll(
         runtime.window_width,
         runtime.window_height,
     ) {
+        let raster_width = state.frame.raster_width;
         mark_redraw(
             &mut state,
-            scroll_viewport_cache_redraw_mode(scroll_y, bitmap_height),
+            scroll_viewport_cache_redraw_mode(scroll_y, raster_width, bitmap_height),
         );
         state.retained_present = Some(retained);
     } else {
@@ -672,7 +673,8 @@ pub(crate) fn focus_next_page_input_from_runtime(runtime: &BrowserInputRuntime<'
         let focus_cache_retained = state.frame.focus_viewport_retained_sent;
         prepare_focus_viewport_cache(&mut state, scroll_y, bitmap_height);
         if apply_focus_viewport_cache(&mut state, scroll_y, bitmap_height) {
-            let redraw_mode = focus_viewport_cache_redraw_mode(scroll_y, bitmap_height);
+            let redraw_mode =
+                focus_viewport_cache_redraw_mode(scroll_y, state.frame.raster_width, bitmap_height);
             mark_redraw(&mut state, redraw_mode);
             if focus_cache_retained {
                 state.retained_present = focus_viewport_retained_present(
@@ -693,9 +695,14 @@ pub(crate) fn focus_next_page_input_from_runtime(runtime: &BrowserInputRuntime<'
 
 pub(crate) fn focus_viewport_cache_redraw_mode(
     scroll_y: u32,
+    raster_width: u32,
     bitmap_height: u32,
 ) -> BrowserRedrawMode {
-    BrowserRedrawMode::Damage(scroll_visible_document_rect(scroll_y, bitmap_height))
+    BrowserRedrawMode::Damage(scroll_visible_document_rect(
+        scroll_y,
+        raster_width,
+        bitmap_height,
+    ))
 }
 
 pub(crate) fn focus_viewport_retained_present(
@@ -758,9 +765,11 @@ pub(crate) fn prepare_focus_viewport_cache(
     let Some(runtime) = state.runtime.as_ref() else {
         return;
     };
+    let raster_width = state.frame.raster_width;
     state.frame.focus_viewport_cache = Some(render_focus_viewport_cache(
         &runtime.display_list,
         scroll_y,
+        raster_width,
         bitmap_height,
     ));
     state.frame.focus_viewport_retained_sent = false;
@@ -768,9 +777,14 @@ pub(crate) fn prepare_focus_viewport_cache(
 
 pub(crate) fn scroll_viewport_cache_redraw_mode(
     scroll_y: u32,
+    raster_width: u32,
     bitmap_height: u32,
 ) -> BrowserRedrawMode {
-    BrowserRedrawMode::Damage(scroll_visible_document_rect(scroll_y, bitmap_height))
+    BrowserRedrawMode::Damage(scroll_visible_document_rect(
+        scroll_y,
+        raster_width,
+        bitmap_height,
+    ))
 }
 
 pub(crate) fn apply_scroll_viewport_cache(
@@ -814,7 +828,8 @@ pub(crate) fn scroll_viewport_retained_present(
     window_width: u32,
     window_height: u32,
 ) -> Option<BrowserRetainedPresent> {
-    let redraw_mode = scroll_viewport_cache_redraw_mode(scroll_y, bitmap_height);
+    let redraw_mode =
+        scroll_viewport_cache_redraw_mode(scroll_y, state.frame.raster_width, bitmap_height);
     let damage = browser_present_damage(
         redraw_mode,
         state.frame.raster_height,

@@ -203,6 +203,58 @@ impl ResponseCache {
         self.entries.insert(url, entry);
     }
 
+    /*
+     * refresh_from_not_modified -- turn a 304 into the stored representation.
+     *
+     * RFC 9111, 4.3.4: a 304 means the stored response is still current, and
+     * its headers update from the 304's. The entry's freshness restarts from
+     * now, because the origin has just spoken about it; the body, status, and
+     * validators stay, because a 304 carries none of them.
+     *
+     * Returns the stored representation as a response, or None when the URL
+     * holds no entry -- a 304 for a URL nothing cached names no
+     * representation, so the caller has no body to build from.
+     */
+    pub fn refresh_from_not_modified(
+        &mut self,
+        url: &str,
+        response: &super::HttpResponse,
+    ) -> Option<super::HttpResponse> {
+        let entry = self.entries.get_mut(url)?;
+        for (name, value) in &response.headers {
+            let lowered = name.to_ascii_lowercase();
+            if let Some(existing) = entry
+                .headers
+                .iter_mut()
+                .find(|(stored, _)| stored.eq_ignore_ascii_case(&lowered))
+            {
+                existing.1.clone_from(value);
+            } else {
+                entry.headers.push((name.clone(), value.clone()));
+            }
+        }
+        if let Some(etag) = response.header("etag") {
+            entry.etag = Some(etag.to_string());
+        }
+        if let Some(last_modified) = response.header("last-modified") {
+            entry.last_modified = Some(last_modified.to_string());
+        }
+        entry.freshness_secs = freshness_lifetime(&entry.headers);
+        entry.cached_at = Instant::now();
+        entry.prior_age_secs = 0;
+        let refreshed = super::HttpResponse {
+            status: entry.status,
+            headers: entry.headers.clone(),
+            body: entry.body.clone(),
+        };
+        if let Some(dir) = self.disk_dir.clone()
+            && let Some(entry) = self.entries.get(url)
+        {
+            put_to_disk(&dir, url, entry);
+        }
+        Some(refreshed)
+    }
+
     /// Build conditional request headers for revalidation.
     #[must_use]
     pub fn conditional_headers(&self, url: &str) -> Vec<(String, String)> {
@@ -715,5 +767,98 @@ mod tests {
                 .as_nanos()
         ));
         dir
+    }
+
+    /*
+     * A stale entry keeps its validators and its body. These cases pin what a
+     * 304 does with them: the body serves the response, the freshness window
+     * restarts, and a 304 for a URL nothing cached names no representation.
+     */
+
+    fn validated_response(cache_control: &str) -> HttpResponse {
+        let mut response = text_response(200, cache_control);
+        response
+            .headers
+            .push(("ETag".to_string(), "\"v1\"".to_string()));
+        response
+    }
+
+    #[test]
+    fn a_stale_entry_offers_its_validators() {
+        let mut cache = ResponseCache::new();
+        cache.put(
+            "https://example.test/".to_string(),
+            &validated_response("max-age=0"),
+        );
+        assert!(
+            cache.get("https://example.test/").is_none(),
+            "entry is stale"
+        );
+        assert_eq!(
+            cache.conditional_headers("https://example.test/"),
+            vec![("If-None-Match".to_string(), "\"v1\"".to_string())]
+        );
+    }
+
+    #[test]
+    fn a_not_modified_answer_serves_the_stored_body() {
+        let mut cache = ResponseCache::new();
+        cache.put(
+            "https://example.test/".to_string(),
+            &validated_response("max-age=0"),
+        );
+        let not_modified = HttpResponse {
+            status: 304,
+            headers: vec![("Cache-Control".to_string(), "max-age=600".to_string())],
+            body: Vec::new(),
+        };
+
+        let refreshed = cache
+            .refresh_from_not_modified("https://example.test/", &not_modified)
+            .expect("the entry supplies the representation");
+
+        assert_eq!(refreshed.status, 200);
+        assert_eq!(refreshed.body, b"<p>body</p>".to_vec());
+        assert!(
+            cache.get("https://example.test/").is_some(),
+            "the 304's max-age restarts the freshness window"
+        );
+    }
+
+    #[test]
+    fn a_not_modified_answer_keeps_the_validators_the_origin_omits() {
+        let mut cache = ResponseCache::new();
+        cache.put(
+            "https://example.test/".to_string(),
+            &validated_response("max-age=0"),
+        );
+        let not_modified = HttpResponse {
+            status: 304,
+            headers: vec![("Cache-Control".to_string(), "max-age=600".to_string())],
+            body: Vec::new(),
+        };
+        cache
+            .refresh_from_not_modified("https://example.test/", &not_modified)
+            .expect("the entry supplies the representation");
+
+        assert_eq!(
+            cache.conditional_headers("https://example.test/"),
+            vec![("If-None-Match".to_string(), "\"v1\"".to_string())]
+        );
+    }
+
+    #[test]
+    fn a_not_modified_answer_for_an_uncached_url_names_no_representation() {
+        let mut cache = ResponseCache::new();
+        let not_modified = HttpResponse {
+            status: 304,
+            headers: Vec::new(),
+            body: Vec::new(),
+        };
+        assert!(
+            cache
+                .refresh_from_not_modified("https://example.test/", &not_modified)
+                .is_none()
+        );
     }
 }

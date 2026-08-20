@@ -189,6 +189,52 @@ pub(crate) fn refresh_runtime_stylesheets(
     true
 }
 
+/*
+ * reflow_runtime_for_viewport -- relayout the document at a new CSS viewport.
+ *
+ * The window surface below the browser chrome is the viewport, so a resize
+ * changes three cascade inputs at once: which `@media` branch is active, what
+ * a `vw` or `vh` length resolves to, and what a percentage against the
+ * initial containing block measures. `StyleIndex::for_viewport` evaluates the
+ * media queries when it flattens the active rules, so the index rebuilds
+ * before the fused pipeline reruns; a relayout without that rebuild moves the
+ * geometry and leaves every breakpoint-dependent declaration on the previous
+ * branch.
+ *
+ * `set_viewport` follows the relayout, which keeps matchMedia answering the
+ * size the document is laid out at. matchMedia lists stay static snapshots,
+ * so a script that already ran keeps its earlier answer; that half is the
+ * matchmedia-change-events cut in
+ * docs/roadmaps/SPA-CAPABILITY-ROADMAP.md.
+ *
+ * The retained viewport caches are bitmaps at the old stride, so they are
+ * dropped rather than re-keyed.
+ */
+pub(crate) fn reflow_runtime_for_viewport(
+    runtime: &mut BrowserPageRuntime,
+    frame: &mut BrowserFrame,
+    viewport: Rect,
+) -> BrowserRedrawMode {
+    runtime.viewport = viewport;
+    runtime.style_index =
+        StyleIndex::for_viewport(&runtime.stylesheet, viewport.width, viewport.height);
+    runtime.js_ctx.set_viewport(viewport.width, viewport.height);
+    frame.raster_width = viewport.width as u32;
+    frame.focus_viewport_cache = None;
+    frame.focus_viewport_retained_sent = false;
+    frame.scroll_viewport_caches.clear();
+    let redraw_mode = repaint_runtime_full_document(runtime, frame);
+    // repaint_runtime_full_document rasters into frame.argb at the new
+    // stride, so the bitmap key records it and refresh_browser_frame_bitmap
+    // reads the frame as current.
+    frame.bitmap_raster_width = frame.raster_width;
+    eprintln!(
+        "[SilkSurf] Viewport reflow: {}x{}",
+        viewport.width, viewport.height
+    );
+    redraw_mode
+}
+
 pub(crate) fn repaint_runtime_dirty_nodes(
     runtime: &mut BrowserPageRuntime,
     frame: &mut BrowserFrame,
@@ -263,22 +309,28 @@ fn repaint_runtime_document(
     drop(dom);
 
     let next_height = browser_frame_height(&display_list.items, BROWSER_CHROME_HEIGHT as u32);
-    display_list = tile_browser_document_display_list(display_list, next_height);
+    display_list =
+        tile_browser_document_display_list(display_list, frame.raster_width, next_height);
     frame.raster_height = next_height;
     let redraw_mode = if let Some(damage) = damage {
         rasterize_browser_document_damage_into(
             &display_list,
             frame.bitmap_scroll_y,
+            frame.raster_width,
             frame.bitmap_height,
             damage,
             &mut runtime.rgba,
             &mut runtime.damage_scratch,
         );
-        if !sync_argb_damage_from_scratch(&runtime.damage_scratch, &mut frame.argb, FRAME_WIDTH) {
+        if !sync_argb_damage_from_scratch(
+            &runtime.damage_scratch,
+            &mut frame.argb,
+            frame.raster_width,
+        ) {
             sync_argb_damage_from_rgba(
                 &runtime.rgba,
                 &mut frame.argb,
-                FRAME_WIDTH,
+                frame.raster_width,
                 frame.bitmap_height,
                 viewport_damage_rect(damage, frame.bitmap_scroll_y),
             );
@@ -288,6 +340,7 @@ fn repaint_runtime_document(
         rasterize_browser_viewport_argb_preferred(
             &display_list,
             frame.bitmap_scroll_y,
+            frame.raster_width,
             frame.bitmap_height,
             &mut runtime.rgba,
             &mut frame.argb,
@@ -358,14 +411,17 @@ pub(crate) fn repaint_runtime_text_only_dirty_nodes(
     rasterize_browser_document_damage_scratch(
         &runtime.display_list,
         frame.bitmap_scroll_y,
+        frame.raster_width,
         frame.bitmap_height,
         damage,
         &mut runtime.damage_scratch,
     );
-    if !sync_argb_damage_from_scratch(&runtime.damage_scratch, &mut frame.argb, FRAME_WIDTH) {
+    if !sync_argb_damage_from_scratch(&runtime.damage_scratch, &mut frame.argb, frame.raster_width)
+    {
         rasterize_browser_document_damage_into(
             &runtime.display_list,
             frame.bitmap_scroll_y,
+            frame.raster_width,
             frame.bitmap_height,
             damage,
             &mut runtime.rgba,
@@ -416,14 +472,17 @@ pub(crate) fn repaint_single_runtime_text_node(
     rasterize_browser_document_damage_scratch(
         &runtime.display_list,
         frame.bitmap_scroll_y,
+        frame.raster_width,
         frame.bitmap_height,
         damage,
         &mut runtime.damage_scratch,
     );
-    if !sync_argb_damage_from_scratch(&runtime.damage_scratch, &mut frame.argb, FRAME_WIDTH) {
+    if !sync_argb_damage_from_scratch(&runtime.damage_scratch, &mut frame.argb, frame.raster_width)
+    {
         rasterize_browser_document_damage_into(
             &runtime.display_list,
             frame.bitmap_scroll_y,
+            frame.raster_width,
             frame.bitmap_height,
             damage,
             &mut runtime.rgba,
@@ -572,14 +631,17 @@ pub(crate) fn repaint_focused_input_value(
     rasterize_browser_document_damage_scratch(
         &runtime.display_list,
         frame.bitmap_scroll_y,
+        frame.raster_width,
         frame.bitmap_height,
         damage,
         &mut runtime.damage_scratch,
     );
-    if !sync_argb_damage_from_scratch(&runtime.damage_scratch, &mut frame.argb, FRAME_WIDTH) {
+    if !sync_argb_damage_from_scratch(&runtime.damage_scratch, &mut frame.argb, frame.raster_width)
+    {
         rasterize_browser_document_damage_into(
             &runtime.display_list,
             frame.bitmap_scroll_y,
+            frame.raster_width,
             frame.bitmap_height,
             damage,
             &mut runtime.rgba,
@@ -1161,6 +1223,7 @@ mod tests {
         rasterize_browser_viewport_into(
             &display_list,
             0,
+            FRAME_WIDTH,
             bitmap_height,
             &mut rgba,
             &mut viewport_item_indices,
@@ -1187,8 +1250,10 @@ mod tests {
             frame: BrowserFrame {
                 url: "https://example.com/".to_string(),
                 argb,
+                raster_width: FRAME_WIDTH,
                 raster_height,
                 bitmap_height,
+                bitmap_raster_width: FRAME_WIDTH,
                 bitmap_scroll_y: 0,
                 focus_viewport_cache: None,
                 focus_viewport_retained_sent: false,
@@ -1279,6 +1344,7 @@ mod tests {
         rasterize_browser_viewport_into(
             &display_list,
             0,
+            FRAME_WIDTH,
             bitmap_height,
             &mut rgba,
             &mut viewport_item_indices,
@@ -1305,8 +1371,10 @@ mod tests {
             frame: BrowserFrame {
                 url: "https://example.com/".to_string(),
                 argb,
+                raster_width: FRAME_WIDTH,
                 raster_height,
                 bitmap_height,
+                bitmap_raster_width: FRAME_WIDTH,
                 bitmap_scroll_y: 0,
                 focus_viewport_cache: None,
                 focus_viewport_retained_sent: false,

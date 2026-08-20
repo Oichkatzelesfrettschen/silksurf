@@ -87,6 +87,11 @@ pub struct FusedWorkspace {
     cascade_generation: u64,
     /// Cached tree-shape generation for the taffy node graph.
     taffy_structure_generation: u64,
+    /// The viewport the retained taffy styles were built from. The cascade
+    /// resolves `vw`, `vh`, and the `@media` branch against the viewport, so a
+    /// viewport that moved changes the ComputedStyle that `rebuild` reads
+    /// while both DOM generations stand still.
+    taffy_viewport: Rect,
     /// Cached selector-input generation for the taffy style graph.
     taffy_style_generation: u64,
 }
@@ -122,6 +127,12 @@ impl FusedWorkspace {
             table_generation: u64::MAX,
             cascade_generation: u64::MAX,
             taffy_structure_generation: u64::MAX,
+            taffy_viewport: Rect {
+                x: f32::NAN,
+                y: f32::NAN,
+                width: f32::NAN,
+                height: f32::NAN,
+            },
             taffy_style_generation: u64::MAX,
         }
     }
@@ -258,10 +269,12 @@ impl FusedWorkspace {
         let phase_start = std::time::Instant::now();
         if structure_gen != self.taffy_structure_generation
             || style_gen != self.taffy_style_generation
+            || viewport != self.taffy_viewport
         {
             self.taffy_layout.rebuild(dom, &self.table, &self.styles);
             self.taffy_structure_generation = structure_gen;
             self.taffy_style_generation = style_gen;
+            self.taffy_viewport = viewport;
         }
         trace_fused_phase(
             trace_fused,

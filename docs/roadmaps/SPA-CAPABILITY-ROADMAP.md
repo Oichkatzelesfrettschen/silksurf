@@ -339,24 +339,12 @@ separately-landable follow-up):
   already records the mutated set the fused pipeline consumes, so the
   records exist; delivering them needs a per-observer subtree filter and
   a microtask-checkpoint queue.
-- import-map-scopes -- PageModuleLoader applies the import map's
-  top-level `imports` entries. The `scopes` member changes resolution by
-  referrer, and applying a scoped mapping to every referrer resolves a
-  specifier to the wrong module, so scopes are read as absent. Wiring
-  them needs the referrer URL matched against each scope prefix before
-  the `imports` lookup.
 - dynamic-import-fetch -- the module graph is fetched ahead of
   evaluation from the static imports boa reports, so `import()` reaches
   a module the registry does not hold and rejects. chatgpt.com's entry
   module route-splits through `import()`, so its page code never
   evaluates. Wiring it needs load_imported_module to fetch on demand
   rather than report a miss.
-- stale-entry-revalidation -- ResponseCache::get answers only while an
-  entry is fresh, and a stale entry stays in the map carrying its ETag
-  and Last-Modified. Nothing consults conditional_headers on a miss, so
-  a stale entry refetches in full instead of riding a 304. Wiring it
-  needs fetch_or_speculate to send the validators and to rebuild the
-  response from the cached body when the origin answers 304.
 - intl-formatters -- Intl carries Locale and getCanonicalLocales, which
   is what language negotiation reads. DateTimeFormat, NumberFormat,
   Collator, PluralRules, and RelativeTimeFormat stay absent rather than
@@ -364,13 +352,6 @@ separately-landable follow-up):
   presents as localized. boa_engine's `intl` feature supplies
   spec-correct implementations backed by icu4x, at a binary-size and
   compile-time cost the low-resource profile has not accepted.
-- important-layer-inversion -- `Specificity::layer` orders cascade
-  layers ahead of selector specificity, which is correct for normal
-  declarations. CSS Cascade 5, 6.4.4 inverts layer order for important
-  declarations; `ResolvedProperty::should_override` compares importance
-  before specificity, so two important declarations in different layers
-  resolve by rank rather than by inverted rank. Correcting it needs the
-  importance bit to select between the rank and its complement.
 
 ## Live document resources (landed 2026-08-19)
 
@@ -471,30 +452,177 @@ a block box with no in-flow line box a height of zero, so
 from the closure. A genuinely childless element keeps the existing floor,
 which is recorded as the `empty-block-line-height-floor` cut.
 
+## Window-width reflow (landed 2026-08-19)
+
+`FRAME_WIDTH` was the row stride at every site that read or wrote the page
+bitmap, so the document laid out at 1280 px whatever the window presented.
+`BrowserFrame::raster_width` now carries it and the layout viewport is the
+window surface below the browser chrome (`browser_layout_viewport`), which is
+what a rotated or non-1280 output needs: `--monitor LG` fullscreens onto a
+90-degree-rotated panel and gets a 1440x3440 surface.
+
+A page builds against the live window size when one exists
+(`build_browser_page_with_buffers_for_window`), and
+`reflow_browser_page_for_window` compares the runtime's viewport against the
+surface on every frame and relayouts when they disagree. That comparison is
+what carries the compositor's answer: `WinitWindow::new` requests a size and
+`--monitor` fullscreen overrides it, so the size the window opens at arrives
+through `WindowEvent::Resized` after the first page is already built.
+
+`reflow_runtime_for_viewport` rebuilds `StyleIndex` before the fused pipeline
+reruns, because `StyleIndex::for_viewport` evaluates the media queries when it
+flattens the active rules; a relayout without that rebuild moves the geometry
+and leaves every breakpoint-dependent declaration on the previous branch.
+`set_viewport` follows the relayout, so matchMedia answers the size the
+document is laid out at. matchMedia lists stay static snapshots, so a script
+that already ran keeps its earlier answer -- that half stays the
+matchmedia-change-events deferral.
+
+Three retained mechanisms cached the old width and each needed the stride in
+its key. `refresh_browser_frame_bitmap` compared scroll offset and row count
+only, so a pure-width resize hit its early return and presented the previous
+width's bitmap; `bitmap_raster_width` joins the key and the scroll-reuse path,
+which shifts rows at one stride, refuses a width that moved.
+`FocusViewportCache` and `ScrollViewportCache` are bitmaps the window presents
+word for word, so both record the width they were rastered at and a reflow
+drops them. `FusedWorkspace` gated its taffy rebuild on
+`Dom::structure_generation` and `style_generation` alone, and neither moves
+when the viewport does: the cascade resolves `vw`, `vh`, and the `@media`
+branch against the viewport, so the retained taffy styles held the previous
+width's `ComputedStyle` while the fresh cascade output sat unused. The rebuild
+now fires on a viewport that moved as well.
+
+`MAX_SCREENSHOT_HEIGHT` did its 5-MiB arithmetic against 1280, so it became
+`MAX_SCREENSHOT_PIXELS` and a document divides it by its own raster width.
+
+`crates/silksurf-app/src/window_frame.rs` asserts the discrimination against a
+fixture whose `#box` is 300 px wide only above a 1000 px viewport and whose
+`#fluid` is `50vw`: a reflow that relayouts without rebuilding `StyleIndex`
+moves `#fluid` and leaves `#box` wide. Each mechanism was falsified by
+reverting it -- dropping the taffy viewport gate, the `StyleIndex` rebuild, and
+the stride from the bitmap key each fail their own assertion. Measured with
+`make gui-probe-page-click` over three runs: render min 11.2 to 11.5 us
+against a 11.3 us baseline, and `make gui-probe-attr-reconcile` min 40.7 to
+42.5 us against 52.2 us.
+
+## Important-declaration layer inversion (landed 2026-08-19)
+
+`Specificity::cascade_key` takes the importance bit and returns the layer rank
+or its complement, which is what CSS Cascade 5, 6.4.4 asks for: an important
+declaration in an earlier layer beats one in a later layer, and an unlayered
+important declaration loses to every layered one. The complement carries both,
+because `UNLAYERED` is `u32::MAX` and complements to the minimum while the
+first layer's rank 0 complements to the maximum.
+
+`Specificity` gains an `element_attached` field ahead of `layer`, so the
+`style` attribute keeps the element-attached step of CSS Cascade 5, 6.4.3 in
+both importance classes rather than riding the selector counts of `u32::MAX`
+it previously carried. Leaving it inside the reversal would have made an
+important layered rule beat an important `style` attribute.
+
+`ResolvedProperty::should_override` and `custom_property_wins` both read the
+key. Five cases in `crates/silksurf-css/tests/conditional_rules.rs` mirror the
+normal-declaration ordering the existing layer tests fix, so a comparison that
+ignores importance fails one set or the other.
+
+Closing this surfaced a separate defect the same tests exposed: an inline
+`!important` written without a trailing semicolon parsed as a normal
+declaration, because `CssTokenizer::finish` appends `CssToken::Eof` and
+`parse_declarations` carried it into the value where `consume_important`
+reads. Landed separately.
+
+## Import-map scopes (landed 2026-08-19)
+
+`silksurf_js::ImportMap` carries both members of the document's import map.
+`PageModuleLoader::apply_import_map` takes the referrer's URL and consults the
+scopes whose prefix it matches, longest prefix first, before falling through to
+the top-level `imports`; applying a scoped mapping to every referrer resolves
+the specifier to the wrong module, which is why the referrer reaches the lookup
+rather than the specifier alone.
+
+`set_import_map` resolves each scope key against the document's address, which
+is what HTML 8.1.3.8 asks of a scope key before it is compared to a referrer, and
+drops a key that does not resolve because it names no referrer.
+`document_import_map` reads both members out of the `<script type=importmap>`
+element.
+
+Seven cases pair a referrer inside a scope with one outside it, so a lookup
+that applies the scope to every referrer passes the first and fails the second.
+
+## Stale-entry revalidation (landed 2026-08-19)
+
+`ResponseCache::get` answers only while an entry is fresh, and a stale entry
+stayed in the map carrying its ETag and Last-Modified with nothing consulting
+them, so a stale navigation refetched the whole body.
+`SpeculativeRenderer::fetch_or_speculate` now sends
+`ResponseCache::conditional_headers` on the miss path (RFC 9111, 4.3.1); an
+absent entry offers none and the request stays a plain GET.
+
+`ResponseCache::refresh_from_not_modified` turns the origin's 304 into the
+stored representation (RFC 9111, 4.3.4): the 304's headers update the stored
+ones, the freshness window restarts from now because the origin has just
+spoken about the entry, and the body, status, and the validators the 304 omits
+stay. `FetchOrigin::Revalidated` names the outcome, so the navigation trace
+separates one round-trip with no body bytes from a full refetch.
+
+Four cases in `crates/silksurf-net/src/cache.rs`. Dropping the freshness
+restart fails `a_not_modified_answer_serves_the_stored_body`.
+
+## Registered custom properties (landed 2026-08-19)
+
+`@property` parsed structurally and its descriptors were discarded, so a
+`var(--unset)` with no fallback substituted to nothing and left its declaration
+unapplied. `PropertyRegistration` now reads `syntax`, `inherits`, and
+`initial-value` out of the at-rule's declaration block, and `collect_active_rules`
+collects the registrations on the same walk that flattens the rules, so a
+registration inside `@media`, `@supports`, or `@layer` registers alongside the
+rules that block admits. CSS Properties and Values 1, 2 makes `syntax` and
+`inherits` required and `initial-value` required for every syntax but the
+universal `*`, so a rule missing one registers nothing.
+
+`apply_registrations` puts each initial value into the element's map before its
+own declarations are recorded, which is what makes a registered name answer a
+`var()` at every element that neither declares nor inherits it. The
+registrations are a per-element floor rather than a root seed because the
+document node carries a default `ComputedStyle`, so no element ever cascades
+with `parent: None`. A registration with `inherits: false` overwrites the
+inherited value, which is how the parent's declaration stops at the child; an
+inheriting one fills only a name the map does not already hold. The map is
+rebuilt only when a registration is unsatisfied, so the parent's `Arc` stays
+shared below the element that established the values.
+
+The syntax string is retained without being enforced: a registration's
+observable effect here is the initial value and the inheritance the flag turns
+off. Type-checking a declared value against its registered syntax is named as
+the `registered-property-syntax-enforcement` cut below.
+
+Eight cases in `crates/silksurf-css/tests/conditional_rules.rs`, including the
+pair that differs only in the `inherits` flag. Dropping `apply_registrations`
+fails three of them; making every registration inherit fails
+`a_non_inheriting_registration_stops_at_the_child`.
+
 ## Open work after the live-resource change
 
 Named cuts, each with the mechanism that closes it:
 
-- registered-custom-properties -- `@property` declares a syntax, an inherits
-  flag, and an initial value; the parser discards the at-rule, so an
-  unregistered `var(--unset)` with no fallback leaves its declaration
-  unapplied instead of taking a registered initial. chatgpt.com opens its
-  sheet with four of them.
 - css-transform-beyond-translation -- `transform` contributes its translation
   component to the paint rect; rotate, scale, skew, and matrix contribute
   nothing, because every DisplayItem is an axis-aligned rect. Carrying them
   needs a transform per display item and a rasterizer that applies it to
   geometry and to shaped glyph runs.
-- window-width-reflow -- `FRAME_WIDTH` pins the windowed page raster, damage
-  sync, and retained presenter to 1280 px, so the page lays out at that width
-  whatever the window is. `set_viewport` therefore reports 1280x800 to
-  matchMedia for the whole session, which at least agrees with layout;
-  reporting the real surface first would make a page pick a narrow branch and
-  then lay it out wide. Closing it makes the raster width follow the window
-  and reissues `set_viewport` on resize, and it is what a rotated or
-  non-1280 output needs: `--monitor LG` fullscreens onto a 90-degree-rotated
-  panel and gets a 1440x3440 surface, which renders correctly at 1280 px with
-  the remainder unpainted.
+- chrome-width-responsive -- the address bar is `ADDRESS_BAR_X` 108 plus
+  `ADDRESS_BAR_WIDTH` 880, so it ends at 988 px whatever the window is. A
+  window wider than that leaves the remainder bare and a narrower one clips
+  the bar, because `fill_argb_rect` bounds every write to the surface. Closing
+  it makes the bar's width the surface minus the button strip and the right
+  margin.
+- registered-property-syntax-enforcement -- `PropertyRegistration` retains the
+  `syntax` descriptor without checking a declared value against it, so a
+  declaration whose value does not match the registered grammar applies rather
+  than falling back to the initial value. CSS Properties and Values 1, 5 makes
+  a mismatched value invalid at computed-value time. Closing it needs the
+  syntax string parsed into a component-value grammar the cascade can match a
+  token list against.
 - empty-block-line-height-floor -- the measure closure in
   `TaffyLayout::compute` ends by giving a childless element an auto height of
   one line box. CSS 2.1 10.6.3 gives a block-level non-replaced in-flow box
