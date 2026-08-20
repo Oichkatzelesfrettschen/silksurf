@@ -94,6 +94,10 @@ pub struct FusedWorkspace {
     taffy_viewport: Rect,
     /// Cached selector-input generation for the taffy style graph.
     taffy_style_generation: u64,
+    /// The StyleIndex the retained taffy styles were built from. A rebuilt
+    /// index carries new ComputedStyle for the same DOM, which CSSStyleSheet
+    /// insertRule produces while both DOM generations stand still.
+    taffy_style_index: u64,
 }
 
 impl Default for FusedWorkspace {
@@ -134,6 +138,7 @@ impl FusedWorkspace {
                 height: f32::NAN,
             },
             taffy_style_generation: u64::MAX,
+            taffy_style_index: u64::MAX,
         }
     }
 
@@ -270,11 +275,13 @@ impl FusedWorkspace {
         if structure_gen != self.taffy_structure_generation
             || style_gen != self.taffy_style_generation
             || viewport != self.taffy_viewport
+            || style_index.build_id() != self.taffy_style_index
         {
             self.taffy_layout.rebuild(dom, &self.table, &self.styles);
             self.taffy_structure_generation = structure_gen;
             self.taffy_style_generation = style_gen;
             self.taffy_viewport = viewport;
+            self.taffy_style_index = style_index.build_id();
         }
         trace_fused_phase(
             trace_fused,

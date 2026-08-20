@@ -282,6 +282,52 @@ impl StyleSheetSet {
     }
 
     /*
+     * live_sheets -- the document's sheets as CSSOM addresses them.
+     *
+     * One LiveSheet per source, user-agent sheet first, each carrying the
+     * owner node, resolved href, and media the source holds. A source whose
+     * text fails to parse contributes an empty sheet rather than dropping out
+     * of the list, because a script that enumerates `document.styleSheets`
+     * indexes by position.
+     */
+    pub(crate) fn live_sheets(&self, dom: &silksurf_dom::Dom) -> Vec<silksurf_css::LiveSheet> {
+        let parse = |text: &str| {
+            dom.with_interner_mut(|interner| {
+                silksurf_css::parse_stylesheet_with_interner(text, interner).ok()
+            })
+            .unwrap_or(silksurf_css::Stylesheet { rules: Vec::new() })
+        };
+        let mut sheets = vec![silksurf_css::LiveSheet::new(
+            silksurf_css::SheetOrigin::UserAgent,
+            parse(DEFAULT_USER_AGENT_STYLESHEET),
+        )];
+        for source in &self.sources {
+            let (text, href) = match &source.kind {
+                StyleSourceKind::Inline(text) => (text.as_str(), None),
+                StyleSourceKind::Link(url) => (
+                    self.bodies.get(url).map_or("", String::as_str),
+                    Some(url.clone()),
+                ),
+            };
+            // The media attribute scopes the sheet's rules the way css_text
+            // wraps them, and rides the LiveSheet so CSSStyleSheet.media can
+            // report it.
+            let rules = if source.media.is_empty() || text.trim().is_empty() {
+                parse(text)
+            } else {
+                parse(&format!("@media {} {{\n{text}\n}}", source.media))
+            };
+            sheets.push(
+                silksurf_css::LiveSheet::new(silksurf_css::SheetOrigin::Author, rules)
+                    .with_owner(source.owner)
+                    .with_href(href)
+                    .with_media(source.media.clone()),
+            );
+        }
+        sheets
+    }
+
+    /*
      * refresh -- recollect when the document moved, and report whether the
      * cascade input changed.
      *

@@ -224,7 +224,44 @@ pub(crate) fn build_browser_page_with_buffers_for_window(
     js_ctx.set_document_url(&payload.url);
     js_ctx.preload_local_storage(crate::profile::load_local_storage(&payload.url));
     js_ctx.set_viewport(viewport.width, viewport.height);
-    install_computed_style_provider(&mut js_ctx, &dom_arc, &stylesheet);
+    /*
+     * The set collects after the page's scripts have run, so a document that
+     * rewrites a link's rel from preload to stylesheet during startup enters
+     * the list on its first collection. The bodies the payload already fetched
+     * seed it, so an unchanged list costs no refetch.
+     */
+    let sheets = {
+        let dom = dom_arc
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        StyleSheetSet::new(
+            collect_style_sources(&dom, doc_node, &payload.url),
+            payload.sheet_bodies,
+            &payload.url,
+            &payload.render_config,
+            &dom,
+        )
+    };
+
+    // The CSSOM addresses the same sheets the cascade reads, so the set is
+    // built once here and handed to the JS context; a rule script splices
+    // lands in the set the repaint tick rebuilds StyleIndex from.
+    let cssom = {
+        let dom = dom_arc
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut set = silksurf_css::SheetSet::new();
+        set.replace(sheets.live_sheets(&dom));
+        Arc::new(Mutex::new(set))
+    };
+    js_ctx.set_style_sheets(&cssom);
+    let cssom_generation = cssom
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .script_generation();
+
+    let provider_stylesheet = Arc::new(Mutex::new(stylesheet.clone()));
+    install_computed_style_provider(&mut js_ctx, &dom_arc, &provider_stylesheet);
     {
         let mut dom = dom_arc
             .lock()
@@ -292,24 +329,6 @@ pub(crate) fn build_browser_page_with_buffers_for_window(
         trace_build,
     );
     trace_navigation_script_phase(trace_build, "module-total", module_start.elapsed());
-    /*
-     * The set collects after the page's scripts have run, so a document that
-     * rewrites a link's rel from preload to stylesheet during startup enters
-     * the list on its first collection. The bodies the payload already fetched
-     * seed it, so an unchanged list costs no refetch.
-     */
-    let sheets = {
-        let dom = dom_arc
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        StyleSheetSet::new(
-            collect_style_sources(&dom, doc_node, &payload.url),
-            payload.sheet_bodies,
-            &payload.url,
-            &payload.render_config,
-            &dom,
-        )
-    };
 
     /*
      * The preload fetches start at build time so the event loop already has a
@@ -466,6 +485,9 @@ pub(crate) fn build_browser_page_with_buffers_for_window(
             document: doc_node,
             stylesheet,
             sheets,
+            cssom,
+            cssom_generation,
+            provider_stylesheet,
             preloads,
             style_index,
             viewport,
@@ -663,12 +685,15 @@ pub(crate) fn execute_static_module_scripts(
 pub(crate) fn install_computed_style_provider(
     js_ctx: &mut SilkContext,
     dom_arc: &Arc<Mutex<silksurf_dom::Dom>>,
-    stylesheet: &silksurf_css::Stylesheet,
+    stylesheet: &Arc<Mutex<silksurf_css::Stylesheet>>,
 ) {
     let dom_arc = Arc::clone(dom_arc);
-    let stylesheet = stylesheet.clone();
+    let stylesheet = Arc::clone(stylesheet);
     js_ctx.set_computed_style_provider(std::rc::Rc::new(move |node, property| {
         let dom = dom_arc
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let stylesheet = stylesheet
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let style = silksurf_css::compute_style_for_node(&dom, node, &stylesheet, None);

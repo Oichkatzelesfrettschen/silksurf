@@ -10,13 +10,16 @@
 
 pub mod calc;
 pub mod cascade_view;
+pub mod cssom;
 pub use cascade_view::{CascadeEntry, CascadeView};
+pub use cssom::{LiveSheet, SheetError, SheetOrigin, SheetSet};
 pub mod custom_properties;
 mod matching;
 pub mod media;
 mod parser;
 pub mod property_id;
 mod selector;
+pub mod serialize;
 mod style;
 pub mod supports;
 
@@ -25,6 +28,9 @@ pub use parser::{
     AtRule, AtRuleBlock, CssParser, Declaration, Rule, StyleRule, Stylesheet,
     parse_declaration_list, parse_stylesheet, parse_stylesheet_bytes,
     parse_stylesheet_with_interner,
+};
+pub use serialize::{
+    declaration_to_css, declarations_to_css, rule_to_css, selector_list_to_css, value_to_css,
 };
 
 /*

@@ -1739,6 +1739,95 @@ mod tests {
         }
     }
 
+    fn cssom_page(script: &str) -> BrowserPagePayload {
+        let css = "#box { width: 100px; height: 10px; background: #00ff00; }";
+        BrowserPagePayload {
+            url: "https://example.com/cssom".to_string(),
+            html: format!(
+                "<!doctype html><html><head><style>{css}</style></head>\
+                 <body><div id=\"box\"></div></body></html>"
+            ),
+            css_text: stylesheet_text_with_user_agent_defaults(css),
+            sheet_bodies: Vec::new(),
+            script_texts: vec![(None, script.to_string())],
+            module_texts: Vec::new(),
+            images: Vec::new(),
+            render_config: BrowserRenderConfig::default(),
+            parsed_document: None,
+        }
+    }
+
+    /// A rule inserted through the CSSOM reaches the paint list.
+    ///
+    /// Emotion inserts one rule per styled component this way. The splice
+    /// moves no DOM generation, so the repaint tick finds it through
+    /// SheetSet::script_generation alone.
+    #[test]
+    fn a_scripted_rule_insertion_repaints_the_document() {
+        let page = build_browser_page_with_buffers_for_window(
+            cssom_page(
+                "document.styleSheets[0].insertRule('#box { width: 250px }', \
+                 document.styleSheets[0].cssRules.length);",
+            ),
+            BrowserFrameBuffers::default(),
+            Some((1200, 600)),
+        )
+        .expect("payload builds page");
+        let mut state = test_browser_state("https://example.com/cssom");
+        state.frame = page.frame;
+        state.runtime = Some(page.runtime);
+
+        assert!(
+            tick_browser_runtime(&mut state),
+            "the scripted splice drives a repaint"
+        );
+
+        assert_eq!(
+            solid_color_width(
+                &state.runtime.as_ref().expect("runtime").display_list.items,
+                (0, 255, 0)
+            ),
+            Some(250.0),
+            "the inserted rule wins the cascade and the box relayouts"
+        );
+    }
+
+    /// getComputedStyle answers from the rules the last rebuild produced.
+    ///
+    /// The provider held a Stylesheet cloned at page build, so it reported the
+    /// parse-time snapshot however the document's sheets moved afterwards.
+    #[test]
+    fn computed_style_follows_a_scripted_rule_insertion() {
+        let page = build_browser_page_with_buffers_for_window(
+            cssom_page(""),
+            BrowserFrameBuffers::default(),
+            Some((1200, 600)),
+        )
+        .expect("payload builds page");
+        let mut state = test_browser_state("https://example.com/cssom");
+        state.frame = page.frame;
+        state.runtime = Some(page.runtime);
+
+        let runtime = state.runtime.as_mut().expect("runtime");
+        runtime
+            .js_ctx
+            .eval(
+                "document.styleSheets[0].insertRule('#box { width: 250px }', \
+                 document.styleSheets[0].cssRules.length);",
+            )
+            .expect("the rule inserts");
+        assert!(tick_browser_runtime(&mut state), "the splice repaints");
+
+        let runtime = state.runtime.as_mut().expect("runtime");
+        runtime
+            .js_ctx
+            .eval(
+                "var w = getComputedStyle(document.getElementById('box')).width; \
+                 if (w !== '250px') throw new Error('width was ' + w);",
+            )
+            .expect("getComputedStyle reports the inserted rule");
+    }
+
     fn solid_color_width(
         items: &[silksurf_render::DisplayItem],
         want: (u8, u8, u8),

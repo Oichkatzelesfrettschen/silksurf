@@ -1837,23 +1837,31 @@ fn collect_active_rules(
 /// Flatten a stylesheet into the rules the cascade selects against, in document
 /// order, paired with the layer rank each rule carries into `Specificity` and
 /// the `@property` registrations the same walk collects.
-fn flatten_active_rules(
-    stylesheet: &Stylesheet,
+fn flatten_active_rules<'a, I>(
+    sheets: I,
     viewport_w: f32,
     viewport_h: f32,
-) -> (Vec<StyleRule>, Vec<u32>, Vec<PropertyRegistration>) {
+) -> (Vec<StyleRule>, Vec<u32>, Vec<PropertyRegistration>)
+where
+    I: IntoIterator<Item = &'a Stylesheet>,
+{
     let mut ranked: Vec<(u32, StyleRule)> = Vec::new();
     let mut order = LayerOrder::new();
     let mut registrations = Vec::new();
-    collect_active_rules(
-        &stylesheet.rules,
-        viewport_w,
-        viewport_h,
-        "",
-        &mut order,
-        &mut ranked,
-        &mut registrations,
-    );
+    // One LayerOrder spans the whole list: CSS Cascade 5, 6.4.4 gives a layer
+    // name one rank per document, so the same `@layer` name in two sheets
+    // names one layer rather than two.
+    for stylesheet in sheets {
+        collect_active_rules(
+            &stylesheet.rules,
+            viewport_w,
+            viewport_h,
+            "",
+            &mut order,
+            &mut ranked,
+            &mut registrations,
+        );
+    }
     let mut rules = Vec::with_capacity(ranked.len());
     let mut ranks = Vec::with_capacity(ranked.len());
     for (rank, rule) in ranked {
@@ -1979,9 +1987,25 @@ pub struct StyleIndex {
     /// than seeding one root map: the document node carries a default
     /// `ComputedStyle`, so no element ever cascades with no parent.
     registrations: Vec<PropertyRegistration>,
+    /// Distinguishes this index from every other one the process builds. A
+    /// consumer retaining structures derived from an index -- the fused
+    /// pipeline's taffy styles -- compares it to learn the cascade input
+    /// changed while both DOM generations stood still, which is what a
+    /// stylesheet rebuild, a viewport change, and a CSSOM splice each do.
+    build_id: u64,
 }
 
+/// Source of `StyleIndex::build_id`. Monotonic per process, so two indexes
+/// never share an id and a retained derivation never mistakes one for another.
+static STYLE_INDEX_BUILDS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 impl StyleIndex {
+    /// Identifies this index among the indexes the process built.
+    #[must_use]
+    pub fn build_id(&self) -> u64 {
+        self.build_id
+    }
+
     /// Construct with the default 1280x800 viewport (matches typical desktop
     /// render target; callers with a known viewport should use `for_viewport`).
     #[must_use]
@@ -2003,10 +2027,24 @@ impl StyleIndex {
     /// the rules). This matches media.rs `evaluate_media_query` semantics.
     #[must_use]
     pub fn for_viewport(stylesheet: &Stylesheet, viewport_w: f32, viewport_h: f32) -> Self {
-        // Flatten stylesheet into a contiguous Vec<StyleRule> of active rules.
+        Self::for_viewport_sheets(std::slice::from_ref(stylesheet), viewport_w, viewport_h)
+    }
+
+    /// Build a `StyleIndex` over an ordered list of sheets.
+    ///
+    /// Cascade order across sheets is list order, which is what walking one
+    /// concatenation of the same sheets already produced. The list form is what
+    /// lets a sheet keep its own rule vector, so `CSSStyleSheet::insertRule`
+    /// splices one sheet rather than reparsing the document's whole CSS text.
+    #[must_use]
+    pub fn for_viewport_sheets<'a, I>(sheets: I, viewport_w: f32, viewport_h: f32) -> Self
+    where
+        I: IntoIterator<Item = &'a Stylesheet>,
+    {
+        // Flatten the sheets into a contiguous Vec<StyleRule> of active rules.
         // rule_index fields in IndexedSelector index into this vec.
         let (active_rules, layer_ranks, registrations) =
-            flatten_active_rules(stylesheet, viewport_w, viewport_h);
+            flatten_active_rules(sheets, viewport_w, viewport_h);
 
         // Build tag/id/class/universal selector index over active_rules.
         // Separating collection from indexing avoids a borrow conflict
@@ -2066,6 +2104,7 @@ impl StyleIndex {
             total_selector_pairs: pair_id as usize,
             declares_custom_properties,
             registrations: deduped,
+            build_id: STYLE_INDEX_BUILDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         }
     }
 }
@@ -2236,17 +2275,16 @@ impl CascadeWorkspace {
      * candidates and class_keys are cleared with O(1) capacity-preserving clear().
      */
     fn prepare(&mut self, rules_len: usize, total_selector_pairs: usize) {
-        if self.matched_by_rule.len() < rules_len {
-            self.matched_by_rule.resize(rules_len, None);
-        } else {
-            self.matched_by_rule[..rules_len].fill(None);
-        }
+        // Both buffers clear before they grow. `Vec::resize` appends the fill
+        // value and leaves the existing elements alone, so a rule list that
+        // grew -- a CSSOM insertRule, a `<style>` the document gained --
+        // would otherwise carry the previous run's match cache into rule
+        // indices the new StyleIndex assigned to different rules.
+        self.matched_by_rule.clear();
+        self.matched_by_rule.resize(rules_len, None);
         let words_needed = total_selector_pairs.div_ceil(64);
-        if self.seen_bits.len() < words_needed {
-            self.seen_bits.resize(words_needed, 0);
-        } else if words_needed > 0 {
-            self.seen_bits[..words_needed].fill(0);
-        }
+        self.seen_bits.clear();
+        self.seen_bits.resize(words_needed, 0);
         self.candidates.clear();
         self.class_keys.clear();
     }

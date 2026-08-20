@@ -44,6 +44,7 @@ mod module_loader;
 pub use module_loader::{ImportMap, module_import_specifiers};
 mod net_queue;
 mod platform_globals;
+mod style_sheets;
 
 const HOST_CALLBACKS_REGISTRY: &str = "__silksurfHostCallbacks";
 const DEFAULT_HOST_CALLBACK_BUDGET: usize = 256;
@@ -1252,6 +1253,19 @@ impl SilkContext {
     /// replaceState since the last call.
     pub fn take_history_intents(&mut self) -> Vec<HistoryIntent> {
         std::mem::take(&mut *self.history_intents.borrow_mut())
+    }
+
+    /// Install `document.styleSheets` and the CSSOM objects it hands out,
+    /// backed by the same `SheetSet` the engine cascades from.
+    ///
+    /// A rule script inserts lands in the set the next `StyleIndex` build
+    /// reads, and `SheetSet::script_generation` is what tells the repaint tick
+    /// a splice happened: an `insertRule` call touches no DOM node.
+    pub fn set_style_sheets(&mut self, sheets: &Arc<Mutex<silksurf_css::SheetSet>>) {
+        let Some(dom) = self.dom.clone() else {
+            return;
+        };
+        style_sheets::install_style_sheet_natives(sheets, &dom, &mut self.ctx);
     }
 
     /// Install the computed-style provider backing `getComputedStyle`.

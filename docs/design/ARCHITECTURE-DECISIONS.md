@@ -1898,6 +1898,132 @@ ordinary cascade rebuild.
 
 ---
 
+## AD-030: CSSOM Style Sheets as the Scripted View of Live Sheet State
+
+**Status**: Accepted (implemented on branch document-stylesheets-cssom)
+**Date**: 2026-08-19
+**Deciders**: Public web page load repairs
+
+### Context
+
+AD-028 made the document's stylesheets live engine state and named the
+remaining gap: "`document.styleSheets` and the CSSOM stay absent: the set is
+engine state, not a scripted object model." The roadmap entry
+`document-stylesheets-cssom` reads that gap as a page contributing nothing to
+the cascade when it installs styles through script rather than through a
+`<style>` element.
+
+The measured failure is sharper than the roadmap states. chatgpt.com's module
+graph is 1163 chunks reachable from `/cdn/assets/manifest-56d12409.js`; seven
+touch the CSSOM. One of them decides whether the page paints its component
+styles at all. Chunk `e0691314-j25je0r3ld54d0o7.js` is Emotion's style sheet,
+whose `insert` reaches its target sheet through
+
+```js
+function r(e){ if(e.sheet) return e.sheet;
+  for(var t=0;t<document.styleSheets.length;t++)
+    if(document.styleSheets[t].ownerNode===e) return document.styleSheets[t]; }
+```
+
+and whose speedy mode is on by default: `this.isSpeedy = e.speedy === void 0
+|| e.speedy`. The `try { n.insertRule(e, n.cssRules.length) } catch {}` that
+follows guards the insertion alone; the accessor call `var n = r(t)` sits
+outside it. A `SilkContext` probe over a document carrying a `<style>` element
+measures `document.styleSheets` undefined, `CSSStyleSheet` undefined,
+`styleElement.sheet` undefined, and `document.adoptedStyleSheets` undefined,
+so the accessor raises `TypeError: cannot convert 'null' or 'undefined' to
+object` and the throw leaves `insert` rather than being swallowed. Every
+Emotion rule the page writes is lost, and the loss is a thrown exception in
+the page's own style path, not a silent degradation.
+
+The other six consumers rank differently. Chunk
+`bcae0416-e2x9v208ubq1vkey.js` is CodeMirror's StyleModule, which gates on
+`e.adoptedStyleSheets && r.CSSStyleSheet` and otherwise builds `<style>` text
+that AD-028 already collects; it works today. Chunk
+`2340486e-eab5bn2wcgxcv5rd.js` wraps `CSSStyleSheet.prototype.insertRule`,
+`CSSMediaRule`, and `CSSSupportsRule` and reads `cssText`, `parentStyleSheet`,
+and `ownerNode` to emit `StyleSheetRule` mutation records; it is a session
+recorder and moves no pixels. Chunk `27597608-biyt09iz6nivrt6s.js` calls
+`attachShadow`, `new CSSStyleSheet`, and `replaceSync`, which need Shadow DOM.
+
+Feature detection makes a partial implementation actively worse than none.
+CodeMirror takes its working text path only while `adoptedStyleSheets` stays
+undefined, so defining the constructed-sheet surface without the adoption
+plumbing moves a working consumer onto a broken path.
+
+Three engine facts bound the design. `StyleSheetSet`
+(crates/silksurf-app/src/stylesheet_set.rs:171) derives its sources by walking
+the DOM and exposes `css_text()` alone, so a sheet has no identity a script
+could hold. `refresh` (stylesheet_set.rs:291) watches
+`Dom::structure_generation`, `Dom::generation`, and dirty nodes matching
+`is_style_source_element`, and an `insertRule` call moves none of them.
+`install_computed_style_provider` (crates/silksurf-app/src/page_build.rs:663)
+clones the `Stylesheet` into its closure and is called once at page build
+(page_build.rs:227), so `getComputedStyle` answers from a parse-time snapshot
+and already fails to observe the AD-028 rebuild.
+
+### Decision
+
+Model the CSSOM as the scripted view of the sheet state AD-028 already keeps
+live, rather than as a second store script mutates behind the engine's back.
+
+The concatenated `Stylesheet` becomes an ordered list carrying origin.
+`StyleIndex::for_viewport_sheets(&[Stylesheet], w, h)` flattens the list in
+document order, which is what walking one concatenation already did, and the
+single-sheet `for_viewport` wraps it so the seven construction sites change by
+one line each. Origin tagging keeps `DEFAULT_USER_AGENT_STYLESHEET`
+(stylesheet_set.rs:257) out of the scripted collection.
+
+Sheet state moves behind a handle both sides hold. silksurf-js already depends
+on silksurf-css, so the shared type needs no new crate edge. The app runtime
+and `SilkContext` share it, and `document.styleSheets` enumerates the author
+entries with `ownerNode`, `href`, `media`, `disabled`, `cssRules`,
+`insertRule`, and `deleteRule`. `HTMLStyleElement.sheet` and
+`HTMLLinkElement.sheet` resolve to the same object, which is the branch
+Emotion takes first and the one that avoids the enumeration entirely.
+
+`insertRule` splices the sheet's `Vec<Rule>` and raises a dirty flag the
+repaint tick drains, on the precedent of `SilkContext::storage_dirty`
+(silksurf-js/src/boa_backend/mod.rs:853). Draining it enters the same
+`StyleIndex` rebuild and full repaint that `refresh_runtime_stylesheets`
+(crates/silksurf-app/src/runtime_repaint.rs:169) runs when sheet text changes,
+without reparsing the text a script never touched. Emotion reads
+`cssRules.length` before every insert, so the retained rule list is what keeps
+that read O(1) instead of a reparse per inserted rule.
+
+`cssText` and `selectorText` need `Rule`, `SelectorList`, and `Declaration`
+serialization, which silksurf-css does not have in any form today. The
+serializer lands in silksurf-css beside the parser so the parse and the
+serialization of a rule stay one review away from each other.
+
+`install_computed_style_provider` takes the shared handle instead of a cloned
+`Stylesheet`. This repairs the AD-028 snapshot defect on its own and is the
+only way a rule inserted through script can reach `getComputedStyle` at all.
+
+### Consequences
+
+A page that inserts rules through `CSSStyleSheet.insertRule` reaches the
+cascade, and chatgpt.com's Emotion styles stop throwing out of the page's own
+style path. The rebuild cost per drained tick is the existing `StyleIndex`
+rebuild and full repaint that AD-028 measured at 113 us on
+`make gui-probe-page-click`; the CSSOM path avoids AD-028's reparse of the
+concatenated text, which the parse of chatgpt's 180,449 bytes dominates.
+
+Three pieces are cut by name. `constructed-stylesheets-and-adoption` leaves
+`new CSSStyleSheet`, `replaceSync`, and `adoptedStyleSheets` undefined, which
+needs Shadow DOM for its only observed consumer and keeps CodeMirror on its
+working text fallback. `cssom-synchronous-restyle` leaves an `insertRule`
+followed by a `getComputedStyle` read in the same script observing the
+pre-insert cascade, because the rebuild rides the tick. `cssom-grouping-rules`
+leaves `CSSMediaRule` and `CSSSupportsRule` without the `parentRule` and
+`parentStyleSheet` walk the session recorder performs, which records telemetry
+and paints nothing.
+
+Each cut is a defined surface rather than a partial one: the constructed-sheet
+API stays absent so feature detection keeps choosing the path that works.
+
+---
+
 ## Future ADRs
 
 Planned (renumbered after the 2026-04-30 batch):
