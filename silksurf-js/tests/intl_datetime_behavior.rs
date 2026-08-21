@@ -107,7 +107,9 @@ fn the_default_zone_agrees_with_the_date_object_it_formats() {
         eq(Number(utc.filter(function (p) {{ return p.type === 'hour'; }})[0].value), d.getUTCHours(), 'the UTC hour matches Date');
         // The reported zone names the zone the accessors read. A fixed-offset
         // identifier states its own offset, so that pairing is checkable here;
-        // a named zone's is not, and the offset that produced the name is.
+        // a named zone's is not. Neither branch fires on a host whose
+        // /etc/localtime is a zoneinfo symlink, which is where this runs, so
+        // this guards the container and TZ configurations rather than this one.
         var zone = new Intl.DateTimeFormat().resolvedOptions().timeZone;
         var offset = -d.getTimezoneOffset();
         if (zone === 'UTC') {{ eq(offset, 0, 'a UTC report needs a zero offset'); }}

@@ -772,6 +772,41 @@ mod tests {
     }
 
     #[test]
+    fn a_zone_with_no_name_renders_the_offset_format_cldr_falls_back_to() {
+        // Matched against the reference implementation's shortOffset and
+        // longOffset zone names: GMT-7 and GMT-07:00 for -07:00, GMT+5:30 and
+        // GMT+05:30 for +05:30. Only the UTC arm is reachable from the
+        // conformance fixture, which pins every vector to UTC so it stays
+        // host-independent.
+        let locale = &super::LOCALES[0];
+        let at = |offset: i32, count: usize| {
+            super::zone_name(
+                super::Fields {
+                    offset,
+                    ..super::Fields::default()
+                },
+                count,
+                locale,
+            )
+        };
+        assert_eq!(at(-420, 1), "GMT-7");
+        assert_eq!(at(-420, 4), "GMT-07:00");
+        assert_eq!(at(330, 1), "GMT+5:30");
+        assert_eq!(at(330, 4), "GMT+05:30");
+        assert_eq!(at(60, 1), "GMT+1");
+        assert_eq!(at(0, 1), "GMT+0");
+        let utc = super::Fields {
+            utc: true,
+            ..super::Fields::default()
+        };
+        assert_eq!(super::zone_name(utc, 1, locale), "UTC");
+        assert_eq!(
+            super::zone_name(utc, 4, locale),
+            "Coordinated Universal Time"
+        );
+    }
+
+    #[test]
     fn the_pattern_pool_carries_every_index_the_locale_tables_name() {
         let pool = patterns().len();
         for locale in super::LOCALES {

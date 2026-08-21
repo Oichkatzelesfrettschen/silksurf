@@ -363,8 +363,9 @@ separately-landable follow-up):
   intl_bundled feature and 1/61 of the icu_datetime blob that feature
   links but no marker request reaches. 28 of chatgpt.com's 30
   DateTimeFormat sites sit in eagerly preloaded bundles.
-- intl-locale-data-expansion -- A locale costs roughly 14 KB in the
-  generated table, so the set grows by rerunning
+- intl-locale-data-expansion -- A locale costs roughly 17 KB of generated
+  source, measured at 23,489 bytes for one tag, 39,964 for two, and 57,875
+  for three, so the set grows by rerunning
   `scripts/gen_intl_datetime_data.mjs` with more tags. Slavic genitive
   month names, CJK year and month markers, non-Gregorian calendars, and
   non-Latin numbering systems need the generator extended before their

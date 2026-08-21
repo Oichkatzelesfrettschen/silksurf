@@ -2583,9 +2583,10 @@ and the two were checked against each other.
 
 Seven pieces are cut by name.
 
-`intl-locale-data-expansion` records that a locale costs roughly 14 KB in this
-table, measured as 34,826 bytes of generated source for two, so the set grows
-by rerunning `scripts/gen_intl_datetime_data.mjs` with more tags. Locales whose
+`intl-locale-data-expansion` records that a locale costs roughly 17 KB of
+generated source, measured as 23,489 bytes for one tag, 39,964 for two, and
+57,875 for three before rustfmt, so the set grows by rerunning
+`scripts/gen_intl_datetime_data.mjs` with more tags. Locales whose
 patterns need a form this table does not carry -- Slavic genitive month names,
 CJK year and month markers, non-Gregorian calendars, non-Latin numbering
 systems -- need the generator extended before their tags are added.
