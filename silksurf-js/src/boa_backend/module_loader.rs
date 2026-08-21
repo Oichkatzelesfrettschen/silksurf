@@ -13,12 +13,14 @@
  * module's own URL and `url::Url::join` performs the resolution. `import.meta`
  * reads its `url` from the same key.
  *
- * A specifier the registry does not hold is recorded in `missing` and reported
- * as an error, so a caller drives the fetch rounds from what the parser
- * actually requested.
+ * A specifier the registry does not hold is recorded in `missing`. A loader
+ * carrying a fetcher answers the miss by fetching that URL, parsing it, and
+ * inserting it, which is what lets `import()` reach a module no scan over the
+ * source text predicted; a loader without one reports the miss as an error, so
+ * a caller drives the fetch rounds from what the parser actually requested.
  */
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use boa_engine::{
@@ -26,6 +28,28 @@ use boa_engine::{
     module::{Module, ModuleLoader, Referrer},
 };
 use rustc_hash::FxHashMap;
+
+/// Fetch one module's source text, by absolute URL.
+///
+/// The embedder supplies the network, so this crate keeps none: the app hands
+/// over a closure holding the client, cache, and cookie policy a navigation
+/// already uses. The call runs on the thread evaluating the import and blocks
+/// it, because `ModuleLoader::load_imported_module` returns a `Module` to
+/// boa's own opcode and that opcode carries no parked form.
+pub type ModuleFetcher = Box<dyn Fn(&str) -> Result<String, String>>;
+
+/// What one navigation's loader may still fetch.
+///
+/// The static walk and the loader spend one allowance, so a document that
+/// route-splits into hundreds of chunks fetches a bounded prefix and rejects
+/// the rest with a reason. Both members reaching zero is the stop.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ModuleFetchBudget {
+    /// URLs the loader may still fetch.
+    pub urls: usize,
+    /// Bytes those responses may still total.
+    pub bytes: usize,
+}
 
 /// A document's import map: the top-level `imports` and the `scopes` that
 /// override them by referrer (HTML 8.1.3.8).
@@ -61,6 +85,11 @@ pub(super) struct PageModuleLoader {
     /// The document's address, the referrer for a specifier named by page
     /// script rather than by another module.
     document_url: RefCell<String>,
+    /// The network, supplied by the embedder. A loader without one reports a
+    /// registry miss as an error.
+    fetcher: RefCell<Option<ModuleFetcher>>,
+    /// What this navigation's loader may still fetch.
+    budget: Cell<ModuleFetchBudget>,
 }
 
 impl PageModuleLoader {
@@ -75,6 +104,69 @@ impl PageModuleLoader {
 
     pub(super) fn take_missing(&self) -> Vec<String> {
         std::mem::take(&mut *self.missing.borrow_mut())
+    }
+
+    pub(super) fn set_fetcher(&self, fetcher: ModuleFetcher) {
+        *self.fetcher.borrow_mut() = Some(fetcher);
+    }
+
+    pub(super) fn set_budget(&self, budget: ModuleFetchBudget) {
+        self.budget.set(budget);
+    }
+
+    pub(super) fn budget(&self) -> ModuleFetchBudget {
+        self.budget.get()
+    }
+
+    /// Fetch, parse, and register the module at `url`.
+    ///
+    /// The budget is charged before the parse and by the response's own length,
+    /// so a body that arrives over the allowance is rejected rather than
+    /// admitted for being already paid for. `Module::parse` takes the context
+    /// while the fetcher's borrow is released, because the parse runs page code
+    /// through boa and the fetcher must stay re-entrant.
+    fn fetch_module(&self, url: &str, context: &RefCell<&mut Context>) -> JsResult<Module> {
+        let source_text = {
+            let fetcher = self.fetcher.borrow();
+            let Some(fetcher) = fetcher.as_ref() else {
+                return Err(JsNativeError::typ()
+                    .with_message(format!("module {url} was not fetched"))
+                    .into());
+            };
+            let budget = self.budget.get();
+            if budget.urls == 0 {
+                return Err(JsNativeError::typ()
+                    .with_message(format!(
+                        "module {url} exceeds this document's module fetch allowance"
+                    ))
+                    .into());
+            }
+            fetcher(url).map_err(|err| {
+                JsError::from(JsNativeError::typ().with_message(format!("module {url}: {err}")))
+            })?
+        };
+
+        let budget = self.budget.get();
+        if source_text.len() > budget.bytes {
+            return Err(JsNativeError::typ()
+                .with_message(format!(
+                    "module {url} exceeds this document's module byte allowance"
+                ))
+                .into());
+        }
+        self.budget.set(ModuleFetchBudget {
+            urls: budget.urls - 1,
+            bytes: budget.bytes - source_text.len(),
+        });
+
+        let path = std::path::PathBuf::from(url);
+        let source = Source::from_bytes(source_text.as_bytes()).with_path(path.as_path());
+        let module = Module::parse(source, None, &mut context.borrow_mut())
+            .map_err(|err| JsNativeError::typ().with_message(format!("module {url}: {err}")))?;
+        self.modules
+            .borrow_mut()
+            .insert(url.to_string(), module.clone());
+        Ok(module)
     }
 
     pub(super) fn set_document_url(&self, url: &str) {
@@ -185,7 +277,7 @@ impl ModuleLoader for PageModuleLoader {
         self: Rc<Self>,
         referrer: Referrer,
         specifier: JsString,
-        _context: &RefCell<&mut Context>,
+        context: &RefCell<&mut Context>,
     ) -> JsResult<Module> {
         let specifier = specifier.to_std_string_lossy();
         let Some(url) = self.resolve(&referrer, &specifier) else {
@@ -197,9 +289,7 @@ impl ModuleLoader for PageModuleLoader {
             return Ok(module.clone());
         }
         self.missing.borrow_mut().push(url.clone());
-        Err(JsNativeError::typ()
-            .with_message(format!("module {url} was not fetched"))
-            .into())
+        self.fetch_module(&url, context)
     }
 
     fn init_import_meta(

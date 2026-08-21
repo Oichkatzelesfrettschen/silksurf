@@ -41,7 +41,7 @@ mod dom_bridge;
 mod dom_interfaces;
 mod event_dispatch;
 mod module_loader;
-pub use module_loader::{ImportMap, module_import_specifiers};
+pub use module_loader::{ImportMap, ModuleFetchBudget, ModuleFetcher, module_import_specifiers};
 mod net_queue;
 mod platform_globals;
 mod style_sheets;
@@ -1341,6 +1341,39 @@ impl SilkContext {
             }
             Err(e) => Err(format!("{e}")),
         }
+    }
+
+    /// Give the module loader the network it calls on a registry miss.
+    ///
+    /// A dynamic import whose specifier is computed at run time -- a router
+    /// naming its route module from route data -- reaches the loader with no
+    /// scan over the source text having predicted it, so the module is absent
+    /// from the graph the embedder fetched ahead of evaluation. The fetcher
+    /// answers that miss. A context with none installed reports the miss as an
+    /// error, which is what keeps `module_import_specifiers` a scanner over an
+    /// empty registry.
+    ///
+    /// The call blocks the thread that evaluates the import, because
+    /// `ModuleLoader::load_imported_module` returns a `Module` to boa's opcode
+    /// and that opcode carries no parked form. Pair it with
+    /// `set_module_fetch_budget`.
+    pub fn set_module_fetcher(&mut self, fetcher: module_loader::ModuleFetcher) {
+        self.module_loader.set_fetcher(fetcher);
+    }
+
+    /// Bound what the loader may fetch for this navigation.
+    ///
+    /// The static walk and the loader spend one allowance, so the embedder
+    /// seeds this with what its own graph walk left. An exhausted allowance
+    /// rejects the import with a reason rather than fetching on.
+    pub fn set_module_fetch_budget(&mut self, budget: module_loader::ModuleFetchBudget) {
+        self.module_loader.set_budget(budget);
+    }
+
+    /// What this navigation's loader may still fetch.
+    #[must_use]
+    pub fn module_fetch_budget(&self) -> module_loader::ModuleFetchBudget {
+        self.module_loader.budget()
     }
 
     /// Set the document's import map, as `(specifier, target)` pairs from the
