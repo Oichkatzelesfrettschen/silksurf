@@ -214,24 +214,46 @@ fn requested_tags(value: &JsValue, context: &mut Context) -> JsResult<Vec<String
 /// `/etc/localtime` resolves to. `Date`'s own accessors carry the offset, so this
 /// name is what `resolvedOptions().timeZone` reports rather than an input to
 /// formatting.
-pub(super) fn host_time_zone() -> &'static str {
-    static ZONE: OnceLock<String> = OnceLock::new();
-    ZONE.get_or_init(|| {
-        if let Ok(tz) = std::env::var("TZ")
-            && let tz = tz.trim_start_matches(':')
-            && tz.contains('/')
-        {
+pub(super) fn host_time_zone(offset_minutes: i32) -> String {
+    if let Ok(tz) = std::env::var("TZ") {
+        let tz = tz.trim_start_matches(':');
+        if !tz.is_empty() {
             return tz.to_string();
         }
-        let Ok(target) = std::fs::read_link("/etc/localtime") else {
-            return "UTC".to_string();
-        };
+    }
+    if let Ok(target) = std::fs::read_link("/etc/localtime") {
         let text = target.to_string_lossy();
-        match text.split_once("zoneinfo/") {
-            Some((_, zone)) if !zone.is_empty() => zone.to_string(),
-            _ => "UTC".to_string(),
+        if let Some((_, zone)) = text.split_once("zoneinfo/")
+            && !zone.is_empty()
+        {
+            return zone.to_string();
         }
-    })
+    }
+    // Neither source names the zone, so the identifier comes from the offset
+    // the accessors report and agrees with the fields by construction.
+    offset_zone(offset_minutes)
+}
+
+/// The fixed-offset zone identifier for an offset in minutes east of UTC. The
+/// Etc/GMT zones invert the sign, so a zone west of UTC carries a plus.
+fn offset_zone(offset_minutes: i32) -> String {
+    if offset_minutes == 0 {
+        return "UTC".to_string();
+    }
+    let hours = offset_minutes / 60;
+    if offset_minutes % 60 == 0 {
+        return format!(
+            "Etc/GMT{}{}",
+            if hours < 0 { '+' } else { '-' },
+            hours.abs()
+        );
+    }
+    let sign = if offset_minutes < 0 { '-' } else { '+' };
+    format!(
+        "{sign}{:02}:{:02}",
+        offset_minutes.abs() / 60,
+        offset_minutes.abs() % 60
+    )
 }
 
 /// Accept the zone the engine can actually render: UTC, its aliases, and the
@@ -239,17 +261,22 @@ pub(super) fn host_time_zone() -> &'static str {
 /// to a page that reads it and passes it to a second formatter. Any other
 /// named zone needs an offset this build cannot compute, so it reports the
 /// `RangeError` ECMA-402 specifies rather than formatting the wrong instant.
-fn resolve_time_zone(options: &JsObject, context: &mut Context) -> JsResult<(String, bool)> {
+fn resolve_time_zone(
+    options: &JsObject,
+    offset_minutes: i32,
+    context: &mut Context,
+) -> JsResult<(String, bool)> {
+    let host = host_time_zone(offset_minutes);
     let value = options.get(js_string!("timeZone"), context)?;
     if value.is_undefined() {
-        return Ok((host_time_zone().to_string(), false));
+        return Ok((host, false));
     }
     let text = value.to_string(context)?.to_std_string_lossy();
     if text.eq_ignore_ascii_case("utc") || text.eq_ignore_ascii_case("etc/utc") {
         return Ok(("UTC".to_string(), true));
     }
-    if text.eq_ignore_ascii_case(host_time_zone()) {
-        return Ok((host_time_zone().to_string(), false));
+    if text.eq_ignore_ascii_case(&host) {
+        return Ok((host, false));
     }
     Err(JsNativeError::range()
         .with_message(format!(
@@ -340,7 +367,11 @@ fn resolve(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult
         widths.day = 1;
     }
 
-    let (zone, utc) = resolve_time_zone(&options, context)?;
+    let offset_minutes = args
+        .get(2)
+        .unwrap_or(&JsValue::undefined())
+        .to_number(context)? as i32;
+    let (zone, utc) = resolve_time_zone(&options, offset_minutes, context)?;
     let has_time = if styles.named() {
         styles.time != 0
     } else {
@@ -476,17 +507,22 @@ fn compose(locale: &LocaleData, widths: Widths, cycle: usize) -> JsResult<String
 /// it passes them.
 #[derive(Clone, Copy, Default)]
 struct Fields {
-    year: i64,
-    month: i64,
-    day: i64,
-    weekday: i64,
-    hour: i64,
-    minute: i64,
-    second: i64,
-    millisecond: i64,
+    year: i32,
+    month: i32,
+    day: i32,
+    weekday: i32,
+    hour: i32,
+    minute: i32,
+    second: i32,
+    /// Minutes east of UTC for the accessors that produced these fields, which
+    /// is the negation of what `Date.prototype.getTimezoneOffset` reports.
+    offset: i32,
+    /// Set when the fields come from the UTC accessors, which is what lets the
+    /// zone token render UTC's name rather than its offset.
+    utc: bool,
 }
 
-fn pad(value: i64, width: usize) -> String {
+fn pad(value: i32, width: usize) -> String {
     format!("{value:0width$}")
 }
 
@@ -548,30 +584,39 @@ fn render_token(
         ),
         'm' => ("minute", pad(fields.minute, count)),
         's' => ("second", pad(fields.second, count)),
-        'S' => ("fractionalSecond", fractional(fields.millisecond, count)),
         'a' => (
             "dayPeriod",
             locale.day_periods[usize::from(fields.hour >= 12)].to_string(),
         ),
+        'z' => ("timeZoneName", zone_name(fields, count, locale)),
         _ => ("literal", String::new()),
     }
 }
 
-fn hour12(hour: i64) -> i64 {
+fn hour12(hour: i32) -> i32 {
     match hour % 12 {
         0 => 12,
         other => other,
     }
 }
 
-/// Milliseconds, widened or truncated to the digit count the pattern asks for.
-fn fractional(millisecond: i64, count: usize) -> String {
-    let text = pad(millisecond, 3);
-    match count {
-        0 | 3 => text,
-        n if n < 3 => text[..n].to_string(),
-        n => format!("{text}{}", "0".repeat(n - 3)),
+/// The zone token's text. A request naming UTC renders UTC's own name, and any
+/// other zone renders the GMT offset format CLDR falls back to for a zone it
+/// carries no name for, because naming the host zone's abbreviation needs the
+/// zone data `intl-time-zone-database` covers.
+fn zone_name(fields: Fields, count: usize, locale: &LocaleData) -> String {
+    if fields.utc {
+        return locale.zone_names[usize::from(count >= 4)].to_string();
     }
+    let sign = if fields.offset < 0 { '-' } else { '+' };
+    let (hours, minutes) = (fields.offset.abs() / 60, fields.offset.abs() % 60);
+    if count >= 4 {
+        return format!("GMT{sign}{hours:02}:{minutes:02}");
+    }
+    if minutes == 0 {
+        return format!("GMT{sign}{hours}");
+    }
+    format!("GMT{sign}{hours}:{minutes:02}")
 }
 
 /// Walk a pattern, emitting one part per token run and one per literal run.
@@ -658,9 +703,9 @@ fn read_fields(value: Option<&JsValue>, context: &mut Context) -> JsResult<Field
         return Ok(Fields::default());
     };
     let array = JsArray::from_object(object.clone())?;
-    let mut slots = [0_i64; 8];
+    let mut slots = [0_i32; 9];
     for (index, slot) in slots.iter_mut().enumerate() {
-        *slot = array.get(index as u64, context)?.to_number(context)? as i64;
+        *slot = array.get(index as u64, context)?.to_number(context)? as i32;
     }
     Ok(Fields {
         year: slots[0],
@@ -670,7 +715,8 @@ fn read_fields(value: Option<&JsValue>, context: &mut Context) -> JsResult<Field
         hour: slots[4],
         minute: slots[5],
         second: slots[6],
-        millisecond: slots[7],
+        offset: slots[7],
+        utc: slots[8] != 0,
     })
 }
 
@@ -695,7 +741,7 @@ fn supported_locales(
 pub(super) fn install(ctx: &mut Context) {
     let _ = ctx.register_global_callable(
         js_string!("__silksurfIntlDateTimeResolve"),
-        2,
+        3,
         NativeFunction::from_fn_ptr(resolve),
     );
     let _ = ctx.register_global_callable(
@@ -708,4 +754,40 @@ pub(super) fn install(ctx: &mut Context) {
         1,
         NativeFunction::from_fn_ptr(supported_locales),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{offset_zone, patterns};
+
+    #[test]
+    fn an_offset_names_a_zone_whose_offset_it_is() {
+        // Etc/GMT zones invert the sign, so a zone west of UTC carries a plus.
+        assert_eq!(offset_zone(0), "UTC");
+        assert_eq!(offset_zone(-480), "Etc/GMT+8");
+        assert_eq!(offset_zone(-420), "Etc/GMT+7");
+        assert_eq!(offset_zone(60), "Etc/GMT-1");
+        assert_eq!(offset_zone(330), "+05:30");
+        assert_eq!(offset_zone(-570), "-09:30");
+    }
+
+    #[test]
+    fn the_pattern_pool_carries_every_index_the_locale_tables_name() {
+        let pool = patterns().len();
+        for locale in super::LOCALES {
+            let slots = locale
+                .dates
+                .iter()
+                .chain(locale.times.iter())
+                .chain(locale.glue.iter())
+                .chain(locale.styles.iter());
+            for slot in slots {
+                assert!(
+                    *slot == super::NONE || (*slot as usize) < pool,
+                    "{} names pattern {slot} outside a pool of {pool}",
+                    locale.tag
+                );
+            }
+        }
+    }
 }

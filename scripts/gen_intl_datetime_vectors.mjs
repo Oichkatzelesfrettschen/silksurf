@@ -12,12 +12,19 @@ const WEEKDAY = [null,'long','short','narrow'], ERA = [null,'long','short','narr
 const YEAR = [null,'numeric','2-digit'], MONTH = [null,'numeric','2-digit','long','short','narrow'];
 const DAY = [null,'numeric','2-digit'], NUM2 = [null,'numeric','2-digit'];
 const CYCLES = ['h11','h12','h23','h24'];
+/*
+ * Every month and every weekday appear, so each name in the generated table is
+ * compared against the reference implementation at least once. The last two
+ * instants pin midnight, noon, the end of a year, and a leap day.
+ */
 const INSTANTS = [
-  Date.UTC(2026, 7, 20, 14, 5, 9, 123),
-  Date.UTC(2026, 0, 3, 4, 5, 6, 70),
-  Date.UTC(1999, 11, 31, 23, 59, 59, 999),
-  Date.UTC(2026, 5, 1, 0, 0, 0, 0),
-  Date.UTC(2024, 1, 29, 12, 0, 0, 500),
+  Date.UTC(2026, 0, 5, 4, 5, 6, 70),    Date.UTC(2026, 1, 10, 9, 30, 0),
+  Date.UTC(2026, 2, 18, 14, 5, 9, 123), Date.UTC(2026, 3, 23, 18, 45, 30),
+  Date.UTC(2026, 4, 1, 23, 15, 1),      Date.UTC(2026, 5, 13, 6, 7, 8),
+  Date.UTC(2026, 6, 28, 11, 59, 59),    Date.UTC(2026, 7, 20, 14, 5, 9, 123),
+  Date.UTC(2026, 8, 2, 0, 0, 0),        Date.UTC(2026, 9, 16, 12, 0, 0, 500),
+  Date.UTC(2026, 10, 25, 21, 21, 21),   Date.UTC(2026, 11, 31, 23, 59, 59, 999),
+  Date.UTC(1999, 11, 31, 23, 59, 59),   Date.UTC(2024, 1, 29, 12, 0, 0),
 ];
 const locales = (process.argv[2] || 'en-US,en-GB').split(',');
 const vectors = [];
@@ -56,7 +63,7 @@ for (const locale of locales) {
   for (let h = 1; h < 3; h++) for (let mi = 0; mi < 3; mi++) for (let s = 0; s < 3; s++) {
     push(locale, [w ? 2 : 0, 0, 1, m, 1, h, mi, s, 0, 0, 0]);
   }
-  for (let ds = 0; ds < 5; ds++) for (const ts of [0, 4, 3]) {
+  for (let ds = 0; ds < 5; ds++) for (let ts = 0; ts < 5; ts++) {
     if (!ds && !ts) continue;
     push(locale, [0, 0, 0, 0, 0, 0, 0, 0, 0, ds, ts]);
   }

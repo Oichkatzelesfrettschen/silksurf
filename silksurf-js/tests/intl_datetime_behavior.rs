@@ -104,7 +104,15 @@ fn the_default_zone_agrees_with_the_date_object_it_formats() {
         var hour = parts.filter(function (p) {{ return p.type === 'hour'; }})[0].value;
         eq(Number(hour), d.getHours(), 'the local hour matches Date');
         var utc = new Intl.DateTimeFormat('en-US', {{ timeZone: 'UTC', hour: 'numeric', hourCycle: 'h23' }}).formatToParts(T);
-        eq(Number(utc.filter(function (p) {{ return p.type === 'hour'; }})[0].value), d.getUTCHours(), 'the UTC hour matches Date');"
+        eq(Number(utc.filter(function (p) {{ return p.type === 'hour'; }})[0].value), d.getUTCHours(), 'the UTC hour matches Date');
+        // The reported zone names the zone the accessors read. A fixed-offset
+        // identifier states its own offset, so that pairing is checkable here;
+        // a named zone's is not, and the offset that produced the name is.
+        var zone = new Intl.DateTimeFormat().resolvedOptions().timeZone;
+        var offset = -d.getTimezoneOffset();
+        if (zone === 'UTC') {{ eq(offset, 0, 'a UTC report needs a zero offset'); }}
+        var etc = /^Etc[/]GMT([+-])([0-9]{{1,2}})$/.exec(zone);
+        if (etc) {{ eq(offset, (etc[1] === '+' ? -60 : 60) * Number(etc[2]), 'an Etc/GMT report states its offset'); }}"
     ));
 }
 
@@ -156,6 +164,21 @@ fn the_hour_cycle_follows_hour12_then_hour_cycle_then_the_locale() {
         eq(at('en-GB', {{ hour12: true }}), '2 pm', 'en-GB spells the day period in lower case');
         eq(at('en-US', {{ hourCycle: 'h23' }}), '14', 'an explicit cycle');
         eq(at('en-US', {{ hour12: true, hourCycle: 'h23' }}), '2 PM', 'hour12 outranks hourCycle');"
+    ));
+}
+
+#[test]
+fn a_style_that_carries_a_zone_name_renders_one_rather_than_reporting_an_error() {
+    run(&format!(
+        "{ASSERT}
+        eq(new Intl.DateTimeFormat('en-US', {{ timeZone: 'UTC', timeStyle: 'long' }}).format(T), '2:05:09 PM UTC', 'timeStyle long');
+        eq(new Intl.DateTimeFormat('en-US', {{ timeZone: 'UTC', timeStyle: 'full' }}).format(T), '2:05:09 PM Coordinated Universal Time', 'timeStyle full');
+        eq(new Date(T).toLocaleTimeString('en-US', {{ timeZone: 'UTC', timeStyle: 'long' }}), '2:05:09 PM UTC', 'through toLocaleTimeString');
+        // A zone with no name data renders the GMT offset format CLDR falls
+        // back to, so the host zone formats rather than reporting an error.
+        var local = new Intl.DateTimeFormat('en-US', {{ timeStyle: 'long' }}).formatToParts(T);
+        var zone = local.filter(function (p) {{ return p.type === 'timeZoneName'; }})[0].value;
+        eq(/^(UTC|GMT[+-][0-9]{{1,2}}(:[0-9]{{2}})?)$/.test(zone), true, 'host zone name: ' + zone);"
     ));
 }
 

@@ -634,8 +634,11 @@ const PLATFORM_BOOTSTRAP: &str = r"
      */
     var DTF = function DateTimeFormat(locales, options) {
         var self = this instanceof DTF ? this : Object.create(DTF.prototype);
+        // The offset the local accessors carry decides both the zone name a
+        // request naming none reports and the text the zone token renders, so
+        // resolution reads it from the same Date the formatter will.
         Object.defineProperty(self, '_resolved', {
-            value: __silksurfIntlDateTimeResolve(locales, options),
+            value: __silksurfIntlDateTimeResolve(locales, options, -new Date().getTimezoneOffset()),
         });
         return self;
     };
@@ -643,10 +646,10 @@ const PLATFORM_BOOTSTRAP: &str = r"
         var d = new Date(time);
         if (resolved.utc) {
             return [d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), d.getUTCDay(),
-                d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds(), d.getUTCMilliseconds()];
+                d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds(), 0, 1];
         }
         return [d.getFullYear(), d.getMonth(), d.getDate(), d.getDay(),
-            d.getHours(), d.getMinutes(), d.getSeconds(), d.getMilliseconds()];
+            d.getHours(), d.getMinutes(), d.getSeconds(), -d.getTimezoneOffset(), 0];
     }
     function dtfTime(date) {
         var t = date === undefined ? Date.now() : Number(date);

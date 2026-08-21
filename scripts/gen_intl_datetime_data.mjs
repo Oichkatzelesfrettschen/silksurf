@@ -44,6 +44,13 @@ function token(type, value, hc) {
     case 'second': return two?'ss':'s';
     case 'fractionalSecond': return 'S'.repeat(value.length);
     case 'dayPeriod': return 'a';
+    /*
+     * A style carries the zone name without naming a width, so the width is
+     * whichever of the locale's two UTC names the value matches. CLDR falls
+     * back to the GMT offset format for a zone it has no name for, which is
+     * what the runtime renders for the host zone.
+     */
+    case 'timeZoneName': return NAMES && NAMES.zone[1] === value ? 'zzzz' : 'z';
     default: return null;
   }
 }
@@ -87,6 +94,8 @@ function names(locale, kind) {
     [Date.UTC(-1, 5, 15), Date.UTC(2026, 5, 15)].map(t => at({era:w, year:'numeric'}, 'era', t)));
   if (kind === 'dayPeriod') return [[0, 13].map(h =>
     at({hour:'numeric', hourCycle:'h12'}, 'dayPeriod', Date.UTC(2026, 0, 1, h)))];
+  if (kind === 'zone') return ['short', 'long'].map(w =>
+    at({timeZoneName:w}, 'timeZoneName', Date.UTC(2026, 0, 1)));
   return [];
 }
 
@@ -101,7 +110,8 @@ let exact = 0, total = 0;
 
 for (const locale of locales) {
   NAMES = null;
-  NAMES = { month: names(locale, 'month'), weekday: names(locale, 'weekday'), era: names(locale, 'era') };
+  NAMES = { month: names(locale, 'month'), weekday: names(locale, 'weekday'),
+    era: names(locale, 'era'), zone: names(locale, 'zone') };
   const dates = new Uint16Array(864).fill(0xFFFF), times = new Uint16Array(108).fill(0xFFFF);
   for (let w = 0; w < 4; w++) for (let e = 0; e < 4; e++) for (let y = 0; y < 3; y++)
   for (let m = 0; m < 6; m++) for (let d = 0; d < 3; d++) {
@@ -171,7 +181,8 @@ for (const locale of locales) {
     return [];
   };
   out.push({ locale, dates, times, glue, styles,
-    months: NAMES.month, weekdays: NAMES.weekday, eras: NAMES.era, dayPeriods: names(locale, 'dayPeriod')[0],
+    months: NAMES.month, weekdays: NAMES.weekday, eras: NAMES.era,
+    dayPeriods: names(locale, 'dayPeriod')[0], zoneNames: NAMES.zone,
     resolved: new Intl.DateTimeFormat(locale, {timeZone:'UTC'}).resolvedOptions() });
   console.error(`${locale}: pool now ${pool.length}`);
 }
@@ -197,9 +208,11 @@ let rs = `/*
  * the Unicode license recorded in NOTICE-CLDR.
  */
 
-/// Signature slot no pattern occupies. A date or time field combination the
-/// reference implementation rejects stays empty and formatting reports the
-/// unsupported combination rather than guessing a pattern for it.
+/// Signature slot no pattern occupies. Every combination an option bag can
+/// reach carries a pattern; the empty slots are signatures no request
+/// produces -- the empty field set, and the hour cycle variants of a time
+/// signature that names no hour -- and formatting reports a reached one
+/// rather than rendering an empty string.
 pub(super) const NONE: u16 = u16::MAX;
 
 /// Every distinct pattern, one per line, shared across locales.
@@ -228,6 +241,9 @@ pub(super) struct LocaleData {
     pub(super) eras: [[&'static str; 2]; 3],
     /// The AM and PM day period names.
     pub(super) day_periods: [&'static str; 2],
+    /// UTC's short and long names, which a style pattern's zone token renders
+    /// when the request names UTC.
+    pub(super) zone_names: [&'static str; 2],
     /// The hour cycle a request that names none resolves to.
     pub(super) hour_cycle: &'static str,
 }
@@ -253,6 +269,7 @@ for (const l of out) {
         weekdays: [${l.weekdays.map(arr).join(', ')}],
         eras: [${l.eras.map(arr).join(', ')}],
         day_periods: ${arr(l.dayPeriods)},
+        zone_names: ${arr(l.zoneNames)},
         hour_cycle: ${esc(new Intl.DateTimeFormat(l.locale, {timeZone:'UTC', hour:'numeric'}).resolvedOptions().hourCycle)},
     },\n`;
 }
