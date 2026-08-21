@@ -2324,7 +2324,7 @@ every import after it; the router's `window.location.reload()` recovery
 rebuilds the document and reseeds it, which turns the exhaustion into a reload
 after enough route changes.
 
-Six pieces are cut by name.
+Seven pieces are cut by name.
 
 `module-fetch-deadline` leaves the block bounded only by the socket read
 timeout above. A deadline the loader owns would reject an import whose fetch
@@ -2519,10 +2519,10 @@ controlled pair on the host above:
 | configuration | binary bytes | delta | DateTimeFormat |
 |---|---|---|---|
 | baseline | 19,954,048 | -- | absent |
-| in-engine, en-US and en-GB | 20,037,376 | +83,328 | formats |
+| in-engine, en-US and en-GB | 20,037,312 | +83,264 | formats |
 | boa `intl_bundled` | 31,338,368 | +11,384,320 | `format` undefined |
 
-83,328 bytes is 1/137 of the bundled feature and 1/61 of the `icu_datetime`
+83,264 bytes is 1/137 of the bundled feature and 1/61 of the `icu_datetime`
 blob alone, and it is the configuration in which `Intl.DateTimeFormat` works.
 
 The supported locale set is declared rather than implied. `supportedLocalesOf`
@@ -2534,25 +2534,39 @@ instead of ignoring the one it was given.
 
 Time zones follow `Date` rather than a zone database. The bootstrap reads the
 calendar fields off the `Date` object with either the local or the UTC
-accessors, so `Intl` and `Date` agree on the wall clock by construction and no
-zone data enters the crate. Measured, boa's default
-`local_timezone_offset_seconds` returns the host offset and keeps returning it
-with other threads running, so the local accessors carry a real offset;
-`resolvedOptions().timeZone` names that zone from `TZ` or from the path
-`/etc/localtime` resolves to. A request naming UTC or naming the host's own
-zone formats, which is the round trip the five `resolvedOptions().timeZone`
+accessors and passes the offset those accessors carry, so `Intl` and `Date`
+agree on the wall clock by construction and no zone data enters the crate.
+Measured, boa's default `local_timezone_offset_seconds` returns the host offset
+and keeps returning it with other threads running, so the local accessors carry
+a real offset.
+
+The reported zone names the zone those accessors read, which is one decision
+rather than two. `TZ` wins when it is set, because that is what the offset
+lookup honors; `/etc/localtime` supplies the name when it is a symlink into a
+zoneinfo path; and when neither names a zone the identifier comes from the
+offset itself, as `UTC`, an `Etc/GMT` zone, or an offset string, each of which
+states the offset it was built from. A request naming UTC or naming the host's
+own zone formats, which is the round trip the five `resolvedOptions().timeZone`
 sites perform, and any other named zone reports the `RangeError` ECMA-402
 specifies.
+
+A style pattern carrying a zone name renders UTC's own name for a request
+naming UTC, and the GMT offset format for any other zone, which is the fallback
+CLDR specifies for a zone it carries no name for.
 
 ### Consequences
 
 `Intl.DateTimeFormat` formats, `formatToParts` labels, `resolvedOptions`
 reports, and the three `Date` locale methods return strings where they threw.
-2,346 vectors covering every date signature, every time signature, and every
-style combination agree with the reference implementation
-(`silksurf-js/tests/intl_datetime_conformance.rs`), and 11 behavior cases cover
+2,366 vectors covering every date signature, every time signature, every style
+combination, and every month and weekday name in the table agree with the
+reference implementation
+(`silksurf-js/tests/intl_datetime_conformance.rs`), and 12 behavior cases cover
 negotiation, the detachable `format` accessor, and the specified errors
 (`intl_datetime_behavior.rs`).
+
+Whether chatgpt.com's timestamps render is a separate evidence class. A
+conformance run proves the formatter; a live load proves the page.
 
 The generated table derives from the Unicode Common Locale Data Repository, so
 `NOTICE-CLDR` records the Unicode license it carries.
@@ -2567,7 +2581,7 @@ The disagreement surfaced only because the pattern table is generated through
 `formatToParts` while the conformance fixture is generated through `format`,
 and the two were checked against each other.
 
-Six pieces are cut by name.
+Seven pieces are cut by name.
 
 `intl-locale-data-expansion` records that a locale costs roughly 14 KB in this
 table, measured as 34,826 bytes of generated source for two, so the set grows
@@ -2591,6 +2605,10 @@ seven eager sites, and that boa never had it.
 `intl-display-names` records that `Intl.DisplayNames` stays absent across five
 eager sites, and that boa's `Intl` object never carried it, so no feature level
 answers those sites.
+
+`intl-fractional-seconds` records that `fractionalSecondDigits` is not read, so
+no pattern carries a fractional second token. Reaching it means generating the
+table's time slots across the three digit counts as well.
 
 `intl-collation` records that `String.prototype.localeCompare` compares by code
 point today -- boa registers it unconditionally and its non-`intl` arm ignores

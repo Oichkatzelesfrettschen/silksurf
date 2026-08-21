@@ -358,8 +358,8 @@ separately-landable follow-up):
   implementation and enumerated rather than derived, because ICU's
   skeleton width adjustment and its appendItems fallback defeat every
   composition rule tried against the 69,983-combination matrix.
-  2,346 vectors agree with the reference implementation. The table costs
-  83,328 binary bytes for en-US and en-GB, which is 1/137 of boa's
+  2,366 vectors agree with the reference implementation. The table costs
+  83,264 binary bytes for en-US and en-GB, which is 1/137 of boa's
   intl_bundled feature and 1/61 of the icu_datetime blob that feature
   links but no marker request reaches. 28 of chatgpt.com's 30
   DateTimeFormat sites sit in eagerly preloaded bundles.
@@ -373,7 +373,9 @@ separately-landable follow-up):
   reports the RangeError ECMA-402 specifies, because computing its offset
   needs zone data this build has none of. The five sites that read
   resolvedOptions().timeZone and hand it back to a second formatter round
-  trip today.
+  trip today. A style pattern's zone token renders the GMT offset format
+  CLDR falls back to rather than the host zone's abbreviation, which needs
+  the same zone data.
 - intl-number-and-plural-formatters -- Intl.NumberFormat, Intl.PluralRules,
   and Number.prototype.toLocaleString stay absent across 16 eager sites.
   The same generator shape reaches them: symbols and grouping sizes per
@@ -384,6 +386,9 @@ separately-landable follow-up):
 - intl-display-names -- Intl.DisplayNames stays absent across five eager
   sites; boa's Intl object never carried it, so no feature level answers
   them.
+- intl-fractional-seconds -- fractionalSecondDigits is not read, so no
+  pattern carries a fractional second token. Reaching it means generating
+  the time slots across the three digit counts as well.
 - intl-collation -- String.prototype.localeCompare compares by code point,
   because boa registers it unconditionally and its non-intl arm ignores the
   locale. That answers 21 chatgpt.com sites with an ordering wrong for any
