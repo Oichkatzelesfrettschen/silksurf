@@ -320,6 +320,10 @@ pub(crate) fn build_browser_page_with_buffers_for_window(
     );
     trace_navigation_script_phase(trace_build, "dynamic-total", dynamic_start.elapsed());
     let module_start = std::time::Instant::now();
+    // The loader fetches a specifier the static walk did not predict, under
+    // what that walk left of the navigation's module allowance (AD-032).
+    js_ctx.set_module_fetcher(module_fetcher(&payload.render_config));
+    js_ctx.set_module_fetch_budget(module_fetch_budget(&payload.module_texts));
     execute_static_module_scripts(
         &payload.url,
         &dom_arc,

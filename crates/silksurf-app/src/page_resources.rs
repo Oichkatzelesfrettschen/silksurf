@@ -495,6 +495,57 @@ pub(crate) fn fetch_module_round_texts(
         .collect()
 }
 
+/*
+ * module_fetcher -- the network the module loader calls on a registry miss.
+ *
+ * A router naming its route module from route data reaches the loader with a
+ * specifier no scan over the source text resolved, so the module is absent
+ * from the graph fetch_module_graph_texts walked. AD-032 answers that miss
+ * here.
+ *
+ * The renderer is built on the first miss rather than per navigation, because
+ * SpeculativeRenderer::new loads the on-disk response cache and most documents
+ * never name a specifier the static walk missed. Fetching through the renderer
+ * rather than a bare client is what lets a chunk the modulepreload walk warmed
+ * come from that cache, which bounds how long the evaluating thread blocks.
+ */
+pub(crate) fn module_fetcher(config: &BrowserRenderConfig) -> silksurf_js::ModuleFetcher {
+    let config = config.clone();
+    let renderer: RefCell<Option<SpeculativeRenderer>> = RefCell::new(None);
+    Box::new(move |url: &str| {
+        let mut slot = renderer.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(renderer_from_config(&config)?);
+        }
+        let renderer = slot.as_mut().ok_or("module renderer")?;
+        let urls = [url.to_string()];
+        fetch_module_round_texts(renderer, &urls, "Dynamic import")
+            .into_iter()
+            .next()
+            .map(|(_, text)| text)
+            .ok_or_else(|| format!("no module body for {url}"))
+    })
+}
+
+/*
+ * module_fetch_budget -- what the loader may fetch after the static walk.
+ *
+ * The walk and the loader spend one allowance, so the loader starts from the
+ * caps in browser_types less what the walk already fetched. Enforcing the byte
+ * cap only in load_document_module_texts would leave every loader fetch
+ * uncounted, which is why the remainder travels to the loader rather than the
+ * cap itself.
+ */
+pub(crate) fn module_fetch_budget(
+    module_texts: &[(String, String)],
+) -> silksurf_js::ModuleFetchBudget {
+    let spent_bytes: usize = module_texts.iter().map(|(_, text)| text.len()).sum();
+    silksurf_js::ModuleFetchBudget {
+        urls: MAX_MODULE_GRAPH_URLS.saturating_sub(module_texts.len()),
+        bytes: MAX_NAVIGATION_MODULE_GRAPH_BYTES.saturating_sub(spent_bytes),
+    }
+}
+
 pub(crate) fn module_graph_child_urls(
     fetched: &[(String, String)],
     import_map: &silksurf_js::ImportMap,
@@ -1287,5 +1338,26 @@ mod tests {
             ),
             vec!["https://example.com/vendor/react-17.js".to_string()]
         );
+    }
+
+    #[test]
+    fn the_loader_budget_is_what_the_static_walk_left() {
+        let fetched = vec![
+            ("https://example.com/a.js".to_string(), "x".repeat(100)),
+            ("https://example.com/b.js".to_string(), "y".repeat(200)),
+        ];
+        let budget = module_fetch_budget(&fetched);
+        assert_eq!(budget.urls, MAX_MODULE_GRAPH_URLS - 2);
+        assert_eq!(budget.bytes, MAX_NAVIGATION_MODULE_GRAPH_BYTES - 300);
+    }
+
+    #[test]
+    fn a_walk_that_spent_the_whole_allowance_leaves_the_loader_none() {
+        let fetched = vec![(
+            "https://example.com/big.js".to_string(),
+            "z".repeat(MAX_NAVIGATION_MODULE_GRAPH_BYTES + 1),
+        )];
+        let budget = module_fetch_budget(&fetched);
+        assert_eq!(budget.bytes, 0, "an overspent allowance floors at zero");
     }
 }
