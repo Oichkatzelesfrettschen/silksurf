@@ -2367,20 +2367,29 @@ completed request for the context's lifetime.
 
 ---
 
-## AD-033: Intl Formatters Measured Against boa's icu4x Feature
+## AD-033: Intl.DateTimeFormat Formats In-Engine Against an Enumerated Pattern Table
 
-**Status**: Proposed
-**Date**: 2026-08-20
+**Status**: Accepted
+**Date**: 2026-08-21
 **Deciders**: Public web page load repairs
 
 ### Context
 
 `Intl` in the workspace is a JS shim installed by the bootstrap in
-`silksurf-js/src/boa_backend/platform_globals.rs:594`, carrying `Locale` and
+`silksurf-js/src/boa_backend/platform_globals.rs`, carrying `Locale` and
 `getCanonicalLocales` behind a `typeof globalThis.Intl === 'undefined'` guard,
-which is what language negotiation reads: a tag's subtags. `DateTimeFormat`, `NumberFormat`, `Collator`, `PluralRules`,
-and `RelativeTimeFormat` are absent rather than wrong, on the reasoning that a
-formatter ignoring its locale produces text a page presents as localized.
+which is what language negotiation reads: a tag's subtags. `DateTimeFormat`,
+`NumberFormat`, `Collator`, `PluralRules`, and `RelativeTimeFormat` are absent
+rather than wrong, on the reasoning that a formatter ignoring its locale
+produces text a page presents as localized.
+
+`Date.prototype.toLocaleDateString`, `toLocaleString`, and `toLocaleTimeString`
+are a separate absence with a separate cause. boa registers all three
+unconditionally and every one returns
+`Err(JsError::from_opaque(js_string!("Function Unimplemented")))`
+(boa_engine-0.21.1 src/builtins/date/mod.rs:1621, 1640, 1660), so a page
+calling one takes a thrown value rather than a string, whatever the `intl`
+feature is set to.
 
 chatgpt.com reads them on its load path. Its bundles for build prod-b8908cce
 name `Intl.` 67 times, and the distribution decides the priority:
@@ -2394,7 +2403,9 @@ name `Intl.` 67 times, and the distribution decides the priority:
 
 51 of the 67 sites and 28 of the 30 `DateTimeFormat` sites sit in bundles the
 document preloads eagerly, so this is load-path work rather than a lazy path
-that a deferral leaves untouched.
+that a deferral leaves untouched. Five of those sites read
+`resolvedOptions().timeZone`, which is how a page names the zone it then hands
+back to a second formatter.
 
 boa_engine 0.21.1 offers two feature levels. `intl` compiles the `Intl`
 builtins against icu4x and leaves the data provider to the embedder;
@@ -2412,89 +2423,179 @@ Compile time moves once rather than per build. A controlled pair rebuilding the
 same four crates -- `boa_engine`, `boa_runtime`, `silksurf-js`, `silksurf-app`
 -- against an otherwise warm workspace measured 140.63 s at baseline and
 139.92 s with `intl_bundled`, so the feature costs nothing on an incremental
-rebuild. What it costs is the first build of 23 added packages:
-`boa_icu_provider`, twelve `icu_*` crates, `fixed_decimal`,
-`calendrical_calculations`, and the `databake`, `postcard`, `erased-serde`,
-`cobs`, `ryu`, and `typeid` support they pull. A cold-cache total for the whole
-workspace under each configuration is not measured; the icu crates persist in
-the target directory across a feature flip, so separating that number needs a
-full clean per configuration.
+rebuild. What it costs is the first build of 23 added packages.
 
-`intl` alone does not start the engine. `Context::builder().build()` fails with
-`TypeError: missing Intl provider for context`, so `SilkContext::new()` panics
-and the configuration is unusable without an embedder-supplied provider.
-`ContextBuilder::icu_buffer_provider` (boa context/mod.rs:996) is the API that
-takes one.
+Almost half the bundled cost is data no code path reaches. `boa_icu_provider`
+holds nine postcard blobs summing to 10,729,636 bytes, each behind a
+`LazyBufferProvider` gated on that icu crate's `MARKERS`:
 
-`intl_bundled` builds and runs, and delivers part of the surface. Measured
-through `SilkContext`:
+| blob | bytes | requested by |
+|---|---|---|
+| icu_datetime | 5,049,809 | nothing |
+| icu_segmenter | 4,151,067 | `Intl.Segmenter` |
+| icu_collator | 1,124,667 | `Intl.Collator` |
+| icu_locale | 194,204 | locale fallback |
+| icu_normalizer | 144,789 | `Intl.Collator` |
+| icu_list | 30,475 | `Intl.ListFormat` |
+| icu_casemap | 23,602 | `toLocaleLowerCase` |
+| icu_plurals | 6,021 | `Intl.PluralRules` |
+| icu_decimal | 5,002 | `Intl.NumberFormat` |
+
+`icu_datetime` appears once in all of boa, as `use
+icu_datetime::preferences::HourCycle` at
+src/builtins/intl/date_time_format.rs:26, which is a type import rather than a
+data request. The byte accounting confirms what the grep shows: 10,729,636 of
+blob plus 496,192 of `intl` code is 11,225,828 against a measured 11,384,320
+delta, leaving 158,492 for the provider glue, so every blob links including the
+5,049,809-byte one whose markers nothing requests.
+
+The reason it is unreachable is that boa's `DateTimeFormat` is a constructor
+stub. Its `IntrinsicObject::init` is
+`BuiltInBuilder::from_standard_constructor::<Self>(realm).build()` with no
+method registered, and its constructor stores the literals `en-US`, `gregory`,
+`arab`, `UTC`, and `narrow` regardless of the arguments, so its prototype
+carries only `constructor` and `format`, `formatToParts`, and `resolvedOptions`
+are undefined. `Intl.DisplayNames` is absent from boa's `Intl` object entirely,
+so five further chatgpt.com sites stay unanswered at either feature level.
+
+Measured through `SilkContext` with `intl_bundled`:
 
 | API | eager sites | result |
 |---|---|---|
 | `Intl.NumberFormat` | 16 | `de-DE` formats 1234.5 as `1.234,5` |
 | `Intl.Collator` | -- | German collation orders b, a, a-umlaut as a, a-umlaut, b |
-| `String.prototype.localeCompare` | -- | returns -1 |
-| `Intl.DateTimeFormat` | 30 | constructs; its prototype carries only `constructor`, so `format` and `formatToParts` are undefined |
+| `Intl.DateTimeFormat` | 30 | constructs; `format` and `formatToParts` are undefined |
 | `Intl.RelativeTimeFormat` | 7 | absent from `Intl` |
 | `Number.prototype.toLocaleString` | -- | `de-DE` yields `1234.5` |
 | `Date.prototype.toLocaleDateString` | -- | throws `Function Unimplemented` |
 
 `NumberFormat('de-DE')` producing `1.234,5` establishes that the German data is
 present and loaded, which places the remaining gaps in boa rather than in the
-data: `DateTimeFormat` is a constructor stub, and `toLocaleString` declines to
-route through the `NumberFormat` that works. Supplying more ICU data moves
-neither.
+data. Supplying more ICU data moves none of them.
 
-Enabling either level moves the workspace's ICU versions. boa 0.21.1 specifies
-`icu_provider = "~2.0.0"`, `icu_collator = "~2.0.0"`, `icu_locale = "~2.0.0"`,
-and eleven more tilde requirements, while the workspace resolves `icu_provider`
-and `icu_locale_core` to 2.2.0 today, so the feature downgrades both to 2.0.0
-and 2.0.1 and adds roughly twelve icu crates. `cargo tree -i icu_normalizer`
-places that stack under `idna_adapter`, `idna`, and `silksurf-core`, which is
-the URL and IDNA path every navigation takes and the one `psl.rs` builds on. No
-workspace test exercises an IDNA case that would observe the change.
+Slicing the blob to the locales the browser negotiates is the shape that would
+make the data affordable, and it is out of reach for this build. It needs
+`icu4x-datagen` over CLDR source, and neither `icu_provider_export` nor any
+datagen crate is present in the registry this workspace resolves against, so
+the option space closes to `intl_bundled` at 11,384,320 bytes, `intl` with a
+provider that cannot be generated here, or an implementation the workspace
+owns.
+
+Enabling either level also moves the workspace's ICU versions. boa 0.21.1
+specifies `icu_provider = "~2.0.0"` and thirteen more tilde requirements, while
+the workspace resolves `icu_provider` and `icu_locale_core` to 2.2.0 today
+under `idna_adapter`, `idna`, and `silksurf-core`, which is the URL and IDNA
+path every navigation takes. No workspace test exercises an IDNA case that
+would observe the downgrade.
 
 ### Decision
 
-Keep the `Intl` shim, and adopt neither feature level as it stands.
+Adopt neither feature level, and format dates in the engine against a pattern
+table generated from a reference ECMA-402 implementation.
 
-`intl_bundled` costs 11,384,320 bytes, a 57 percent larger binary, and answers
-14 of the 67 eager sites through `NumberFormat` while leaving the 30
-`DateTimeFormat` sites with an undefined `format`. It also makes one behavior
-worse rather than absent: `(1234.5).toLocaleString('de-DE')` returns `1234.5`,
-which is unlocalized text produced under a locale argument, and the shim's
-present state is an absence a page can feature-detect.
+`silksurf-js/src/boa_backend/intl_datetime.rs` resolves an option bag to a
+pattern and renders a pattern to the parts `formatToParts` reports;
+`platform_globals.rs` carries the object shape, which is the split that module
+already documents. `Date.prototype.toLocaleDateString`, `toLocaleTimeString`,
+and `toLocaleString` replace boa's throwing stubs and delegate to it.
 
-This contradicts the assumption behind the standing instruction to add the
-feature and record its cost, which took the capability as given and the cost as
-the open question. The measurement is the deliverable either way, and adopting
-on the strength of the instruction while the measurement says the capability is
-half-absent would spend the size without the outcome.
+`intl_datetime_data.rs` is generated by `scripts/gen_intl_datetime_data.mjs`.
+The generator reads each pattern back out of `formatToParts`, which labels
+every rendered piece with its field type, so a probe instant whose fields are
+individually identifiable turns a rendered string into the pattern that
+produced it. Patterns are enumerated rather than derived: ICU's skeleton width
+adjustment keeps a locale's own pattern when every requested width matches the
+skeleton and retypes every field when any one differs, and its `appendItems`
+fallback rewrites the field order outright, so each composition rule tried
+against the 69,983-combination matrix left thousands of disagreements. The
+enumerated table is exact by construction at 864 date slots, 108 time slots,
+100 style slots, and 12 glue slots per locale, and a slot the reference
+implementation rejects stays empty so a request reaching it reports a
+`RangeError` rather than a guessed pattern.
+
+The table's cost is what makes this the affordable answer. Measured as a
+controlled pair on the host above:
+
+| configuration | binary bytes | delta | DateTimeFormat |
+|---|---|---|---|
+| baseline | 19,954,048 | -- | absent |
+| in-engine, en-US and en-GB | 20,037,376 | +83,328 | formats |
+| boa `intl_bundled` | 31,338,368 | +11,384,320 | `format` undefined |
+
+83,328 bytes is 1/137 of the bundled feature and 1/61 of the `icu_datetime`
+blob alone, and it is the configuration in which `Intl.DateTimeFormat` works.
+
+The supported locale set is declared rather than implied. `supportedLocalesOf`
+reports it, `resolvedOptions().locale` names the locale that actually
+formatted, and a request outside the set negotiates to the first entry, which
+ECMA-402 permits and which a page can read back. This is the positive form of
+the rule the shim already followed: a formatter states the locale it used
+instead of ignoring the one it was given.
+
+Time zones follow `Date` rather than a zone database. The bootstrap reads the
+calendar fields off the `Date` object with either the local or the UTC
+accessors, so `Intl` and `Date` agree on the wall clock by construction and no
+zone data enters the crate. Measured, boa's default
+`local_timezone_offset_seconds` returns the host offset and keeps returning it
+with other threads running, so the local accessors carry a real offset;
+`resolvedOptions().timeZone` names that zone from `TZ` or from the path
+`/etc/localtime` resolves to. A request naming UTC or naming the host's own
+zone formats, which is the round trip the five `resolvedOptions().timeZone`
+sites perform, and any other named zone reports the `RangeError` ECMA-402
+specifies.
 
 ### Consequences
 
-The `Intl.` call sites keep reading a shim that answers `Locale` and
-`getCanonicalLocales` and nothing else, so a page formatting a date or a
-relative time on the load path continues to see an absent constructor rather
-than wrong output.
+`Intl.DateTimeFormat` formats, `formatToParts` labels, `resolvedOptions`
+reports, and the three `Date` locale methods return strings where they threw.
+2,346 vectors covering every date signature, every time signature, and every
+style combination agree with the reference implementation
+(`silksurf-js/tests/intl_datetime_conformance.rs`), and 11 behavior cases cover
+negotiation, the detachable `format` accessor, and the specified errors
+(`intl_datetime_behavior.rs`).
 
-Three pieces are cut by name.
+The generated table derives from the Unicode Common Locale Data Repository, so
+`NOTICE-CLDR` records the Unicode license it carries.
 
-`intl-sliced-data-provider` records the shape that makes the capability
-affordable. The cost splits as 496,192 bytes of code and roughly 10.9 MB of
-all-locales data, and `ContextBuilder::icu_buffer_provider` accepts any
-`BufferProvider`, so a blob sliced to the locales the browser negotiates is a
-fraction of the bundled default. The ICU downgrade under `idna` applies to this
-path too, because the tilde requirements come with `intl` either way.
+The generator's own oracle proved unreliable and the disagreement is recorded
+because it bounds how far a single reference implementation can be trusted.
+Node 22.23.2 returns U+0020 from `format` and U+202F from `formatToParts` for
+the same en-US formatter and instant, which contradicts ECMA-402 12.1.6:
+`format` is the concatenation of the parts. Deno and Bun return U+0020 from
+both and satisfy the invariant, so the generator normalizes U+202F to U+0020.
+The disagreement surfaced only because the pattern table is generated through
+`formatToParts` while the conformance fixture is generated through `format`,
+and the two were checked against each other.
 
-`intl-datetime-and-relative-time-shims` records that `DateTimeFormat.format`,
-`RelativeTimeFormat`, `Date.prototype.toLocaleDateString`, and
-`Number.prototype.toLocaleString` need implementations regardless of which data
-provider is chosen, because their absence is boa's rather than icu4x's.
+Six pieces are cut by name.
 
-`icu-version-floor-under-idna` records that adopting any `intl` level pins
-`icu_provider` and `icu_locale_core` to 2.0.x beneath the URL and IDNA path,
-and that the workspace has no test that would notice the change.
+`intl-locale-data-expansion` records that a locale costs roughly 14 KB in this
+table, measured as 34,826 bytes of generated source for two, so the set grows
+by rerunning `scripts/gen_intl_datetime_data.mjs` with more tags. Locales whose
+patterns need a form this table does not carry -- Slavic genitive month names,
+CJK year and month markers, non-Gregorian calendars, non-Latin numbering
+systems -- need the generator extended before their tags are added.
+
+`intl-time-zone-database` records that a named zone other than UTC or the
+host's own reports a `RangeError`, because computing its offset needs zone data
+this build has none of.
+
+`intl-number-and-plural-formatters` records that `Intl.NumberFormat`,
+`Intl.PluralRules`, and `Number.prototype.toLocaleString` stay absent, and that
+the same generator shape reaches them: symbols and grouping sizes per locale
+are a table of the same kind at a fraction of this one's size.
+
+`intl-relative-time` records that `Intl.RelativeTimeFormat` stays absent across
+seven eager sites, and that boa never had it.
+
+`intl-display-names` records that `Intl.DisplayNames` stays absent across five
+eager sites, and that boa's `Intl` object never carried it, so no feature level
+answers those sites.
+
+`intl-collation` records that `String.prototype.localeCompare` compares by code
+point today -- boa registers it unconditionally and its non-`intl` arm ignores
+the locale -- which answers 21 chatgpt.com sites with an ordering that is wrong
+for any locale whose collation differs from code point order.
 
 ---
 

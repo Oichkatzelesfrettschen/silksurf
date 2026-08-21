@@ -350,18 +350,44 @@ separately-landable follow-up):
   dynamic import reloads into the same failure or waits forever. AD-032 takes
   it: `load_imported_module` fetches on a registry miss through an
   embedder-installed hook, under one budget shared with the static walk.
-- intl-formatters -- Intl carries Locale and getCanonicalLocales, which
-  is what language negotiation reads. DateTimeFormat, NumberFormat,
-  Collator, PluralRules, and RelativeTimeFormat stay absent rather than
-  wrong: a formatter that ignores the locale produces text a page
-  presents as localized. AD-033 measures boa_engine's icu4x features and
-  keeps the shim: `intl` alone panics the Context builder with "missing
-  Intl provider", and `intl_bundled` costs 11,384,320 bytes -- a 57 percent
-  larger binary -- to deliver NumberFormat and Collator while
-  DateTimeFormat.format stays undefined, RelativeTimeFormat stays absent,
-  and toLocaleString drops its locale argument. 28 of chatgpt.com's 30
-  DateTimeFormat sites sit in eagerly preloaded bundles, so this is
-  load-path work whose available implementation does not reach it.
+- intl-datetime-format -- Intl.DateTimeFormat formats, formatToParts
+  labels, resolvedOptions reports, and Date.prototype.toLocaleDateString,
+  toLocaleTimeString, and toLocaleString return strings where boa's
+  unconditional stubs threw "Function Unimplemented". AD-033 takes it
+  against a pattern table generated from a reference ECMA-402
+  implementation and enumerated rather than derived, because ICU's
+  skeleton width adjustment and its appendItems fallback defeat every
+  composition rule tried against the 69,983-combination matrix.
+  2,346 vectors agree with the reference implementation. The table costs
+  83,328 binary bytes for en-US and en-GB, which is 1/137 of boa's
+  intl_bundled feature and 1/61 of the icu_datetime blob that feature
+  links but no marker request reaches. 28 of chatgpt.com's 30
+  DateTimeFormat sites sit in eagerly preloaded bundles.
+- intl-locale-data-expansion -- A locale costs roughly 14 KB in the
+  generated table, so the set grows by rerunning
+  `scripts/gen_intl_datetime_data.mjs` with more tags. Slavic genitive
+  month names, CJK year and month markers, non-Gregorian calendars, and
+  non-Latin numbering systems need the generator extended before their
+  tags are added.
+- intl-time-zone-database -- A named zone other than UTC or the host's own
+  reports the RangeError ECMA-402 specifies, because computing its offset
+  needs zone data this build has none of. The five sites that read
+  resolvedOptions().timeZone and hand it back to a second formatter round
+  trip today.
+- intl-number-and-plural-formatters -- Intl.NumberFormat, Intl.PluralRules,
+  and Number.prototype.toLocaleString stay absent across 16 eager sites.
+  The same generator shape reaches them: symbols and grouping sizes per
+  locale are a table of the same kind at a fraction of the date table's
+  size.
+- intl-relative-time -- Intl.RelativeTimeFormat stays absent across seven
+  eager sites; boa never carried it at any feature level.
+- intl-display-names -- Intl.DisplayNames stays absent across five eager
+  sites; boa's Intl object never carried it, so no feature level answers
+  them.
+- intl-collation -- String.prototype.localeCompare compares by code point,
+  because boa registers it unconditionally and its non-intl arm ignores the
+  locale. That answers 21 chatgpt.com sites with an ordering wrong for any
+  locale whose collation differs from code point order.
 
 ## Live document resources (landed 2026-08-19)
 
