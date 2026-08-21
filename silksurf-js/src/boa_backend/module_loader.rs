@@ -81,6 +81,21 @@ impl PageModuleLoader {
         *self.document_url.borrow_mut() = url.to_string();
     }
 
+    /// Supply a base for a loader the embedder never gave one.
+    ///
+    /// The document's address is the base for a referrer that is not a module,
+    /// so `SilkContext::set_document_url` owns it. A module graph evaluated
+    /// without a document -- a test, a probe binary -- falls back to its root
+    /// module's URL, and leaves an embedder-set address alone so a classic
+    /// script keeps resolving against the document rather than against
+    /// whichever module root ran last.
+    pub(super) fn ensure_document_url(&self, url: &str) {
+        let mut current = self.document_url.borrow_mut();
+        if current.is_empty() {
+            *current = url.to_string();
+        }
+    }
+
     /// Replace the import map.
     ///
     /// Both member lists sort by descending key length so a prefix mapping
