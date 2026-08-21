@@ -354,9 +354,14 @@ separately-landable follow-up):
   is what language negotiation reads. DateTimeFormat, NumberFormat,
   Collator, PluralRules, and RelativeTimeFormat stay absent rather than
   wrong: a formatter that ignores the locale produces text a page
-  presents as localized. boa_engine's `intl` feature supplies
-  spec-correct implementations backed by icu4x, at a binary-size and
-  compile-time cost the low-resource profile has not accepted.
+  presents as localized. AD-033 measures boa_engine's icu4x features and
+  keeps the shim: `intl` alone panics the Context builder with "missing
+  Intl provider", and `intl_bundled` costs 11,384,320 bytes -- a 57 percent
+  larger binary -- to deliver NumberFormat and Collator while
+  DateTimeFormat.format stays undefined, RelativeTimeFormat stays absent,
+  and toLocaleString drops its locale argument. 28 of chatgpt.com's 30
+  DateTimeFormat sites sit in eagerly preloaded bundles, so this is
+  load-path work whose available implementation does not reach it.
 
 ## Live document resources (landed 2026-08-19)
 

@@ -2367,6 +2367,137 @@ completed request for the context's lifetime.
 
 ---
 
+## AD-033: Intl Formatters Measured Against boa's icu4x Feature
+
+**Status**: Proposed
+**Date**: 2026-08-20
+**Deciders**: Public web page load repairs
+
+### Context
+
+`Intl` in the workspace is a JS shim installed by the bootstrap in
+`silksurf-js/src/boa_backend/platform_globals.rs:594`, carrying `Locale` and
+`getCanonicalLocales` behind a `typeof globalThis.Intl === 'undefined'` guard,
+which is what language negotiation reads: a tag's subtags. `DateTimeFormat`, `NumberFormat`, `Collator`, `PluralRules`,
+and `RelativeTimeFormat` are absent rather than wrong, on the reasoning that a
+formatter ignoring its locale produces text a page presents as localized.
+
+chatgpt.com reads them on its load path. Its bundles for build prod-b8908cce
+name `Intl.` 67 times, and the distribution decides the priority:
+
+| bundle | preloaded by cg.html | `Intl.` | DateTimeFormat | NumberFormat | RelativeTimeFormat |
+|---|---|---|---|---|---|
+| 2340486e | yes | 30 | 15 | 14 | 5 |
+| 4813494d | yes | 21 | 13 | 0 | 1 |
+| conversation-small | yes | 16 | 2 | 2 | 1 |
+| 27597608 | no | 0 | 0 | 0 | 0 |
+
+51 of the 67 sites and 28 of the 30 `DateTimeFormat` sites sit in bundles the
+document preloads eagerly, so this is load-path work rather than a lazy path
+that a deferral leaves untouched.
+
+boa_engine 0.21.1 offers two feature levels. `intl` compiles the `Intl`
+builtins against icu4x and leaves the data provider to the embedder;
+`intl_bundled` adds `boa_icu_provider`, which carries the all-locales data.
+Measured on an AMD Ryzen 5 5600X3D, 12 logical CPUs, Linux 7.1.8-1-cachyos,
+rustc 1.94.1, through `cargo build --release -p silksurf-app`:
+
+| configuration | binary bytes | delta |
+|---|---|---|
+| annex-b only | 19,954,048 | -- |
+| + `intl` | 20,450,240 | +496,192 |
+| + `intl_bundled` | 31,338,368 | +11,384,320 |
+
+Compile time moves once rather than per build. A controlled pair rebuilding the
+same four crates -- `boa_engine`, `boa_runtime`, `silksurf-js`, `silksurf-app`
+-- against an otherwise warm workspace measured 140.63 s at baseline and
+139.92 s with `intl_bundled`, so the feature costs nothing on an incremental
+rebuild. What it costs is the first build of 23 added packages:
+`boa_icu_provider`, twelve `icu_*` crates, `fixed_decimal`,
+`calendrical_calculations`, and the `databake`, `postcard`, `erased-serde`,
+`cobs`, `ryu`, and `typeid` support they pull. A cold-cache total for the whole
+workspace under each configuration is not measured; the icu crates persist in
+the target directory across a feature flip, so separating that number needs a
+full clean per configuration.
+
+`intl` alone does not start the engine. `Context::builder().build()` fails with
+`TypeError: missing Intl provider for context`, so `SilkContext::new()` panics
+and the configuration is unusable without an embedder-supplied provider.
+`ContextBuilder::icu_buffer_provider` (boa context/mod.rs:996) is the API that
+takes one.
+
+`intl_bundled` builds and runs, and delivers part of the surface. Measured
+through `SilkContext`:
+
+| API | eager sites | result |
+|---|---|---|
+| `Intl.NumberFormat` | 16 | `de-DE` formats 1234.5 as `1.234,5` |
+| `Intl.Collator` | -- | German collation orders b, a, a-umlaut as a, a-umlaut, b |
+| `String.prototype.localeCompare` | -- | returns -1 |
+| `Intl.DateTimeFormat` | 30 | constructs; its prototype carries only `constructor`, so `format` and `formatToParts` are undefined |
+| `Intl.RelativeTimeFormat` | 7 | absent from `Intl` |
+| `Number.prototype.toLocaleString` | -- | `de-DE` yields `1234.5` |
+| `Date.prototype.toLocaleDateString` | -- | throws `Function Unimplemented` |
+
+`NumberFormat('de-DE')` producing `1.234,5` establishes that the German data is
+present and loaded, which places the remaining gaps in boa rather than in the
+data: `DateTimeFormat` is a constructor stub, and `toLocaleString` declines to
+route through the `NumberFormat` that works. Supplying more ICU data moves
+neither.
+
+Enabling either level moves the workspace's ICU versions. boa 0.21.1 specifies
+`icu_provider = "~2.0.0"`, `icu_collator = "~2.0.0"`, `icu_locale = "~2.0.0"`,
+and eleven more tilde requirements, while the workspace resolves `icu_provider`
+and `icu_locale_core` to 2.2.0 today, so the feature downgrades both to 2.0.0
+and 2.0.1 and adds roughly twelve icu crates. `cargo tree -i icu_normalizer`
+places that stack under `idna_adapter`, `idna`, and `silksurf-core`, which is
+the URL and IDNA path every navigation takes and the one `psl.rs` builds on. No
+workspace test exercises an IDNA case that would observe the change.
+
+### Decision
+
+Keep the `Intl` shim, and adopt neither feature level as it stands.
+
+`intl_bundled` costs 11,384,320 bytes, a 57 percent larger binary, and answers
+14 of the 67 eager sites through `NumberFormat` while leaving the 30
+`DateTimeFormat` sites with an undefined `format`. It also makes one behavior
+worse rather than absent: `(1234.5).toLocaleString('de-DE')` returns `1234.5`,
+which is unlocalized text produced under a locale argument, and the shim's
+present state is an absence a page can feature-detect.
+
+This contradicts the assumption behind the standing instruction to add the
+feature and record its cost, which took the capability as given and the cost as
+the open question. The measurement is the deliverable either way, and adopting
+on the strength of the instruction while the measurement says the capability is
+half-absent would spend the size without the outcome.
+
+### Consequences
+
+The `Intl.` call sites keep reading a shim that answers `Locale` and
+`getCanonicalLocales` and nothing else, so a page formatting a date or a
+relative time on the load path continues to see an absent constructor rather
+than wrong output.
+
+Three pieces are cut by name.
+
+`intl-sliced-data-provider` records the shape that makes the capability
+affordable. The cost splits as 496,192 bytes of code and roughly 10.9 MB of
+all-locales data, and `ContextBuilder::icu_buffer_provider` accepts any
+`BufferProvider`, so a blob sliced to the locales the browser negotiates is a
+fraction of the bundled default. The ICU downgrade under `idna` applies to this
+path too, because the tilde requirements come with `intl` either way.
+
+`intl-datetime-and-relative-time-shims` records that `DateTimeFormat.format`,
+`RelativeTimeFormat`, `Date.prototype.toLocaleDateString`, and
+`Number.prototype.toLocaleString` need implementations regardless of which data
+provider is chosen, because their absence is boa's rather than icu4x's.
+
+`icu-version-floor-under-idna` records that adopting any `intl` level pins
+`icu_provider` and `icu_locale_core` to 2.0.x beneath the URL and IDNA path,
+and that the workspace has no test that would notice the change.
+
+---
+
 ## Future ADRs
 
 Planned (renumbered after the 2026-04-30 batch):
