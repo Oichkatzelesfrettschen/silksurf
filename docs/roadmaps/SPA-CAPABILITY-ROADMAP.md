@@ -341,10 +341,15 @@ separately-landable follow-up):
   a microtask-checkpoint queue.
 - dynamic-import-fetch -- the module graph is fetched ahead of
   evaluation from the static imports boa reports, so `import()` reaches
-  a module the registry does not hold and rejects. chatgpt.com's entry
-  module route-splits through `import()`, so its page code never
-  evaluates. Wiring it needs load_imported_module to fetch on demand
-  rather than report a miss.
+  a module the registry does not hold and rejects. Measurement confirms the
+  mechanism and sharpens the symptom: chatgpt.com's router awaits
+  `import(a.clientLoaderModule)`, `import(a.clientActionModule)`, and
+  `import(a.clientMiddlewareModule)` with no `catch`, and its route module
+  loader answers a failed `import(e.module)` with `window.location.reload()`
+  followed by a promise built never to settle, so a browser that rejects every
+  dynamic import reloads into the same failure or waits forever. AD-032 takes
+  it: `load_imported_module` fetches on a registry miss through an
+  embedder-installed hook, under one budget shared with the static walk.
 - intl-formatters -- Intl carries Locale and getCanonicalLocales, which
   is what language negotiation reads. DateTimeFormat, NumberFormat,
   Collator, PluralRules, and RelativeTimeFormat stay absent rather than
@@ -716,7 +721,18 @@ Named cuts, each with the mechanism that closes it:
   stage.
 - animation-and-transition -- the `animation-*` and `transition` longhands
   parse to nothing and `@keyframes` blocks flatten out of the cascade, so an
-  element animated into view keeps its start state.
+  animated element keeps the style the cascade computed for it. Deferred
+  behind dynamic-import-fetch on measurement: chatgpt.com's author sheet
+  carries 8 `animation` declarations, 1 `transition`, and 5 `@keyframes`
+  blocks, and none of the animation-bearing selectors matches the captured
+  document, against 558 `import(` sites in the same page's bundles. Two
+  findings survive for whoever takes it. The event loop already sleeps on a
+  deadline that JS timers and stylesheet fetches both feed
+  (`with_host_work_deadline`, crates/silksurf-app/src/main.rs:170), so an
+  animation is another deadline source rather than a new clock. Fill is the
+  trap: `mobile-empty-composer-action-enter` declares `both` fill over a 0%
+  keyframe of `opacity: 0`, so implementing fill-backwards without advancing
+  the clock hides an element that renders correctly today.
 
 ## Verification checklist (applies to every workstream)
 
