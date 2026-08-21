@@ -2126,6 +2126,247 @@ inconsistency that a scale widens.
 
 ---
 
+## AD-032: Dynamic Import Fetches On Demand Inside the Module Loader
+
+**Status**: Proposed
+**Date**: 2026-08-20
+**Deciders**: Public web page load repairs
+
+### Context
+
+`PageModuleLoader::load_imported_module`
+(silksurf-js/src/boa_backend/module_loader.rs:184) answers from a registry the
+embedder fills ahead of evaluation. A specifier the registry holds returns its
+`Module`; a specifier it misses is pushed to `missing`
+(module_loader.rs:200) and reported as
+`TypeError: module <url> was not fetched` (module_loader.rs:201).
+
+Measured against `SilkContext` at c759f2b, three probes fix the behavior:
+
+```
+import('./sib.js')   sibling in the eval_module_graph slice -> resolved:42
+import('./lazy.js')  sibling absent                         -> rejected,
+                     TypeError: module https://example.test/lazy.js
+                     was not fetched
+import('./m.js')     from a classic script, fresh context   -> rejected,
+                     TypeError: module specifier ./m.js does not resolve
+```
+
+The first probe settles what works: boa's dynamic-import path, relative
+resolution against the referrer URL, and the promise plumbing all deliver a
+real namespace object once the module is in the registry. The gap is the
+fetch, not the import.
+
+The second fixes the failure mode as a rejected promise rather than a hang or
+a synchronous throw, so a page that guards its import degrades and a page that
+awaits it bare fails its route render with a reason.
+
+The third names a separate defect with a separate cause, since fixed in
+862b141. `SilkContext::new` set no document URL on the loader and
+`eval_module_graph` was its only writer, so `url::Url::parse("")` failed,
+`Url::join` had no base, and a classic script's relative specifier never
+reached the registry or landed in `missing`. The same unset base dropped every
+relative-prefixed import-map scope, because `execute_static_module_scripts`
+installs the import map (page_build.rs:657) before any module graph runs and
+`set_import_map` resolves scope prefixes against the base at call time.
+`SilkContext::set_document_url` (mod.rs:1240) now gives the loader the address
+it gives `location`, and `ensure_document_url` (module_loader.rs:92) supplies
+the root module's URL only when no address is set.
+
+Fetching is bounded and happens before evaluation.
+`fetch_module_graph_texts` (crates/silksurf-app/src/page_resources.rs:348)
+walks the static graph in at most `MAX_MODULE_GRAPH_ROUNDS` = 8 breadth-first
+rounds over at most `MAX_MODULE_GRAPH_URLS` = 64 URLs and
+`MAX_NAVIGATION_MODULE_GRAPH_BYTES` = 512 KiB
+(crates/silksurf-app/src/browser_types.rs:56-59), discovering children through
+`module_import_specifiers`, which drives a throwaway context against an empty
+registry and reads its `missing` (module_loader.rs:252). That is the one reader
+in the workspace: the live context's `missing` is written and never read, so no
+fetch is ever driven by a module request boa actually made. The runtime tick
+holds no module path at all -- `tick_browser_runtime`
+(crates/silksurf-app/src/runtime_repaint.rs:35) names neither
+`eval_module_graph` nor a module fetch.
+
+chatgpt.com reaches this gap on its route path. Its shipped bundles for
+build prod-b8908cce name `import(` 558 times, of which 292 are a
+Vite-preserved syntax-highlighter asset table (229 languages, 60 themes, the
+oniguruma engine, two theme registrations) that loads on demand and stays off
+the route path. Of the remaining 266, 189 sit inside a retry-with-fallback
+component wrapper that answers a failed import with a placeholder component,
+and 59 carry no handling beyond Vite's preload helper. That helper rethrows
+unless a `vite:preloadError` listener calls `preventDefault`, and the one
+listener the bundle registers records the event and returns, so its `catch` is
+observability rather than recovery.
+
+Six sites decide whether the page renders. `route.lazy.loader`,
+`route.lazy.action`, and `route.lazy.middleware` each `await
+import(a.clientLoaderModule)`, `import(a.clientActionModule)`, and
+`import(a.clientMiddlewareModule)` with no `catch`, so a rejection propagates
+into the router's lazy-route resolution with no fallback. A prefetch helper
+calls `import(e.clientActionModule)` and discards the promise, so a rejection
+there is unhandled. The route module loader wraps `import(e.module)` in
+`try`/`catch`, and its catch calls `window.location.reload()` and then returns
+`new Promise(() => {})`, a promise built never to settle. A browser that
+rejects every dynamic import therefore reloads the document and re-enters the
+same failure, and any reload the environment suppresses leaves the router
+awaiting a promise nothing can settle.
+
+All six specifiers are computed from route data rather than written as
+literals, so no scan over the source text resolves them.
+
+Where the fetch blocks decides the shape, because boa drives a dynamic import
+as an async job. `ImportCall` enqueues a `NativeAsyncJob` wrapping
+`load_dyn_import` (boa_engine-0.21.1 src/vm/opcode/call/mod.rs:475-481), which
+awaits the loader future and settles the import's promise capability.
+`NativeAsyncJob::call` is declared
+`fn call<'a, 'b>(self, context: &'a RefCell<&'b mut Context>) -> impl Future<..> + use<'a, 'b>`
+(boa job.rs:341-346), so the future borrows the context for its whole life and
+cannot outlive the `run_jobs` call that produced it. An import therefore
+settles inside one `run_jobs`, and an executor cannot poll a loader future,
+retain it, and resume it on a later tick.
+
+That constraint also answers what the executor must be. silksurf-js configures
+none, so boa's `SimpleJobExecutor` runs, and its `run_jobs_async` drives async
+jobs with `poll_once` inside a loop that exits when every queue and the group
+are empty (boa job.rs:678-706) -- a loop that spins while a future stays
+pending. A loader that blocks is Ready on its first poll, so the group empties
+in one iteration and the loop never spins. Measured: a loader patched to
+answer a registry miss synchronously resolves `import('./lazy.js')` to a real
+namespace object under the stock executor, with `Module::parse` taking
+`context.borrow_mut()` inside the loader future and no borrow conflict.
+
+The workspace parks async work elsewhere, and that pattern does not reach this
+call. `fetch` returns a pending promise and parks its resolving functions in
+`__silksurfPendingNet`, a JS-heap object reachable from the global so boa
+traces it (mod.rs:3227, mod.rs:3280); a thread per request runs the blocking
+client and posts to an `mpsc` channel (net_queue.rs:90-97), and
+`drain_net_completions` (mod.rs:1713) settles what arrived from
+`run_host_callbacks` (mod.rs:1487), immediately before the microtask
+checkpoint (mod.rs:1491). That works because the page already holds the
+promise and nothing waits on a return value. `load_imported_module` returns a
+`Module` to boa's own opcode, which has no parked form: the value is produced
+or the import rejects.
+
+The registry is JS-side rather than Rust-side because
+`NativeFunction::from_closure` stores a capture boa does not trace, so a Rust
+map of `JsValue` would hold untraced GC pointers (mod.rs:3321-3323). A loader
+holds `Module` values in a Rust `FxHashMap` already (module_loader.rs:54) and
+inherits no such constraint, because boa traces a `Module` through the realm
+that links it.
+
+### Decision
+
+Fetch a missed module on demand, synchronously, inside the loader.
+
+`PageModuleLoader::load_imported_module` answers a registry miss by calling a
+fetcher the embedder installs, parsing the response with `Module::parse` keyed
+by the absolute URL, and inserting it. The call blocks the thread that runs the
+job, which is what lets the loader return a `Module` where boa's opcode
+requires one, and what keeps the stock `SimpleJobExecutor` from spinning: a
+Ready future empties its group in one poll. A network failure, a non-2xx
+status, a body that is not a module, or an exhausted budget rejects the
+import's promise with the reason, which is the outcome pages guard for. The
+parsed module enters the same registry the static graph fills, so a second
+import of one URL answers from the registry and the module evaluates once,
+which is the module record identity ECMA-262 requires.
+
+The fetcher is a hook rather than a dependency. silksurf-js gains no network
+crate, silksurf-app installs the fetcher it already uses, and a context with no
+fetcher installed reports the miss exactly as it does today, which is what
+keeps `module_import_specifiers` a pure scanner over an empty registry.
+
+One budget covers the static walk and the loader. The loader carries a
+remaining-URL count and a remaining-byte total, both set per navigation and
+both decremented per fetch, and the embedder seeds them from
+`MAX_MODULE_GRAPH_URLS` and `MAX_NAVIGATION_MODULE_GRAPH_BYTES` less what
+`fetch_module_graph_texts` already spent. The budget lives on the loader
+because that is where a fetch now happens, and enforcing it only in
+`page_resources.rs:339` would leave every loader fetch uncounted. A page that
+route-splits into hundreds of chunks therefore fetches a bounded prefix and
+rejects the rest with a reason.
+
+Static imports take the same path, so the pre-walk's truncation stops being
+silent. `fetch_module_graph_texts` stops at 8 rounds or 64 URLs
+(crates/silksurf-app/src/browser_types.rs:58-59) and today a module past that
+edge fails to link with no fetch attempted; with a fetcher installed the loader
+fetches it at link time and charges it to the same budget.
+
+What bounds the block is the socket's own read timeout:
+`connect_tcp` sets `set_read_timeout` to `MAX_TLS_HANDSHAKE_SECS` = 30
+(crates/silksurf-net/src/lib.rs:487, crates/silksurf-tls/src/lib.rs:46). That
+is a defence against a stalled peer rather than a latency budget, it applies
+per read rather than to the request, and `TcpStream::connect` carries no
+timeout at all, so a blackholed address blocks for whatever the host stack
+allows.
+
+Resolution rests on the document address the loader takes at navigation, which
+`SilkContext::set_document_url` supplies alongside `location`. That landed
+ahead of this decision, because a classic script's relative specifier and a
+relative-prefixed import-map scope both need it whether or not a missed module
+is ever fetched.
+
+### Consequences
+
+A computed specifier the router names resolves to a module the loader fetched,
+so `route.lazy.loader`, `route.lazy.action`, and `route.lazy.middleware` reach
+their exports instead of rejecting, and the route module loader stops entering
+its `window.location.reload()` recovery. Whether chatgpt.com's shell then
+renders is a separate evidence class: a fixture page whose `route.lazy.loader`
+awaits a computed-specifier import is the oracle that settles it, and a live
+load is what settles the shell.
+
+The loader gains a network dependency it did not have, expressed as an
+embedder hook, and the module registry gains entries no static walk predicted.
+Both are bounded by one budget rather than by the shape of the graph. That
+budget is seeded per page build and never refills, so an application that
+route-splits without rebuilding its document spends its allowance and rejects
+every import after it; the router's `window.location.reload()` recovery
+rebuilds the document and reseeds it, which turns the exhaustion into a reload
+after enough route changes.
+
+Six pieces are cut by name.
+
+`module-fetch-deadline` leaves the block bounded only by the socket read
+timeout above. A deadline the loader owns would reject an import whose fetch
+outlives a budget measured against the frame the page is holding, which is a
+different quantity from the 30 seconds that keeps a stalled peer from holding
+a socket forever, and it needs a connect timeout the client does not offer.
+
+`dynamic-import-off-thread-settle` records the cost this decision accepts: the
+thread that runs the job is the thread that draws, so a document resolving a
+route module presents no frame until the response arrives, and the timer and animation-frame callbacks that tick before the
+microtask checkpoint (mod.rs:1469-1486) wait with it, so a page running an
+interval sees it skip across the fetch. Moving the settle off that thread needs
+a suspend boa's async job does not offer, so it means owning the module fetch
+outside the job entirely.
+
+`dynamic-import-literal-prefetch` leaves a literal `import('./chunk.js')`
+specifier fetched on demand at first evaluation rather than discovered during
+the static walk. Extending `module_import_specifiers` to report literal dynamic
+specifiers would warm the registry ahead of the import and keep the fetch off
+the drawing thread for every site that spells its target; the router sites that
+force this ADR compute their specifiers and gain nothing from it.
+
+`silksurf-job-executor` leaves `SimpleJobExecutor` in place. A host operation
+that must await network work without holding the thread needs an executor that
+parks on a waker rather than polling in a loop, and no operation in the
+workspace has that shape: `fetch` parks its resolvers instead, and this loader
+blocks.
+
+`module-record-identity-across-roots` records that `eval_module_graph` calls
+`clear()` on entry (mod.rs:1360) while `execute_static_module_scripts` loops
+over up to `MAX_NAVIGATION_MODULE_ROOTS` = 4 roots passing the whole text set
+each time (page_build.rs:658), so a module two roots share is parsed and
+evaluated once per root instead of once per document. A loader that also
+inserts fetched modules loses them to the same `clear()` at the next root.
+
+`net-completion-registry-reclaim` records that `take_net_resolvers` writes
+`undefined` into the settled slot rather than deleting the property
+(mod.rs:3314), so `__silksurfPendingNet` accumulates one dead property per
+completed request for the context's lifetime.
+
+---
+
 ## Future ADRs
 
 Planned (renumbered after the 2026-04-30 batch):
