@@ -1223,15 +1223,23 @@ impl SilkContext {
         self.viewport.set((width, height));
     }
 
-    /// Point `location` and `document.URL` at the document's address.
+    /// Point `location`, `document.URL`, and the module loader's base at the
+    /// document's address.
     ///
     /// The location stub installs with empty fields, and a page reads
     /// `location.href` and `location.origin` to build API endpoints:
     /// chatgpt.com's startup script evaluates `new URL(location.href)` and
     /// throws on the empty string. Embedders call this with the navigation URL
     /// before running page script. An unparseable URL leaves the stub as it is.
+    ///
+    /// The loader resolves a relative specifier named by a referrer that is not
+    /// a module against this address, and `set_import_map` resolves an import
+    /// map's scope prefixes against it, so a document that sets its address
+    /// after installing its import map resolves every relative scope prefix
+    /// against the empty string and drops it.
     pub fn set_document_url(&mut self, url: &str) {
         platform_globals::set_document_url(&mut self.ctx, url);
+        self.module_loader.set_document_url(url);
     }
 
     /*
@@ -1350,7 +1358,7 @@ impl SilkContext {
         modules: &[(String, String)],
     ) -> Result<(), String> {
         self.module_loader.clear();
-        self.module_loader.set_document_url(root_url);
+        self.module_loader.ensure_document_url(root_url);
         let mut root_module = None;
         for (module_url, source_text) in modules {
             let path = PathBuf::from(module_url);
