@@ -40,6 +40,8 @@ mod css_object;
 mod dom_bridge;
 mod dom_interfaces;
 mod event_dispatch;
+mod intl_datetime;
+mod intl_datetime_data;
 mod module_loader;
 pub use module_loader::{ImportMap, ModuleFetchBudget, ModuleFetcher, module_import_specifiers};
 mod net_queue;

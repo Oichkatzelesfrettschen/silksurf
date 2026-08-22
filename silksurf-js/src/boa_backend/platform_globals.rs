@@ -22,6 +22,7 @@ pub(super) fn install_platform_globals(ctx: &mut Context) {
     install_url_natives(ctx);
     install_base64_natives(ctx);
     install_text_codec_natives(ctx);
+    super::intl_datetime::install(ctx);
     if let Err(err) = ctx.eval(Source::from_bytes(PLATFORM_BOOTSTRAP.as_bytes())) {
         eprintln!("silksurf-js: platform globals bootstrap failed: {err}");
     }
@@ -390,10 +391,14 @@ pub(super) fn set_document_url(ctx: &mut Context, url: &str) {
  * UTF-8 -- comes from the natives above.
  *
  * Intl carries Locale and getCanonicalLocales, which is what language
- * negotiation needs: a tag's subtags. Formatting (DateTimeFormat, NumberFormat,
- * Collator, PluralRules, RelativeTimeFormat) stays absent rather than wrong,
- * because a formatter that ignores the locale silently produces the wrong text.
- * Tracked in docs/roadmaps/SPA-CAPABILITY-ROADMAP.md under intl-formatters.
+ * negotiation needs: a tag's subtags. DateTimeFormat carries the object shape
+ * over the patterns and names in intl_datetime_data, and reports the locale it
+ * negotiated to, so a request outside the supported set formats in a locale the
+ * page can read back rather than in a locale the formatter ignored.
+ *
+ * The remaining formatters -- NumberFormat, Collator, PluralRules,
+ * RelativeTimeFormat, DisplayNames, ListFormat, Segmenter -- stay absent, and
+ * docs/roadmaps/SPA-CAPABILITY-ROADMAP.md carries one cut each.
  */
 const PLATFORM_BOOTSTRAP: &str = r"
 (function () {
@@ -620,6 +625,108 @@ const PLATFORM_BOOTSTRAP: &str = r"
         };
         globalThis.Intl = Intl;
     }
+
+    /*
+     * Intl.DateTimeFormat. Resolution and rendering are native, because a page
+     * observes their output byte-for-byte; this expresses the object shape the
+     * specification writes, including format as an accessor whose bound
+     * function survives being detached from the formatter.
+     */
+    var DTF = function DateTimeFormat(locales, options) {
+        var self = this instanceof DTF ? this : Object.create(DTF.prototype);
+        // The offset the local accessors carry decides both the zone name a
+        // request naming none reports and the text the zone token renders, so
+        // resolution reads it from the same Date the formatter will.
+        Object.defineProperty(self, '_resolved', {
+            value: __silksurfIntlDateTimeResolve(locales, options, -new Date().getTimezoneOffset()),
+        });
+        return self;
+    };
+    function dtfFields(resolved, time) {
+        var d = new Date(time);
+        if (resolved.utc) {
+            return [d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), d.getUTCDay(),
+                d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds(), 0, 1];
+        }
+        return [d.getFullYear(), d.getMonth(), d.getDate(), d.getDay(),
+            d.getHours(), d.getMinutes(), d.getSeconds(), -d.getTimezoneOffset(), 0];
+    }
+    function dtfTime(date) {
+        var t = date === undefined ? Date.now() : Number(date);
+        if (!isFinite(t)) { throw new RangeError('Invalid time value'); }
+        return t;
+    }
+    function dtfParts(self, date) {
+        var r = self._resolved;
+        return __silksurfIntlDateTimeParts(r.pattern, r.locale, dtfFields(r, dtfTime(date)));
+    }
+    Object.defineProperty(DTF.prototype, 'format', {
+        configurable: true,
+        get: function () {
+            var self = this;
+            if (!self._boundFormat) {
+                Object.defineProperty(self, '_boundFormat', {
+                    value: function (date) {
+                        var parts = dtfParts(self, date), text = '';
+                        for (var i = 0; i < parts.length; i++) { text += parts[i].value; }
+                        return text;
+                    },
+                });
+            }
+            return self._boundFormat;
+        },
+    });
+    DTF.prototype.formatToParts = function (date) { return dtfParts(this, date); };
+    DTF.prototype.resolvedOptions = function () {
+        var r = this._resolved;
+        var out = { locale: r.locale, calendar: r.calendar,
+            numberingSystem: r.numberingSystem, timeZone: r.timeZone };
+        if (r.hourCycle !== undefined) { out.hourCycle = r.hourCycle; out.hour12 = r.hour12; }
+        var order = ['weekday', 'era', 'year', 'month', 'day', 'hour', 'minute', 'second',
+            'dateStyle', 'timeStyle'];
+        for (var i = 0; i < order.length; i++) {
+            if (r[order[i]] !== undefined) { out[order[i]] = r[order[i]]; }
+        }
+        return out;
+    };
+    DTF.supportedLocalesOf = function (locales) {
+        return __silksurfIntlSupportedLocales(locales);
+    };
+    Object.defineProperty(DTF.prototype, Symbol.toStringTag, {
+        configurable: true, value: 'Intl.DateTimeFormat',
+    });
+    Object.defineProperty(globalThis.Intl, 'DateTimeFormat', {
+        configurable: true, writable: true, value: DTF,
+    });
+
+    /*
+     * Date's locale methods. ToDateTimeOptions fills in the numeric defaults
+     * for whichever half the method names, which is what makes a bare
+     * toLocaleDateString() render a date rather than an empty pattern.
+     */
+    function dtfDefaults(options, wantDate, wantTime) {
+        var out = {};
+        if (options !== undefined && options !== null) {
+            for (var k in Object(options)) { out[k] = Object(options)[k]; }
+        }
+        var hasDate = out.weekday !== undefined || out.year !== undefined
+            || out.month !== undefined || out.day !== undefined || out.dateStyle !== undefined;
+        var hasTime = out.hour !== undefined || out.minute !== undefined
+            || out.second !== undefined || out.timeStyle !== undefined;
+        if (wantDate && !hasDate && !hasTime) { out.year = 'numeric'; out.month = 'numeric'; out.day = 'numeric'; }
+        if (wantTime && !hasDate && !hasTime) { out.hour = 'numeric'; out.minute = 'numeric'; out.second = 'numeric'; }
+        return out;
+    }
+    function dtfDateMethod(wantDate, wantTime) {
+        return function (locales, options) {
+            var t = Number(this);
+            if (!isFinite(t)) { return 'Invalid Date'; }
+            return new DTF(locales, dtfDefaults(options, wantDate, wantTime)).format(t);
+        };
+    }
+    Date.prototype.toLocaleDateString = dtfDateMethod(true, false);
+    Date.prototype.toLocaleTimeString = dtfDateMethod(false, true);
+    Date.prototype.toLocaleString = dtfDateMethod(true, true);
 
     if (typeof globalThis.screen === 'undefined') {
         globalThis.screen = {
