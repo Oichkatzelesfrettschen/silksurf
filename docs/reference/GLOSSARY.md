@@ -792,6 +792,18 @@ files and the relevant ADRs.
 **Type**: Cache coherence counter
 **Definition**: Monotonic `Dom` counter that advances on child insertion, removal, or reparenting. Text-only edits leave it stable, so `FusedWorkspace` keeps the BFS table and taffy node graph warm for existing text nodes.
 
+### set_mutation_recording
+**Type**: DOM mutation observation control
+**Definition**: Opens or closes the mutation record queue on a `Dom`. The JS half opens it when the first `MutationObserver` registers and closes it when the last disconnects, so a document nobody observes pays one bool test per mutation and allocates nothing. Closing discards whatever is queued.
+
+### pending_mutation_records
+**Type**: DOM mutation observation query
+**Definition**: How many mutation records wait on a `Dom`. The bridge reads it to decide whether the delivery microtask still needs enqueuing.
+
+### take_mutation_records
+**Type**: DOM mutation observation function
+**Definition**: Empties the mutation record queue and returns what it held, which is the "empty the queue" step of DOM 4.4.3's notify-mutation-observers. A record is queued only for a target connected to the document and not itself part of a subtree added since the previous take, so building a subtree before splicing it in reports the splice rather than each construction step.
+
 ### take_dirty_nodes
 **Type**: DOM change detection function
 **Definition**: Returns the set of `NodeId`s marked dirty since the last call, and clears the set. Used by the incremental render pipeline to determine which subtrees to re-cascade.

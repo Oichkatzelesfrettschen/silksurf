@@ -335,10 +335,29 @@ separately-landable follow-up):
   would supply it against the tiny-skia backend silksurf-render already
   rasterizes through, at a dependency weight the low-resource profile
   has not accepted.
-- mutation-observer -- MutationObserver is undefined. `Dom::take_dirty_nodes`
-  already records the mutated set the fused pipeline consumes, so the
-  records exist; delivering them needs a per-observer subtree filter and
-  a microtask-checkpoint queue.
+- mutation-observer -- AD-034 takes it. The roadmap's earlier reading was
+  wrong twice: `Dom::take_dirty_nodes` returns a bare `Vec<NodeId>` and
+  carries no record payload, and the bridge's mutating natives are not the
+  mutation surface, because innerHTML splices through import_subtree and the
+  fragment parser builds through the ordinary constructors. The queue sits
+  behind silksurf-dom's seven mutators instead, filtered to connected targets
+  outside a subtree added since the previous take, and delivery is a promise
+  job enqueued when the record is queued so the callback precedes a
+  continuation registered after the mutation.
+- resize-observer -- ResizeObserver is undefined across 20 constructions in
+  chatgpt.com's bundles, so an unguarded one raises a ReferenceError that
+  takes the module. It reports post-layout geometry against a frame, which
+  needs the layout box and the frame loop reaching script.
+- intersection-observer -- IntersectionObserver is undefined across 23
+  constructions, the largest of the four observer counts, and needs the same
+  post-layout geometry plus threshold crossing.
+- performance-observer -- PerformanceObserver is undefined across 8
+  constructions and needs performance entries the engine does not collect.
+- mutation-observer-record-coalescing -- a browser reports one childList
+  record per tree operation while the queue reports one per mutator call, so
+  an operation reaching the tree as several calls reports several records.
+  The union of added and removed nodes matches either way, so a reconciling
+  observer converges and one counting records does not.
 - dynamic-import-fetch -- the module graph is fetched ahead of
   evaluation from the static imports boa reports, so `import()` reaches
   a module the registry does not hold and rejects. Measurement confirms the
