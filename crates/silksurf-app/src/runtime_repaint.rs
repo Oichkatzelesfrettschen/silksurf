@@ -423,6 +423,10 @@ fn repaint_runtime_document(
     runtime.display_list = display_list;
 
     let old_fused = std::mem::replace(&mut runtime.fused, new_fused);
+    // The layout the DOM's geometry accessors report is the one that just
+    // completed, and this is the one place the runtime's fused result becomes
+    // current.
+    runtime.geometry.borrow_mut().refresh(&runtime.fused);
     runtime.fused_workspace.recycle_result_storage(old_fused);
     trace_runtime_fused_repaint(dirty_nodes.map_or(0, <[_]>::len), redraw_mode);
     redraw_mode
@@ -1350,6 +1354,7 @@ mod tests {
                 style_index,
                 viewport,
                 js_ctx,
+                geometry: std::rc::Rc::default(),
                 fused,
                 fused_workspace: FusedWorkspace::new(),
                 display_list: runtime_display_list,
@@ -1474,6 +1479,7 @@ mod tests {
                 style_index,
                 viewport,
                 js_ctx,
+                geometry: std::rc::Rc::default(),
                 fused,
                 fused_workspace: FusedWorkspace::new(),
                 display_list: runtime_display_list,

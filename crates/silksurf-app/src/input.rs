@@ -745,6 +745,14 @@ pub(crate) fn apply_focus_viewport_cache(
     };
     state.frame.argb = cache.argb;
     state.frame.bitmap_scroll_y = cache.scroll_y;
+    // The geometry accessors report viewport coordinates, so the scroll the
+    // frame presents at rides with the map.
+    if let Some(runtime) = state.runtime.as_ref() {
+        runtime
+            .geometry
+            .borrow_mut()
+            .set_scroll(cache.scroll_y as f32);
+    }
     state.frame.bitmap_height = cache.bitmap_height;
     true
 }
@@ -807,6 +815,14 @@ pub(crate) fn apply_scroll_viewport_cache(
     let cache = state.frame.scroll_viewport_caches.swap_remove(cache_index);
     state.frame.argb = cache.argb;
     state.frame.bitmap_scroll_y = cache.scroll_y;
+    // The geometry accessors report viewport coordinates, so the scroll the
+    // frame presents at rides with the map.
+    if let Some(runtime) = state.runtime.as_ref() {
+        runtime
+            .geometry
+            .borrow_mut()
+            .set_scroll(cache.scroll_y as f32);
+    }
     state.frame.bitmap_height = cache.bitmap_height;
     scroll_viewport_retained_present(
         state,

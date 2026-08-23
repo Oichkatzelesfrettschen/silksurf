@@ -1279,6 +1279,44 @@ impl SilkContext {
         style_sheets::install_style_sheet_natives(sheets, &dom, &mut self.ctx);
     }
 
+    /// Install the geometry provider backing the layout-reading accessors.
+    ///
+    /// `getBoundingClientRect`, `getClientRects`, `offsetWidth`,
+    /// `offsetHeight`, `clientWidth`, and `clientHeight` all read one border
+    /// box, so one provider answers all six. The box comes from the last
+    /// completed layout: a read in the same script as the mutation that
+    /// invalidated it reports the rect that was last laid out, because layout
+    /// runs after script rather than on demand.
+    pub fn set_geometry_provider(&mut self, provider: GeometryProvider) {
+        // SAFETY: the capture is an Rc closure over app data, no GC pointers.
+        let native = unsafe {
+            NativeFunction::from_closure(move |_this, args, ctx| {
+                let node = args
+                    .first()
+                    .map(|value| value.to_u32(ctx))
+                    .transpose()?
+                    .unwrap_or(0);
+                let Some(box_) = provider(silksurf_dom::NodeId::from_raw(node as usize)) else {
+                    return Ok(JsValue::null());
+                };
+                let array = JsArray::new(ctx);
+                for value in box_ {
+                    array.push(JsValue::from(f64::from(value)), ctx)?;
+                }
+                Ok(array.into())
+            })
+        };
+        let _ = self
+            .ctx
+            .register_global_callable(js_string!("__silksurfElementBox"), 1, native);
+        if let Err(err) = self
+            .ctx
+            .eval(Source::from_bytes(GEOMETRY_BOOTSTRAP.as_bytes()))
+        {
+            eprintln!("silksurf-js: geometry bootstrap failed: {err}");
+        }
+    }
+
     /// Install the computed-style provider backing `getComputedStyle`.
     ///
     /// The provider maps (node, kebab-case property) to a serialized value,
@@ -2237,7 +2275,71 @@ type HistoryIntentsRef = Rc<RefCell<Vec<HistoryIntent>>>;
 type ViewportRef = Rc<std::cell::Cell<(f32, f32)>>;
 
 /// Callback the embedder installs to serialize computed style values.
+/*
+ * The six accessors a border box answers. The provider returns the box in
+ * viewport coordinates, so getBoundingClientRect reports it directly;
+ * offsetWidth and offsetHeight are its dimensions by definition, and
+ * clientWidth and clientHeight subtract the border widths to reach the
+ * padding box. An element the layout produced no box for reports zeros, which
+ * is what a browser reports for an unrendered element.
+ */
+const GEOMETRY_BOOTSTRAP: &str = r"
+(function () {
+    'use strict';
+    function boxOf(el) {
+        var id = el && typeof el.nodeId === 'number' ? el.nodeId : -1;
+        return id < 0 ? null : __silksurfElementBox(id);
+    }
+    function rectOf(el) {
+        var b = boxOf(el) || [0, 0, 0, 0, 0, 0, 0, 0];
+        return {
+            x: b[0], y: b[1], width: b[2], height: b[3],
+            top: b[1], left: b[0], right: b[0] + b[2], bottom: b[1] + b[3],
+            toJSON: function () { return this; },
+        };
+    }
+    Element.prototype.getBoundingClientRect = function () { return rectOf(this); };
+    // A box this engine lays out is never fragmented across lines or columns,
+    // so the list carries the one border box.
+    Element.prototype.getClientRects = function () {
+        var rect = rectOf(this);
+        var list = [rect];
+        list.item = function (i) { return i === 0 ? rect : null; };
+        return list;
+    };
+    function dimension(index) {
+        return function () { var b = boxOf(this); return b ? Math.round(b[index]) : 0; };
+    }
+    function inner(size, near, far) {
+        return function () {
+            var b = boxOf(this);
+            return b ? Math.round(b[size] - b[near] - b[far]) : 0;
+        };
+    }
+    var props = {
+        offsetWidth: dimension(2), offsetHeight: dimension(3),
+        clientWidth: inner(2, 7, 5), clientHeight: inner(3, 4, 6),
+    };
+    Object.keys(props).forEach(function (name) {
+        Object.defineProperty(Element.prototype, name, {
+            configurable: true, get: props[name],
+        });
+    });
+})();
+";
+
 pub type ComputedStyleProvider = Rc<dyn Fn(silksurf_dom::NodeId, &str) -> Option<String>>;
+
+/// Border-box geometry for one node, in the order the JS half reads it:
+/// `x`, `y`, `width`, `height`, then the top, right, bottom, and left border
+/// widths. Coordinates are viewport-relative, because that is the space
+/// `Element.getBoundingClientRect` reports in.
+pub type ElementBox = [f32; 8];
+
+/// Answers geometry for a node from the last completed layout. A node the
+/// layout produced no box for answers `None`, which the JS half reports as a
+/// zero rect the way a browser does for an unrendered element.
+pub type GeometryProvider = Rc<dyn Fn(silksurf_dom::NodeId) -> Option<ElementBox>>;
 
 /// `__silksurfMatchMedia(query)`: evaluate a media query prelude against the
 /// current viewport through the silksurf-css evaluator.

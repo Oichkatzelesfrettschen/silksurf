@@ -1112,6 +1112,11 @@ pub(crate) fn refresh_browser_frame_bitmap(
     state.frame.bitmap_height = bitmap_height;
     state.frame.bitmap_raster_width = raster_width;
     state.frame.bitmap_scroll_y = scroll_y;
+    // The geometry accessors report viewport coordinates, so the scroll the
+    // frame presents at rides with the map.
+    if let Some(runtime) = state.runtime.as_ref() {
+        runtime.geometry.borrow_mut().set_scroll(scroll_y as f32);
+    }
     BrowserBitmapRefresh::Full
 }
 
@@ -1184,6 +1189,11 @@ pub(crate) fn scroll_browser_frame_bitmap(
         }
     }
     state.frame.bitmap_scroll_y = scroll_y;
+    // The geometry accessors report viewport coordinates, so the scroll the
+    // frame presents at rides with the map.
+    if let Some(runtime) = state.runtime.as_ref() {
+        runtime.geometry.borrow_mut().set_scroll(scroll_y as f32);
+    }
     Some(exposed_damage)
 }
 

@@ -743,13 +743,12 @@ const INTERFACE_BOOTSTRAP: &str = r"
     Element.prototype.focus = function () {};
     Element.prototype.blur = function () {};
     Element.prototype.scrollIntoView = function () {};
+    // A context with no geometry provider has run no layout, so every box is
+    // zero. SilkContext::set_geometry_provider replaces this with the accessor
+    // that reads the last completed layout.
     Element.prototype.getBoundingClientRect = function () {
-        var box = typeof __silksurfBoundingRect === 'function'
-            ? __silksurfBoundingRect(this.nodeId) : null;
-        if (!box) { box = { x: 0, y: 0, width: 0, height: 0 }; }
         return {
-            x: box.x, y: box.y, width: box.width, height: box.height,
-            top: box.y, left: box.x, right: box.x + box.width, bottom: box.y + box.height,
+            x: 0, y: 0, width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0,
             toJSON: function () { return this; }
         };
     };
