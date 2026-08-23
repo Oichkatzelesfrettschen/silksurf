@@ -839,6 +839,11 @@ fn set_attribute_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFun
                 .unwrap_or_default();
             let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
             let _ = dom.set_attribute(node_id, name, value);
+            // The mutation queues a record, so the delivery microtask is
+            // enqueued before this native returns. The tree lock drops first,
+            // because enqueuing reads the queue depth through the same mutex.
+            drop(dom);
+            super::mutation_observer::notify(&arc, ctx);
             Ok(JsValue::undefined())
         })
     }
@@ -887,6 +892,11 @@ fn attribute_set_native(
                 .unwrap_or_default();
             let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
             let _ = dom.set_attribute(node_id, attribute_name, value);
+            // The mutation queues a record, so the delivery microtask is
+            // enqueued before this native returns. The tree lock drops first,
+            // because enqueuing reads the queue depth through the same mutex.
+            drop(dom);
+            super::mutation_observer::notify(&arc, ctx);
             Ok(JsValue::undefined())
         })
     }
@@ -905,6 +915,9 @@ fn append_child_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunc
                 detach_from_parent(&mut dom, child);
                 let _ = dom.append_child(node_id, child);
             }
+            // The mutation queues a record, so the delivery microtask is
+            // enqueued before this native returns.
+            super::mutation_observer::notify(&arc, ctx);
             Ok(child_arg.cloned().unwrap_or(JsValue::undefined()))
         })
     }
@@ -922,6 +935,9 @@ fn remove_child_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunc
                 let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
                 let _ = dom.remove_child(node_id, child);
             }
+            // The mutation queues a record, so the delivery microtask is
+            // enqueued before this native returns.
+            super::mutation_observer::notify(&arc, ctx);
             Ok(child_arg.cloned().unwrap_or(JsValue::undefined()))
         })
     }
@@ -937,6 +953,9 @@ fn insert_before_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFun
             let child = extract_node_id(child_arg, ctx)?;
             let reference = extract_optional_node_id(args.get(1), ctx)?;
             insert_before_or_append(&arc, node_id, child, reference);
+            // The mutation queues a record, so the delivery microtask is
+            // enqueued before this native returns.
+            super::mutation_observer::notify(&arc, ctx);
             Ok(child_arg.cloned().unwrap_or(JsValue::undefined()))
         })
     }
@@ -971,6 +990,9 @@ fn replace_child_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFun
                 let _ = dom.insert_before(node_id, child, old_child);
                 let _ = dom.remove_child(node_id, old_child);
             }
+            // The mutation queues a record, so the delivery microtask is
+            // enqueued before this native returns.
+            super::mutation_observer::notify(&arc, ctx);
             Ok(old_child_arg.cloned().unwrap_or(JsValue::undefined()))
         })
     }
@@ -1003,6 +1025,11 @@ fn text_content_set_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> Native
                 .unwrap_or_default();
             let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
             let _ = dom.set_text_content(node_id, text);
+            // The mutation queues a record, so the delivery microtask is
+            // enqueued before this native returns. The tree lock drops first,
+            // because enqueuing reads the queue depth through the same mutex.
+            drop(dom);
+            super::mutation_observer::notify(&arc, ctx);
             Ok(JsValue::undefined())
         })
     }
@@ -1050,6 +1077,11 @@ fn node_value_set_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFu
             if is_text {
                 let _ = dom.set_text_content(node_id, text);
             }
+            // The mutation queues a record, so the delivery microtask is
+            // enqueued before this native returns. The tree lock drops first,
+            // because enqueuing reads the queue depth through the same mutex.
+            drop(dom);
+            super::mutation_observer::notify(&arc, ctx);
             Ok(JsValue::undefined())
         })
     }
@@ -1084,6 +1116,11 @@ fn inner_html_set_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFu
                 let _ = dom.remove_child(node_id, child);
             }
             silksurf_html::parse_fragment_into(&mut dom, node_id, &context_tag, &html);
+            // The mutation queues a record, so the delivery microtask is
+            // enqueued before this native returns. The tree lock drops first,
+            // because enqueuing reads the queue depth through the same mutex.
+            drop(dom);
+            super::mutation_observer::notify(&arc, ctx);
             Ok(JsValue::undefined())
         })
     }
@@ -1116,6 +1153,11 @@ fn value_set_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunctio
                 .unwrap_or_default();
             let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
             let _ = dom.set_attribute(node_id, "value", value);
+            // The mutation queues a record, so the delivery microtask is
+            // enqueued before this native returns. The tree lock drops first,
+            // because enqueuing reads the queue depth through the same mutex.
+            drop(dom);
+            super::mutation_observer::notify(&arc, ctx);
             Ok(JsValue::undefined())
         })
     }
@@ -1170,6 +1212,7 @@ pub(super) fn install_document(
 ) {
     let root = NodeId::from_raw(0);
     super::css_object::install_style_dataset_natives(dom_arc, ctx);
+    super::mutation_observer::install(ctx, dom_arc);
     let methods = document_methods(dom_arc, root);
     let accessors = document_accessors(dom_arc, root, ctx);
     let cookie_getter =

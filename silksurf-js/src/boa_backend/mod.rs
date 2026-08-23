@@ -43,6 +43,7 @@ mod event_dispatch;
 mod intl_datetime;
 mod intl_datetime_data;
 mod module_loader;
+mod mutation_observer;
 pub use module_loader::{ImportMap, ModuleFetchBudget, ModuleFetcher, module_import_specifiers};
 mod net_queue;
 mod platform_globals;
@@ -1522,6 +1523,11 @@ impl SilkContext {
         ran += self.drain_net_completions()?;
         ran += self.drain_ws_events()?;
         ran += self.drain_sse_events()?;
+        // A record left queued by a mutation path that did not enqueue its own
+        // delivery reaches its callback at this checkpoint rather than never.
+        if let Some(dom) = self.dom.clone() {
+            mutation_observer::deliver_pending(&dom, &mut self.ctx);
+        }
         let jobs_start = Instant::now();
         self.run_pending_jobs();
         trace_host_callback_jobs(trace_callbacks, jobs_start.elapsed());
