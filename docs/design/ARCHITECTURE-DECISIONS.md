@@ -2616,6 +2616,143 @@ point today -- boa registers it unconditionally and its non-`intl` arm ignores
 the locale -- which answers 21 chatgpt.com sites with an ordering that is wrong
 for any locale whose collation differs from code point order.
 
+## AD-034: Mutation Records Queue On the Tree and Deliver From a Microtask
+
+**Status**: Accepted
+**Date**: 2026-08-23
+**Deciders**: Public web page load repairs
+
+### Context
+
+`MutationObserver`, `ResizeObserver`, `IntersectionObserver`, and
+`PerformanceObserver` are all absent from the engine, so constructing one
+raises a `ReferenceError`. A module that constructs an observer without a
+`typeof` guard therefore fails to evaluate, and the failure takes the module
+rather than the feature.
+
+chatgpt.com's bundles for build prod-b8908cce construct them 65 times.
+Measured 2026-08-23 over the six captured bundles, counting `new X` rather
+than mentions of `X`:
+
+| observer | constructions | mentions |
+|---|---|---|
+| IntersectionObserver | 23 | 40 |
+| ResizeObserver | 20 | 37 |
+| MutationObserver | 14 | 26 |
+| PerformanceObserver | 8 | 15 |
+
+`MutationObserver` is the one the tree can already answer. `ResizeObserver`
+and `IntersectionObserver` report post-layout geometry against a frame, which
+needs the layout box and the frame loop reaching script; a mutation record
+needs only what the mutators already know.
+
+Where the records are captured decides whether an observer can be trusted. The
+bridge's mutating natives are not the mutation surface: the `innerHTML` setter
+clears through `Dom::remove_child` and splices through
+`silksurf_html::parse_fragment_into`, and `Dom::import_subtree` re-creates
+every imported node through the ordinary constructors
+(`crates/silksurf-dom/src/lib.rs`). Capturing at the natives alone would leave
+those paths silent, and an observer that misses mutations is worse than an
+absent one: a page reconciling on records diverges rather than fails.
+
+`silksurf-dom` has one bounded mutation surface -- `append_child`,
+`insert_before`, `remove_child`, `append_text`, `set_text_content`,
+`set_attribute`, and `remove_attribute` -- and every other path reaches the
+tree through it.
+
+When the callback runs is equally decided. DOM 4.4.3 queues
+notify-mutation-observers as a microtask at the moment a record is queued, so
+a continuation registered after the mutation runs second. boa's
+`SimpleJobExecutor` holds promise jobs in a FIFO queue
+(boa_engine-0.21.1 src/job.rs:662), and `Context::enqueue_job`
+(context/mod.rs:479) reaches it from inside a native, so a `PromiseJob`
+enqueued at mutation time keeps that order. Delivering only at the microtask
+checkpoint would reverse it.
+
+### Decision
+
+Queue mutation records on the tree, and deliver them from a promise job
+enqueued when the record is queued.
+
+`crates/silksurf-dom/src/mutation.rs` owns the queue and the mutators fill it.
+Two filters decide what enters: the target is connected to the document root,
+and the target is not itself part of a subtree added since the previous take.
+The first keeps a subtree built before it is spliced unobserved; the second
+carries that suppression down the subtree, because a record suppressed by it
+still contributes its added nodes to the added set. Together they make
+`import_subtree` report one addition for the splice rather than one per
+imported node, which is what a browser reports for `innerHTML`.
+
+Recording opens on an exact request. The JS half opens it when the first
+observer registers and closes it when the last disconnects, so a document
+nobody observes pays one bool test per mutation and allocates nothing.
+
+Open, it is not free, and the cost is bounded by measurement rather than by
+argument. 4,000 mutations against a depth-21 tree, release build on an AMD
+Ryzen 5 5600X3D, measured 10.82 us per mutation with recording closed and
+11.22 us with an observer registered under `subtree: true` -- 0.40 us of
+connectedness walk and set membership per mutation, a factor of 1.04. The
+added set is a hash set for that reason: as a list it measured 1.10x, because
+a splice that adds hundreds of nodes between takes rescans every earlier
+addition. The live observer list holds an observer only while it has a
+registration, so a page constructing one per component and disconnecting it
+accumulates nothing.
+
+`silksurf-js/src/boa_backend/mutation_observer.rs` turns records into objects
+and schedules delivery; the bootstrap carries the registry and the matching
+DOM 4.3.4 specifies, because matching reads against the option bag the page
+passed and that bag is a JS object. Nodes are wrapped through the bridge's
+wrapper cache, so a record's `target` compares equal to the element the page
+already holds.
+
+Ten natives in `dom_bridge.rs` reach a `Dom` mutator, and each enqueues the
+delivery job before returning. Each drops the tree lock first, because
+enqueuing reads the queue depth through the same mutex and the mutex is not
+reentrant. `run_host_callbacks` repeats the check before the microtask
+checkpoint, so a native added later without the call delivers one checkpoint
+late rather than not at all.
+
+### Consequences
+
+`MutationObserver` constructs, observes, disconnects, and takes records;
+`childList`, `attributes`, `characterData`, `subtree`, `attributeFilter`,
+`attributeOldValue`, and `characterDataOldValue` all select what a
+registration receives. Eleven behavior cases cover routing, ordering against a
+promise continuation, and the registration lifecycle
+(`silksurf-js/tests/mutation_observer.rs`), and ten cover what the tree queues
+(`crates/silksurf-dom/tests/mutation_records.rs`).
+
+One of those eleven exists because the first version of the suite proved
+nothing. An assertion thrown inside a promise callback rejects that promise,
+and the rejection never reaches the embedder, so ten tests passed with a
+deliberately falsified expectation still in place. Assertions now record into
+a global that the runner reads after the queue drains, and each test declares
+how many assertions must have run, so a chain that never executed fails rather
+than passes empty. A test whose assertions run inside a callback is worth
+falsifying before it is trusted.
+
+A second case guards a silent failure mode: connectedness is measured against
+the root `Dom::create_document` registers, and a tree built without it would
+filter out every record and leave every observer quiet. The HTML tree sink
+calls it (`crates/silksurf-html/src/treesink.rs:50`), and the test pins that.
+
+Four pieces are cut by name.
+
+`resize-observer` and `intersection-observer` record that 43 of the 65
+observer constructions still raise a `ReferenceError`, so this decision does
+not get chatgpt.com's bundles past their observer sites. Both report
+post-layout geometry against a frame, which is a different mechanism from a
+mutation record and needs the layout box and the frame loop reaching script.
+
+`performance-observer` records the remaining eight constructions, which need
+performance entries the engine does not collect.
+
+`mutation-observer-record-coalescing` records that a browser reports one
+childList record per tree operation while this queue reports one per mutator
+call, so a single `replaceChildren` reaching the tree as several calls reports
+several records. The union of added and removed nodes matches either way, so a
+reconciling observer converges; an observer counting records does not.
+
 ---
 
 ## Future ADRs
