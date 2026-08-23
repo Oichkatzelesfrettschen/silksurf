@@ -262,6 +262,8 @@ pub(crate) fn build_browser_page_with_buffers_for_window(
 
     let provider_stylesheet = Arc::new(Mutex::new(stylesheet.clone()));
     install_computed_style_provider(&mut js_ctx, &dom_arc, &provider_stylesheet);
+    let geometry: PageGeometryRef = std::rc::Rc::default();
+    install_geometry_provider(&mut js_ctx, &geometry);
     {
         let mut dom = dom_arc
             .lock()
@@ -381,6 +383,8 @@ pub(crate) fn build_browser_page_with_buffers_for_window(
         &replaced_sizes,
     );
     let mut fused = fused_workspace.take_result();
+    // The page's first layout; every later one refreshes at the repaint swap.
+    geometry.borrow_mut().refresh(&fused);
     let mut display_list = silksurf_render::DisplayList {
         items: std::mem::take(&mut fused.display_items),
         tiles: None,
@@ -496,6 +500,7 @@ pub(crate) fn build_browser_page_with_buffers_for_window(
             style_index,
             viewport,
             js_ctx,
+            geometry,
             fused,
             fused_workspace,
             display_list,

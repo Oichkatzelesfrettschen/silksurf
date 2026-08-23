@@ -232,3 +232,168 @@ pub(crate) fn union_rect(a: Rect, b: Rect) -> Rect {
         height: y1 - y0,
     }
 }
+
+/*
+ * PageGeometry -- the border boxes the layout-reading DOM accessors answer
+ * from.
+ *
+ * The fused pipeline writes rects in document coordinates and the frame
+ * scrolls the presented bitmap, so a viewport rect is the document rect less
+ * the scroll offset -- the same conversion `viewport_damage_rect` performs for
+ * damage. `getBoundingClientRect` reports viewport coordinates, so the
+ * conversion happens on read and the map stays valid while the page scrolls.
+ *
+ * The map refreshes when a fused run completes rather than when a script asks,
+ * because layout runs after script. A read in the same script as the mutation
+ * that invalidated it therefore reports the last completed layout.
+ */
+#[derive(Default)]
+pub(crate) struct PageGeometry {
+    boxes: std::collections::HashMap<silksurf_dom::NodeId, silksurf_js::ElementBox>,
+    scroll_y: f32,
+}
+
+/// Shared handle: the repaint path writes it, the JS geometry provider reads it.
+pub(crate) type PageGeometryRef = std::rc::Rc<std::cell::RefCell<PageGeometry>>;
+
+impl PageGeometry {
+    /// Replace the map from a completed layout. A node the layout produced no
+    /// box for is absent, which the JS half reports as a zero rect.
+    pub(crate) fn refresh(&mut self, fused: &FusedResult) {
+        self.boxes.clear();
+        self.boxes.reserve(fused.table.bfs_order.len());
+        for (index, node) in fused.table.bfs_order.iter().enumerate() {
+            let (Some(rect), Some(border)) =
+                (fused.node_rects.get(index), fused.node_borders.get(index))
+            else {
+                continue;
+            };
+            self.boxes.insert(
+                *node,
+                [
+                    rect.x,
+                    rect.y,
+                    rect.width,
+                    rect.height,
+                    border.top,
+                    border.right,
+                    border.bottom,
+                    border.left,
+                ],
+            );
+        }
+    }
+
+    /// Record the scroll offset the frame presents at, which the read
+    /// subtracts to reach viewport coordinates.
+    pub(crate) fn set_scroll(&mut self, scroll_y: f32) {
+        self.scroll_y = scroll_y;
+    }
+
+    /// The node's border box in viewport coordinates.
+    pub(crate) fn get(&self, node: silksurf_dom::NodeId) -> Option<silksurf_js::ElementBox> {
+        let mut found = *self.boxes.get(&node)?;
+        found[1] -= self.scroll_y;
+        Some(found)
+    }
+}
+
+/// Install the geometry provider backing `getBoundingClientRect`,
+/// `getClientRects`, `offsetWidth`, `offsetHeight`, `clientWidth`, and
+/// `clientHeight`.
+pub(crate) fn install_geometry_provider(js_ctx: &mut SilkContext, geometry: &PageGeometryRef) {
+    let geometry = std::rc::Rc::clone(geometry);
+    js_ctx.set_geometry_provider(std::rc::Rc::new(move |node| geometry.borrow().get(node)));
+}
+
+#[cfg(test)]
+mod page_geometry_tests {
+    use super::*;
+
+    /// A one-element document plus the layout result for it.
+    fn fixture(rect: Rect) -> (silksurf_dom::NodeId, FusedResult) {
+        let mut dom = silksurf_dom::Dom::new();
+        let root = dom.create_document();
+        let div = dom.create_element("div");
+        let _ = dom.append_child(root, div);
+        dom.materialize_resolve_table();
+        let table = silksurf_layout::neighbor_table::LayoutNeighborTable::build(&dom, root);
+        // UNWRAP-OK: the fixture appended the div under the root the table was built from.
+        let at = table
+            .bfs_order
+            .iter()
+            .position(|node| *node == div)
+            .expect("the div is in the table");
+        let mut node_rects = vec![Rect::default(); table.len()];
+        let mut node_borders = vec![silksurf_layout::EdgeSizes::default(); table.len()];
+        node_rects[at] = rect;
+        node_borders[at] = silksurf_layout::EdgeSizes {
+            top: 1.0,
+            right: 2.0,
+            bottom: 3.0,
+            left: 4.0,
+        };
+        (
+            div,
+            FusedResult {
+                styles: vec![None; table.len()],
+                display_items: Vec::new(),
+                node_rects,
+                node_borders,
+                table,
+            },
+        )
+    }
+
+    #[test]
+    fn a_refresh_publishes_the_border_box_and_its_insets() {
+        let (div, fused) = fixture(Rect {
+            x: 10.0,
+            y: 20.0,
+            width: 300.0,
+            height: 100.0,
+        });
+        let mut geometry = PageGeometry::default();
+        geometry.refresh(&fused);
+        // UNWRAP-OK: the fixture wrote a rect at the div's BFS slot before the refresh.
+        let found = geometry.get(div).expect("the div has a box");
+        let want = [10.0, 20.0, 300.0, 100.0, 1.0, 2.0, 3.0, 4.0];
+        for (index, (got, expected)) in found.iter().zip(want).enumerate() {
+            assert!((got - expected).abs() < f32::EPSILON, "slot {index}");
+        }
+    }
+
+    #[test]
+    fn a_read_reports_viewport_coordinates_while_the_page_scrolls() {
+        // The fused pipeline writes document coordinates and the frame scrolls
+        // the presented bitmap, so a viewport rect is the document rect less
+        // the scroll offset -- the conversion viewport_damage_rect performs.
+        let (div, fused) = fixture(Rect {
+            x: 0.0,
+            y: 500.0,
+            width: 10.0,
+            height: 10.0,
+        });
+        let mut geometry = PageGeometry::default();
+        geometry.refresh(&fused);
+        // UNWRAP-OK: the fixture wrote a rect at the div's BFS slot before the refresh.
+        let unscrolled = geometry.get(div).expect("box");
+        assert!((unscrolled[1] - 500.0).abs() < f32::EPSILON, "unscrolled");
+        geometry.set_scroll(120.0);
+        // UNWRAP-OK: the same slot the unscrolled read above resolved.
+        let scrolled = geometry.get(div).expect("box");
+        assert!((scrolled[1] - 380.0).abs() < f32::EPSILON, "scrolled");
+        assert!(scrolled[0].abs() < f32::EPSILON, "x is unaffected");
+    }
+
+    #[test]
+    fn a_node_the_layout_skipped_has_no_box() {
+        let (_div, fused) = fixture(Rect::default());
+        let mut geometry = PageGeometry::default();
+        geometry.refresh(&fused);
+        assert!(
+            geometry.get(silksurf_dom::NodeId::from_raw(999)).is_none(),
+            "a node outside the layout answers nothing"
+        );
+    }
+}

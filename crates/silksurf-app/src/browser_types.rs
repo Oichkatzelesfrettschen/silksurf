@@ -355,6 +355,11 @@ pub(crate) struct BrowserPageRuntime {
     pub(crate) style_index: StyleIndex,
     pub(crate) viewport: Rect,
     pub(crate) js_ctx: SilkContext,
+    /// The border boxes the layout-reading DOM accessors answer from, shared
+    /// with the JS context the way `provider_stylesheet` is. The repaint path
+    /// refreshes it when a fused run completes, so a read reports the last
+    /// completed layout rather than the snapshot page build made.
+    pub(crate) geometry: PageGeometryRef,
     pub(crate) fused: FusedResult,
     pub(crate) fused_workspace: FusedWorkspace,
     pub(crate) display_list: silksurf_render::DisplayList,

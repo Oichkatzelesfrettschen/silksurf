@@ -1939,6 +1939,11 @@ mod tests {
         state.frame.bitmap_raster_width = 1200;
         state.frame.bitmap_height = 600;
         state.frame.bitmap_scroll_y = 0;
+        // The geometry accessors report viewport coordinates, so the scroll the
+        // frame presents at rides with the map.
+        if let Some(runtime) = state.runtime.as_ref() {
+            runtime.geometry.borrow_mut().set_scroll(0.0);
+        }
         state.frame.raster_width = 900;
 
         assert_eq!(
