@@ -42,7 +42,7 @@ use taffy::{
     },
 };
 
-use crate::{Rect, neighbor_table::LayoutNeighborTable, unresolved_font_relative_px};
+use crate::{EdgeSizes, Rect, neighbor_table::LayoutNeighborTable, unresolved_font_relative_px};
 
 pub struct SilkTaffy {
     styles: Vec<Style>,
@@ -937,6 +937,29 @@ impl TaffyLayout {
     /// taffy's Layout.location is parent-relative, so we accumulate offsets
     /// down the BFS tree (parents are always processed before children in
     /// BFS order, so `node_rects[parent]` is already filled when we process child).
+    /// Border widths per BFS-indexed node.
+    ///
+    /// `write_rects` stores taffy's `layout.size`, which is the border box, so
+    /// the border widths are what separate it from the padding box
+    /// `Element.clientWidth` reports. A node taffy laid out no box for carries
+    /// zero on every edge.
+    pub fn write_border_insets(&self, insets: &mut [EdgeSizes]) {
+        let n = self.taffy_nodes.len().min(insets.len());
+        for (slot, node) in insets[..n].iter_mut().zip(&self.taffy_nodes[..n]) {
+            let Some(tn) = *node else {
+                *slot = EdgeSizes::default();
+                continue;
+            };
+            let border = self.tree.layout(tn).border;
+            *slot = EdgeSizes {
+                top: border.top,
+                right: border.right,
+                bottom: border.bottom,
+                left: border.left,
+            };
+        }
+    }
+
     pub fn write_rects(&self, parent_idx: &[u32], node_rects: &mut [Rect], viewport: Rect) {
         let n = self.taffy_nodes.len().min(node_rects.len());
         for i in 0..n {
@@ -2087,6 +2110,54 @@ mod tests {
         tl.write_rects(&table.parent_idx, &mut node_rects, viewport);
         assert!(node_rects[0].width <= viewport.width + 1.0);
         assert!(node_rects[0].height <= viewport.height + 1.0);
+    }
+
+    #[test]
+    fn border_insets_report_the_css_border_widths() {
+        // write_rects stores taffy's layout.size, which is the border box, so
+        // the insets are what Element.clientWidth subtracts to reach the
+        // padding box.
+        let mut dom = Dom::new();
+        let root = dom.create_document();
+        let div = dom.create_element("div");
+        let _ = dom.set_attribute(
+            div,
+            "style",
+            "border-width: 1px 2px 3px 4px; border-style: solid; width: 100px; height: 50px",
+        );
+        let _ = dom.append_child(root, div);
+        dom.materialize_resolve_table();
+        let table = LayoutNeighborTable::build(&dom, root);
+        let sheet = silksurf_css::Stylesheet { rules: Vec::new() };
+        let styles: Vec<Option<ComputedStyle>> = table
+            .bfs_order
+            .iter()
+            .map(|node| {
+                Some(silksurf_css::compute_style_for_node(
+                    &dom, *node, &sheet, None,
+                ))
+            })
+            .collect();
+        let viewport = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 800.0,
+            height: 600.0,
+        };
+        let mut tl = TaffyLayout::new();
+        tl.rebuild(&dom, &table, &styles);
+        tl.compute(&dom, &styles, &table.bfs_order, viewport);
+        let mut insets = vec![EdgeSizes::default(); table.len()];
+        tl.write_border_insets(&mut insets);
+        let at = table
+            .bfs_order
+            .iter()
+            .position(|node| *node == div)
+            .expect("the div is in the table");
+        assert!((insets[at].top - 1.0).abs() < f32::EPSILON, "top");
+        assert!((insets[at].right - 2.0).abs() < f32::EPSILON, "right");
+        assert!((insets[at].bottom - 3.0).abs() < f32::EPSILON, "bottom");
+        assert!((insets[at].left - 4.0).abs() < f32::EPSILON, "left");
     }
 
     #[test]
