@@ -3,8 +3,10 @@
 pub mod a11y;
 pub mod canvas2d;
 pub mod diff;
+pub mod mutation;
 
 pub use canvas2d::CanvasSurface;
+pub use mutation::{MutationKind, MutationRecord};
 
 use silksurf_core::{Atom, SilkInterner, SmallString, should_intern_identifier};
 use smallvec::SmallVec;
@@ -376,6 +378,10 @@ pub struct Dom {
     /// drawing surface; JS draw calls mutate it in place and the paint
     /// pipeline snapshots its pixels. Keyed by the canvas element `NodeId`.
     canvas_surfaces: HashMap<NodeId, CanvasSurface>,
+    /// Mutation records for the observers registered against this tree, and
+    /// the document root connectedness is measured against.
+    mutations: mutation::MutationLog,
+    document_root: Option<NodeId>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -392,6 +398,11 @@ impl From<DomError> for silksurf_core::SilkError {
     }
 }
 
+/// Depth bound on the connectedness walk. A tree deeper than this is
+/// malformed or cyclic, and the walk reports it as disconnected rather than
+/// spinning.
+const MAX_CONNECTED_WALK: usize = 1024;
+
 impl Dom {
     pub fn new() -> Self {
         use std::sync::atomic::{AtomicU32, Ordering};
@@ -403,6 +414,8 @@ impl Dom {
             resolve_table: Vec::new(),
             dirty_nodes: Vec::new(),
             dirty_batch: Vec::new(),
+            mutations: mutation::MutationLog::default(),
+            document_root: None,
             batch_depth: 0,
             generation: (instance_id as u64) << 32,
             structure_generation: (instance_id as u64) << 32,
@@ -476,7 +489,11 @@ impl Dom {
     }
 
     pub fn create_document(&mut self) -> NodeId {
-        self.push_node(NodeKind::Document)
+        let root = self.push_node(NodeKind::Document);
+        // Connectedness is measured against the first document created, which
+        // is the tree an observer registers on.
+        self.document_root.get_or_insert(root);
+        root
     }
 
     pub fn create_element(&mut self, name: impl Into<String>) -> NodeId {
@@ -522,11 +539,21 @@ impl Dom {
             return Err(DomError::AlreadyHasParent(child));
         }
 
+        let previous = self.nodes[parent_index].children.last().copied();
         self.nodes[child_index].parent = Some(parent);
         self.nodes[parent_index].children.push(child);
         self.record_structure_change();
         self.mark_dirty(parent);
         self.mark_dirty(child);
+        self.queue_mutation(
+            parent,
+            MutationKind::ChildList {
+                added: vec![child],
+                removed: Vec::new(),
+                previous,
+                next: None,
+            },
+        );
         Ok(())
     }
 
@@ -582,10 +609,30 @@ impl Dom {
     pub fn remove_child(&mut self, parent: NodeId, child: NodeId) -> Result<(), DomError> {
         let parent_index = self.node_index(parent)?;
         let child_index = self.node_index(child)?;
+        let position = self.nodes[parent_index]
+            .children
+            .iter()
+            .position(|id| *id == child);
+        let (previous, next) = position.map_or((None, None), |at| {
+            let children = &self.nodes[parent_index].children;
+            (
+                at.checked_sub(1).and_then(|i| children.get(i).copied()),
+                children.get(at + 1).copied(),
+            )
+        });
         self.nodes[parent_index].children.retain(|id| *id != child);
         self.nodes[child_index].parent = None;
         self.record_structure_change();
         self.mark_dirty(parent);
+        self.queue_mutation(
+            parent,
+            MutationKind::ChildList {
+                added: Vec::new(),
+                removed: vec![child],
+                previous,
+                next,
+            },
+        );
         Ok(())
     }
 
@@ -613,6 +660,12 @@ impl Dom {
             .children
             .iter()
             .position(|id| *id == ref_child);
+        let previous = match pos {
+            Some(idx) => idx
+                .checked_sub(1)
+                .and_then(|i| self.nodes[parent_index].children.get(i).copied()),
+            None => self.nodes[parent_index].children.last().copied(),
+        };
         match pos {
             Some(idx) => self.nodes[parent_index].children.insert(idx, new_child),
             None => self.nodes[parent_index].children.push(new_child),
@@ -620,6 +673,15 @@ impl Dom {
         self.record_structure_change();
         self.mark_dirty(parent);
         self.mark_dirty(new_child);
+        self.queue_mutation(
+            parent,
+            MutationKind::ChildList {
+                added: vec![new_child],
+                removed: Vec::new(),
+                previous,
+                next: pos.map(|_| ref_child),
+            },
+        );
         Ok(())
     }
 
@@ -636,10 +698,12 @@ impl Dom {
         if let Some(last) = last {
             let last_index = self.node_index(last)?;
             if let NodeKind::Text { text: existing } = &mut self.nodes[last_index].kind {
+                let old = existing.clone();
                 existing.push_str(&text);
                 self.record_text_change();
                 self.mark_dirty(parent);
                 self.mark_dirty(last);
+                self.queue_mutation(last, MutationKind::CharacterData { old });
                 return Ok(last);
             }
         }
@@ -659,12 +723,16 @@ impl Dom {
         let index = self.node_index(id)?;
         match self.nodes[index].kind {
             NodeKind::Text { .. } => {
+                let old = self.text_snapshot(id);
                 if let NodeKind::Text { text: existing } = &mut self.nodes[index].kind
                     && *existing != text
                 {
                     *existing = text;
                     self.record_text_change();
                     self.mark_dirty(id);
+                    if let Some(old) = old {
+                        self.queue_mutation(id, MutationKind::CharacterData { old });
+                    }
                 }
                 Ok(())
             }
@@ -677,6 +745,7 @@ impl Dom {
                         self.nodes[child_index].parent = None;
                     }
                 }
+                let mut added = Vec::new();
                 if !text.is_empty() {
                     let text_node = self.create_text(text);
                     let text_index = self.node_index(text_node)?;
@@ -684,10 +753,22 @@ impl Dom {
                     self.nodes[index].children.push(text_node);
                     self.record_structure_change();
                     self.mark_dirty(text_node);
+                    added.push(text_node);
                 } else if !old_children.is_empty() {
                     self.record_structure_change();
                 }
                 self.mark_dirty(id);
+                if !added.is_empty() || !old_children.is_empty() {
+                    self.queue_mutation(
+                        id,
+                        MutationKind::ChildList {
+                            added,
+                            removed: old_children,
+                            previous: None,
+                            next: None,
+                        },
+                    );
+                }
                 Ok(())
             }
             _ => Err(DomError::NotText(id)),
@@ -737,6 +818,7 @@ impl Dom {
             }
         };
         let index = self.node_index(id)?;
+        let old = self.attribute_snapshot(id, &name);
         match &mut self.nodes[index].kind {
             NodeKind::Element { attributes, .. } => {
                 if let Some(existing) = attributes.iter_mut().find(|a| a.name == attr_name) {
@@ -755,6 +837,7 @@ impl Dom {
                 }
                 self.record_style_change();
                 self.mark_dirty(id);
+                self.queue_mutation(id, MutationKind::Attributes { name, old });
                 Ok(())
             }
             _ => Err(DomError::NotElement(id)),
@@ -766,8 +849,10 @@ impl Dom {
         id: NodeId,
         name: impl Into<String>,
     ) -> Result<bool, DomError> {
-        let attr_name = AttributeName::from_str(&name.into());
+        let name = name.into();
+        let attr_name = AttributeName::from_str(&name);
         let index = self.node_index(id)?;
+        let old = self.attribute_snapshot(id, &name);
         match &mut self.nodes[index].kind {
             NodeKind::Element { attributes, .. } => {
                 let Some(position) = attributes.iter().position(|attr| attr.name == attr_name)
@@ -777,9 +862,98 @@ impl Dom {
                 attributes.remove(position);
                 self.record_style_change();
                 self.mark_dirty(id);
+                self.queue_mutation(id, MutationKind::Attributes { name, old });
                 Ok(true)
             }
             _ => Err(DomError::NotElement(id)),
+        }
+    }
+
+    /// Open or close mutation recording. A document with no observer keeps it
+    /// closed, which costs one bool test per mutation and no allocation.
+    /// Closing discards whatever is queued, because a tree nobody observes
+    /// reports no history when the next observer arrives.
+    pub fn set_mutation_recording(&mut self, on: bool) {
+        self.mutations.set_recording(on);
+    }
+
+    /// How many records wait. The bridge reads this to decide whether the
+    /// delivery microtask still needs enqueuing.
+    #[must_use]
+    pub fn pending_mutation_records(&self) -> usize {
+        self.mutations.pending()
+    }
+
+    /// Take every queued record, which is what "empty the queue" does in the
+    /// notify-mutation-observers algorithm.
+    pub fn take_mutation_records(&mut self) -> Vec<MutationRecord> {
+        self.mutations.take()
+    }
+
+    /// Whether `id` hangs off the document root. A record is queued only for a
+    /// connected target, so building a subtree before splicing it in reports
+    /// the splice rather than each construction step.
+    fn is_connected(&self, id: NodeId) -> bool {
+        let Some(root) = self.document_root else {
+            return false;
+        };
+        let mut current = id;
+        for _ in 0..MAX_CONNECTED_WALK {
+            if current == root {
+                return true;
+            }
+            match self
+                .node_index(current)
+                .ok()
+                .and_then(|i| self.nodes[i].parent)
+            {
+                Some(parent) => current = parent,
+                None => return false,
+            }
+        }
+        false
+    }
+
+    /// Queue one record, applying the two filters that decide observability:
+    /// the target is in the document, and it is not itself part of a subtree
+    /// added since the last take.
+    ///
+    /// A record suppressed by the second filter still contributes its added
+    /// nodes to the added set, so suppression follows a subtree all the way
+    /// down. Without that, a grandchild appended under a suppressed child
+    /// would find its own parent unrecorded and report an addition for a
+    /// subtree the observer never saw arrive.
+    fn queue_mutation(&mut self, target: NodeId, kind: MutationKind) {
+        if !self.mutations.recording() || !self.is_connected(target) {
+            return;
+        }
+        if self.mutations.was_added(target) {
+            self.mutations.absorb(&kind);
+            return;
+        }
+        self.mutations.push(MutationRecord { target, kind });
+    }
+
+    /// The value an attribute holds now, read before a write so the record can
+    /// carry it as the old value.
+    fn attribute_snapshot(&self, id: NodeId, name: &str) -> Option<String> {
+        let index = self.node_index(id).ok()?;
+        let attr_name = AttributeName::from_str(name);
+        match &self.nodes[index].kind {
+            NodeKind::Element { attributes, .. } => attributes
+                .iter()
+                .find(|attr| attr.name == attr_name)
+                .map(|attr| attr.value.as_str().to_string()),
+            _ => None,
+        }
+    }
+
+    /// The data a text node holds now, read before a write for the same reason.
+    fn text_snapshot(&self, id: NodeId) -> Option<String> {
+        let index = self.node_index(id).ok()?;
+        match &self.nodes[index].kind {
+            NodeKind::Text { text } => Some(text.clone()),
+            _ => None,
         }
     }
 
