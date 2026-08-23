@@ -2753,6 +2753,118 @@ call, so a single `replaceChildren` reaching the tree as several calls reports
 several records. The union of added and removed nodes matches either way, so a
 reconciling observer converges; an observer counting records does not.
 
+## AD-035: Layout Geometry Reaches Script Through a Snapshot of the Last Completed Layout
+
+**Status**: Accepted
+**Date**: 2026-08-23
+**Deciders**: Public web page load repairs
+
+### Context
+
+`Element.getBoundingClientRect` returned a zero rect for every element. The
+bootstrap called `__silksurfBoundingRect` and fell back to zeros when it was
+absent (`silksurf-js/src/boa_backend/dom_interfaces.rs`), and no code in the
+workspace ever registered that native, so the fallback was the only path. The
+remaining layout-reading accessors -- `getClientRects`, `offsetWidth`,
+`offsetHeight`, `clientWidth`, `clientHeight` -- were undefined.
+
+That is a sharper failure than an absent constructor. A page reading an absent
+API can feature-detect; a page reading a zero rect lays out against a number
+the engine invented. Measured over chatgpt.com's six captured bundles:
+
+| accessor | references |
+|---|---|
+| `getBoundingClientRect` | 97 |
+| `clientWidth` / `clientHeight` | 86 |
+| `offsetWidth` / `offsetHeight` | 39 |
+| `offsetTop` / `offsetLeft` | 29 |
+| `getClientRects` | 17 |
+
+The same geometry is what `ResizeObserver` and `IntersectionObserver` report,
+so it is the prerequisite for both cuts AD-034 named.
+
+The engine already computes it. `FusedWorkspace.node_rects` holds one rect per
+BFS-indexed node, written by `TaffyLayout::write_rects` from taffy's
+`layout.size`, and taffy reports `layout.size` as the border box -- which is
+the box `getBoundingClientRect` returns. The field's own comment called it the
+content rect and was wrong.
+
+Two coordinate facts decide correctness. `write_rects` accumulates positions
+from the viewport rect's origin, which does not move when the page scrolls;
+the frame scrolls the presented bitmap instead, and `viewport_damage_rect`
+(`crates/silksurf-app/src/argb_raster.rs:1063`) converts a document rect to a
+viewport rect by subtracting `bitmap_scroll_y`. Geometry the engine holds is
+therefore in document coordinates, and `getBoundingClientRect` reports viewport
+coordinates.
+
+When layout runs decides the rest. A browser forces a synchronous reflow when
+script reads geometry after a mutation. silksurf runs the fused pipeline after
+script, so no layout is available mid-script that reflects a mutation made in
+that script.
+
+### Decision
+
+Publish the last completed layout as a snapshot the geometry accessors read,
+and convert to viewport coordinates on read.
+
+`PageGeometry` (`crates/silksurf-app/src/redraw_geometry.rs`) holds one border
+box and its border insets per node, keyed by `NodeId`, plus the scroll offset
+the frame presents at. It refreshes where a layout becomes current: once in
+`page_build` for the page's first layout, and at the single point in
+`repaint_runtime_document` where `runtime.fused` is replaced. The scroll offset
+rides separately, set at the five places `bitmap_scroll_y` is written, because
+a scroll presents a new frame without re-running layout. Subtracting on read
+rather than on refresh is what keeps the map valid while the page scrolls.
+
+The handle is shared with the JS context the way `provider_stylesheet` already
+is, and `SilkContext::set_geometry_provider` installs one native over it.
+One border box answers all six accessors: `getBoundingClientRect` and
+`getClientRects` report it, `offsetWidth` and `offsetHeight` are its
+dimensions, and `clientWidth` and `clientHeight` subtract the border widths to
+reach the padding box. `TaffyLayout::write_border_insets` supplies those widths
+from taffy's `layout.border`, alongside the rects rather than through
+`write_rects`, so the six existing `write_rects` call sites stay unchanged.
+
+A node the layout produced no box for answers nothing, and the JS half reports
+zeros, which is what a browser reports for an unrendered element. A context
+with no provider installed keeps the zero rect, which is the honest state of a
+document that has run no layout.
+
+### Consequences
+
+The six accessors report the geometry the engine computed. Three test suites
+cover the seam: `write_border_insets` returns the CSS border widths
+(`crates/silksurf-layout/src/taffy_layout.rs`), `PageGeometry` publishes the
+border box and converts to viewport coordinates under scroll
+(`crates/silksurf-app/src/redraw_geometry.rs`), and every accessor derives from
+one provider box including the zero-box and no-box cases
+(`silksurf-js/tests/element_geometry.rs`).
+
+Four pieces are cut by name.
+
+`synchronous-reflow-on-geometry-read` records the timing this decision accepts:
+a read in the same script as the mutation that invalidated it reports the last
+completed layout, because layout runs after script. Reaching a browser's
+behavior means running the fused pipeline from inside a native, which needs the
+stylesheet, the document node, and the viewport in a closure that today holds
+none of them, and which would invalidate the workspace output the repaint path
+holds.
+
+`offset-parent-geometry` records that `offsetTop` and `offsetLeft` stay
+undefined across 29 references. Both are relative to the offset parent rather
+than to the viewport, so they need the offset-parent chain walked, which the
+snapshot does not carry.
+
+`scroll-position-accessors` records that `scrollTop` and `scrollHeight` stay
+undefined across 130 references. They report a scrollable box's own offset and
+content height, neither of which the border box carries.
+
+`fused-pipeline-complexity` records that
+`FusedWorkspace::run_with_replaced_sizes` stands at cyclomatic complexity 17,
+above the workspace gate of 16, and stood there before this change; the two
+straight-line statements added here do not move it, and splitting a 210-line
+pipeline function belongs to its own change.
+
 ---
 
 ## Future ADRs

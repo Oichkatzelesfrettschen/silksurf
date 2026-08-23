@@ -344,13 +344,32 @@ separately-landable follow-up):
   outside a subtree added since the previous take, and delivery is a promise
   job enqueued when the record is queued so the callback precedes a
   continuation registered after the mutation.
+- element-geometry-accessors -- AD-035 takes it. getBoundingClientRect
+  returned a zero rect from a native nothing ever registered, across 97
+  references, which is worse than an absent API because a page cannot
+  feature-detect an invented number. The last completed layout publishes as
+  a snapshot keyed by node, converted to viewport coordinates on read so it
+  stays valid while the page scrolls, and one border box answers
+  getBoundingClientRect, getClientRects, offsetWidth, offsetHeight,
+  clientWidth, and clientHeight.
+- synchronous-reflow-on-geometry-read -- layout runs after script, so a read
+  in the same script as the mutation that invalidated it reports the last
+  completed layout. Matching a browser means running the fused pipeline from
+  inside a native, which needs the stylesheet, document node, and viewport in
+  a closure holding none of them.
+- offset-parent-geometry -- offsetTop and offsetLeft stay undefined across 29
+  references; both are relative to the offset parent, which needs the chain
+  walked rather than the border box alone.
+- scroll-position-accessors -- scrollTop and scrollHeight stay undefined
+  across 130 references; both report a scrollable box's own offset and
+  content height rather than its border box.
 - resize-observer -- ResizeObserver is undefined across 20 constructions in
   chatgpt.com's bundles, so an unguarded one raises a ReferenceError that
-  takes the module. It reports post-layout geometry against a frame, which
-  needs the layout box and the frame loop reaching script.
+  takes the module. AD-035 supplies the geometry it reports; what remains is
+  the frame-driven delivery and the box-size change detection.
 - intersection-observer -- IntersectionObserver is undefined across 23
-  constructions, the largest of the four observer counts, and needs the same
-  post-layout geometry plus threshold crossing.
+  constructions, the largest of the four observer counts. AD-035 supplies the
+  geometry; what remains is viewport intersection and threshold crossing.
 - performance-observer -- PerformanceObserver is undefined across 8
   constructions and needs performance entries the engine does not collect.
 - mutation-observer-record-coalescing -- a browser reports one childList
