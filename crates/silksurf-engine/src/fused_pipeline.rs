@@ -75,6 +75,9 @@ pub struct FusedWorkspace {
     /// Border widths per BFS-indexed node, which separate the border box above
     /// from the padding box `Element.clientWidth` reports.
     pub node_borders: Vec<EdgeSizes>,
+    /// Padding widths per BFS-indexed node, which separate that padding box
+    /// from the content box a `ResizeObserver` entry reports as `contentRect`.
+    pub node_paddings: Vec<EdgeSizes>,
     /// Paint commands (valid after `run()`; order is BFS paint order).
     pub display_items: Vec<DisplayItem>,
     /// Accumulated transform translation per BFS-indexed node, retained so a
@@ -134,6 +137,7 @@ impl FusedWorkspace {
             styles: Vec::new(),
             node_rects: Vec::new(),
             node_borders: Vec::new(),
+            node_paddings: Vec::new(),
             display_items: Vec::new(),
             table_generation: u64::MAX,
             cascade_generation: u64::MAX,
@@ -224,6 +228,8 @@ impl FusedWorkspace {
         self.node_rects.resize(n, viewport);
         self.node_borders.clear();
         self.node_borders.resize(n, EdgeSizes::default());
+        self.node_paddings.clear();
+        self.node_paddings.resize(n, EdgeSizes::default());
         self.display_items.clear();
         let root_suppressed = node_starts_non_rendered_subtree(dom, root);
 
@@ -316,6 +322,8 @@ impl FusedWorkspace {
             .write_rects(&self.table.parent_idx, &mut self.node_rects, viewport);
         self.taffy_layout
             .write_border_insets(&mut self.node_borders);
+        self.taffy_layout
+            .write_padding_insets(&mut self.node_paddings);
         trace_fused_phase(
             trace_fused,
             "rects",
@@ -414,6 +422,7 @@ impl FusedWorkspace {
             display_items: self.display_items.clone(),
             node_rects: self.node_rects.clone(),
             node_borders: self.node_borders.clone(),
+            node_paddings: self.node_paddings.clone(),
             table: self.table.clone(),
         }
     }
@@ -426,6 +435,7 @@ impl FusedWorkspace {
             display_items: std::mem::take(&mut self.display_items),
             node_rects: std::mem::take(&mut self.node_rects),
             node_borders: std::mem::take(&mut self.node_borders),
+            node_paddings: std::mem::take(&mut self.node_paddings),
             table: self.table.clone(),
         }
     }
@@ -436,6 +446,7 @@ impl FusedWorkspace {
         self.display_items = std::mem::take(&mut result.display_items);
         self.node_rects = std::mem::take(&mut result.node_rects);
         self.node_borders = std::mem::take(&mut result.node_borders);
+        self.node_paddings = std::mem::take(&mut result.node_paddings);
     }
 }
 
@@ -464,6 +475,8 @@ pub struct FusedResult {
     pub node_rects: Vec<Rect>,
     /// Border widths per node in BFS order.
     pub node_borders: Vec<EdgeSizes>,
+    /// Padding widths per node in BFS order.
+    pub node_paddings: Vec<EdgeSizes>,
     /// BFS traversal table; use `node_to_bfs_idx` for `NodeId` -> index mapping.
     pub table: LayoutNeighborTable,
 }
@@ -610,6 +623,8 @@ pub fn fused_style_layout_paint_with_replaced_sizes(
     taffy_layout.write_rects(&table.parent_idx, &mut node_rects, viewport);
     let mut node_borders = vec![EdgeSizes::default(); node_rects.len()];
     taffy_layout.write_border_insets(&mut node_borders);
+    let mut node_paddings = vec![EdgeSizes::default(); node_rects.len()];
+    taffy_layout.write_padding_insets(&mut node_paddings);
     trace_fused_phase(
         trace_fused,
         "rects",
@@ -696,6 +711,7 @@ pub fn fused_style_layout_paint_with_replaced_sizes(
         display_items,
         node_rects,
         node_borders,
+        node_paddings,
         table,
     }
 }
