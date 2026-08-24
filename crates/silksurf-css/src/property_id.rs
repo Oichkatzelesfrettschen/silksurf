@@ -124,6 +124,11 @@ pub enum PropertyId {
     /// `-webkit-` alias, which carries the value five times as often as the
     /// unprefixed name across the corpus under docs/roadmaps.
     BackdropFilter = 92,
+    /// `animation`, the shorthand. The corpus declares no `animation-*`
+    /// longhand, and the roadmap carries them as `animation-longhands`.
+    Animation = 93,
+    /// `transition`, the shorthand.
+    Transition = 94,
     Unknown = 255,
 }
 
@@ -252,8 +257,11 @@ pub fn lookup_property_id(name: &str) -> PropertyId {
         (b'w', 12) if name.eq_ignore_ascii_case("word-spacing") => PropertyId::WordSpacing,
         (b'w', 12) if name.eq_ignore_ascii_case("white-space") => PropertyId::WhiteSpace,
         // 'a' prefix
+        (b'a', 9) if name.eq_ignore_ascii_case("animation") => PropertyId::Animation,
         (b'a', 11) if name.eq_ignore_ascii_case("align-items") => PropertyId::AlignItems,
         (b'a', 10) if name.eq_ignore_ascii_case("align-self") => PropertyId::AlignSelf,
+        // 't' prefix
+        (b't', 10) if name.eq_ignore_ascii_case("transition") => PropertyId::Transition,
         // 'z' prefix
         (b'z', 7) if name.eq_ignore_ascii_case("z-index") => PropertyId::ZIndex,
         // '-' prefix. Each vendor alias is listed by name, because a blanket

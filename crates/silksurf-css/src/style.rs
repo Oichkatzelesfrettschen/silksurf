@@ -691,6 +691,10 @@ pub struct ComputedStyle {
     pub background_image: Option<LinearGradient>,
     /// `backdrop-filter`, empty when the property resolves to `none`.
     pub backdrop_filter: FilterList,
+    /// `animation`, empty when the property resolves to `none`.
+    pub animation: crate::animation::AnimationList,
+    /// `transition`, empty when the property names nothing to transition.
+    pub transition: crate::animation::TransitionList,
 }
 
 impl Default for ComputedStyle {
@@ -746,6 +750,8 @@ impl Default for ComputedStyle {
             box_shadow: None,
             background_image: None,
             backdrop_filter: FilterList::new(),
+            animation: crate::animation::AnimationList::new(),
+            transition: crate::animation::TransitionList::new(),
         }
     }
 }
@@ -905,6 +911,8 @@ struct CascadedStyle {
     box_shadow: Option<ResolvedProperty<BoxShadow>>,
     background_image: Option<ResolvedProperty<Option<LinearGradient>>>,
     backdrop_filter: Option<ResolvedProperty<FilterList>>,
+    animation: Option<ResolvedProperty<crate::animation::AnimationList>>,
+    transition: Option<ResolvedProperty<crate::animation::TransitionList>>,
 }
 
 /*
@@ -1518,6 +1526,18 @@ impl CascadedStyle {
                 ks.get(&PropertyId::Opacity),
                 parent.map(|s| s.opacity),
                 1.0f32,
+            ),
+            animation: resolve_non_inherited_kw(
+                self.animation.clone(),
+                ks.get(&PropertyId::Animation),
+                parent.map(|s| s.animation.clone()),
+                crate::animation::AnimationList::new(),
+            ),
+            transition: resolve_non_inherited_kw(
+                self.transition.clone(),
+                ks.get(&PropertyId::Transition),
+                parent.map(|s| s.transition.clone()),
+                crate::animation::TransitionList::new(),
             ),
             backdrop_filter: resolve_non_inherited_kw(
                 self.backdrop_filter.clone(),
@@ -3954,6 +3974,28 @@ fn apply_declaration(
             if let Some(value) = parse_overflow(&declaration.value) {
                 apply_property(
                     &mut cascaded.overflow_y,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::Animation => {
+            if let Some(value) = crate::animation::parse_animation(&declaration.value) {
+                apply_property(
+                    &mut cascaded.animation,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
+        PropertyId::Transition => {
+            if let Some(value) = crate::animation::parse_transition(&declaration.value) {
+                apply_property(
+                    &mut cascaded.transition,
                     value,
                     declaration.important,
                     specificity,
