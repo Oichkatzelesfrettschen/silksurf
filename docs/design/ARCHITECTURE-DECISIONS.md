@@ -2985,6 +2985,99 @@ vertical writing mode the cascade does not yet resolve.
 callback that mutates the tree on every delivery reaches its second pass and
 then waits for the next frame.
 
+## AD-037: Intersection Reports Against a Root Rectangle and Crosses On Two Dimensions
+
+**Status**: Accepted
+**Date**: 2026-08-24
+**Deciders**: Public web page load repairs
+
+### Context
+
+`IntersectionObserver` is undefined across 23 constructions in chatgpt.com's
+six captured bundles, the largest of the four observer counts, so an unguarded
+one raises a `ReferenceError` that takes the module holding it. AD-035
+supplied the border box and AD-036 the checkpoint that delivers it; what
+remains is the geometry between a target and a root.
+
+The options are read, not decorative. The bundles name `rootMargin` 24 times
+and carry real values -- `1000px 0px 1000px 0px`, `80px 0px 0px`,
+`0px 0px 96px`, `0%` -- so a margin parsed as a no-op silences every
+fetch-ahead sentinel that depends on it. They name `threshold` 63 times,
+including a list built as `Array.from({length: 101})`. They read
+`isIntersecting` 22 times and `intersectionRatio` 12, and call `unobserve` 16
+times.
+
+### Decision
+
+The root intersection rectangle is the viewport for a null or document root
+and the root element's padding box otherwise. A scrollable root clips its
+descendants against the padding box, so the border widths come off the border
+box before the margin goes on. The viewport comes from the cell
+`SilkContext::set_viewport` writes, which `page_build`, the startup path, and
+each relayout update, so the rectangle tracks the real window.
+
+Both rectangles are already viewport-relative: `PageGeometry::get` subtracts
+the frame's scroll offset on read (AD-035), so the root box and the target box
+compare directly with no further conversion.
+
+`rootMargin` parses as CSS shorthand of one to four components in `px` or `%`.
+A percentage resolves against the root rectangle's own width on the left and
+right edges and its height on the top and bottom, and the expanded rectangle
+is what the entry reports as `rootBounds`. A component in any other unit is a
+`SyntaxError` rather than a silently dropped edge.
+
+`threshold` accepts a number or a list, rejects a value outside `[0, 1]` with
+a `RangeError`, and sorts ascending. The threshold index is zero while the
+target does not intersect and otherwise one past the largest threshold the
+ratio reaches.
+
+Delivery follows a change in that index or in `isIntersecting`. The index
+alone is not sufficient: against a single threshold of 0.5, a target at ratio
+0.4 and a target entirely outside the root both hold index 0, so a page
+watching for its sentinel to leave would never hear. `isIntersecting` is the
+dimension that separates them.
+
+A zero-area target intersects when it lies inside the root and carries ratio
+1, because the area quotient is undefined there and a collapsed sentinel is a
+shape pages ship.
+
+### Consequences
+
+`IntersectionObserver` constructs, observes, unobserves, disconnects, takes
+records, and delivers entries carrying `target`, `time`, `rootBounds`,
+`boundingClientRect`, `intersectionRect`, `intersectionRatio`, and
+`isIntersecting`.
+
+The geometry is verified against a provider answering a box per node
+(`silksurf-js/tests/intersection_observer.rs`): a target on screen reports on
+the first pass, one leaving and returning reports each crossing, a 200px
+bottom margin holds a target below the viewport intersecting until it passes
+the margin, `25%` resolves to 200px against an 800-tall viewport, a 0.5
+threshold reports a fall to ratio 0.3 and stays silent inside that band, an
+element root 400x300 stops intersecting a target the viewport still contains,
+and an unobserved target reports nothing. An assertion broken inside a
+callback was confirmed to fail the run rather than pass silently.
+
+Four pieces are cut by name.
+
+`intersection-observer-clip-chain` records that the intersection is computed
+between the target and the root alone. The spec intersects through the
+containing-block chain, so a target clipped by a scrollable ancestor between
+itself and the root reports the unclipped rectangle here.
+
+`intersection-observer-visibility` records that `trackVisibility`, `delay`,
+and the entry's `isVisible` stay absent, so an observer asking for visibility
+tracking receives geometry alone.
+
+`intersection-observer-frame-time` records that `entry.time` reports
+`performance.now()` at delivery rather than the frame timestamp the spec
+names.
+
+`intersection-observer-empty-rect` records that a target outside the root
+reports `intersectionRect` as a zero rectangle at the origin rather than the
+clamped edges a browser reports; `intersectionRatio` and `isIntersecting`
+carry the state pages branch on.
+
 ---
 
 ## Future ADRs
