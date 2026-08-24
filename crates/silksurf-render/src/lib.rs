@@ -266,6 +266,7 @@ pub fn rasterize_damage(
     damage: Rect,
 ) -> Vec<u8> {
     let mut buffer = vec![255; (width * height * 4) as usize];
+    let damage = damage_with_backdrop_samples(&display_list.items, damage);
     let item_indices = if let Some(tiles) = &display_list.tiles {
         tiles.items_for_rect(damage)
     } else {
@@ -331,15 +332,67 @@ pub fn rasterize_damage(
     buffer
 }
 
+/// The region a `backdrop-filter` reads to paint `rect`.
+///
+/// The stage samples three standard deviations past the element, so every
+/// display item inside these bounds has to have painted before it runs.
+/// Damage bookkeeping bounds the item by this rather than by the element.
+#[must_use]
+pub fn backdrop_sample_bounds(rect: Rect, filters: &[silksurf_css::FilterFunction]) -> Rect {
+    let margin = backdrop_filter::sample_margin(filters) as f32;
+    Rect {
+        x: rect.x - margin,
+        y: rect.y - margin,
+        width: rect.width + margin * 2.0,
+        height: rect.height + margin * 2.0,
+    }
+}
+
 fn item_rect(item: &DisplayItem) -> Rect {
     match item {
-        DisplayItem::BackdropFilter { rect, .. }
-        | DisplayItem::SolidColor { rect, .. }
+        DisplayItem::SolidColor { rect, .. }
         | DisplayItem::Text { rect, .. }
         | DisplayItem::RoundedRect { rect, .. }
         | DisplayItem::LinearGradient { rect, .. }
         | DisplayItem::Image { rect, .. } => *rect,
         DisplayItem::BoxShadow { rect, shadow } => box_shadow_rect(*rect, shadow),
+        DisplayItem::BackdropFilter { rect, .. } => *rect,
+    }
+}
+
+/// Grows a damage rect to cover every backdrop a filter inside it samples.
+///
+/// `rasterize_damage` clears its buffer and skips items that miss the damage
+/// rect. A `backdrop-filter` reads three standard deviations past its own
+/// element, so an item lying only in that margin has to survive the cull:
+/// dropping it leaves the margin cleared and the blur pulls that cleared
+/// value inward as a fringe around the element. Culling stays keyed on the
+/// rect each item writes, and this widens what counts as reachable.
+fn damage_with_backdrop_samples(items: &[DisplayItem], damage: Rect) -> Rect {
+    let mut bounds = damage;
+    for item in items {
+        let DisplayItem::BackdropFilter { rect, filters, .. } = item else {
+            continue;
+        };
+        if !rect_intersects(*rect, damage) {
+            continue;
+        }
+        bounds = union_rect(bounds, backdrop_sample_bounds(*rect, filters));
+    }
+    bounds
+}
+
+/// The smallest rect containing both inputs.
+fn union_rect(a: Rect, b: Rect) -> Rect {
+    let x = a.x.min(b.x);
+    let y = a.y.min(b.y);
+    let right = (a.x + a.width).max(b.x + b.width);
+    let bottom = (a.y + a.height).max(b.y + b.height);
+    Rect {
+        x,
+        y,
+        width: right - x,
+        height: bottom - y,
     }
 }
 
@@ -772,6 +825,13 @@ unsafe impl Send for SendPtr {}
 #[cfg(feature = "parallel")]
 unsafe impl Sync for SendPtr {}
 
+/// Rasterizes tiles concurrently into disjoint regions of one buffer.
+///
+/// A tile sees only the items its own rect selects, so a `backdrop-filter`
+/// inside one reads whatever that tile has painted rather than the whole
+/// backdrop. The roadmap carries this as `backdrop-filter-tile-parallel`;
+/// the browser reaches `rasterize_skia_into` and this path stays behind the
+/// `parallel` feature.
 #[cfg(feature = "parallel")]
 pub fn rasterize_parallel_into(
     display_list: &DisplayList,
@@ -1249,6 +1309,7 @@ fn collect_damage_item_indices(
     damage: Rect,
     item_indices: &mut Vec<usize>,
 ) {
+    let damage = damage_with_backdrop_samples(&display_list.items, damage);
     if let Some(tiles) = &display_list.tiles {
         tiles.items_for_rect_into(damage, item_indices);
     } else {

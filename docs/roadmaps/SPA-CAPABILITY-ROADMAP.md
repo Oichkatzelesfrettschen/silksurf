@@ -838,7 +838,12 @@ Named cuts, each with the mechanism that closes it:
   document order into one buffer and the filter item precedes everything the
   element paints for itself. Cuts named by AD-038: `mask-compositing`,
   `filter-property`, `backdrop-filter-function-set`,
-  `backdrop-filter-perf-baseline`, `backdrop-filter-extract-cost`. One further
+  `backdrop-filter-perf-baseline`, `backdrop-filter-extract-cost`, and
+  `backdrop-filter-tile-parallel`, which records that a tile in
+  `rasterize_parallel_into` sees only the items its own rect selects, so a
+  filter inside one reads that tile rather than the whole backdrop; the
+  browser reaches `rasterize_skia_into` and that path stays behind the
+  `parallel` feature. One further
   cut, `cascade-property-dispatch-complexity`, records that
   `silksurf_css::style::apply_declaration` reaches cyclomatic complexity 105
   and `resolve` 19, both above the 16 the workflow sets, because every

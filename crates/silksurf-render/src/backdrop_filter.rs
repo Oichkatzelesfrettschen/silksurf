@@ -75,7 +75,7 @@ struct Region {
 /// far out leaves the element's own edge indistinguishable from an unbounded
 /// backdrop. Sampling only the element rect would instead clamp against its
 /// boundary and darken the edge.
-fn sample_margin(filters: &[FilterFunction]) -> u32 {
+pub(crate) fn sample_margin(filters: &[FilterFunction]) -> u32 {
     let widest = filters.iter().fold(0.0f32, |widest, filter| match filter {
         FilterFunction::Blur(sigma) => widest.max(*sigma),
         _ => widest,

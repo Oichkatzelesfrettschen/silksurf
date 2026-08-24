@@ -86,3 +86,55 @@ fn an_empty_pipeline_matches_a_list_without_the_item() {
     plain.items.truncate(1);
     assert_eq!(filtered, rasterize_skia(&plain, 64, 64));
 }
+
+/// Damage culling bounds a backdrop filter by the region it samples, not by
+/// the element it writes.
+///
+/// `rasterize_damage` clears to white and skips items that miss the damage
+/// rect. The stage samples three standard deviations past the element, so an
+/// item living only in that margin has to survive the cull; culling it would
+/// leave the margin white and the blur would pull that white inward as a
+/// bright fringe around the element.
+#[test]
+fn partial_damage_keeps_the_items_the_filter_samples() {
+    let mut filters = FilterList::new();
+    filters.push(FilterFunction::Blur(6.0));
+    let element = rect(24.0, 24.0, 16.0, 16.0);
+    // A black stripe entirely outside the element, inside the sampled margin.
+    let list = DisplayList {
+        items: vec![
+            DisplayItem::SolidColor {
+                rect: rect(0.0, 4.0, 64.0, 12.0),
+                color: Color {
+                    r: 0,
+                    g: 0,
+                    b: 0,
+                    a: 255,
+                },
+            },
+            DisplayItem::BackdropFilter {
+                rect: element,
+                radii: [0.0; 4],
+                filters,
+            },
+        ],
+        tiles: None,
+    };
+    let full = rasterize_damage(&list, 64, 64, rect(0.0, 0.0, 64.0, 64.0));
+    let partial = rasterize_damage(&list, 64, 64, element);
+
+    // The stripe darkens the element's top edge, and both damage rects agree.
+    assert!(
+        red_at(&full, 32, 24) < 255,
+        "the sampled stripe never reached the element"
+    );
+    for y in 24..40 {
+        for x in 24..40 {
+            assert_eq!(
+                red_at(&partial, x, y),
+                red_at(&full, x, y),
+                "pixel {x},{y} disagrees between damage rects"
+            );
+        }
+    }
+}

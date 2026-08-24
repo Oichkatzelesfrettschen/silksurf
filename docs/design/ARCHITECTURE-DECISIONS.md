@@ -3142,7 +3142,12 @@ already do.
 `backdrop-filter` parses through both spellings and paints through both
 rasterizers. Sixteen tests cover it: six over the parser, ten over the filter
 math, three driving a display list, one asserting the item precedes the
-element background, and one asserting the direct ARGB path defers. Breaking
+element background, one asserting the direct ARGB path defers, and one holding a partial repaint
+equal to a full one. Damage culling keys on the rect an item writes, so the
+element rect answers for the filter and `damage_with_backdrop_samples` widens
+what counts as reachable instead: an item lying only in the sampled margin has
+to survive the cull, because dropping it leaves that margin cleared and the
+blur pulls the cleared value inward as a fringe. Breaking
 the kernel normalization and dropping the sampling-scale divisor were each
 confirmed to fail the run.
 
@@ -3158,7 +3163,7 @@ because a box pass at half resolution and half radius describes the same
 Gaussian; the reduction is itself a box filter and composes with the blur that
 follows.
 
-Five pieces are cut by name.
+Six pieces are cut by name.
 
 `mask-compositing` records that `mask-image` and `mask-composite` parse to
 nothing. Every declaration in the corpus is `none`, which is the initial
@@ -3177,6 +3182,12 @@ so it is parsing and an element-scoped paint stage rather than new math.
 ADR rather than in `perf/` with the provenance envelope
 `scripts/validate_measurement_artifacts.py` checks, so it is a development-host
 reading rather than a tracked baseline.
+
+`backdrop-filter-tile-parallel` records that a tile in
+`rasterize_parallel_into` sees only the items its own rect selects, so a
+filter inside one reads that tile rather than the whole backdrop. The browser
+reaches `rasterize_skia_into` and that path stays behind the `parallel`
+feature.
 
 `backdrop-filter-extract-cost` records that the stage reads every frame pixel
 under the sampled region even though it blurs a reduced grid, which is the
