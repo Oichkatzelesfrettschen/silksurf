@@ -14,6 +14,7 @@ pub mod cssom;
 pub use cascade_view::{CascadeEntry, CascadeView};
 pub use cssom::{LiveSheet, SheetError, SheetOrigin, SheetSet};
 pub mod animation;
+pub mod animation_sample;
 pub mod custom_properties;
 mod matching;
 pub mod media;

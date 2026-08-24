@@ -2750,6 +2750,36 @@ pub fn compute_style_for_node_with_workspace(
     .resolve(parent, rem_base_px, viewport)
 }
 
+/// Resolves `declarations` over `base`, keeping every property they leave
+/// alone at the value `base` holds.
+///
+/// A keyframe block declares a few properties and says nothing about the
+/// rest, and CSS Animations 1 takes the element's own computed value for
+/// each one it omits. Resolving the block alone would instead reach the
+/// initial value for every non-inherited property, so the resolved style is
+/// consulted only for the properties the block actually names.
+#[must_use]
+pub fn style_with_declarations(
+    base: &ComputedStyle,
+    declarations: &[Declaration],
+    rem_base_px: f32,
+    viewport: (f32, f32),
+) -> ComputedStyle {
+    if declarations.is_empty() {
+        return base.clone();
+    }
+    let mut cascaded = CascadedStyle::default();
+    for (order, declaration) in declarations.iter().enumerate() {
+        apply_declaration(&mut cascaded, declaration, Specificity::zero(), order);
+    }
+    let resolved = cascaded.resolve(Some(base), rem_base_px, viewport);
+    let mut style = base.clone();
+    for declaration in declarations {
+        crate::animation_sample::copy_animatable(&mut style, &resolved, declaration.property_id);
+    }
+    style
+}
+
 #[allow(clippy::too_many_arguments)]
 fn compute_styles_recursive(
     dom: &Dom,
