@@ -827,9 +827,22 @@ Named cuts, each with the mechanism that closes it:
   `parentRule` or `parentStyleSheet` walk. The session recorder in
   `2340486e-eab5bn2wcgxcv5rd.js` reads them to emit mutation records and
   paints nothing.
-- backdrop-filter-and-mask -- `backdrop-filter`, `mask-image`, and
-  `mask-composite` parse to nothing; the paint list carries no filter or mask
-  stage.
+- backdrop-filter-and-mask -- AD-038 takes the filter half and cuts the mask
+  half by measurement. The corpus carries six `backdrop-filter` declarations,
+  five spelling only `-webkit-backdrop-filter`, all of one value
+  `blur(25px) saturate(1.12)` on glass surfaces. Every `mask-image`
+  declaration resolves to `none` and `mask-composite` appears nowhere, so mask
+  compositing is worth no pixels on the measured page; the remaining
+  `mask`-prefixed names are custom properties rather than the mask property.
+  The paint stage needs no backdrop surface, because the rasterizer paints in
+  document order into one buffer and the filter item precedes everything the
+  element paints for itself. Cuts named by AD-038: `mask-compositing`,
+  `filter-property`, `backdrop-filter-function-set`,
+  `backdrop-filter-perf-baseline`, `backdrop-filter-extract-cost`. One further
+  cut, `cascade-property-dispatch-complexity`, records that
+  `silksurf_css::style::apply_declaration` reaches cyclomatic complexity 105
+  and `resolve` 19, both above the 16 the workflow sets, because every
+  property in the crate adds an arm to the same two functions.
 - animation-and-transition -- the `animation-*` and `transition` longhands
   parse to nothing and `@keyframes` blocks flatten out of the cascade, so an
   animated element keeps the style the cascade computed for it. Deferred
