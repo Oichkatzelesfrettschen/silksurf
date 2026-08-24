@@ -87,7 +87,28 @@ pub(crate) fn tick_browser_runtime(state: &mut BrowserState) -> bool {
     chrome_changed
 }
 
+/// Drain the tick's pending work, then deliver the layout observations the
+/// frame's geometry now supports.
+///
+/// A `ResizeObserver` or `IntersectionObserver` callback reports the geometry
+/// of the frame that just completed, so delivery follows the repaint rather
+/// than the host callbacks that preceded it. A callback that mutates the tree
+/// dirties nodes no pass has drained, so one further pass runs and its redraw
+/// mode wins; the bound is two passes, which is what stops a callback that
+/// mutates on every delivery from spinning the tick.
 pub(crate) fn repaint_runtime_host_callbacks(
+    runtime: &mut BrowserPageRuntime,
+    frame: &mut BrowserFrame,
+) -> Result<Option<BrowserRedrawMode>, String> {
+    let redraw_mode = repaint_runtime_pending_work(runtime, frame)?;
+    if runtime.js_ctx.deliver_layout_observations() == 0 {
+        return Ok(redraw_mode);
+    }
+    let after_callbacks = repaint_runtime_pending_work(runtime, frame)?;
+    Ok(after_callbacks.or(redraw_mode))
+}
+
+fn repaint_runtime_pending_work(
     runtime: &mut BrowserPageRuntime,
     frame: &mut BrowserFrame,
 ) -> Result<Option<BrowserRedrawMode>, String> {
@@ -427,6 +448,9 @@ fn repaint_runtime_document(
     // completed, and this is the one place the runtime's fused result becomes
     // current.
     runtime.geometry.borrow_mut().refresh(&runtime.fused);
+    // The layout that just completed is the geometry an observer reports, so
+    // the checkpoint is marked here and delivered once the repaint returns.
+    runtime.js_ctx.request_layout_observation();
     runtime.fused_workspace.recycle_result_storage(old_fused);
     trace_runtime_fused_repaint(dirty_nodes.map_or(0, <[_]>::len), redraw_mode);
     redraw_mode
