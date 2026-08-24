@@ -1865,7 +1865,7 @@ fn collect_active_rules(
     layer_path: &str,
     order: &mut LayerOrder,
     out: &mut Vec<(u32, StyleRule)>,
-    registrations: &mut Vec<PropertyRegistration>,
+    products: &mut AtRuleProducts,
 ) {
     for rule in rules {
         match rule {
@@ -1896,7 +1896,17 @@ fn collect_active_rules(
                             && let Some(registration) =
                                 PropertyRegistration::parse(&at.prelude, descriptors)
                         {
-                            registrations.push(registration);
+                            products.registrations.push(registration);
+                        }
+                        // `@keyframes` carries its own block grammar rather
+                        // than rules, so it registers here for the same
+                        // reason and never reaches selection.
+                        if let Some(AtRuleBlock::Keyframes(blocks)) = &at.block
+                            && let Some(rule) = keyframes_name(&at.prelude)
+                        {
+                            products
+                                .keyframes
+                                .push(KeyframesRule::from_blocks(rule, blocks));
                         }
                         continue;
                     }
@@ -1905,26 +1915,14 @@ fn collect_active_rules(
                     "media" => {
                         if crate::media::evaluate_media_query(&at.prelude, viewport_w, viewport_h) {
                             collect_active_rules(
-                                children,
-                                viewport_w,
-                                viewport_h,
-                                layer_path,
-                                order,
-                                out,
-                                registrations,
+                                children, viewport_w, viewport_h, layer_path, order, out, products,
                             );
                         }
                     }
                     "supports" => {
                         if crate::supports::evaluate_supports_condition(&at.prelude) {
                             collect_active_rules(
-                                children,
-                                viewport_w,
-                                viewport_h,
-                                layer_path,
-                                order,
-                                out,
-                                registrations,
+                                children, viewport_w, viewport_h, layer_path, order, out, products,
                             );
                         }
                     }
@@ -1942,7 +1940,7 @@ fn collect_active_rules(
                             &child_path,
                             order,
                             out,
-                            registrations,
+                            products,
                         );
                     }
                     // @keyframes, @scope, @container, and the rest carry rules
@@ -1961,13 +1959,18 @@ fn flatten_active_rules<'a, I>(
     sheets: I,
     viewport_w: f32,
     viewport_h: f32,
-) -> (Vec<StyleRule>, Vec<u32>, Vec<PropertyRegistration>)
+) -> (
+    Vec<StyleRule>,
+    Vec<u32>,
+    Vec<PropertyRegistration>,
+    Vec<KeyframesRule>,
+)
 where
     I: IntoIterator<Item = &'a Stylesheet>,
 {
     let mut ranked: Vec<(u32, StyleRule)> = Vec::new();
     let mut order = LayerOrder::new();
-    let mut registrations = Vec::new();
+    let mut products = AtRuleProducts::default();
     // One LayerOrder spans the whole list: CSS Cascade 5, 6.4.4 gives a layer
     // name one rank per document, so the same `@layer` name in two sheets
     // names one layer rather than two.
@@ -1979,7 +1982,7 @@ where
             "",
             &mut order,
             &mut ranked,
-            &mut registrations,
+            &mut products,
         );
     }
     let mut rules = Vec::with_capacity(ranked.len());
@@ -1988,7 +1991,58 @@ where
         ranks.push(rank);
         rules.push(rule);
     }
-    (rules, ranks, registrations)
+    (rules, ranks, products.registrations, products.keyframes)
+}
+
+/// One `@keyframes` rule, as the animation sampler reads it.
+///
+/// The stops are sorted ascending and a selector list is spread across them,
+/// so `0%, to { ... }` contributes the same declarations at both ends. A
+/// later rule of the same name replaces the earlier one, which is what CSS
+/// Animations 1 gives duplicate names.
+#[derive(Debug, Clone, PartialEq)]
+pub struct KeyframesRule {
+    pub name: SmolStr,
+    pub stops: Vec<(f32, std::sync::Arc<Vec<Declaration>>)>,
+}
+
+/// What one flatten walk collects from at-rules that carry no selectable
+/// rules.
+///
+/// `@property` and `@keyframes` each reach the walk's terminal arm and
+/// contribute a value rather than a rule, so they travel together as one
+/// sink rather than as a parameter apiece.
+#[derive(Default)]
+struct AtRuleProducts {
+    registrations: Vec<PropertyRegistration>,
+    keyframes: Vec<KeyframesRule>,
+}
+
+/// The name a `@keyframes` prelude declares.
+///
+/// CSS Animations 1 takes a `<keyframes-name>`, which is a custom identifier
+/// or a string, so both token shapes name the same rule.
+fn keyframes_name(prelude: &[CssToken]) -> Option<SmolStr> {
+    prelude.iter().find_map(|token| match token {
+        CssToken::Ident(name) => Some(name.clone()),
+        CssToken::String(name) => Some(SmolStr::new(name)),
+        _ => None,
+    })
+}
+
+impl KeyframesRule {
+    /// Builds a rule from the blocks the parser read.
+    fn from_blocks(name: SmolStr, blocks: &[crate::parser::Keyframe]) -> Self {
+        let mut stops: Vec<(f32, std::sync::Arc<Vec<Declaration>>)> = Vec::new();
+        for block in blocks {
+            let declarations = std::sync::Arc::new(block.declarations.clone());
+            for offset in &block.offsets {
+                stops.push((*offset, std::sync::Arc::clone(&declarations)));
+            }
+        }
+        stops.sort_by(|a, b| a.0.total_cmp(&b.0));
+        Self { name, stops }
+    }
 }
 
 /*
@@ -2107,6 +2161,9 @@ pub struct StyleIndex {
     /// than seeding one root map: the document node carries a default
     /// `ComputedStyle`, so no element ever cascades with no parent.
     registrations: Vec<PropertyRegistration>,
+    /// The document's `@keyframes` rules, keyed by name. An animation names
+    /// one, so the sampler looks the name up rather than walking the list.
+    keyframes: FxHashMap<SmolStr, KeyframesRule>,
     /// Distinguishes this index from every other one the process builds. A
     /// consumer retaining structures derived from an index -- the fused
     /// pipeline's taffy styles -- compares it to learn the cascade input
@@ -2120,6 +2177,24 @@ pub struct StyleIndex {
 static STYLE_INDEX_BUILDS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 impl StyleIndex {
+    /// The `@keyframes` rule an animation names, if the document declares it.
+    ///
+    /// An animation naming no declared rule runs with no keyframes, which
+    /// CSS Animations 1 makes indistinguishable from an empty one.
+    #[must_use]
+    pub fn keyframes(&self, name: &str) -> Option<&KeyframesRule> {
+        self.keyframes.get(name)
+    }
+
+    /// Whether the document declares any `@keyframes` rule.
+    ///
+    /// A document declaring none needs no animation sampling at all, so the
+    /// frame path reads this rather than looking each name up.
+    #[must_use]
+    pub fn declares_keyframes(&self) -> bool {
+        !self.keyframes.is_empty()
+    }
+
     /// Identifies this index among the indexes the process built.
     #[must_use]
     pub fn build_id(&self) -> u64 {
@@ -2163,7 +2238,7 @@ impl StyleIndex {
     {
         // Flatten the sheets into a contiguous Vec<StyleRule> of active rules.
         // rule_index fields in IndexedSelector index into this vec.
-        let (active_rules, layer_ranks, registrations) =
+        let (active_rules, layer_ranks, registrations, keyframes) =
             flatten_active_rules(sheets, viewport_w, viewport_h);
 
         // Build tag/id/class/universal selector index over active_rules.
@@ -2224,6 +2299,11 @@ impl StyleIndex {
             total_selector_pairs: pair_id as usize,
             declares_custom_properties,
             registrations: deduped,
+            // A later rule of the same name replaces the earlier one.
+            keyframes: keyframes
+                .into_iter()
+                .map(|rule| (rule.name.clone(), rule))
+                .collect(),
             build_id: STYLE_INDEX_BUILDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         }
     }
