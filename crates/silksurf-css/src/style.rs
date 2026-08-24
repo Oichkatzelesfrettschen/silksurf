@@ -358,6 +358,34 @@ pub struct LinearGradient {
     pub stops: Vec<(f32, Color)>,
 }
 
+/// One `<filter-function>` from a `backdrop-filter` list.
+///
+/// CSS Filter Effects 1 defines the list as a pipeline rather than a set, so
+/// the rasterizer applies these in source order and `SmallVec` holds two
+/// inline because `blur() saturate()` is the pair the corpus declares.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FilterFunction {
+    /// Gaussian standard deviation in px, the value `blur(<length>)` carries.
+    Blur(f32),
+    /// Saturation multiplier; 1.0 leaves the backdrop unchanged.
+    Saturate(f32),
+    /// Linear channel multiplier; 1.0 leaves the backdrop unchanged.
+    Brightness(f32),
+    /// Contrast multiplier about mid-gray; 1.0 leaves the backdrop unchanged.
+    Contrast(f32),
+    /// Proportion converted to luminance, in [0.0, 1.0].
+    Grayscale(f32),
+    /// Proportion of channel inversion, in [0.0, 1.0].
+    Invert(f32),
+    /// Alpha multiplier, in [0.0, 1.0].
+    Opacity(f32),
+    /// Proportion of the sepia matrix applied, in [0.0, 1.0].
+    Sepia(f32),
+}
+
+/// A parsed `backdrop-filter` value. Empty is `none`, the initial value.
+pub type FilterList = SmallVec<[FilterFunction; 2]>;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Length {
     Px(f32),
@@ -661,6 +689,8 @@ pub struct ComputedStyle {
     pub border_radius: f32,
     pub box_shadow: Option<BoxShadow>,
     pub background_image: Option<LinearGradient>,
+    /// `backdrop-filter`, empty when the property resolves to `none`.
+    pub backdrop_filter: FilterList,
 }
 
 impl Default for ComputedStyle {
@@ -715,6 +745,7 @@ impl Default for ComputedStyle {
             border_radius: 0.0,
             box_shadow: None,
             background_image: None,
+            backdrop_filter: FilterList::new(),
         }
     }
 }
@@ -873,6 +904,7 @@ struct CascadedStyle {
     border_radius: Option<ResolvedProperty<f32>>,
     box_shadow: Option<ResolvedProperty<BoxShadow>>,
     background_image: Option<ResolvedProperty<Option<LinearGradient>>>,
+    backdrop_filter: Option<ResolvedProperty<FilterList>>,
 }
 
 /*
@@ -1486,6 +1518,12 @@ impl CascadedStyle {
                 ks.get(&PropertyId::Opacity),
                 parent.map(|s| s.opacity),
                 1.0f32,
+            ),
+            backdrop_filter: resolve_non_inherited_kw(
+                self.backdrop_filter.clone(),
+                ks.get(&PropertyId::BackdropFilter),
+                parent.map(|s| s.backdrop_filter.clone()),
+                FilterList::new(),
             ),
             visibility: resolve_non_inherited_kw(
                 self.visibility,
@@ -3924,6 +3962,17 @@ fn apply_declaration(
             }
         }
         // Visual
+        PropertyId::BackdropFilter => {
+            if let Some(value) = parse_filter_list(&declaration.value) {
+                apply_property(
+                    &mut cascaded.backdrop_filter,
+                    value,
+                    declaration.important,
+                    specificity,
+                    order,
+                );
+            }
+        }
         PropertyId::Opacity => {
             if let Some(value) = parse_opacity(&declaration.value) {
                 apply_property(
@@ -4920,6 +4969,88 @@ fn parse_length_or_auto(
         return Some(LengthOrAuto::Auto);
     }
     parse_length(tokens, calc_expressions).map(LengthOrAuto::Length)
+}
+
+/// Parses a `backdrop-filter` value into its pipeline of filter functions.
+///
+/// `none` and an empty list both resolve to an empty `FilterList`, which the
+/// paint stage reads as "leave the backdrop alone". An unrecognized function
+/// name rejects the whole declaration, so a list this rasterizer cannot honor
+/// in full never paints a partial approximation of what the author asked for.
+fn parse_filter_list(tokens: &[CssToken]) -> Option<FilterList> {
+    let mut list = FilterList::new();
+    let mut rest = tokens.iter();
+    while let Some(token) = rest.next() {
+        match token {
+            CssToken::Whitespace => {}
+            CssToken::Ident(name) if name.eq_ignore_ascii_case("none") => {
+                return Some(FilterList::new());
+            }
+            CssToken::Function(name) => {
+                list.push(filter_function(name, filter_argument(&mut rest)?)?);
+            }
+            _ => return None,
+        }
+    }
+    Some(list)
+}
+
+/// Reads one filter function's numeric argument up to its closing paren.
+///
+/// A percentage resolves against 1.0, so `saturate(50%)` and `saturate(.5)`
+/// reach the same value. The outer `None` marks a malformed argument list and
+/// the inner one marks an empty one, which each function answers with its own
+/// initial value.
+fn filter_argument<'a>(rest: &mut impl Iterator<Item = &'a CssToken>) -> Option<Option<f32>> {
+    let mut amount = None;
+    for token in rest {
+        match token {
+            CssToken::ParenClose => return Some(amount),
+            CssToken::Whitespace => {}
+            CssToken::Number(value) => amount = Some(value.parse::<f32>().ok()?),
+            CssToken::Percentage(value) => amount = Some(value.parse::<f32>().ok()? / 100.0),
+            CssToken::Dimension { value, unit } if unit.eq_ignore_ascii_case("px") => {
+                amount = Some(value.parse::<f32>().ok()?);
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+
+/// Maps a function name and argument onto `FilterFunction`.
+///
+/// An omitted argument takes the per-function initial value CSS Filter
+/// Effects 1 gives it: a zero radius for `blur()`, and 1.0 for every other
+/// function, which is that function's identity.
+fn filter_function(name: &str, amount: Option<f32>) -> Option<FilterFunction> {
+    let unit = amount.unwrap_or(1.0).max(0.0);
+    let proportion = unit.min(1.0);
+    if name.eq_ignore_ascii_case("blur") {
+        return Some(FilterFunction::Blur(amount.unwrap_or(0.0).max(0.0)));
+    }
+    if name.eq_ignore_ascii_case("saturate") {
+        return Some(FilterFunction::Saturate(unit));
+    }
+    if name.eq_ignore_ascii_case("brightness") {
+        return Some(FilterFunction::Brightness(unit));
+    }
+    if name.eq_ignore_ascii_case("contrast") {
+        return Some(FilterFunction::Contrast(unit));
+    }
+    if name.eq_ignore_ascii_case("grayscale") {
+        return Some(FilterFunction::Grayscale(proportion));
+    }
+    if name.eq_ignore_ascii_case("invert") {
+        return Some(FilterFunction::Invert(proportion));
+    }
+    if name.eq_ignore_ascii_case("opacity") {
+        return Some(FilterFunction::Opacity(proportion));
+    }
+    if name.eq_ignore_ascii_case("sepia") {
+        return Some(FilterFunction::Sepia(proportion));
+    }
+    None
 }
 
 fn parse_opacity(tokens: &[CssToken]) -> Option<f32> {
