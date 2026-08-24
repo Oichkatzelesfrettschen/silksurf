@@ -932,11 +932,6 @@ impl TaffyLayout {
             .resize(self.taffy_nodes.len(), CachedTextMeasures::default());
     }
 
-    /// Write absolute positions from taffy layout results into `node_rects`.
-    ///
-    /// taffy's Layout.location is parent-relative, so we accumulate offsets
-    /// down the BFS tree (parents are always processed before children in
-    /// BFS order, so `node_rects[parent]` is already filled when we process child).
     /// Border widths per BFS-indexed node.
     ///
     /// `write_rects` stores taffy's `layout.size`, which is the border box, so
@@ -960,6 +955,34 @@ impl TaffyLayout {
         }
     }
 
+    /// Padding widths per BFS-indexed node.
+    ///
+    /// The padding box is the border box less the border widths, and the
+    /// content box is that less these, so a `ResizeObserver` entry reports
+    /// `contentRect` from the two inset sets together. A node taffy laid out
+    /// no box for carries zero on every edge.
+    pub fn write_padding_insets(&self, insets: &mut [EdgeSizes]) {
+        let n = self.taffy_nodes.len().min(insets.len());
+        for (slot, node) in insets[..n].iter_mut().zip(&self.taffy_nodes[..n]) {
+            let Some(tn) = *node else {
+                *slot = EdgeSizes::default();
+                continue;
+            };
+            let padding = self.tree.layout(tn).padding;
+            *slot = EdgeSizes {
+                top: padding.top,
+                right: padding.right,
+                bottom: padding.bottom,
+                left: padding.left,
+            };
+        }
+    }
+
+    /// Write absolute positions from taffy layout results into `node_rects`.
+    ///
+    /// taffy's Layout.location is parent-relative, so we accumulate offsets
+    /// down the BFS tree (parents are always processed before children in
+    /// BFS order, so `node_rects[parent]` is already filled when we process child).
     pub fn write_rects(&self, parent_idx: &[u32], node_rects: &mut [Rect], viewport: Rect) {
         let n = self.taffy_nodes.len().min(node_rects.len());
         for i in 0..n {
@@ -2158,6 +2181,53 @@ mod tests {
         assert!((insets[at].right - 2.0).abs() < f32::EPSILON, "right");
         assert!((insets[at].bottom - 3.0).abs() < f32::EPSILON, "bottom");
         assert!((insets[at].left - 4.0).abs() < f32::EPSILON, "left");
+    }
+
+    #[test]
+    fn padding_insets_report_the_css_padding_widths() {
+        // The content box is the border box less the border widths and these,
+        // which is the rect a ResizeObserver entry reports as contentRect.
+        let mut dom = Dom::new();
+        let root = dom.create_document();
+        let div = dom.create_element("div");
+        let _ = dom.set_attribute(
+            div,
+            "style",
+            "padding: 5px 6px 7px 8px; width: 100px; height: 50px",
+        );
+        let _ = dom.append_child(root, div);
+        dom.materialize_resolve_table();
+        let table = LayoutNeighborTable::build(&dom, root);
+        let sheet = silksurf_css::Stylesheet { rules: Vec::new() };
+        let styles: Vec<Option<ComputedStyle>> = table
+            .bfs_order
+            .iter()
+            .map(|node| {
+                Some(silksurf_css::compute_style_for_node(
+                    &dom, *node, &sheet, None,
+                ))
+            })
+            .collect();
+        let viewport = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 800.0,
+            height: 600.0,
+        };
+        let mut tl = TaffyLayout::new();
+        tl.rebuild(&dom, &table, &styles);
+        tl.compute(&dom, &styles, &table.bfs_order, viewport);
+        let mut insets = vec![EdgeSizes::default(); table.len()];
+        tl.write_padding_insets(&mut insets);
+        let at = table
+            .bfs_order
+            .iter()
+            .position(|node| *node == div)
+            .expect("the div is in the table");
+        assert!((insets[at].top - 5.0).abs() < f32::EPSILON, "top");
+        assert!((insets[at].right - 6.0).abs() < f32::EPSILON, "right");
+        assert!((insets[at].bottom - 7.0).abs() < f32::EPSILON, "bottom");
+        assert!((insets[at].left - 8.0).abs() < f32::EPSILON, "left");
     }
 
     #[test]

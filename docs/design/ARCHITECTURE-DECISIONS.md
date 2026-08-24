@@ -2865,6 +2865,126 @@ above the workspace gate of 16, and stood there before this change; the two
 straight-line statements added here do not move it, and splitting a 210-line
 pipeline function belongs to its own change.
 
+## AD-036: Layout Observations Deliver At the Checkpoint Where the Frame's Geometry Becomes Current
+
+**Status**: Accepted
+**Date**: 2026-08-24
+**Deciders**: Public web page load repairs
+
+### Context
+
+`ResizeObserver` is undefined across 20 constructions in chatgpt.com's six
+captured bundles, so an unguarded one raises a `ReferenceError` that takes the
+module holding it. AD-035 supplied the border box the entries report; what was
+missing is when a page reads it.
+
+An observer reports the geometry of a frame rather than a tree mutation, so
+the delivery point is neither the mutation that dirtied the tree nor the host
+callback drain that precedes layout. `repaint_runtime_host_callbacks` runs
+`SilkContext::run_host_callbacks` before the fused pipeline runs, so a
+delivery from there reports the previous frame's layout.
+
+Two events make a frame's geometry current, and only one of them is a layout.
+`PageGeometry` stores document coordinates and subtracts the scroll offset on
+read, precisely because a scroll presents a new bitmap without re-running
+layout (AD-035). A scroll therefore moves every viewport rect an observer
+reports while `FusedResult` holds still, which is the event
+`IntersectionObserver` exists for.
+
+The event loop sleeps until the earliest timer deadline
+(`crates/silksurf-app/src/main.rs`), so an idle page holding no timer does not
+tick. A checkpoint marked by a scroll or by `observe` on such a page would
+wait for an unrelated wake.
+
+### Decision
+
+One checkpoint serves both observers, marked by the embedder and delivered
+after the repaint returns.
+
+`SilkContext::request_layout_observation` marks it. The completed layout marks
+it (`crates/silksurf-app/src/runtime_repaint.rs`), the five scroll paths that
+call `PageGeometry::set_scroll` mark it, the page's first layout marks it
+(`crates/silksurf-app/src/page_build.rs`), and the JS half's `observe` marks
+it through `__silksurfRequestLayoutObservation`.
+
+`SilkContext::deliver_layout_observations` delivers it, called by
+`repaint_runtime_host_callbacks` after the repaint that made the geometry
+current. A callback that mutates the tree dirties nodes the pass already
+drained, so one further pass runs and its redraw mode wins; the bound is two
+passes, which is what stops an observer that mutates on every delivery from
+spinning the tick.
+
+`SilkContext::layout_observation_pending` reaches the event loop's deadline
+hook, which returns the current instant when a checkpoint is marked. A scroll
+on an idle page therefore wakes the loop rather than sleeping through its own
+delivery.
+
+Two counters gate the cost. `observation_count` holds the live observation
+total, written by the JS half whenever `observe`, `unobserve`, or `disconnect`
+moves it; a page constructing no observer never marks the checkpoint and never
+enters the JS context. `observation_pending` holds whether the geometry moved,
+so a frame that moved nothing pays the same single `Cell` read.
+
+An observation reports once when it is first observed, regardless of change. A
+static element never resizes, so a differ alone delivers nothing for it, and a
+page waiting on its first entry stalls. `reported` distinguishes the first
+pass from a later one; seeding the recorded size at `observe` time would
+silence it.
+
+The entry carries `contentRect`, `contentBoxSize`, and `borderBoxSize`
+together, because the bundles read `borderBoxSize` 13 times against
+`contentRect` 6 and `contentBoxSize` 2, and a page that feature-detects with
+`entry.borderBoxSize?.[0]?.inlineSize` reads the first. One box read answers
+all three: `ElementBox` widened from eight numbers to twelve, appending the
+four padding widths that `TaffyLayout::write_padding_insets` reports from
+taffy's `Layout.padding`. The border widths carry the border box down to the
+padding box `Element.clientWidth` reports, and the paddings carry that down to
+the content box `contentRect` reports. Appending rather than reordering keeps
+slots 0 through 7 where the AD-035 accessors read them.
+
+### Consequences
+
+`ResizeObserver` constructs, observes, unobserves, disconnects, and delivers.
+The `box` option selects the observed box between `content-box` and
+`border-box`, and re-observing with a different box restarts the observation
+so the new box reports once before any change.
+
+The delivery pass is verified against a provider whose box the test moves
+(`silksurf-js/tests/resize_observer.rs`): the first pass reports a static
+element, an unmoved box reports nothing, a moved box reports, a border-box
+observation ignores a padding change, and a disconnected observer reports
+nothing. Assertions record into a global rather than throwing, because a throw
+inside an observer callback reaches the page's error path and never the
+embedder.
+
+`aa4973d` inserted `write_border_insets` between `write_rects` and its
+doc comment, leaving `write_rects` undocumented and the two docs fused; this
+change separates them.
+
+Five pieces are cut by name.
+
+`intersection-observer` records the remaining 23 constructions. The checkpoint
+this decision builds is what they deliver on; what remains is the root
+rectangle, `rootMargin`, and threshold crossing.
+
+`device-pixel-content-box` records that the `box` option's third value
+observes the content box here, because the engine presents one device pixel
+per CSS pixel, and that `devicePixelContentBoxSize` stays absent from the
+entry. The bundles name it once.
+
+`resize-observer-depth-loop` records that the spec re-runs layout and
+re-delivers within one frame until no shallower element resizes, reporting an
+error when the loop does not settle. This checkpoint delivers once per frame
+and lets a callback's own resize report on the next one.
+
+`resize-observer-writing-mode` records that `inlineSize` and `blockSize` map
+to width and height, which holds for `horizontal-tb` and transposes for a
+vertical writing mode the cascade does not yet resolve.
+
+`observation-callback-repaint-bound` records the two-pass bound: an observer
+callback that mutates the tree on every delivery reaches its second pass and
+then waits for the next frame.
+
 ---
 
 ## Future ADRs

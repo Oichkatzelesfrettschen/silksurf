@@ -1116,6 +1116,10 @@ pub(crate) fn refresh_browser_frame_bitmap(
     // frame presents at rides with the map.
     if let Some(runtime) = state.runtime.as_ref() {
         runtime.geometry.borrow_mut().set_scroll(scroll_y as f32);
+        // A scroll presents a new frame without re-running layout, and it
+        // moves every viewport rect, so it marks the observation checkpoint
+        // the same way a completed layout does.
+        runtime.js_ctx.request_layout_observation();
     }
     BrowserBitmapRefresh::Full
 }
@@ -1193,6 +1197,10 @@ pub(crate) fn scroll_browser_frame_bitmap(
     // frame presents at rides with the map.
     if let Some(runtime) = state.runtime.as_ref() {
         runtime.geometry.borrow_mut().set_scroll(scroll_y as f32);
+        // A scroll presents a new frame without re-running layout, and it
+        // moves every viewport rect, so it marks the observation checkpoint
+        // the same way a completed layout does.
+        runtime.js_ctx.request_layout_observation();
     }
     Some(exposed_damage)
 }

@@ -363,13 +363,36 @@ separately-landable follow-up):
 - scroll-position-accessors -- scrollTop and scrollHeight stay undefined
   across 130 references; both report a scrollable box's own offset and
   content height rather than its border box.
-- resize-observer -- ResizeObserver is undefined across 20 constructions in
-  chatgpt.com's bundles, so an unguarded one raises a ReferenceError that
-  takes the module. AD-035 supplies the geometry it reports; what remains is
-  the frame-driven delivery and the box-size change detection.
+- resize-observer -- AD-036 takes it. ResizeObserver was undefined across 20
+  constructions, so an unguarded one raised a ReferenceError that took the
+  module. Delivery rides a checkpoint the embedder marks wherever the frame's
+  geometry becomes current -- a completed layout and a scroll both, because a
+  scroll moves every viewport rect while the layout holds still -- and an
+  observation reports once when observed so a static element still reaches
+  its callback. The entry carries borderBoxSize, contentBoxSize, and
+  contentRect from one twelve-number box read.
 - intersection-observer -- IntersectionObserver is undefined across 23
-  constructions, the largest of the four observer counts. AD-035 supplies the
-  geometry; what remains is viewport intersection and threshold crossing.
+  constructions, the largest of the four observer counts. AD-036 supplies the
+  delivery checkpoint and AD-035 the geometry; what remains is the root
+  rectangle, rootMargin, and threshold crossing. The bundles read rootMargin
+  24 times with pixel and percent values (`1000px 0px 1000px 0px`,
+  `0px 0px 96px`, `0%`) and threshold 63 times including a 101-entry list, so
+  neither reduces to a no-op.
+- device-pixel-content-box -- the ResizeObserver box option's third value
+  observes the content box, because the engine presents one device pixel per
+  CSS pixel, and devicePixelContentBoxSize stays absent from the entry. The
+  bundles name it once.
+- resize-observer-depth-loop -- the spec re-runs layout and re-delivers within
+  one frame until no shallower element resizes, reporting an error when the
+  loop does not settle. The checkpoint delivers once per frame, so a
+  callback's own resize reports on the next one.
+- resize-observer-writing-mode -- inlineSize and blockSize map to width and
+  height, which holds for horizontal-tb and transposes for a vertical writing
+  mode the cascade does not yet resolve.
+- observation-callback-repaint-bound -- an observer callback that mutates the
+  tree dirties nodes the repaint pass already drained, so one further pass
+  runs; a callback that mutates on every delivery reaches its second pass and
+  then waits for the next frame.
 - performance-observer -- PerformanceObserver is undefined across 8
   constructions and needs performance entries the engine does not collect.
 - mutation-observer-record-coalescing -- a browser reports one childList

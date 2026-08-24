@@ -42,6 +42,7 @@ mod dom_interfaces;
 mod event_dispatch;
 mod intl_datetime;
 mod intl_datetime_data;
+mod layout_observers;
 mod module_loader;
 mod mutation_observer;
 pub use module_loader::{ImportMap, ModuleFetchBudget, ModuleFetcher, module_import_specifiers};
@@ -858,6 +859,12 @@ pub struct SilkContext {
     storage_dirty: StorageDirtyFlag,
     /// Viewport dimensions backing matchMedia (and future viewport units).
     viewport: ViewportRef,
+    /// Live layout observations, written by the JS half's observe and
+    /// unobserve. Zero is what lets a page with no observer skip the
+    /// checkpoint without entering the JS context.
+    observation_count: layout_observers::ObservationCount,
+    /// Whether the frame's geometry moved since the last delivery.
+    observation_pending: layout_observers::ObservationPending,
 }
 
 /// Extra payload field on a synthetic event object.
@@ -1087,6 +1094,9 @@ impl SilkContext {
         let history_intents: HistoryIntentsRef = Rc::new(RefCell::new(Vec::new()));
         let viewport = Rc::new(std::cell::Cell::new((1280.0_f32, 720.0_f32)));
         install_match_media_native(&mut ctx, &viewport);
+        let observation_count: layout_observers::ObservationCount = Rc::default();
+        let observation_pending: layout_observers::ObservationPending = Rc::default();
+        layout_observers::install(&mut ctx, &observation_count, &observation_pending);
         install_history_intent_native(&mut ctx, &history_intents);
         let bootstrap = r"
             globalThis.queueMicrotask = function (cb) {
@@ -1200,9 +1210,47 @@ impl SilkContext {
             sse_subscriptions,
             history_intents,
             viewport,
+            observation_count,
+            observation_pending,
             local_storage,
             storage_dirty,
         }
+    }
+
+    /// Mark the frame's geometry current, which is what makes the next
+    /// checkpoint deliver.
+    ///
+    /// A completed layout and a scroll that moved the presented bitmap both
+    /// reach it, because both change the viewport rect an observer reports.
+    /// A page holding no observation ignores the mark, so the embedder calls
+    /// it unconditionally and pays one `Cell` read.
+    pub fn request_layout_observation(&self) {
+        if self.observation_count.get() == 0 {
+            return;
+        }
+        self.observation_pending.set(true);
+    }
+
+    /// Whether a marked checkpoint is waiting for delivery. The event loop
+    /// reads it to wake a page whose only pending work is an observation.
+    #[must_use]
+    pub fn layout_observation_pending(&self) -> bool {
+        self.observation_pending.get()
+    }
+
+    /// Deliver the marked checkpoint and report how many observer callbacks
+    /// ran. The geometry the callbacks read is the one the frame presents, so
+    /// the embedder calls this after the layout or scroll that made it
+    /// current rather than before.
+    pub fn deliver_layout_observations(&mut self) -> usize {
+        if !self.observation_pending.replace(false) {
+            return 0;
+        }
+        let ran = layout_observers::deliver(&mut self.ctx);
+        // A callback that resolves a promise settles it in the same tick
+        // rather than waiting for the next host callback drain.
+        self.run_pending_jobs();
+        ran
     }
 
     /// Seed localStorage with persisted entries (before page scripts run).
@@ -2291,7 +2339,7 @@ const GEOMETRY_BOOTSTRAP: &str = r"
         return id < 0 ? null : __silksurfElementBox(id);
     }
     function rectOf(el) {
-        var b = boxOf(el) || [0, 0, 0, 0, 0, 0, 0, 0];
+        var b = boxOf(el) || [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         return {
             x: b[0], y: b[1], width: b[2], height: b[3],
             top: b[1], left: b[0], right: b[0] + b[2], bottom: b[1] + b[3],
@@ -2331,10 +2379,15 @@ const GEOMETRY_BOOTSTRAP: &str = r"
 pub type ComputedStyleProvider = Rc<dyn Fn(silksurf_dom::NodeId, &str) -> Option<String>>;
 
 /// Border-box geometry for one node, in the order the JS half reads it:
-/// `x`, `y`, `width`, `height`, then the top, right, bottom, and left border
-/// widths. Coordinates are viewport-relative, because that is the space
+/// `x`, `y`, `width`, `height`, the top, right, bottom, and left border
+/// widths, then the same four padding widths. Coordinates are
+/// viewport-relative, because that is the space
 /// `Element.getBoundingClientRect` reports in.
-pub type ElementBox = [f32; 8];
+///
+/// The border widths carry the border box down to the padding box
+/// `Element.clientWidth` reports, and the padding widths carry that down to
+/// the content box a `ResizeObserver` entry reports as `contentRect`.
+pub type ElementBox = [f32; 12];
 
 /// Answers geometry for a node from the last completed layout. A node the
 /// layout produced no box for answers `None`, which the JS half reports as a

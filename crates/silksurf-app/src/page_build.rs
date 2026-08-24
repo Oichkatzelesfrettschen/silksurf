@@ -385,6 +385,8 @@ pub(crate) fn build_browser_page_with_buffers_for_window(
     let mut fused = fused_workspace.take_result();
     // The page's first layout; every later one refreshes at the repaint swap.
     geometry.borrow_mut().refresh(&fused);
+    // The first layout is the geometry the page's first observations report.
+    js_ctx.request_layout_observation();
     let mut display_list = silksurf_render::DisplayList {
         items: std::mem::take(&mut fused.display_items),
         tiles: None,

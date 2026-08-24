@@ -752,6 +752,10 @@ pub(crate) fn apply_focus_viewport_cache(
             .geometry
             .borrow_mut()
             .set_scroll(cache.scroll_y as f32);
+        // A scroll presents a new frame without re-running layout, and it
+        // moves every viewport rect, so it marks the observation checkpoint
+        // the same way a completed layout does.
+        runtime.js_ctx.request_layout_observation();
     }
     state.frame.bitmap_height = cache.bitmap_height;
     true
@@ -822,6 +826,10 @@ pub(crate) fn apply_scroll_viewport_cache(
             .geometry
             .borrow_mut()
             .set_scroll(cache.scroll_y as f32);
+        // A scroll presents a new frame without re-running layout, and it
+        // moves every viewport rect, so it marks the observation checkpoint
+        // the same way a completed layout does.
+        runtime.js_ctx.request_layout_observation();
     }
     state.frame.bitmap_height = cache.bitmap_height;
     scroll_viewport_retained_present(
