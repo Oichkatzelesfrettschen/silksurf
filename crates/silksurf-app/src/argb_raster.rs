@@ -702,7 +702,8 @@ pub(crate) fn viewport_argb_direct_item_supported(item: &silksurf_render::Displa
         }
         silksurf_render::DisplayItem::Image { image, .. } => image_has_full_rgba_argb(image),
         silksurf_render::DisplayItem::BoxShadow { .. }
-        | silksurf_render::DisplayItem::LinearGradient { .. } => false,
+        | silksurf_render::DisplayItem::LinearGradient { .. }
+        | silksurf_render::DisplayItem::BackdropFilter { .. } => false,
     }
 }
 
@@ -807,7 +808,8 @@ pub(crate) fn paint_viewport_argb_direct_item(
             blit_shifted_argb_image(pixels, raster_width, bitmap_height, *rect, scroll_y, image);
         }
         silksurf_render::DisplayItem::BoxShadow { .. }
-        | silksurf_render::DisplayItem::LinearGradient { .. } => {}
+        | silksurf_render::DisplayItem::LinearGradient { .. }
+        | silksurf_render::DisplayItem::BackdropFilter { .. } => {}
     }
 }
 
@@ -863,7 +865,8 @@ pub(crate) fn paint_viewport_argb_direct_item_clipped(
             );
         }
         silksurf_render::DisplayItem::BoxShadow { .. }
-        | silksurf_render::DisplayItem::LinearGradient { .. } => {}
+        | silksurf_render::DisplayItem::LinearGradient { .. }
+        | silksurf_render::DisplayItem::BackdropFilter { .. } => {}
     }
 }
 
@@ -1383,6 +1386,7 @@ pub(crate) fn display_item_rect(item: &silksurf_render::DisplayItem) -> Rect {
         | silksurf_render::DisplayItem::Text { rect, .. }
         | silksurf_render::DisplayItem::RoundedRect { rect, .. }
         | silksurf_render::DisplayItem::LinearGradient { rect, .. }
+        | silksurf_render::DisplayItem::BackdropFilter { rect, .. }
         | silksurf_render::DisplayItem::Image { rect, .. } => *rect,
         silksurf_render::DisplayItem::BoxShadow { rect, shadow } => Rect {
             x: rect.x + shadow.offset_x - shadow.spread_radius,
@@ -1418,6 +1422,7 @@ pub(crate) fn shift_display_item_y(
         | silksurf_render::DisplayItem::RoundedRect { rect, .. }
         | silksurf_render::DisplayItem::BoxShadow { rect, .. }
         | silksurf_render::DisplayItem::LinearGradient { rect, .. }
+        | silksurf_render::DisplayItem::BackdropFilter { rect, .. }
         | silksurf_render::DisplayItem::Image { rect, .. } => {
             rect.y += delta_y;
         }
@@ -1445,6 +1450,7 @@ pub(crate) fn display_item_bottom(item: &silksurf_render::DisplayItem) -> f32 {
         | silksurf_render::DisplayItem::RoundedRect { rect, .. }
         | silksurf_render::DisplayItem::BoxShadow { rect, .. }
         | silksurf_render::DisplayItem::LinearGradient { rect, .. }
+        | silksurf_render::DisplayItem::BackdropFilter { rect, .. }
         | silksurf_render::DisplayItem::Image { rect, .. } => rect.y + rect.height,
     }
 }
@@ -3392,6 +3398,46 @@ pub(crate) fn css_color_to_argb(color: silksurf_css::Color) -> u32 {
 
 #[cfg(test)]
 mod tests {
+
+    /// The direct ARGB path composes each item into the window buffer from
+    /// the item alone, and a backdrop filter is defined against the pixels
+    /// already beneath it. Reporting it unsupported routes the frame through
+    /// the tiny-skia rasterizer, which owns the buffer the stage reads.
+    #[test]
+    fn a_backdrop_filter_sends_the_frame_down_the_skia_path() {
+        let mut filters = silksurf_css::FilterList::new();
+        filters.push(silksurf_css::FilterFunction::Blur(25.0));
+        let item = silksurf_render::DisplayItem::BackdropFilter {
+            rect: Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 44.0,
+                height: 44.0,
+            },
+            radii: [22.0; 4],
+            filters,
+        };
+        assert!(!viewport_argb_direct_item_supported(&item));
+
+        // An opaque solid color still takes the direct path, so the fallback
+        // above is the filter's own doing rather than a blanket rejection.
+        assert!(viewport_argb_direct_item_supported(
+            &silksurf_render::DisplayItem::SolidColor {
+                rect: Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 8.0,
+                    height: 8.0,
+                },
+                color: silksurf_css::Color {
+                    r: 1,
+                    g: 2,
+                    b: 3,
+                    a: 255,
+                },
+            }
+        ));
+    }
     // Module split from the former single-file binary; the crate root
     // re-exports every module so sibling items resolve by bare name.
     #[allow(clippy::wildcard_imports)]

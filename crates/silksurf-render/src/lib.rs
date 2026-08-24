@@ -22,8 +22,10 @@
     clippy::manual_div_ceil
 )]
 
+mod backdrop_filter;
+
 use rustc_hash::FxHashMap;
-use silksurf_css::{BoxShadow as CssBoxShadow, Color, ComputedStyle};
+use silksurf_css::{BoxShadow as CssBoxShadow, Color, ComputedStyle, FilterList};
 use silksurf_dom::{Dom, NodeId, NodeKind};
 use silksurf_layout::{LayoutTree, Rect};
 use std::sync::Arc;
@@ -121,6 +123,18 @@ pub enum DisplayItem {
         rect: Rect,
         image: ImageSurface,
     },
+    /// CSS `backdrop-filter` over the pixels already painted beneath the
+    /// element.
+    ///
+    /// The item precedes the element's own background in the list, so a
+    /// rasterizer reaching it has already painted the backdrop and filters
+    /// that buffer in place. `radii` clips the write-back to the rounded
+    /// border box.
+    BackdropFilter {
+        rect: Rect,
+        radii: [f32; 4],
+        filters: FilterList,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -171,6 +185,15 @@ fn build_display_list_for_box(
         | silksurf_layout::BoxType::InlineNode(node_id) => {
             if let Some(style) = styles.get(&node_id) {
                 let content_rect = layout.dimensions().content;
+                // The filter reads the backdrop, so it precedes every item
+                // this element paints for itself.
+                if !style.backdrop_filter.is_empty() {
+                    list.items.push(DisplayItem::BackdropFilter {
+                        rect: content_rect,
+                        radii: [style.border_radius; 4],
+                        filters: style.backdrop_filter.clone(),
+                    });
+                }
                 // Box-shadow paints below the background (CSS paint order).
                 if let Some(shadow) = style.box_shadow {
                     if !shadow.inset {
@@ -289,6 +312,20 @@ pub fn rasterize_damage(
             DisplayItem::Image { rect, image } => {
                 blit_image_nearest(&mut buffer, width, height, *rect, image);
             }
+            DisplayItem::BackdropFilter {
+                rect,
+                radii,
+                filters,
+            } => {
+                backdrop_filter::apply_backdrop_filter(
+                    &mut buffer,
+                    width,
+                    height,
+                    *rect,
+                    *radii,
+                    filters,
+                );
+            }
         }
     }
     buffer
@@ -296,7 +333,8 @@ pub fn rasterize_damage(
 
 fn item_rect(item: &DisplayItem) -> Rect {
     match item {
-        DisplayItem::SolidColor { rect, .. }
+        DisplayItem::BackdropFilter { rect, .. }
+        | DisplayItem::SolidColor { rect, .. }
         | DisplayItem::Text { rect, .. }
         | DisplayItem::RoundedRect { rect, .. }
         | DisplayItem::LinearGradient { rect, .. }
@@ -1187,6 +1225,7 @@ fn trace_damage_item(
         DisplayItem::BoxShadow { .. } => "box-shadow",
         DisplayItem::LinearGradient { .. } => "linear-gradient",
         DisplayItem::Image { .. } => "image",
+        DisplayItem::BackdropFilter { .. } => "backdrop-filter",
     };
     let text_len = match item {
         DisplayItem::Text { text, .. } => text.len(),
@@ -1331,6 +1370,22 @@ fn paint_skia_item(pixmap: &mut PixmapMut<'_>, item: &DisplayItem, offset: (f32,
             let rect = shift_rect(*rect, offset);
             let (width, height) = (pixmap.width(), pixmap.height());
             blit_image_nearest(pixmap.data_mut(), width, height, rect, image);
+        }
+        DisplayItem::BackdropFilter {
+            rect,
+            radii,
+            filters,
+        } => {
+            let rect = shift_rect(*rect, offset);
+            let (width, height) = (pixmap.width(), pixmap.height());
+            backdrop_filter::apply_backdrop_filter(
+                pixmap.data_mut(),
+                width,
+                height,
+                rect,
+                *radii,
+                filters,
+            );
         }
     }
 }
@@ -1601,6 +1656,71 @@ mod tests {
     use silksurf_css::{ComputedStyle, Display};
     use silksurf_dom::Dom;
     use silksurf_layout::build_layout_tree;
+
+    /// A computed `backdrop-filter` reaches the display list as an item that
+    /// precedes the element's own background, so a rasterizer reading it has
+    /// already painted the backdrop the filter consumes.
+    #[test]
+    fn a_computed_backdrop_filter_precedes_the_element_background() {
+        let mut dom = Dom::new();
+        let document = dom.create_document();
+        let html = dom.create_element("html");
+        let body = dom.create_element("body");
+        dom.append_child(document, html).unwrap();
+        dom.append_child(html, body).unwrap();
+
+        let mut filters = FilterList::new();
+        filters.push(silksurf_css::FilterFunction::Blur(25.0));
+        let mut styles = FxHashMap::default();
+        for node in [document, html] {
+            styles.insert(
+                node,
+                ComputedStyle {
+                    display: Display::Block,
+                    ..Default::default()
+                },
+            );
+        }
+        styles.insert(
+            body,
+            ComputedStyle {
+                display: Display::Block,
+                background_color: Color {
+                    r: 10,
+                    g: 20,
+                    b: 30,
+                    a: 255,
+                },
+                backdrop_filter: filters,
+                ..Default::default()
+            },
+        );
+
+        let arena = SilkArena::new();
+        let viewport = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 800.0,
+            height: 600.0,
+        };
+        let layout = build_layout_tree(&arena, &dom, &styles, document, viewport).unwrap();
+        let display_list = build_display_list(&dom, &styles, &layout);
+
+        let filter_index = display_list
+            .items
+            .iter()
+            .position(|item| matches!(item, DisplayItem::BackdropFilter { .. }))
+            .expect("backdrop filter item");
+        let background_index = display_list
+            .items
+            .iter()
+            .position(|item| matches!(item, DisplayItem::SolidColor { .. }))
+            .expect("background item");
+        assert!(
+            filter_index < background_index,
+            "filter at {filter_index} against background at {background_index}"
+        );
+    }
 
     #[test]
     fn display_list_excludes_metadata_subtree_text() {

@@ -884,6 +884,7 @@ pub(crate) fn text_damage_background_argb(
                 return Some(css_color_to_argb(*color));
             }
             silksurf_render::DisplayItem::LinearGradient { .. }
+            | silksurf_render::DisplayItem::BackdropFilter { .. }
             | silksurf_render::DisplayItem::Image { .. } => return None,
             silksurf_render::DisplayItem::Text { .. }
             | silksurf_render::DisplayItem::BoxShadow { .. } => {}
