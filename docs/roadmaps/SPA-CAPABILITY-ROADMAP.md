@@ -371,13 +371,26 @@ separately-landable follow-up):
   observation reports once when observed so a static element still reaches
   its callback. The entry carries borderBoxSize, contentBoxSize, and
   contentRect from one twelve-number box read.
-- intersection-observer -- IntersectionObserver is undefined across 23
-  constructions, the largest of the four observer counts. AD-036 supplies the
-  delivery checkpoint and AD-035 the geometry; what remains is the root
-  rectangle, rootMargin, and threshold crossing. The bundles read rootMargin
-  24 times with pixel and percent values (`1000px 0px 1000px 0px`,
-  `0px 0px 96px`, `0%`) and threshold 63 times including a 101-entry list, so
-  neither reduces to a no-op.
+- intersection-observer -- AD-037 takes it. IntersectionObserver was
+  undefined across 23 constructions, the largest of the four observer counts.
+  The root rectangle is the viewport or the root element's padding box,
+  expanded by a rootMargin parsed as CSS shorthand in px and percent, and
+  delivery follows a change in the threshold index or in isIntersecting --
+  the second dimension because a target at ratio 0.4 and a target entirely
+  gone both hold index 0 against a single 0.5 threshold.
+- intersection-observer-clip-chain -- the intersection is computed between the
+  target and the root alone, so a target clipped by a scrollable ancestor
+  between the two reports the unclipped rectangle. The spec intersects through
+  the containing-block chain.
+- intersection-observer-visibility -- trackVisibility, delay, and the entry's
+  isVisible stay absent, so an observer asking for visibility tracking
+  receives geometry alone.
+- intersection-observer-frame-time -- entry.time reports performance.now() at
+  delivery rather than the frame timestamp the spec names.
+- intersection-observer-empty-rect -- a target outside the root reports
+  intersectionRect as a zero rectangle at the origin rather than the clamped
+  edges a browser reports; intersectionRatio and isIntersecting carry the
+  state pages branch on.
 - device-pixel-content-box -- the ResizeObserver box option's third value
   observes the content box, because the engine presents one device pixel per
   CSS pixel, and devicePixelContentBoxSize stays absent from the entry. The

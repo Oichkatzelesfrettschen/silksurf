@@ -21,7 +21,9 @@
 
 use std::{cell::Cell, rc::Rc};
 
-use boa_engine::{Context, JsValue, NativeFunction, js_string};
+use boa_engine::{Context, JsValue, NativeFunction, js_string, object::builtins::JsArray};
+
+use super::ViewportRef;
 
 /// Global naming the JS half's delivery entry point.
 const DELIVER: &str = "__silksurfDeliverLayoutObservations";
@@ -33,7 +35,12 @@ pub(super) type ObservationCount = Rc<Cell<usize>>;
 pub(super) type ObservationPending = Rc<Cell<bool>>;
 
 /// Install the natives and the observer bootstrap.
-pub(super) fn install(ctx: &mut Context, count: &ObservationCount, pending: &ObservationPending) {
+pub(super) fn install(
+    ctx: &mut Context,
+    count: &ObservationCount,
+    pending: &ObservationPending,
+    viewport: &ViewportRef,
+) {
     let count_handle = Rc::clone(count);
     // SAFETY: the closure captures two Rc<Cell> handles and no JS value, so
     // the garbage collector traces nothing through it.
@@ -64,6 +71,19 @@ pub(super) fn install(ctx: &mut Context, count: &ObservationCount, pending: &Obs
     };
     let _ =
         ctx.register_global_callable(js_string!("__silksurfRequestLayoutObservation"), 0, request);
+
+    let viewport_handle = Rc::clone(viewport);
+    // SAFETY: the closure captures one Rc<Cell> handle and no JS value.
+    let viewport_size = unsafe {
+        NativeFunction::from_closure(move |_this, _args, ctx| {
+            let (width, height) = viewport_handle.get();
+            let array = JsArray::new(ctx);
+            array.push(JsValue::from(f64::from(width)), ctx)?;
+            array.push(JsValue::from(f64::from(height)), ctx)?;
+            Ok(array.into())
+        })
+    };
+    let _ = ctx.register_global_callable(js_string!("__silksurfViewportSize"), 0, viewport_size);
 
     if let Err(err) = ctx.eval(boa_engine::Source::from_bytes(BOOTSTRAP.as_bytes())) {
         eprintln!("silksurf-js: layout observer bootstrap failed: {err}");
@@ -152,6 +172,16 @@ const BOOTSTRAP: &str = r"
         };
     }
 
+    function resizeEntry(observation) {
+        var m = boxes(observation.target);
+        var next = size(observation.box, m);
+        if (observation.reported && next[0] === observation.width && next[1] === observation.height) { return null; }
+        observation.reported = true;
+        observation.width = next[0];
+        observation.height = next[1];
+        return entryFor(observation, m);
+    }
+
     globalThis.__silksurfLayoutObservations = observations;
     globalThis.__silksurfSyncLayoutObservationCount = function () {
         __silksurfSetLayoutObservationCount(observations.length);
@@ -164,16 +194,15 @@ const BOOTSTRAP: &str = r"
         var pending = [];
         for (var i = 0; i < observations.length; i++) {
             var observation = observations[i];
-            if (observation.kind !== 'resize') { continue; }
-            var m = boxes(observation.target);
-            var next = size(observation.box, m);
-            if (observation.reported && next[0] === observation.width && next[1] === observation.height) { continue; }
-            observation.reported = true;
-            observation.width = next[0];
-            observation.height = next[1];
-            var slot = pending.indexOf(observation.observer);
-            if (slot === -1) { pending.push(observation.observer); observation.observer._queue = []; }
-            observation.observer._queue.push(entryFor(observation, m));
+            var entry = observation.kind === 'resize'
+                ? resizeEntry(observation)
+                : intersectionEntry(observation);
+            if (!entry) { continue; }
+            if (pending.indexOf(observation.observer) === -1) {
+                pending.push(observation.observer);
+                observation.observer._queue = [];
+            }
+            observation.observer._queue.push(entry);
         }
         var ran = 0;
         for (var j = 0; j < pending.length; j++) {
@@ -232,5 +261,185 @@ const BOOTSTRAP: &str = r"
         configurable: true, value: 'ResizeObserver',
     });
     globalThis.ResizeObserver = ResizeObserver;
+
+    /*
+     * IntersectionObserver.
+     *
+     * The root intersection rectangle is the viewport for a null root and the
+     * root element's padding box otherwise, expanded by rootMargin. A
+     * percentage margin resolves against that rectangle's own width on the
+     * left and right edges and its height on the top and bottom. Both the
+     * root box and the target box arrive in viewport coordinates, so the two
+     * compare directly.
+     */
+    function parseMargin(text) {
+        var parts = String(text === undefined || text === null ? '0px' : text).trim().split(/\s+/);
+        var out = [];
+        for (var i = 0; i < parts.length; i++) {
+            var found = /^(-?\d+(?:\.\d+)?)(px|%)$/.exec(parts[i]);
+            if (!found) { throw new SyntaxError('rootMargin: ' + parts[i]); }
+            out.push({ value: parseFloat(found[1]), percent: found[2] === '%' });
+        }
+        if (out.length === 1) { return [out[0], out[0], out[0], out[0]]; }
+        if (out.length === 2) { return [out[0], out[1], out[0], out[1]]; }
+        if (out.length === 3) { return [out[0], out[1], out[2], out[1]]; }
+        if (out.length === 4) { return out; }
+        throw new SyntaxError('rootMargin takes one to four components');
+    }
+
+    function parseThresholds(value) {
+        var list = Array.isArray(value) ? value.slice() : [value === undefined ? 0 : value];
+        for (var i = 0; i < list.length; i++) {
+            list[i] = Number(list[i]);
+            if (!(list[i] >= 0 && list[i] <= 1)) { throw new RangeError('threshold must be in [0, 1]'); }
+        }
+        list.sort(function (a, b) { return a - b; });
+        return list;
+    }
+
+    function edgesOf(b) {
+        return { left: b[0], top: b[1], right: b[0] + b[2], bottom: b[1] + b[3] };
+    }
+
+    // A scrollable root clips its descendants against its padding box, so the
+    // border widths come off before the margin goes on.
+    function rootEdges(observer) {
+        if (!observer.root) {
+            var view = __silksurfViewportSize();
+            return { left: 0, top: 0, right: view[0], bottom: view[1] };
+        }
+        var b = boxOf(observer.root) || [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        return {
+            left: b[0] + b[7], top: b[1] + b[4],
+            right: b[0] + b[2] - b[5], bottom: b[1] + b[3] - b[6],
+        };
+    }
+
+    function expand(edges, margin) {
+        var width = edges.right - edges.left;
+        var height = edges.bottom - edges.top;
+        function px(edge, base) { return edge.percent ? edge.value * base / 100 : edge.value; }
+        return {
+            top: edges.top - px(margin[0], height),
+            right: edges.right + px(margin[1], width),
+            bottom: edges.bottom + px(margin[2], height),
+            left: edges.left - px(margin[3], width),
+        };
+    }
+
+    function boundsOf(edges) {
+        return {
+            x: edges.left, y: edges.top, left: edges.left, top: edges.top,
+            right: edges.right, bottom: edges.bottom,
+            width: edges.right - edges.left, height: edges.bottom - edges.top,
+            toJSON: function () { return this; },
+        };
+    }
+
+    // A zero-area target intersects when it lies inside the root, which keeps
+    // a collapsed sentinel reporting; the ratio it carries is 1 rather than
+    // the undefined quotient.
+    function intersection(target, root) {
+        var left = Math.max(target.left, root.left);
+        var top = Math.max(target.top, root.top);
+        var right = Math.min(target.right, root.right);
+        var bottom = Math.min(target.bottom, root.bottom);
+        var area = (target.right - target.left) * (target.bottom - target.top);
+        var overlaps = area > 0 ? right > left && bottom > top : right >= left && bottom >= top;
+        var edges = overlaps
+            ? { left: left, top: top, right: right, bottom: bottom }
+            : { left: 0, top: 0, right: 0, bottom: 0 };
+        var ratio = 0;
+        if (overlaps) { ratio = area > 0 ? (right - left) * (bottom - top) / area : 1; }
+        return { edges: edges, ratio: ratio, isIntersecting: overlaps };
+    }
+
+    // The threshold index is zero while the target does not intersect and
+    // otherwise one past the largest threshold the ratio reaches.
+    function thresholdIndex(thresholds, ratio, isIntersecting) {
+        if (!isIntersecting) { return 0; }
+        var index = 0;
+        for (var i = 0; i < thresholds.length; i++) {
+            if (ratio >= thresholds[i]) { index = i + 1; }
+        }
+        return index;
+    }
+
+    // Delivery follows a change in the threshold index or in isIntersecting.
+    // The second dimension is what reports a target leaving the root under a
+    // threshold it never reached: against threshold 0.5 a target moving from
+    // ratio 0.4 to out of view holds index 0 on both sides.
+    function intersectionEntry(observation) {
+        var observer = observation.observer;
+        var target = edgesOf(boxOf(observation.target) || [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        var root = expand(rootEdges(observer), observer.rootMargin);
+        var found = intersection(target, root);
+        var index = thresholdIndex(observer.thresholds, found.ratio, found.isIntersecting);
+        if (observation.reported
+            && index === observation.index
+            && found.isIntersecting === observation.isIntersecting) { return null; }
+        observation.reported = true;
+        observation.index = index;
+        observation.isIntersecting = found.isIntersecting;
+        return {
+            target: observation.target,
+            time: typeof performance === 'object' && performance ? performance.now() : 0,
+            rootBounds: boundsOf(root),
+            boundingClientRect: boundsOf(target),
+            intersectionRect: boundsOf(found.edges),
+            intersectionRatio: found.ratio,
+            isIntersecting: found.isIntersecting,
+        };
+    }
+
+    function IntersectionObserver(callback, options) {
+        if (typeof callback !== 'function') { throw new TypeError('IntersectionObserver requires a callback'); }
+        var bag = options || {};
+        this._callback = callback;
+        this._queue = [];
+        // A document root and a null root both mean the viewport, because a
+        // document carries no box the provider answers.
+        this.root = bag.root && typeof bag.root.nodeId === 'number' ? bag.root : null;
+        this.rootMargin = parseMargin(bag.rootMargin);
+        this.thresholds = parseThresholds(bag.threshold);
+    }
+    IntersectionObserver.prototype.observe = function (target) {
+        if (!target) { throw new TypeError('IntersectionObserver.observe requires a target'); }
+        for (var i = 0; i < observations.length; i++) {
+            var found = observations[i];
+            if (found.observer === this && found.target === target) { return; }
+        }
+        observations.push({
+            kind: 'intersection', observer: this, target: target,
+            reported: false, index: 0, isIntersecting: false,
+        });
+        __silksurfSyncLayoutObservationCount();
+        __silksurfRequestLayoutObservation();
+    };
+    IntersectionObserver.prototype.unobserve = function (target) {
+        for (var i = observations.length - 1; i >= 0; i--) {
+            var found = observations[i];
+            if (found.observer === this && found.target === target) { observations.splice(i, 1); }
+        }
+        __silksurfSyncLayoutObservationCount();
+    };
+    IntersectionObserver.prototype.disconnect = function () {
+        for (var i = observations.length - 1; i >= 0; i--) {
+            if (observations[i].observer === this) { observations.splice(i, 1); }
+        }
+        this._queue = [];
+        __silksurfSyncLayoutObservationCount();
+    };
+    // The queue empties into the callback at each delivery, so a page reading
+    // it between deliveries reads what the checkpoint has not yet reported.
+    IntersectionObserver.prototype.takeRecords = function () {
+        var records = this._queue;
+        this._queue = [];
+        return records;
+    };
+    Object.defineProperty(IntersectionObserver.prototype, Symbol.toStringTag, {
+        configurable: true, value: 'IntersectionObserver',
+    });
+    globalThis.IntersectionObserver = IntersectionObserver;
 })();
 ";
