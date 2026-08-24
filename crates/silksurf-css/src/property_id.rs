@@ -206,7 +206,7 @@ pub fn lookup_property_id(name: &str) -> PropertyId {
         // 'l' prefix
         (b'l', 11) if name.eq_ignore_ascii_case("line-height") => PropertyId::LineHeight,
         (b'l', 4) if name.eq_ignore_ascii_case("left") => PropertyId::Left,
-        (b'l', 13) if name.eq_ignore_ascii_case("letter-spacing") => PropertyId::LetterSpacing,
+        (b'l', 14) if name.eq_ignore_ascii_case("letter-spacing") => PropertyId::LetterSpacing,
         // 'm' prefix
         (b'm', 6) if name.eq_ignore_ascii_case("margin") => PropertyId::Margin,
         (b'm', 9) if name.eq_ignore_ascii_case("min-width") => PropertyId::MinWidth,
@@ -244,8 +244,8 @@ pub fn lookup_property_id(name: &str) -> PropertyId {
         (b'v', 10) if name.eq_ignore_ascii_case("visibility") => PropertyId::Visibility,
         // 'w' prefix
         (b'w', 5) if name.eq_ignore_ascii_case("width") => PropertyId::Width,
-        (b'w', 11) if name.eq_ignore_ascii_case("word-spacing") => PropertyId::WordSpacing,
-        (b'w', 11) if name.eq_ignore_ascii_case("white-space") => PropertyId::WhiteSpace,
+        (b'w', 12) if name.eq_ignore_ascii_case("word-spacing") => PropertyId::WordSpacing,
+        (b'w', 12) if name.eq_ignore_ascii_case("white-space") => PropertyId::WhiteSpace,
         // 'a' prefix
         (b'a', 11) if name.eq_ignore_ascii_case("align-items") => PropertyId::AlignItems,
         (b'a', 10) if name.eq_ignore_ascii_case("align-self") => PropertyId::AlignSelf,
@@ -357,6 +357,24 @@ mod tests {
         assert_eq!(
             lookup_property_id("BACKGROUND-IMAGE"),
             PropertyId::BackgroundImage
+        );
+    }
+
+    /// The spacing longhands carry a hyphen, so their byte length exceeds
+    /// the one-word properties beside them in the dispatch table. A guard
+    /// holding the shorter length never fires and the name falls through to
+    /// `Unknown`, which reaches `apply_declaration`'s no-op arm rather than
+    /// the `letter_spacing` and `word_spacing` slots that already exist.
+    #[test]
+    fn spacing_longhands_match_their_own_byte_length() {
+        assert_eq!(
+            lookup_property_id("letter-spacing"),
+            PropertyId::LetterSpacing
+        );
+        assert_eq!(lookup_property_id("word-spacing"), PropertyId::WordSpacing);
+        assert_eq!(
+            lookup_property_id("LETTER-SPACING"),
+            PropertyId::LetterSpacing
         );
     }
 

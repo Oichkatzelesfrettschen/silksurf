@@ -196,3 +196,32 @@ fn inline_important_overrides_stylesheet_important() {
         }
     );
 }
+
+/// `letter-spacing` and `word-spacing` reach `ComputedStyle` from an author
+/// sheet. Both names are longer than the length their dispatch guard held, so
+/// the cascade slots they write existed while no declaration could reach them.
+#[test]
+fn spacing_longhands_reach_computed_style() {
+    let stylesheet = parse_stylesheet("p { letter-spacing: 3px; word-spacing: 5px; }").unwrap();
+
+    let mut dom = Dom::new();
+    let doc = dom.create_document();
+    let html = dom.create_element("html");
+    dom.append_child(doc, html).unwrap();
+    let para = dom.create_element("p");
+    dom.append_child(html, para).unwrap();
+
+    let styles = compute_styles(&dom, doc, &stylesheet);
+    let style = styles.get(&para).expect("p style");
+
+    assert!(
+        (style.letter_spacing - 3.0).abs() < f32::EPSILON,
+        "letter-spacing: {}",
+        style.letter_spacing
+    );
+    assert!(
+        (style.word_spacing - 5.0).abs() < f32::EPSILON,
+        "word-spacing: {}",
+        style.word_spacing
+    );
+}
