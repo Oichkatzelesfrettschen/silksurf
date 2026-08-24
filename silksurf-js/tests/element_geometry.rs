@@ -41,8 +41,11 @@ fn a_context_with_no_provider_reports_a_zero_rect() {
 
 #[test]
 fn every_accessor_derives_from_the_one_border_box() {
-    // x 10, y 20, 300 wide, 100 tall, borders top 1, right 2, bottom 3, left 4.
-    let mut ctx = context_with_box(Some([10.0, 20.0, 300.0, 100.0, 1.0, 2.0, 3.0, 4.0]));
+    // x 10, y 20, 300 wide, 100 tall, borders top 1, right 2, bottom 3, left
+    // 4, paddings top 5, right 6, bottom 7, left 8.
+    let mut ctx = context_with_box(Some([
+        10.0, 20.0, 300.0, 100.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
+    ]));
     ctx.eval(
         r"
         function eq(got, want, label) {

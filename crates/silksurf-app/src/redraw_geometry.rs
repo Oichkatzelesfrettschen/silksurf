@@ -263,9 +263,11 @@ impl PageGeometry {
         self.boxes.clear();
         self.boxes.reserve(fused.table.bfs_order.len());
         for (index, node) in fused.table.bfs_order.iter().enumerate() {
-            let (Some(rect), Some(border)) =
-                (fused.node_rects.get(index), fused.node_borders.get(index))
-            else {
+            let (Some(rect), Some(border), Some(padding)) = (
+                fused.node_rects.get(index),
+                fused.node_borders.get(index),
+                fused.node_paddings.get(index),
+            ) else {
                 continue;
             };
             self.boxes.insert(
@@ -279,6 +281,10 @@ impl PageGeometry {
                     border.right,
                     border.bottom,
                     border.left,
+                    padding.top,
+                    padding.right,
+                    padding.bottom,
+                    padding.left,
                 ],
             );
         }
@@ -326,12 +332,19 @@ mod page_geometry_tests {
             .expect("the div is in the table");
         let mut node_rects = vec![Rect::default(); table.len()];
         let mut node_borders = vec![silksurf_layout::EdgeSizes::default(); table.len()];
+        let mut node_paddings = vec![silksurf_layout::EdgeSizes::default(); table.len()];
         node_rects[at] = rect;
         node_borders[at] = silksurf_layout::EdgeSizes {
             top: 1.0,
             right: 2.0,
             bottom: 3.0,
             left: 4.0,
+        };
+        node_paddings[at] = silksurf_layout::EdgeSizes {
+            top: 5.0,
+            right: 6.0,
+            bottom: 7.0,
+            left: 8.0,
         };
         (
             div,
@@ -340,6 +353,7 @@ mod page_geometry_tests {
                 display_items: Vec::new(),
                 node_rects,
                 node_borders,
+                node_paddings,
                 table,
             },
         )
@@ -357,7 +371,9 @@ mod page_geometry_tests {
         geometry.refresh(&fused);
         // UNWRAP-OK: the fixture wrote a rect at the div's BFS slot before the refresh.
         let found = geometry.get(div).expect("the div has a box");
-        let want = [10.0, 20.0, 300.0, 100.0, 1.0, 2.0, 3.0, 4.0];
+        let want = [
+            10.0, 20.0, 300.0, 100.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
+        ];
         for (index, (got, expected)) in found.iter().zip(want).enumerate() {
             assert!((got - expected).abs() < f32::EPSILON, "slot {index}");
         }

@@ -2291,7 +2291,7 @@ const GEOMETRY_BOOTSTRAP: &str = r"
         return id < 0 ? null : __silksurfElementBox(id);
     }
     function rectOf(el) {
-        var b = boxOf(el) || [0, 0, 0, 0, 0, 0, 0, 0];
+        var b = boxOf(el) || [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         return {
             x: b[0], y: b[1], width: b[2], height: b[3],
             top: b[1], left: b[0], right: b[0] + b[2], bottom: b[1] + b[3],
@@ -2331,10 +2331,15 @@ const GEOMETRY_BOOTSTRAP: &str = r"
 pub type ComputedStyleProvider = Rc<dyn Fn(silksurf_dom::NodeId, &str) -> Option<String>>;
 
 /// Border-box geometry for one node, in the order the JS half reads it:
-/// `x`, `y`, `width`, `height`, then the top, right, bottom, and left border
-/// widths. Coordinates are viewport-relative, because that is the space
+/// `x`, `y`, `width`, `height`, the top, right, bottom, and left border
+/// widths, then the same four padding widths. Coordinates are
+/// viewport-relative, because that is the space
 /// `Element.getBoundingClientRect` reports in.
-pub type ElementBox = [f32; 8];
+///
+/// The border widths carry the border box down to the padding box
+/// `Element.clientWidth` reports, and the padding widths carry that down to
+/// the content box a `ResizeObserver` entry reports as `contentRect`.
+pub type ElementBox = [f32; 12];
 
 /// Answers geometry for a node from the last completed layout. A node the
 /// layout produced no box for answers `None`, which the JS half reports as a
