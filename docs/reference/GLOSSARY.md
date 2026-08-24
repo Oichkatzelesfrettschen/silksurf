@@ -14,6 +14,11 @@
 **Benefits**: Zero fragmentation, O(1) allocation, batch deallocation
 **Trade-off**: Cannot free individual allocations
 
+### backdrop_sample_bounds
+**Type**: Render Function
+**Definition**: The region a `backdrop-filter` reads to paint its element, which is the element rect grown by three standard deviations of the widest blur in its pipeline.
+**SilkSurf Usage**: `silksurf_render::backdrop_sample_bounds`; damage culling keys on the rect an item writes, and this widens what counts as reachable so the backdrop a filter samples survives a partial repaint (AD-038)
+
 ### BPE (Byte Pair Encoding)
 **Type**: Compression/Tokenization Algorithm
 **Definition**: Maps registered byte sequences (common HTML fragments) to single u16 tokens via greedy longest-prefix trie matching, with raw byte values as the lossless fallback.

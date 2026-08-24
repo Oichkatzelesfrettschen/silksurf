@@ -120,6 +120,10 @@ pub enum PropertyId {
     PaddingInline = 90,
     /// `inset`: the box-shorthand form over top, right, bottom, left.
     Inset = 91,
+    /// `backdrop-filter`, reached through the unprefixed name and the
+    /// `-webkit-` alias, which carries the value five times as often as the
+    /// unprefixed name across the corpus under docs/roadmaps.
+    BackdropFilter = 92,
     Unknown = 255,
 }
 
@@ -149,6 +153,7 @@ pub fn lookup_property_id(name: &str) -> PropertyId {
         (b'b', 16) if name.eq_ignore_ascii_case("background-color") => PropertyId::BackgroundColor,
         (b'b', 16) if name.eq_ignore_ascii_case("background-image") => PropertyId::BackgroundImage,
         (b'b', 10) if name.eq_ignore_ascii_case("background") => PropertyId::Background,
+        (b'b', 15) if name.eq_ignore_ascii_case("backdrop-filter") => PropertyId::BackdropFilter,
         (b'b', 6) if name.eq_ignore_ascii_case("border") => PropertyId::Border,
         (b'b', 12) if name.eq_ignore_ascii_case("border-width") => PropertyId::BorderWidth,
         (b'b', 12) if name.eq_ignore_ascii_case("border-color") => PropertyId::BorderColor,
@@ -251,6 +256,12 @@ pub fn lookup_property_id(name: &str) -> PropertyId {
         (b'a', 10) if name.eq_ignore_ascii_case("align-self") => PropertyId::AlignSelf,
         // 'z' prefix
         (b'z', 7) if name.eq_ignore_ascii_case("z-index") => PropertyId::ZIndex,
+        // '-' prefix. Each vendor alias is listed by name, because a blanket
+        // `-webkit-` strip would alias names whose prefixed form means
+        // something else, as `-webkit-box-orient` does against `box-orient`.
+        (b'-', 23) if name.eq_ignore_ascii_case("-webkit-backdrop-filter") => {
+            PropertyId::BackdropFilter
+        }
         _ => logical_property_id(name),
     }
 }

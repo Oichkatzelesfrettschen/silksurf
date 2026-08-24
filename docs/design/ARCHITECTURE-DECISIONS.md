@@ -3080,6 +3080,122 @@ carry the state pages branch on.
 
 ---
 
+## AD-038: backdrop-filter Runs In Place Over the Painted Backdrop
+
+**Status**: Accepted
+**Date**: 2026-08-24
+**Deciders**: Public web page load repairs
+
+### Context
+
+`backdrop-filter` reached `lookup_property_id` as an unknown name and landed
+on `apply_declaration`'s no-op arm, so the property parsed to nothing and the
+paint list carried no filter stage.
+
+Measurement over the captured corpus reshaped the cut three times. The
+stylesheet carries six declarations, five of which spell only
+`-webkit-backdrop-filter`; an implementation reaching the unprefixed name
+alone would render one of the six. Every declaration carries the same value,
+`blur(25px) saturate(1.12)`, on glass surfaces: the login button, the
+scroll-to-bottom button, the fallback back button, and the sidebar utility
+button. The plain `filter` property appears zero times.
+
+The `mask` half of the roadmap entry that named this cut is worth no pixels.
+Every `mask-image` declaration in the sheet resolves to `none`, `mask-composite`
+appears nowhere, and the remaining `mask`-prefixed names are custom properties
+such as `--mobile-scroll-mask-bottom-size` rather than the mask property.
+
+### Decision
+
+`PropertyId::BackdropFilter` is reached through the unprefixed name and the
+`-webkit-` alias. Each vendor alias is listed by name rather than stripped,
+because a blanket prefix strip aliases names whose prefixed form means
+something else, as `-webkit-box-orient` does against `box-orient`.
+
+`parse_filter_list` rejects a list containing a function the paint stage
+cannot honor, so an unsupported entry leaves the cascade's existing value
+rather than painting a prefix of the author's pipeline.
+
+The paint stage needs no backdrop surface. The rasterizer walks the display
+list in document order into one premultiplied RGBA8 buffer, so at a
+`BackdropFilter` item that buffer already holds the element's backdrop; the
+stage filters that region in place and the element's own background paints
+over the result. `build_display_list_for_box` pushes the item ahead of the
+box-shadow and background the same element emits, which is what makes the
+ordering hold.
+
+`blur()` follows the box approximation SVG 1.1 feGaussianBlur specifies, which
+CSS Filter Effects 1 defers to: three passes of width
+`floor(sigma * 3 * sqrt(2*PI) / 4 + 0.5)` per axis, each carrying a running
+sum, so cost per pixel is constant in the radius. The sampled region extends
+three standard deviations past the element so the blur reads real backdrop
+instead of clamping at the element edge, and the write-back stays inside the
+rounded border box so a pill-shaped element leaves no filtered square corners.
+
+silksurf-app's direct ARGB path composes each item from the item alone, so it
+reports the filter unsupported and routes the frame to the tiny-skia
+rasterizer that owns the buffer the stage reads, as box-shadow and gradients
+already do.
+
+### Consequences
+
+`backdrop-filter` parses through both spellings and paints through both
+rasterizers. Sixteen tests cover it: six over the parser, ten over the filter
+math, three driving a display list, one asserting the item precedes the
+element background, one asserting the direct ARGB path defers, and one holding a partial repaint
+equal to a full one. Damage culling keys on the rect an item writes, so the
+element rect answers for the filter and `damage_with_backdrop_samples` widens
+what counts as reachable instead: an item lying only in the sampled margin has
+to survive the cull, because dropping it leaves that margin cleared and the
+blur pulls the cleared value inward as a fringe. Breaking
+the kernel normalization and dropping the sampling-scale divisor were each
+confirmed to fail the run.
+
+Cost is a rank-5 microbenchmark, bounding CPU work rather than frame latency,
+taken on the development host against `blur(25px) saturate(1.12)` over the
+44 px button the corpus declares it for, in a 1280x800 frame. Three findings
+took the stage from 1.18 ms to 0.166 ms. A per-column running sum strided by
+the row length and missed cache on every access, so the vertical pass carries
+one accumulator per column and sweeps rows in address order. The coverage test
+ran over all 37,636 sampled pixels to write 1,936, so the write-back sweeps
+the element rect alone. The backdrop samples down by `sigma/4` before blurring,
+because a box pass at half resolution and half radius describes the same
+Gaussian; the reduction is itself a box filter and composes with the blur that
+follows.
+
+Six pieces are cut by name.
+
+`mask-compositing` records that `mask-image` and `mask-composite` parse to
+nothing. Every declaration in the corpus is `none`, which is the initial
+value, so the cut costs no pixels on the measured page; a page shipping a real
+mask gets an unmasked element.
+
+`filter-property` records that the non-backdrop `filter` property is absent.
+It appears zero times in the corpus and shares `FilterFunction` with this cut,
+so it is parsing and an element-scoped paint stage rather than new math.
+
+`backdrop-filter-function-set` records that `hue-rotate`, `drop-shadow`, and
+`url()` references reject the declaration. The corpus declares `blur` and
+`saturate` alone.
+
+`backdrop-filter-perf-baseline` records that the 0.166 ms figure lives in this
+ADR rather than in `perf/` with the provenance envelope
+`scripts/validate_measurement_artifacts.py` checks, so it is a development-host
+reading rather than a tracked baseline.
+
+`backdrop-filter-tile-parallel` records that a tile in
+`rasterize_parallel_into` sees only the items its own rect selects, so a
+filter inside one reads that tile rather than the whole backdrop. The browser
+reaches `rasterize_skia_into` and that path stays behind the `parallel`
+feature.
+
+`backdrop-filter-extract-cost` records that the stage reads every frame pixel
+under the sampled region even though it blurs a reduced grid, which is the
+dominant remaining term: 37,636 pixel reads for a 44 px element at
+`blur(25px)`.
+
+---
+
 ## Future ADRs
 
 Planned (renumbered after the 2026-04-30 batch):
