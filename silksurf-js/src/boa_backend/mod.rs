@@ -1096,7 +1096,12 @@ impl SilkContext {
         install_match_media_native(&mut ctx, &viewport);
         let observation_count: layout_observers::ObservationCount = Rc::default();
         let observation_pending: layout_observers::ObservationPending = Rc::default();
-        layout_observers::install(&mut ctx, &observation_count, &observation_pending);
+        layout_observers::install(
+            &mut ctx,
+            &observation_count,
+            &observation_pending,
+            &viewport,
+        );
         install_history_intent_native(&mut ctx, &history_intents);
         let bootstrap = r"
             globalThis.queueMicrotask = function (cb) {
