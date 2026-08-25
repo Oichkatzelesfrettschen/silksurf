@@ -107,6 +107,49 @@ pub struct FusedWorkspace {
     /// index carries new ComputedStyle for the same DOM, which CSSStyleSheet
     /// insertRule produces while both DOM generations stand still.
     taffy_style_index: u64,
+    /// Seconds since the document timeline began, which the style pass
+    /// samples each running animation at.
+    timeline_seconds: f32,
+    /// Whether the last style pass sampled an animation whose value still
+    /// changes with time. An animation held by a fill mode contributes a
+    /// value and never a different one, so it leaves this clear and the
+    /// frame loop goes back to sleep.
+    animations_advance: bool,
+}
+
+/// Samples every animation an element declares onto its computed style.
+///
+/// The list applies in order, so a later component wins the properties it
+/// names, which is the order CSS Animations 1 composites them in. The return
+/// reports whether any of them still changes with time.
+fn sample_element_animations(
+    style: &mut ComputedStyle,
+    style_index: &StyleIndex,
+    timeline_seconds: f32,
+    rem_base_px: f32,
+    viewport: (f32, f32),
+) -> bool {
+    let specs = style.animation.clone();
+    let mut advances = false;
+    for spec in &specs {
+        advances |= silksurf_css::animation_sample::animation_advances(spec, timeline_seconds);
+        let Some(rule) = style_index.keyframes(&spec.name) else {
+            continue;
+        };
+        let Some(progress) =
+            silksurf_css::animation_sample::animation_progress(spec, timeline_seconds)
+        else {
+            continue;
+        };
+        *style = silksurf_css::animation_sample::sample_keyframes(
+            style,
+            rule,
+            progress,
+            rem_base_px,
+            viewport,
+        );
+    }
+    advances
 }
 
 impl Default for FusedWorkspace {
@@ -150,7 +193,28 @@ impl FusedWorkspace {
             },
             taffy_style_generation: u64::MAX,
             taffy_style_index: u64::MAX,
+            timeline_seconds: 0.0,
+            animations_advance: false,
         }
+    }
+
+    /// Sets the document timeline the style pass samples animations at.
+    ///
+    /// The clock lives on the workspace rather than in the run signature
+    /// because both entry points share it and a caller driving no animation
+    /// never touches it.
+    pub fn set_timeline_seconds(&mut self, seconds: f32) {
+        self.timeline_seconds = seconds;
+    }
+
+    /// Whether the last style pass sampled an animation that still changes.
+    ///
+    /// A page whose animated selectors match nothing leaves this clear, and
+    /// so does one holding every animation at a fill, so neither schedules a
+    /// frame it has no new pixels for.
+    #[must_use]
+    pub fn animations_advance(&self) -> bool {
+        self.animations_advance
     }
 
     /*
@@ -213,6 +277,8 @@ impl FusedWorkspace {
             self.cascade_generation = style_gen;
         }
         let n = self.table.len();
+        let timeline = self.timeline_seconds;
+        self.animations_advance = false;
         trace_fused_phase(
             trace_fused,
             "table",
@@ -260,6 +326,15 @@ impl FusedWorkspace {
             );
             if root_suppressed {
                 style.display = Display::None;
+            }
+            if !style.animation.is_empty() && style_index.declares_keyframes() {
+                self.animations_advance |= sample_element_animations(
+                    &mut style,
+                    style_index,
+                    timeline,
+                    rem_base_px,
+                    (viewport.width, viewport.height),
+                );
             }
             any_transform |= !style.transform.is_none();
             any_positioned |= style.position != CssPosition::Static;

@@ -375,6 +375,9 @@ fn repaint_runtime_document(
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let replaced_sizes =
         collect_image_replaced_sizes(&dom, runtime.document, &frame.url, &runtime.images);
+    runtime
+        .fused_workspace
+        .set_timeline_seconds(runtime.timeline_origin.elapsed().as_secs_f32());
     runtime.fused_workspace.run_with_replaced_sizes(
         &dom,
         &runtime.stylesheet,
@@ -1365,6 +1368,7 @@ mod tests {
                 input_targets: Vec::new(),
             },
             runtime: Some(BrowserPageRuntime {
+                timeline_origin: std::time::Instant::now(),
                 sheets: StyleSheetSet::empty("https://example.com/"),
                 cssom: Arc::new(Mutex::new(silksurf_css::SheetSet::new())),
                 cssom_generation: 0,
@@ -1490,6 +1494,7 @@ mod tests {
                 input_targets: Vec::new(),
             },
             runtime: Some(BrowserPageRuntime {
+                timeline_origin: std::time::Instant::now(),
                 sheets: StyleSheetSet::empty("https://example.com/"),
                 cssom: Arc::new(Mutex::new(silksurf_css::SheetSet::new())),
                 cssom_generation: 0,

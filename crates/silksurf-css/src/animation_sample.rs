@@ -52,6 +52,24 @@ pub fn animation_progress(spec: &AnimationSpec, elapsed_seconds: f32) -> Option<
     )
 }
 
+/// Whether the animation's output still changes as time advances.
+///
+/// An animation held by a fill mode past its last iteration is static: it
+/// contributes a value but never a different one, so it needs no further
+/// frames. An infinite one always does. The frame loop reads this to decide
+/// whether to schedule another wake, which is what keeps a page whose
+/// animated selectors match nothing at its idle cost.
+#[must_use]
+pub fn animation_advances(spec: &AnimationSpec, elapsed_seconds: f32) -> bool {
+    if spec.duration <= 0.0 {
+        return false;
+    }
+    if spec.iteration_count.is_infinite() {
+        return true;
+    }
+    elapsed_seconds < spec.delay + spec.duration * spec.iteration_count
+}
+
 /// Applies `animation-direction` to one iteration's progress.
 fn directed(progress: f32, iteration: f32, direction: AnimationDirection) -> f32 {
     let odd = (iteration as i64) % 2 != 0;

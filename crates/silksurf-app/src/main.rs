@@ -37,6 +37,27 @@ use silksurf_js::SilkContext;
 use silksurf_layout::Rect;
 use silksurf_net::{HttpMethod, HttpRequest};
 
+/// How long the event loop sleeps between frames of a running animation.
+///
+/// A 60 Hz cadence is the finest a sampled animation can show on a display
+/// refreshing at that rate, so a shorter sleep costs CPU for frames nothing
+/// presents. Only an animation whose value still changes reaches this.
+const ANIMATION_FRAME_INTERVAL: std::time::Duration = std::time::Duration::from_millis(16);
+
+/// The earlier of two optional deadlines.
+///
+/// The loop wakes for whichever source needs it first, and a source with no
+/// deadline never delays one that has it.
+fn merge_deadline(
+    left: Option<std::time::Instant>,
+    right: Option<std::time::Instant>,
+) -> Option<std::time::Instant> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(left.min(right)),
+        (left, right) => left.or(right),
+    }
+}
+
 mod accessibility;
 mod app_options;
 mod argb_raster;
@@ -176,7 +197,15 @@ fn run_winit_browser_page(
         if runtime.js_ctx.layout_observation_pending() {
             return Some(std::time::Instant::now());
         }
-        let timer = runtime.js_ctx.next_host_callback_deadline();
+        // An animation whose value still changes with time needs the next
+        // frame, and one held at a fill mode does not. A page whose animated
+        // selectors match nothing reaches neither, so it keeps the idle cost
+        // it had before any animation was sampled.
+        let animation = runtime
+            .fused_workspace
+            .animations_advance()
+            .then(|| std::time::Instant::now() + ANIMATION_FRAME_INTERVAL);
+        let timer = merge_deadline(runtime.js_ctx.next_host_callback_deadline(), animation);
         if !runtime.sheets.has_pending_fetches() && !runtime.preloads.has_pending_fetches() {
             return timer;
         }
