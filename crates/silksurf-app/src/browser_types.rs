@@ -367,6 +367,9 @@ pub(crate) struct BrowserPageRuntime {
     pub(crate) rgba: Vec<u8>,
     pub(crate) damage_scratch: silksurf_render::DamageScratch,
     pub(crate) viewport_item_indices: Vec<usize>,
+    /// Rasterized `<svg>` subtrees, held across frames so an icon parses
+    /// once rather than on every repaint.
+    pub(crate) svg_cache: crate::page_resources::SvgSurfaceCache,
     /// When this document's animation timeline began.
     ///
     /// Every animation on the page measures its delay and iterations from

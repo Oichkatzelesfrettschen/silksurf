@@ -658,11 +658,13 @@ fn run_static_browser_render(
         items: std::mem::take(&mut fused.display_items),
         tiles: None,
     };
+    let mut svg_cache = crate::page_resources::SvgSurfaceCache::default();
     append_image_display_items(
         &dom_guard,
         &fused,
         &options.url,
         &decoded_images,
+        &mut svg_cache,
         &mut display_list.items,
     );
     drop(dom_guard);

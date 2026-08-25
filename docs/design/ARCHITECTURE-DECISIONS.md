@@ -3306,6 +3306,106 @@ never fire.
 
 ---
 
+## AD-040: Inline SVG Rasterizes Through usvg Onto the Replaced-Element Path
+
+**Status**: Accepted
+**Date**: 2026-08-24
+**Deciders**: Public web page load repairs
+
+### Context
+
+silksurf-render, silksurf-image, and silksurf-layout carried no SVG handling,
+so an `<svg>` subtree painted nothing and the shell rendered with blank gaps
+where its icons sit.
+
+Counting literal `<svg` text in the bundles finds three, which is the wrong
+measurement: React compiles JSX to element constructor calls, so an SVG
+element is a quoted tag name rather than markup. Counting constructions finds
+84 `svg`, 164 `path`, 296 `viewBox`, 24 `circle`, 20 `rect`, 19 `g`, 10
+`mask`, 8 `defs`, 8 `clipPath`, and 6 `use`. That subset is broad enough that
+an in-engine path rasterizer would reimplement most of an SVG renderer.
+
+Two prerequisites decided the shape before any rendering code.
+
+`AttributeName::from_str` lowercased every attribute name, so `viewBox`
+reached the tree as `viewbox`. usvg reads `viewBox`; the lowercased spelling
+is a different attribute, and an SVG without it has no user coordinate system
+to map onto its viewport. AD-040 depends on the namespace-aware case rule
+that fixes it.
+
+`cargo deny` rejects resvg at its default features. usvg's text support pulls
+`rustybuzz`, unmaintained under RUSTSEC-2026-0206 with no safe upgrade
+available. A license census over the same tree reports only permissive terms,
+so the census alone would have cleared a dependency the gate refuses.
+
+### Decision
+
+usvg and resvg enter at 0.48 with `default-features = false`. silksurf shapes
+its own text and the corpus SVG is icon geometry -- `textPath` appears once
+and `tspan` three times across 7.8 MB of bundles -- so the text feature buys
+nothing here. Dropping it removes `rustybuzz` and `fontdb`, takes the tree
+from 61 transitive crates to 34, and clears `cargo deny` outright. Version
+0.48 also resolves tiny-skia 0.12, the version silksurf already rasterizes
+through, where 0.45 pins 0.11 and duplicates it.
+
+usvg reads SVG source text rather than a DOM, so the subtree the HTML parser
+built is written back out. Serializing foreign content is tractable in a way
+serializing HTML is not: there are no void elements, no implied tags, and no
+raw-text elements, so every node writes as a start tag, its children, and an
+end tag. The root gains an `xmlns` when it carries none, because the parser
+records the namespace on the node rather than as an attribute.
+
+The rasterized result is an `ImageSurface`, which puts an `<svg>` on the path
+`<img>` already travels: an intrinsic size for layout and a
+`DisplayItem::Image` for paint. It therefore needs no display item, no scalar
+rasterizer arm, and no ARGB arm of its own, and the direct ARGB fast path
+composes it unchanged.
+
+`SvgSurfaceCache` holds surfaces across frames, keyed by node and painted box.
+The DOM's structure and style generations clear it, rather than each entry
+proving itself. A rejection caches as a rejection, because retrying it every
+frame costs the parse again for the same nothing.
+
+### Consequences
+
+An inline `<svg>` sizes as a replaced element and paints its geometry.
+
+Twenty-one tests cover the work: four over the namespace-aware attribute case
+rule and three more through the parser, ten over serialization and
+rasterization including exact pixels for a scaled fill and transparency
+outside it, and four over the replaced size and the cache. Replacing the
+viewBox transform with the identity, and restoring the lowercasing rule, were
+each confirmed to fail a specific assertion.
+
+Cost is a rank-5 microbenchmark on the development host: 14.8 us to parse and
+rasterize a 16 px icon, 25.4 us at 48 px, against a blit measured in
+nanoseconds. The cache makes that a once-per-icon cost, so a cold pass over
+the corpus's 84 constructions is about 1.2 ms rather than a per-frame charge.
+
+Five pieces are cut by name.
+
+`svg-text-rendering` records that `<text>`, `<tspan>`, and `<textPath>` render
+nothing, because usvg's text feature stays off. The corpus names them four
+times in total.
+
+`svg-external-references` records that `<image href>` and `<use href>` to an
+external document load nothing; usvg resolves them through a callback this
+integration does not supply.
+
+`svg-css-cascade` records that the CSS cascade does not reach inside an SVG
+subtree. usvg applies presentation attributes and the SVG's own `<style>`,
+so an icon colored by a page rule outside it renders at its own fill.
+
+`svg-animation` records that SMIL and CSS animation inside an SVG subtree
+stay still, since the subtree rasterizes to a surface cached against the DOM
+generations rather than against a clock.
+
+`svg-device-pixel-ratio` records that the surface rasterizes at CSS pixel
+size, so a scaled display resamples it rather than rendering the geometry at
+the device resolution.
+
+---
+
 ## Future ADRs
 
 Planned (renumbered after the 2026-04-30 batch):

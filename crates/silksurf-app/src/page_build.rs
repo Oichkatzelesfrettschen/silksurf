@@ -391,11 +391,13 @@ pub(crate) fn build_browser_page_with_buffers_for_window(
         items: std::mem::take(&mut fused.display_items),
         tiles: None,
     };
+    let mut svg_cache = crate::page_resources::SvgSurfaceCache::default();
     append_image_display_items(
         &dom_guard,
         &fused,
         &payload.url,
         &payload.images,
+        &mut svg_cache,
         &mut display_list.items,
     );
     let link_targets = collect_link_targets(&dom_guard, &display_list.items, &payload.url);
@@ -491,6 +493,7 @@ pub(crate) fn build_browser_page_with_buffers_for_window(
             input_targets,
         },
         runtime: BrowserPageRuntime {
+            svg_cache,
             timeline_origin: std::time::Instant::now(),
             dom: dom_arc,
             document: doc_node,

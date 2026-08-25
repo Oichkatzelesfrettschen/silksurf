@@ -23,6 +23,7 @@
 )]
 
 mod backdrop_filter;
+pub mod svg;
 
 use rustc_hash::FxHashMap;
 use silksurf_css::{BoxShadow as CssBoxShadow, Color, ComputedStyle, FilterList};
