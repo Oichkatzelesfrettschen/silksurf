@@ -51,6 +51,6 @@ pub mod boa_backend;
 // Re-export the crate-level entry point.
 pub use boa_backend::{
     AsyncCompletion, ComputedStyleProvider, DispatchOutcome, ElementBox, GeometryProvider,
-    HistoryIntent, ImportMap, ModuleFetchBudget, ModuleFetcher, SilkContext, SyntheticEvent,
-    SyntheticField, module_import_specifiers,
+    HistoryIntent, ImportMap, ModuleFetchBudget, ModuleFetcher, PerformanceEntryType, SilkContext,
+    SyntheticEvent, SyntheticField, module_import_specifiers,
 };

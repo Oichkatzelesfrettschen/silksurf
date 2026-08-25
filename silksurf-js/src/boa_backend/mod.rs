@@ -47,6 +47,7 @@ mod module_loader;
 mod mutation_observer;
 pub use module_loader::{ImportMap, ModuleFetchBudget, ModuleFetcher, module_import_specifiers};
 mod net_queue;
+mod performance_timeline;
 mod platform_globals;
 mod style_sheets;
 
@@ -863,6 +864,12 @@ pub struct SilkContext {
     /// unobserve. Zero is what lets a page with no observer skip the
     /// checkpoint without entering the JS context.
     observation_count: layout_observers::ObservationCount,
+    /// Entries the engine recorded, awaiting handoff to the JS timeline.
+    performance_sink: performance_timeline::EntrySink,
+    /// Live `PerformanceObserver` total, written by the JS half.
+    performance_observers: performance_timeline::ObserverCount,
+    /// Whether any entry was recorded since the last delivery.
+    performance_pending: performance_timeline::EntryPending,
     /// Whether the frame's geometry moved since the last delivery.
     observation_pending: layout_observers::ObservationPending,
 }
@@ -1102,6 +1109,9 @@ impl SilkContext {
             &observation_pending,
             &viewport,
         );
+        let performance_sink: performance_timeline::EntrySink = Rc::default();
+        let performance_observers: performance_timeline::ObserverCount = Rc::default();
+        let performance_pending: performance_timeline::EntryPending = Rc::default();
         install_history_intent_native(&mut ctx, &history_intents);
         let bootstrap = r"
             globalThis.queueMicrotask = function (cb) {
@@ -1174,8 +1184,10 @@ impl SilkContext {
 
         // -- performance ------------------------------------------------------
         // now() returns fractional milliseconds since a process-wide monotonic
-        // epoch, so benchmark self-timing measures real elapsed time; mark()
-        // and measure() remain no-ops.
+        // epoch, so benchmark self-timing measures real elapsed time. mark()
+        // and measure() install here as no-ops and the timeline bootstrap
+        // below replaces them, which keeps the object shape identical for a
+        // page that reads the properties before calling them.
         let performance = ObjectInitializer::new(&mut ctx)
             .function(
                 NativeFunction::from_fn_ptr(performance_now),
@@ -1198,6 +1210,18 @@ impl SilkContext {
             // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
 
             .expect("performance: install on fresh context cannot fail");
+        // timeOrigin is wall-clock milliseconds, because a page correlates it
+        // with a server timestamp; performance.now() stays monotonic.
+        let time_origin_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0.0, |since| since.as_secs_f64() * 1000.0);
+        performance_timeline::install(
+            &mut ctx,
+            &performance_sink,
+            &performance_observers,
+            &performance_pending,
+            time_origin_ms,
+        );
 
         let (local_storage, storage_dirty) = install_storage_objects(&mut ctx);
         let async_done = Rc::new(RefCell::new(AsyncDoneCell::default()));
@@ -1216,6 +1240,9 @@ impl SilkContext {
             history_intents,
             viewport,
             observation_count,
+            performance_sink,
+            performance_observers,
+            performance_pending,
             observation_pending,
             local_storage,
             storage_dirty,
@@ -1229,6 +1256,77 @@ impl SilkContext {
     /// reach it, because both change the viewport rect an observer reports.
     /// A page holding no observation ignores the mark, so the embedder calls
     /// it unconditionally and pays one `Cell` read.
+    /// Records one entry against the performance timeline.
+    ///
+    /// The buffer fills whether a `PerformanceObserver` watches or not,
+    /// because `getEntriesByType` and an observer constructed with
+    /// `buffered: true` both read entries that predate them.
+    pub fn record_performance_entry(
+        &self,
+        entry_type: PerformanceEntryType,
+        name: impl Into<String>,
+        start_ms: f64,
+        duration_ms: f64,
+    ) {
+        performance_timeline::record(
+            &self.performance_sink,
+            &self.performance_pending,
+            entry_type.as_str(),
+            name,
+            start_ms,
+            duration_ms,
+        );
+    }
+
+    /// Whether the timeline holds an entry no observer has seen.
+    ///
+    /// An entry recorded with no observer registered still needs the drain,
+    /// because it belongs to the buffer `performance.getEntries` reads. The
+    /// observer count decides only whether a callback can run.
+    #[must_use]
+    pub fn performance_delivery_pending(&self) -> bool {
+        self.performance_pending.get()
+    }
+
+    /// Live `PerformanceObserver` registrations.
+    #[must_use]
+    pub fn performance_observer_count(&self) -> usize {
+        self.performance_observers.get()
+    }
+
+    /// Deliver the recorded entries to the observers watching their types.
+    ///
+    /// A page with no observer still drains, because the entries belong to
+    /// the buffer `performance.getEntries` reads whether anyone observes or
+    /// not, and leaving them in the sink would report them late.
+    pub fn deliver_performance_entries(&mut self) -> usize {
+        if !self.performance_pending.replace(false) {
+            return 0;
+        }
+        let ran = performance_timeline::deliver(&mut self.ctx);
+        self.run_pending_jobs();
+        ran
+    }
+
+    /// Records a callback that ran long enough to be a long task.
+    ///
+    /// Long Tasks defines the threshold at 50 ms, so a shorter callback
+    /// records nothing and the buffer holds the tasks a page would act on
+    /// rather than every callback the engine ran.
+    fn record_long_task(&self, name: &'static str, start: Instant, elapsed: Duration) {
+        let duration_ms = elapsed.as_secs_f64() * 1000.0;
+        if duration_ms < performance_timeline::LONG_TASK_THRESHOLD_MS {
+            return;
+        }
+        let _ = start;
+        self.record_performance_entry(
+            PerformanceEntryType::LongTask,
+            name,
+            monotonic_now_ms() - duration_ms,
+            duration_ms,
+        );
+    }
+
     pub fn request_layout_observation(&self) {
         if self.observation_count.get() == 0 {
             return;
@@ -1599,7 +1697,9 @@ impl SilkContext {
             if self.call_registered_callback(callback, &[])? {
                 ran += 1;
             }
-            trace_host_callback(trace_callbacks, callback, callback_start.elapsed());
+            let elapsed = callback_start.elapsed();
+            trace_host_callback(trace_callbacks, callback, elapsed);
+            self.record_long_task("timer", callback_start, elapsed);
         }
 
         let frame_timestamp = JsValue::from(self.frame_timestamp_ms());
@@ -1609,7 +1709,9 @@ impl SilkContext {
             if self.call_registered_callback(callback, std::slice::from_ref(&frame_timestamp))? {
                 ran += 1;
             }
-            trace_host_callback(trace_callbacks, callback, callback_start.elapsed());
+            let elapsed = callback_start.elapsed();
+            trace_host_callback(trace_callbacks, callback, elapsed);
+            self.record_long_task("animation-frame", callback_start, elapsed);
         }
         ran += self.drain_net_completions()?;
         ran += self.drain_ws_events()?;
@@ -1621,7 +1723,9 @@ impl SilkContext {
         }
         let jobs_start = Instant::now();
         self.run_pending_jobs();
-        trace_host_callback_jobs(trace_callbacks, jobs_start.elapsed());
+        let jobs_elapsed = jobs_start.elapsed();
+        trace_host_callback_jobs(trace_callbacks, jobs_elapsed);
+        self.record_long_task("promise-jobs", jobs_start, jobs_elapsed);
         Ok(ran)
     }
 
@@ -1849,6 +1953,14 @@ impl SilkContext {
         }
         let mut settled = 0;
         for completion in completions {
+            // The net queue already timed the fetch, so the resource entry
+            // reads what the request recorded rather than measuring again.
+            self.record_performance_entry(
+                PerformanceEntryType::Resource,
+                completion.url.clone(),
+                completion.started_ms,
+                monotonic_now_ms() - completion.started_ms,
+            );
             let resolvers =
                 take_net_resolvers(completion.id, &mut self.ctx).map_err(|err| format!("{err}"))?;
             let Some((resolve, reject)) = resolvers else {
@@ -2924,9 +3036,41 @@ fn performance_now(
     _args: &[JsValue],
     _ctx: &mut Context,
 ) -> boa_engine::JsResult<JsValue> {
+    Ok(JsValue::from(monotonic_now_ms()))
+}
+
+/// Fractional milliseconds since the process-wide monotonic epoch.
+///
+/// Every performance entry's `startTime` reads from here, so an entry the
+/// engine records and a `performance.now()` a page calls sit on one timeline
+/// and a page subtracting them gets a real elapsed time.
+#[must_use]
+pub fn monotonic_now_ms() -> f64 {
     static EPOCH: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
     let epoch = EPOCH.get_or_init(Instant::now);
-    Ok(JsValue::from(epoch.elapsed().as_secs_f64() * 1000.0))
+    epoch.elapsed().as_secs_f64() * 1000.0
+}
+
+/// The entry types the engine records against the performance timeline.
+///
+/// Each names instrumentation the engine already carries rather than a new
+/// measurement: a long task is a host callback the event loop timed, and a
+/// resource is a fetch the net queue timed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PerformanceEntryType {
+    LongTask,
+    Resource,
+}
+
+impl PerformanceEntryType {
+    /// The `entryType` string a page matches against.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PerformanceEntryType::LongTask => "longtask",
+            PerformanceEntryType::Resource => "resource",
+        }
+    }
 }
 
 // ---- XMLHttpRequest implementation -----------------------------------------
