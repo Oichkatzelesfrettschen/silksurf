@@ -1310,21 +1310,18 @@ impl SilkContext {
 
     /// Records a callback that ran long enough to be a long task.
     ///
-    /// Long Tasks defines the threshold at 50 ms, so a shorter callback
-    /// records nothing and the buffer holds the tasks a page would act on
-    /// rather than every callback the engine ran.
-    fn record_long_task(&self, name: &'static str, start: Instant, elapsed: Duration) {
+    /// `start_ms` is read before the callback rather than derived by
+    /// subtracting the duration from the recording instant, because the trace
+    /// call between the two skews a derived start late by its own cost. Long
+    /// Tasks defines the threshold at 50 ms, so a shorter callback records
+    /// nothing and the buffer holds the tasks a page would act on rather than
+    /// every callback the engine ran.
+    fn record_long_task(&self, name: &'static str, start_ms: f64, elapsed: Duration) {
         let duration_ms = elapsed.as_secs_f64() * 1000.0;
         if duration_ms < performance_timeline::LONG_TASK_THRESHOLD_MS {
             return;
         }
-        let _ = start;
-        self.record_performance_entry(
-            PerformanceEntryType::LongTask,
-            name,
-            monotonic_now_ms() - duration_ms,
-            duration_ms,
-        );
+        self.record_performance_entry(PerformanceEntryType::LongTask, name, start_ms, duration_ms);
     }
 
     pub fn request_layout_observation(&self) {
@@ -1693,25 +1690,27 @@ impl SilkContext {
         let mut ran = 0;
         let timer_callbacks = self.scheduler.borrow_mut().take_timer_callbacks(budget);
         for callback in timer_callbacks {
+            let callback_start_ms = monotonic_now_ms();
             let callback_start = Instant::now();
             if self.call_registered_callback(callback, &[])? {
                 ran += 1;
             }
             let elapsed = callback_start.elapsed();
             trace_host_callback(trace_callbacks, callback, elapsed);
-            self.record_long_task("timer", callback_start, elapsed);
+            self.record_long_task("timer", callback_start_ms, elapsed);
         }
 
         let frame_timestamp = JsValue::from(self.frame_timestamp_ms());
         let frame_callbacks = self.scheduler.borrow_mut().take_animation_frame_callbacks();
         for callback in frame_callbacks {
+            let callback_start_ms = monotonic_now_ms();
             let callback_start = Instant::now();
             if self.call_registered_callback(callback, std::slice::from_ref(&frame_timestamp))? {
                 ran += 1;
             }
             let elapsed = callback_start.elapsed();
             trace_host_callback(trace_callbacks, callback, elapsed);
-            self.record_long_task("animation-frame", callback_start, elapsed);
+            self.record_long_task("animation-frame", callback_start_ms, elapsed);
         }
         ran += self.drain_net_completions()?;
         ran += self.drain_ws_events()?;
@@ -1721,11 +1720,12 @@ impl SilkContext {
         if let Some(dom) = self.dom.clone() {
             mutation_observer::deliver_pending(&dom, &mut self.ctx);
         }
+        let jobs_start_ms = monotonic_now_ms();
         let jobs_start = Instant::now();
         self.run_pending_jobs();
         let jobs_elapsed = jobs_start.elapsed();
         trace_host_callback_jobs(trace_callbacks, jobs_elapsed);
-        self.record_long_task("promise-jobs", jobs_start, jobs_elapsed);
+        self.record_long_task("promise-jobs", jobs_start_ms, jobs_elapsed);
         Ok(ran)
     }
 

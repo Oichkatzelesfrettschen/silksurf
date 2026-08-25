@@ -447,3 +447,74 @@ fn every_supported_type_can_carry_an_entry() {
     .expect("every named type has an entry");
     check(&mut ctx, 4);
 }
+
+/// A callback the event loop timed becomes a long task entry, and its start
+/// time sits where the callback actually began.
+///
+/// Every other case here records entries directly, so this one is what
+/// exercises the engine's own path: `run_host_callbacks` times the callback
+/// and the entry reads that timing. The ordering assertion is the point --
+/// deriving the start by subtracting the duration from the recording instant
+/// places it after the callback truly began, because the trace call between
+/// the two costs its own time.
+#[test]
+fn a_slow_callback_records_a_long_task_where_it_began() {
+    let mut ctx = SilkContext::new();
+    ctx.eval(ASSERT).expect("harness");
+    ctx.eval(
+        r"
+        performance.mark('before');
+        setTimeout(function () {
+            performance.mark('entered');
+            var start = performance.now();
+            // Long Tasks sets the threshold at 50 ms, so the callback has to
+            // outrun it to be recorded at all.
+            while (performance.now() - start < 60) { /* busy */ }
+            performance.mark('left');
+        }, 0);
+        ",
+    )
+    .expect("schedule a slow callback");
+    ctx.run_host_callbacks(4).expect("the callback ran");
+    ctx.deliver_performance_entries();
+    ctx.eval(
+        r"
+        var tasks = performance.getEntriesByType('longtask');
+        eq(tasks.length, 1, 'one long task recorded');
+        eq(tasks[0].name, 'timer', 'the callback source');
+        eq(tasks[0].duration >= 50, true, 'it outran the threshold');
+
+        var before = performance.getEntriesByName('before')[0].startTime;
+        var entered = performance.getEntriesByName('entered')[0].startTime;
+        var left = performance.getEntriesByName('left')[0].startTime;
+        // The task began after the page scheduled it and no later than the
+        // callback's own first statement.
+        eq(tasks[0].startTime >= before, true, 'starts after scheduling');
+        eq(tasks[0].startTime <= entered, true, 'starts no later than the callback body');
+        // And it covers the work the callback did.
+        eq(tasks[0].startTime + tasks[0].duration >= left, true, 'covers the callback');
+        ",
+    )
+    .expect("the long task lands on the timeline");
+    check(&mut ctx, 6);
+}
+
+/// A callback under the threshold records nothing, so the buffer holds the
+/// tasks a page would act on rather than every callback the engine ran.
+#[test]
+fn a_quick_callback_records_no_long_task() {
+    let mut ctx = SilkContext::new();
+    ctx.eval(ASSERT).expect("harness");
+    ctx.eval("setTimeout(function () { performance.mark('quick'); }, 0);")
+        .expect("schedule");
+    ctx.run_host_callbacks(4).expect("the callback ran");
+    ctx.deliver_performance_entries();
+    ctx.eval(
+        r"
+        eq(performance.getEntriesByName('quick').length, 1, 'the callback ran');
+        eq(performance.getEntriesByType('longtask').length, 0, 'no long task');
+        ",
+    )
+    .expect("nothing recorded");
+    check(&mut ctx, 2);
+}
