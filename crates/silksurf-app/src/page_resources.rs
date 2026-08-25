@@ -774,6 +774,7 @@ pub(crate) fn append_image_display_items(
     fused: &FusedResult,
     base_url: &str,
     images: &[DecodedPageImage],
+    svg_cache: &mut SvgSurfaceCache,
     items: &mut Vec<silksurf_render::DisplayItem>,
 ) {
     for &node in &fused.table.bfs_order {
@@ -800,7 +801,75 @@ pub(crate) fn append_image_display_items(
                 continue;
             }
             items.push(silksurf_render::DisplayItem::Image { rect, image });
+        } else if let Some(rect) = svg_paint_rect(dom, fused, node) {
+            let Some(surface) = svg_cache.surface(dom, node, rect) else {
+                continue;
+            };
+            items.push(silksurf_render::DisplayItem::Image {
+                rect,
+                image: surface,
+            });
         }
+    }
+}
+
+/// The device-pixel box an `<svg>` element paints into, when it has one.
+fn svg_paint_rect(
+    dom: &silksurf_dom::Dom,
+    fused: &FusedResult,
+    node: silksurf_dom::NodeId,
+) -> Option<silksurf_layout::Rect> {
+    if dom.element_name(node).ok().flatten() != Some("svg") {
+        return None;
+    }
+    let rect = fused_node_rect(fused, node)?;
+    (rect.width > 0.0 && rect.height > 0.0).then_some(rect)
+}
+
+/// Rasterized `<svg>` subtrees, keyed by the node and the box it paints into.
+///
+/// Serializing a subtree and running it through usvg costs far more than
+/// blitting the result, and an icon's geometry changes only when the tree or
+/// its box does. The DOM's structure and style generations answer both, so a
+/// generation that moved clears the cache rather than each entry proving
+/// itself.
+#[derive(Default)]
+pub(crate) struct SvgSurfaceCache {
+    entries: std::collections::HashMap<(silksurf_dom::NodeId, u32, u32), CachedSvg>,
+    structure_generation: u64,
+    style_generation: u64,
+}
+
+/// One cache entry, holding nothing when usvg rejected the subtree.
+///
+/// A rejection is worth remembering: retrying it every frame costs the parse
+/// each time and yields the same nothing.
+type CachedSvg = Option<silksurf_render::ImageSurface>;
+
+impl SvgSurfaceCache {
+    /// The surface an `<svg>` node paints, rasterizing it when absent.
+    pub(crate) fn surface(
+        &mut self,
+        dom: &silksurf_dom::Dom,
+        node: silksurf_dom::NodeId,
+        rect: silksurf_layout::Rect,
+    ) -> Option<silksurf_render::ImageSurface> {
+        let structure = dom.structure_generation();
+        let style = dom.style_generation();
+        if structure != self.structure_generation || style != self.style_generation {
+            self.entries.clear();
+            self.structure_generation = structure;
+            self.style_generation = style;
+        }
+        let width = rect.width.round().max(1.0) as u32;
+        let height = rect.height.round().max(1.0) as u32;
+        self.entries
+            .entry((node, width, height))
+            .or_insert_with(|| {
+                let source = silksurf_render::svg::serialize_svg(dom, node)?;
+                silksurf_render::svg::rasterize_svg(&source, width, height)
+            })
+            .clone()
     }
 }
 
@@ -816,6 +885,28 @@ fn canvas_surface_image(
         width: surface.width(),
         height: surface.height(),
         rgba: std::sync::Arc::from(surface.pixels()),
+    })
+}
+
+/// The box an inline `<svg>` occupies before its own CSS sizing applies.
+///
+/// An `<svg>` is a replaced element, so layout needs an intrinsic size for it
+/// the way it needs one for an image. The width and height presentation
+/// attributes supply it when present and the `viewBox` extent otherwise,
+/// which is the only intrinsic size an icon defined in user units carries.
+/// An `<svg>` with neither reaches layout as an ordinary box.
+pub(crate) fn svg_replaced_size_for_node(
+    dom: &silksurf_dom::Dom,
+    node: silksurf_dom::NodeId,
+) -> Option<ReplacedSize> {
+    if dom.element_name(node).ok().flatten() != Some("svg") {
+        return None;
+    }
+    let (width, height) = silksurf_render::svg::svg_intrinsic_size(dom, node)?;
+    Some(ReplacedSize {
+        node,
+        width,
+        height,
     })
 }
 
@@ -838,6 +929,8 @@ pub(crate) fn collect_image_replaced_sizes_for_node(
     sizes: &mut Vec<ReplacedSize>,
 ) {
     if let Some(size) = image_replaced_size_for_node(dom, node, base_url, images) {
+        sizes.push(size);
+    } else if let Some(size) = svg_replaced_size_for_node(dom, node) {
         sizes.push(size);
     }
     if let Ok(children) = dom.children(node) {
@@ -1072,7 +1165,14 @@ mod tests {
             &replaced,
         );
         let mut items = fused.display_items.clone();
-        append_image_display_items(&dom, &fused, "http://example.test/", &[], &mut items);
+        append_image_display_items(
+            &dom,
+            &fused,
+            "http://example.test/",
+            &[],
+            &mut SvgSurfaceCache::default(),
+            &mut items,
+        );
 
         let canvas_image = items.iter().find_map(|item| match item {
             silksurf_render::DisplayItem::Image { rect, image } => Some((rect, image)),
@@ -1137,6 +1237,7 @@ mod tests {
             &fused,
             "https://example.com/page",
             &images,
+            &mut SvgSurfaceCache::default(),
             &mut items,
         );
 
@@ -1359,5 +1460,114 @@ mod tests {
         )];
         let budget = module_fetch_budget(&fetched);
         assert_eq!(budget.bytes, 0, "an overspent allowance floors at zero");
+    }
+
+    /// The first `<svg>` element in a tree.
+    fn find_svg(
+        dom: &silksurf_dom::Dom,
+        node: silksurf_dom::NodeId,
+    ) -> Option<silksurf_dom::NodeId> {
+        if dom.element_name(node).ok().flatten() == Some("svg") {
+            return Some(node);
+        }
+        dom.children(node)
+            .ok()?
+            .to_vec()
+            .into_iter()
+            .find_map(|child| find_svg(dom, child))
+    }
+
+    const PAGE: &str = concat!(
+        "<!DOCTYPE html><html><body>",
+        "<svg viewBox=\"0 0 4 4\" width=\"16\" height=\"16\">",
+        "<rect x=\"0\" y=\"0\" width=\"4\" height=\"4\" fill=\"#00ff00\"/>",
+        "</svg></body></html>"
+    );
+
+    /// An `<svg>` is a replaced element, so layout takes an intrinsic size
+    /// from its presentation attributes the way it does for an image.
+    #[test]
+    fn an_svg_reports_a_replaced_size_to_layout() {
+        let dom = silksurf_engine::parse_html(PAGE).expect("parses").dom;
+        let svg = find_svg(&dom, silksurf_dom::NodeId::from_raw(0)).expect("svg");
+        let size = svg_replaced_size_for_node(&dom, svg).expect("replaced size");
+        assert!((size.width - 16.0).abs() < f32::EPSILON, "{}", size.width);
+        assert!((size.height - 16.0).abs() < f32::EPSILON, "{}", size.height);
+    }
+
+    /// An `<svg>` with neither sizing attributes nor a viewBox has no
+    /// intrinsic size, so it reaches layout as an ordinary box.
+    #[test]
+    fn an_unsized_svg_reports_no_replaced_size() {
+        let dom =
+            silksurf_engine::parse_html("<!DOCTYPE html><html><body><svg></svg></body></html>")
+                .expect("parses")
+                .dom;
+        let svg = find_svg(&dom, silksurf_dom::NodeId::from_raw(0)).expect("svg");
+        assert!(svg_replaced_size_for_node(&dom, svg).is_none());
+    }
+
+    /// The cache rasterizes once per node and box, and hands back the same
+    /// pixels afterwards rather than parsing the subtree again.
+    #[test]
+    fn the_cache_rasterizes_once_and_reuses_the_surface() {
+        let dom = silksurf_engine::parse_html(PAGE).expect("parses").dom;
+        let svg = find_svg(&dom, silksurf_dom::NodeId::from_raw(0)).expect("svg");
+        let rect = silksurf_layout::Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 16.0,
+            height: 16.0,
+        };
+        let mut cache = SvgSurfaceCache::default();
+        let first = cache.surface(&dom, svg, rect).expect("rasterized");
+        assert_eq!(cache.entries.len(), 1);
+
+        let second = cache.surface(&dom, svg, rect).expect("rasterized");
+        assert_eq!(cache.entries.len(), 1, "a second read rasterized again");
+        assert!(
+            std::sync::Arc::ptr_eq(&first.rgba, &second.rgba),
+            "the cache handed back different pixels"
+        );
+
+        // The fill reaches the middle of the box at its own color.
+        let center = ((8 * 16 + 8) * 4) as usize;
+        assert_eq!(&first.rgba[center..center + 4], &[0, 255, 0, 255]);
+    }
+
+    /// A different box is a different rasterization, because the tree maps
+    /// its viewBox onto whatever extent layout gave it.
+    #[test]
+    fn a_different_box_rasterizes_separately() {
+        let dom = silksurf_engine::parse_html(PAGE).expect("parses").dom;
+        let svg = find_svg(&dom, silksurf_dom::NodeId::from_raw(0)).expect("svg");
+        let mut cache = SvgSurfaceCache::default();
+        let small = cache
+            .surface(
+                &dom,
+                svg,
+                silksurf_layout::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 8.0,
+                    height: 8.0,
+                },
+            )
+            .expect("rasterized");
+        let large = cache
+            .surface(
+                &dom,
+                svg,
+                silksurf_layout::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 32.0,
+                    height: 32.0,
+                },
+            )
+            .expect("rasterized");
+        assert_eq!(small.width, 8);
+        assert_eq!(large.width, 32);
+        assert_eq!(cache.entries.len(), 2);
     }
 }

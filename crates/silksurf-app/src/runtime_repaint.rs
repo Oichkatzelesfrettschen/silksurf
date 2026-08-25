@@ -396,6 +396,7 @@ fn repaint_runtime_document(
         &new_fused,
         &frame.url,
         &runtime.images,
+        &mut runtime.svg_cache,
         &mut display_list.items,
     );
     frame.link_targets = collect_link_targets(&dom, &display_list.items, &frame.url);
@@ -1368,6 +1369,7 @@ mod tests {
                 input_targets: Vec::new(),
             },
             runtime: Some(BrowserPageRuntime {
+                svg_cache: crate::page_resources::SvgSurfaceCache::default(),
                 timeline_origin: std::time::Instant::now(),
                 sheets: StyleSheetSet::empty("https://example.com/"),
                 cssom: Arc::new(Mutex::new(silksurf_css::SheetSet::new())),
@@ -1494,6 +1496,7 @@ mod tests {
                 input_targets: Vec::new(),
             },
             runtime: Some(BrowserPageRuntime {
+                svg_cache: crate::page_resources::SvgSurfaceCache::default(),
                 timeline_origin: std::time::Instant::now(),
                 sheets: StyleSheetSet::empty("https://example.com/"),
                 cssom: Arc::new(Mutex::new(silksurf_css::SheetSet::new())),
