@@ -30,6 +30,12 @@ pub(super) enum NetPayload {
 pub(super) struct NetCompletion {
     pub(super) id: u64,
     pub(super) payload: NetPayload,
+    /// The request's URL, which names the `resource` performance entry.
+    pub(super) url: String,
+    /// When the worker began the fetch, on the same monotonic clock
+    /// `performance.now()` reads, so the entry's start time and a page's own
+    /// timestamps sit on one timeline.
+    pub(super) started_ms: f64,
 }
 
 pub(super) struct NetShared {
@@ -92,6 +98,8 @@ pub(super) fn spawn_request(
     tx: Sender<NetCompletion>,
     request: silksurf_net::HttpRequest,
 ) {
+    let url = request.url.clone();
+    let started_ms = super::monotonic_now_ms();
     std::thread::spawn(move || {
         use silksurf_net::{BasicClient, NetClient};
         let payload = match BasicClient::new().fetch(&request) {
@@ -100,6 +108,11 @@ pub(super) fn spawn_request(
         };
         // A send failure means the SilkContext (and its realm) is gone;
         // the completion has no destination and the thread just exits.
-        let _ = tx.send(NetCompletion { id, payload });
+        let _ = tx.send(NetCompletion {
+            id,
+            payload,
+            url,
+            started_ms,
+        });
     });
 }

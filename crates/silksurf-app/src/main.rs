@@ -194,7 +194,9 @@ fn run_winit_browser_page(
         // A scroll marks the observation checkpoint and arms no timer, so an
         // otherwise idle page wakes now rather than sleeping through the
         // delivery its observers are waiting for.
-        if runtime.js_ctx.layout_observation_pending() {
+        if runtime.js_ctx.layout_observation_pending()
+            || runtime.js_ctx.performance_delivery_pending()
+        {
             return Some(std::time::Instant::now());
         }
         // An animation whose value still changes with time needs the next

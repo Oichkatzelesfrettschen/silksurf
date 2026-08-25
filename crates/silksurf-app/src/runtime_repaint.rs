@@ -101,7 +101,14 @@ pub(crate) fn repaint_runtime_host_callbacks(
     frame: &mut BrowserFrame,
 ) -> Result<Option<BrowserRedrawMode>, String> {
     let redraw_mode = repaint_runtime_pending_work(runtime, frame)?;
-    if runtime.js_ctx.deliver_layout_observations() == 0 {
+    // Performance entries deliver at the same checkpoint the layout
+    // observations do, because both report what the frame just did. The
+    // entries drain whether an observer watches or not: they belong to the
+    // buffer performance.getEntries reads, and leaving them in the sink would
+    // report them late to a buffered observer constructed next frame.
+    let observations = runtime.js_ctx.deliver_layout_observations();
+    let entries = runtime.js_ctx.deliver_performance_entries();
+    if observations == 0 && entries == 0 {
         return Ok(redraw_mode);
     }
     let after_callbacks = repaint_runtime_pending_work(runtime, frame)?;
