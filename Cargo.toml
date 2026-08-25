@@ -81,6 +81,13 @@ html5ever = "0.38"
 # CPU-only 2D rasterizer (Skia subset, pure Rust). Used by silksurf-render
 # for anti-aliased path fill via PixmapMut::from_bytes wrapping the tile buffer.
 tiny-skia = "0.12"
+# SVG parsing and rasterization onto the same tiny-skia backend
+# silksurf-render already draws through. Default features carry usvg's text
+# support, which pulls rustybuzz and fontdb; silksurf shapes its own text and
+# the corpus SVG is icon geometry, so the text feature stays off and the tree
+# drops from 61 transitive crates to 34.
+usvg = { version = "0.48", default-features = false }
+resvg = { version = "0.48", default-features = false }
 png = "0.18"
 image-webp = "0.2"
 zune-core = "0.5"

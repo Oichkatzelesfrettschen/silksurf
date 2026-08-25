@@ -12,6 +12,8 @@ silksurf-layout = { path = "../silksurf-layout" }
 rustc-hash = { workspace = true }
 rayon = { workspace = true, optional = true }
 tiny-skia = { workspace = true }
+usvg = { workspace = true }
+resvg = { workspace = true }
 silksurf-text = { path = "../silksurf-text" }
 
 [features]
@@ -19,6 +21,7 @@ default = []
 parallel = ["rayon"]
 [dev-dependencies]
 silksurf-core = { path = "../silksurf-core" }
+silksurf-html = { path = "../silksurf-html" }
 
 [lints]
 workspace = true
