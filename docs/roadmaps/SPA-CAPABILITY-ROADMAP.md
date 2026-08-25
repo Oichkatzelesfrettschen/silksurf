@@ -848,20 +848,24 @@ Named cuts, each with the mechanism that closes it:
   `silksurf_css::style::apply_declaration` reaches cyclomatic complexity 105
   and `resolve` 19, both above the 16 the workflow sets, because every
   property in the crate adds an arm to the same two functions.
-- animation-and-transition -- the `animation-*` and `transition` longhands
-  parse to nothing and `@keyframes` blocks flatten out of the cascade, so an
-  animated element keeps the style the cascade computed for it. Deferred
-  behind dynamic-import-fetch on measurement: chatgpt.com's author sheet
-  carries 8 `animation` declarations, 1 `transition`, and 5 `@keyframes`
-  blocks, and none of the animation-bearing selectors matches the captured
-  document, against 558 `import(` sites in the same page's bundles. Two
-  findings survive for whoever takes it. The event loop already sleeps on a
-  deadline that JS timers and stylesheet fetches both feed
-  (`with_host_work_deadline`, crates/silksurf-app/src/main.rs:170), so an
-  animation is another deadline source rather than a new clock. Fill is the
-  trap: `mobile-empty-composer-action-enter` declares `both` fill over a 0%
-  keyframe of `opacity: 0`, so implementing fill-backwards without advancing
-  the clock hides an element that renders correctly today.
+- animation-and-transition -- AD-039 takes it. Measurement put it last and
+  then reshaped it: the corpus carries six real `animation` declarations, six
+  `@keyframes` rules, and one three-component `transition`, and between them
+  the keyframes animate `opacity`, `transform`, `visibility`, and `color`
+  alone. Every transform pair carries the same functions in the same order,
+  so componentwise interpolation covers all of them. Two findings the earlier
+  entry recorded both held. The event loop already sleeps on a deadline
+  (`with_host_work_deadline`, crates/silksurf-app/src/main.rs), so an
+  animation is another deadline source rather than a new clock, and it feeds
+  that deadline only while its value still changes. Fill is the trap
+  `mobile-empty-composer-action-enter` sets, and fill ships with the clock in
+  one commit for that reason. A third finding the entry did not have: a
+  keyframe selector is its own grammar, and reading `50%` through the
+  selector parser yields an empty selector list, so the offsets survived
+  nowhere. Cuts named by AD-039: `transition-value-tracking`,
+  `animation-longhands`, `animation-start-time-per-element`,
+  `animatable-property-set`, `transform-matrix-interpolation`,
+  `animation-play-state-and-events`.
 
 ## Verification checklist (applies to every workstream)
 
