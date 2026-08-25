@@ -3196,6 +3196,116 @@ dominant remaining term: 37,636 pixel reads for a 44 px element at
 
 ---
 
+## AD-039: Animations Sample Per Property at a Gated Document Timeline
+
+**Status**: Accepted
+**Date**: 2026-08-24
+**Deciders**: Public web page load repairs
+
+### Context
+
+The `animation-*` and `transition` longhands parsed to nothing and
+`@keyframes` blocks left the cascade, so an animated element kept the style
+the cascade computed for it.
+
+The captured corpus carries six real `animation` declarations against three
+`animation: none`, six `@keyframes` rules, and one `transition` of three
+components. Between them the keyframes animate four properties: `opacity`,
+`transform`, `visibility`, and `color`. Every transform pair carries the same
+functions in the same order -- `translate` to `translate`, `scale` to
+`scale`, `scale rotate` to `scale rotate` -- so componentwise interpolation
+covers all of them.
+
+Two of the six are `infinite`, which puts an ungated animation clock in
+direct tension with the low idle CPU the browser profile requires.
+
+### Decision
+
+A keyframe selector is its own production in CSS Animations 1, a list of
+percentages plus `from` and `to`, rather than a CSS selector. Reading one
+through the selector parser destroys it: `50%` yields an empty selector list
+and `0%, to` keeps only the `to`. `AtRuleBlock::Keyframes` carries a grammar
+of its own, and `StyleIndex` keys the rules by name where a later rule of one
+name replaces the earlier.
+
+The sampler brackets per property rather than per offset, because CSS
+Animations 1 gives each property its own keyframe list. An endpoint no block
+declares takes the element's own computed value, which is the implicit
+keyframe that makes the corpus rule declaring only `50% { opacity: 0 }` a
+blink rather than a fade in from nothing.
+
+`style_with_declarations` resolves a keyframe block over a base style and
+keeps every property the block leaves alone at the base value, because
+resolving a block on its own reaches the initial value for each
+non-inherited property.
+
+An animation feeds the event loop only while its value still changes. One
+held past its last iteration by a fill mode contributes a value and never a
+different one, so the loop sleeps; an infinite one always wakes it at 60 Hz,
+which is the finest cadence a sampled animation can present at. An animation
+whose selector matches no element never reaches the sampler, so it costs the
+loop nothing.
+
+Fill and the clock land together rather than in sequence. The corpus rule
+`mobile-empty-composer-action-enter` declares `both` fill over a 0% keyframe
+of `opacity: 0`, so a fill implemented without advancing time hides an
+element that renders correctly while animations are ignored.
+
+The shorthand list splits on parenthesis depth. A comma inside a function
+separates that function's arguments rather than the list, so splitting on
+every comma cuts the corpus `cubic-bezier(.2,0,0,1)` into four components and
+drops the declaration.
+
+### Consequences
+
+`animation` and `transition` parse, `@keyframes` reaches a registry, and the
+fused style pass samples every running animation each frame.
+
+Thirty-one tests cover the work: seven over the shorthand grammars and the
+easing curves, six over the keyframe registry, nine over the sampler, six
+over the timeline through the pipeline, and the existing assertion that
+keyframe blocks stay out of the selector cascade, which still holds because
+the registry is not a selection path. Disabling the implicit-endpoint path,
+forcing the advance flag true, and dropping the sampling-scale divisor were
+each confirmed to fail a specific assertion.
+
+The idle-cost claim rests on a rank-2 oracle rather than a measurement:
+`an_animation_matching_no_element_never_advances_the_loop` asserts that an
+unmatched animation leaves the deadline untouched. A live idle-CPU trace over
+the captured document is `not run`.
+
+Six pieces are cut by name.
+
+`transition-value-tracking` records that `transition` parses to a value no
+frame reads. A transition starts from a change in a computed value rather
+than from a timeline, so it needs the previous value retained per element and
+per property, which is a different mechanism from the keyframe sampler.
+
+`animation-longhands` records that the `animation-*` and `transition-*`
+longhands reach no `PropertyId`. The corpus stylesheet declares none, though
+its bundles write `animationDuration`, `animationFillMode`, and
+`animationIterationCount` through CSSOM, which also needs the camelCase
+mapping.
+
+`animation-start-time-per-element` records that every animation measures from
+the document timeline origin, so an element added to the tree later starts
+its animation partway through rather than at its beginning.
+
+`animatable-property-set` records that the sampler interpolates `opacity`,
+`color`, `background-color`, `border-color`, `transform`, `visibility`, and
+`border-radius`. A keyframe naming any other property applies it discretely
+through the cascade rather than interpolating it.
+
+`transform-matrix-interpolation` records that transform lists which disagree
+in length or function order step at the midpoint rather than interpolating
+their decomposed matrices.
+
+`animation-play-state-and-events` records that `animation-play-state` parses
+to nothing and that `animationstart`, `animationend`, and `animationiteration`
+never fire.
+
+---
+
 ## Future ADRs
 
 Planned (renumbered after the 2026-04-30 batch):

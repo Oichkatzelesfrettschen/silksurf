@@ -367,6 +367,14 @@ pub(crate) struct BrowserPageRuntime {
     pub(crate) rgba: Vec<u8>,
     pub(crate) damage_scratch: silksurf_render::DamageScratch,
     pub(crate) viewport_item_indices: Vec<usize>,
+    /// When this document's animation timeline began.
+    ///
+    /// Every animation on the page measures its delay and iterations from
+    /// here, so a `@keyframes` rule the cascade attaches at page build starts
+    /// with the document. The roadmap carries the per-element start time an
+    /// element added later would need as
+    /// `animation-start-time-per-element`.
+    pub(crate) timeline_origin: std::time::Instant,
 }
 
 pub(crate) struct BrowserState {

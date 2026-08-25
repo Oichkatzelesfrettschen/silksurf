@@ -122,7 +122,37 @@ fn write_at_rule(rule: &AtRule, out: &mut String) {
             }
             out.push('}');
         }
+        Some(AtRuleBlock::Keyframes(blocks)) => {
+            out.push_str(" { ");
+            for block in blocks {
+                write_keyframe(block, out);
+                out.push(' ');
+            }
+            out.push('}');
+        }
     }
+}
+
+/// Serializes one keyframe block.
+///
+/// CSSOM spells every offset as a percentage, so `from` and `to` come back as
+/// `0%` and `100%` rather than as the keywords the author wrote.
+fn write_keyframe(block: &crate::parser::Keyframe, out: &mut String) {
+    use std::fmt::Write as _;
+    for (index, offset) in block.offsets.iter().enumerate() {
+        if index > 0 {
+            out.push_str(", ");
+        }
+        let percent = offset * 100.0;
+        if (percent - percent.round()).abs() < f32::EPSILON {
+            let _ = write!(out, "{}%", percent.round() as i32);
+        } else {
+            let _ = write!(out, "{percent}%");
+        }
+    }
+    out.push_str(" { ");
+    write_declaration_block(&block.declarations, out);
+    out.push('}');
 }
 
 fn write_selector_list(list: &SelectorList, out: &mut String) {

@@ -491,6 +491,7 @@ pub(crate) fn build_browser_page_with_buffers_for_window(
             input_targets,
         },
         runtime: BrowserPageRuntime {
+            timeline_origin: std::time::Instant::now(),
             dom: dom_arc,
             document: doc_node,
             stylesheet,

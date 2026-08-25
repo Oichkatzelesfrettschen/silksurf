@@ -38,6 +38,23 @@ pub struct AtRule {
 pub enum AtRuleBlock {
     Rules(Vec<Rule>),
     Declarations(Vec<Declaration>),
+    /// The blocks of a `@keyframes` rule.
+    ///
+    /// A keyframe selector is its own grammar in CSS Animations 1, a list of
+    /// percentages plus `from` and `to`, rather than a CSS selector. Reading
+    /// one through the selector parser destroys it: `50%` yields an empty
+    /// selector list and `0%, to` keeps only the `to`, so the offsets each
+    /// block applies at survive nowhere.
+    Keyframes(Vec<Keyframe>),
+}
+
+/// One block inside a `@keyframes` rule.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Keyframe {
+    /// The offsets in [0.0, 1.0] these declarations apply at, ascending. A
+    /// keyframe selector is a list, so `0%, to` carries two.
+    pub offsets: Vec<f32>,
+    pub declarations: Vec<Declaration>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -439,6 +456,9 @@ fn block_opens_nested_block(tokens: &[CssToken]) -> bool {
 }
 
 fn parse_at_rule_block(name: &str, tokens: Vec<CssToken>, depth: usize) -> AtRuleBlock {
+    if strip_vendor_prefix(&name.to_ascii_lowercase()) == "keyframes" {
+        return AtRuleBlock::Keyframes(parse_keyframe_blocks(&tokens));
+    }
     if !at_rule_block_holds_rules(name, &tokens) {
         return AtRuleBlock::Declarations(parse_declarations(&tokens));
     }
@@ -447,6 +467,74 @@ fn parse_at_rule_block(name: &str, tokens: Vec<CssToken>, depth: usize) -> AtRul
     }
     let mut parser = CssParser::with_depth(tokens, depth);
     AtRuleBlock::Rules(parser.parse_stylesheet().rules)
+}
+
+/// Splits a `@keyframes` body into its blocks.
+///
+/// Each block is a keyframe selector list followed by a declaration block, so
+/// the scan accumulates a prelude until `{` and reads declarations from the
+/// braces that follow. A block whose selector names no valid offset is
+/// dropped, which is what CSS Animations 1 does with an invalid keyframe
+/// selector.
+fn parse_keyframe_blocks(tokens: &[CssToken]) -> Vec<Keyframe> {
+    let mut blocks = Vec::new();
+    let mut prelude_start = 0usize;
+    let mut index = 0usize;
+    while index < tokens.len() {
+        if !matches!(tokens[index], CssToken::CurlyOpen) {
+            index += 1;
+            continue;
+        }
+        let body_start = index + 1;
+        let mut depth = 1usize;
+        let mut cursor = body_start;
+        while cursor < tokens.len() && depth > 0 {
+            match tokens[cursor] {
+                CssToken::CurlyOpen => depth += 1,
+                CssToken::CurlyClose => depth -= 1,
+                _ => {}
+            }
+            cursor += 1;
+        }
+        let body_end = cursor.saturating_sub(1);
+        let offsets = keyframe_offsets(&tokens[prelude_start..index]);
+        if !offsets.is_empty() {
+            blocks.push(Keyframe {
+                offsets,
+                declarations: parse_declarations(&tokens[body_start..body_end]),
+            });
+        }
+        index = cursor;
+        prelude_start = cursor;
+    }
+    blocks
+}
+
+/// Reads a keyframe selector list into ascending offsets in [0.0, 1.0].
+///
+/// `from` and `to` are the spelled forms of 0% and 100%. An offset outside
+/// the range makes the whole selector invalid, so the block it introduces
+/// carries no offsets and is dropped.
+fn keyframe_offsets(tokens: &[CssToken]) -> Vec<f32> {
+    let mut offsets = Vec::new();
+    for token in tokens {
+        let offset = match token {
+            CssToken::Percentage(value) => match value.parse::<f32>() {
+                Ok(percent) => percent / 100.0,
+                Err(_) => return Vec::new(),
+            },
+            CssToken::Ident(name) if name.eq_ignore_ascii_case("from") => 0.0,
+            CssToken::Ident(name) if name.eq_ignore_ascii_case("to") => 1.0,
+            CssToken::Whitespace | CssToken::Comma => continue,
+            _ => return Vec::new(),
+        };
+        if !(0.0..=1.0).contains(&offset) {
+            return Vec::new();
+        }
+        offsets.push(offset);
+    }
+    offsets.sort_by(f32::total_cmp);
+    offsets
 }
 
 fn parse_bounded_selector_list(tokens: Vec<CssToken>, max_tokens: usize) -> SelectorList {
