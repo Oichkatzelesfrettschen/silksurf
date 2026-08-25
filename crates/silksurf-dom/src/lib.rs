@@ -276,6 +276,24 @@ impl AttributeName {
         }
     }
 
+    /// Reads an attribute name for an element in `namespace`.
+    ///
+    /// HTML matches attribute names case-insensitively, so an author writing
+    /// `CLASS` reaches the same attribute as `class`. Foreign content does
+    /// not: SVG defines `viewBox`, `preserveAspectRatio`, `gradientTransform`,
+    /// and `clipPathUnits` with camel case, and lowercasing one produces a
+    /// different attribute that no SVG consumer reads. A name that matches a
+    /// known attribute keeps its interned variant either way, because the
+    /// names SVG shares with HTML are lowercase in both.
+    #[must_use]
+    pub fn from_str_in(name: &str, namespace: &Namespace) -> Self {
+        let known = Self::from_str(name);
+        if matches!(namespace, Namespace::Html) || !matches!(known, AttributeName::Custom(_)) {
+            return known;
+        }
+        AttributeName::Custom(SmallString::from(name))
+    }
+
     #[must_use]
     pub fn as_str(&self) -> &str {
         match self {
@@ -783,7 +801,7 @@ impl Dom {
     ) -> Result<(), DomError> {
         let name = name.into();
         let value = value.into();
-        let attr_name = AttributeName::from_str(&name);
+        let attr_name = AttributeName::from_str_in(&name, &self.element_namespace(id));
         let value: SmallString = value.into();
         let (value_atom, value_atoms, class_strings) = match attr_name {
             AttributeName::Class => {
@@ -844,13 +862,28 @@ impl Dom {
         }
     }
 
+    /// The namespace an element node carries, defaulting to HTML.
+    ///
+    /// A non-element node has no attributes to name, so the default keeps the
+    /// case-insensitive HTML rule for every caller that reaches one.
+    #[must_use]
+    pub fn element_namespace(&self, id: NodeId) -> Namespace {
+        let Ok(index) = self.node_index(id) else {
+            return Namespace::Html;
+        };
+        match &self.nodes[index].kind {
+            NodeKind::Element { namespace, .. } => namespace.clone(),
+            _ => Namespace::Html,
+        }
+    }
+
     pub fn remove_attribute(
         &mut self,
         id: NodeId,
         name: impl Into<String>,
     ) -> Result<bool, DomError> {
         let name = name.into();
-        let attr_name = AttributeName::from_str(&name);
+        let attr_name = AttributeName::from_str_in(&name, &self.element_namespace(id));
         let index = self.node_index(id)?;
         let old = self.attribute_snapshot(id, &name);
         match &mut self.nodes[index].kind {
@@ -938,7 +971,7 @@ impl Dom {
     /// carry it as the old value.
     fn attribute_snapshot(&self, id: NodeId, name: &str) -> Option<String> {
         let index = self.node_index(id).ok()?;
-        let attr_name = AttributeName::from_str(name);
+        let attr_name = AttributeName::from_str_in(name, &self.element_namespace(id));
         match &self.nodes[index].kind {
             NodeKind::Element { attributes, .. } => attributes
                 .iter()
