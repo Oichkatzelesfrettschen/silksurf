@@ -411,8 +411,20 @@ separately-landable follow-up):
   tree dirties nodes the repaint pass already drained, so one further pass
   runs; a callback that mutates on every delivery reaches its second pass and
   then waits for the next frame.
-- performance-observer -- PerformanceObserver is undefined across 8
-  constructions and needs performance entries the engine does not collect.
+- performance-observer -- AD-041 takes it. Measuring the surface around the
+  observer changed what the cut is: the same bundles call `performance.now`
+  183 times, `getEntriesByType` 17, `getEntriesByName` 10, `mark` 9, and
+  `measure` 4, and mark and measure were installed as explicit no-ops, so the
+  timeline the observers watch is the larger surface. `buffered: true`
+  appears twice among the eight observe calls, which means the buffer has to
+  fill from the time origin independent of any observer -- one built over an
+  empty buffer delivers nothing while every test of it passes. The entries
+  come from instrumentation the engine already carries: `run_host_callbacks`
+  times every callback and the job drain, which is what a long task is, and
+  the net queue records when each fetch started, which is what a resource
+  entry reports. Cuts named by AD-041: `performance-event-timing`,
+  `performance-layout-shift`, `performance-navigation-and-paint`,
+  `performance-resource-timing-detail`, `performance-buffer-bounds`.
 - mutation-observer-record-coalescing -- a browser reports one childList
   record per tree operation while the queue reports one per mutator call, so
   an operation reaching the tree as several calls reports several records.

@@ -3406,6 +3406,112 @@ the device resolution.
 
 ---
 
+## AD-041: The Performance Buffer Fills From Existing Instrumentation
+
+**Status**: Accepted
+**Date**: 2026-08-24
+**Deciders**: Public web page load repairs
+
+### Context
+
+`PerformanceObserver` is undefined across 8 constructions, the last of the
+five observer APIs the corpus builds. Measuring the surface around it changes
+what the cut is: the same bundles call `performance.now` 183 times,
+`getEntriesByType` 17, `getEntriesByName` 10, `mark` 9, `timeOrigin` 16, and
+`measure` 4, and `mark` and `measure` were installed as explicit no-ops. The
+timeline the observers watch is a larger surface than the observers.
+
+`buffered: true` appears twice among the eight `observe` calls. Those
+observers ask for entries recorded before they were constructed, so the
+buffer has to fill from the time origin independent of any observer. An
+observer built over an empty buffer delivers nothing while every test of it
+passes.
+
+The entry types the corpus observes are `longtask`, `layout-shift`, `mark`,
+`resource`, `first-input`, and `event`, plus two built from a computed
+expression, which are feature-detection results.
+
+### Decision
+
+The buffer fills whether an observer watches or not, and the observer
+registry sits on top of it.
+
+Entries come from two directions. `mark` and `measure` are the page's own and
+the JS half owns them, because a page reads them back as objects with a
+`detail` it supplied. The rest come from instrumentation the engine already
+carries rather than new measurement. `run_host_callbacks` times every timer
+callback, every animation-frame callback, and the job drain, which is what a
+long task is; the net queue records when each fetch started, which is what a
+resource entry reports. Those call sites gain a second consumer, so the
+timeline costs the engine an `Rc<RefCell<Vec<_>>>` push rather than a
+measurement pass.
+
+Every entry's `startTime` reads from the same monotonic epoch
+`performance.now()` counts from, so a page subtracting one from the other
+gets a real elapsed time. `timeOrigin` is wall-clock milliseconds instead,
+because a page correlates it with a server timestamp.
+
+Long Tasks defines a long task as one running at least 50 ms, so a shorter
+callback records nothing. Event Timing sets 16 ms as the smallest
+`durationThreshold` an observer may ask for, which is what the two corpus
+observers passing `durationThreshold: 0` receive.
+
+`supportedEntryTypes` names `mark`, `measure`, `longtask`, and `resource` and
+no more. A page feature-detects against that list, so naming a type the
+engine never records leaves the page waiting on a callback that cannot come;
+the honest list is what lets it take another path.
+
+Delivery reuses the checkpoint AD-036 built for the layout observers, and
+drains whether an observer watches or not: the entries belong to the buffer
+`performance.getEntries` reads, and leaving them in the sink would report
+them late to an observer constructed on the next frame. The routing set is
+tracked as its own list rather than derived from the buffer, because
+`clearMarks` and `clearMeasures` splice the buffer and an index into it stops
+naming the same entries.
+
+### Consequences
+
+The Performance Timeline reads back marks and measures, `PerformanceObserver`
+constructs and delivers, and `longtask` and `resource` entries reach it from
+the engine.
+
+Fourteen tests cover the observer surface, mark and measure round-tripping, a
+measure over an absent mark throwing `SyntaxError`, selective clearing, both
+clocks, an observer receiving entries recorded after it registered, a
+`buffered` observer receiving entries that predate it against a control that
+does not, a native entry joining the page timeline in start-time order, the
+threshold floor, an unknown type registering nothing without throwing,
+disconnect, a throwing callback costing only its own records, a resource entry
+carrying its URL and duration, and every advertised type carrying an entry.
+Disabling the buffered path was confirmed to fail its assertion.
+
+Five pieces are cut by name.
+
+`performance-event-timing` records that `event` and `first-input` entries are
+absent. The engine measures input-to-present in its trace output, so the
+measurement exists and the entry shape and the first-input election do not.
+
+`performance-layout-shift` records that `layout-shift` entries are absent. The
+old and new rects `PageGeometry` and `FusedResult` hold would supply the
+score, and the impact-region arithmetic that turns them into one does not
+exist.
+
+`performance-navigation-and-paint` records that `navigation`, `paint`, and
+`performance.timing` are absent, so a page reading a navigation entry for its
+load milestones finds none.
+
+`performance-resource-timing-detail` records that a resource entry carries
+`name`, `startTime`, and `duration` alone. The redirect, DNS, connect, TLS,
+and response phases the full interface reports need timing the net client
+does not thread out.
+
+`performance-buffer-bounds` records that the buffer grows without a cap,
+where the specification bounds each type's buffer and fires
+`onresourcetimingbufferfull`. A long-running page accumulates entries until
+it clears them.
+
+---
+
 ## Future ADRs
 
 Planned (renumbered after the 2026-04-30 batch):
