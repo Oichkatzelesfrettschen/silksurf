@@ -325,16 +325,21 @@ separately-landable follow-up):
   textContent; a real HTML serializer is needed for the getter.
 - open-ws-idle-poll -- an open WebSocket/EventSource holds the 10 ms
   poll cadence; the event-loop waker deferral subsumes this.
-- svg-paint-pipeline -- silksurf-render, silksurf-image, and
-  silksurf-layout carry no SVG handling, so an `<svg>` subtree paints
-  nothing. chatgpt.com draws its logo and every icon as inline SVG, and
-  the shell renders with blank gaps where they sit. A real
-  implementation needs the SVG document structure, path geometry,
-  fill and stroke, transforms, gradients, `viewBox` mapping, and
-  `<svg>` sized as a replaced element in layout. `usvg` plus `resvg`
-  would supply it against the tiny-skia backend silksurf-render already
-  rasterizes through, at a dependency weight the low-resource profile
-  has not accepted.
+- svg-paint-pipeline -- AD-040 takes it. Counting literal `<svg` text finds
+  three, which is the wrong measurement: React compiles JSX to element
+  constructor calls, so counting constructions finds 84 `svg`, 164 `path`,
+  296 `viewBox`, and a subset spanning `circle`, `rect`, `g`, `mask`, `defs`,
+  `clipPath`, and `use`. Two prerequisites decided the shape before any
+  rendering code. The DOM lowercased every attribute name, so `viewBox`
+  reached the tree as `viewbox` and an SVG had no user coordinate system to
+  map onto its viewport. And `cargo deny` rejects resvg at its default
+  features over `rustybuzz`, unmaintained with no safe upgrade, where a
+  license census over the same tree reports only permissive terms -- the
+  census alone would have cleared a dependency the gate refuses. With the
+  text feature off the tree drops from 61 transitive crates to 34 and deny
+  passes. Cuts named by AD-040: `svg-text-rendering`,
+  `svg-external-references`, `svg-css-cascade`, `svg-animation`,
+  `svg-device-pixel-ratio`.
 - mutation-observer -- AD-034 takes it. The roadmap's earlier reading was
   wrong twice: `Dom::take_dirty_nodes` returns a bare `Vec<NodeId>` and
   carries no record payload, and the bridge's mutating natives are not the
