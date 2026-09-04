@@ -3,6 +3,7 @@
 ## Instruction Source
 
 This root AGENTS.md is the durable instruction file for silksurf.
+`CLAUDE.md` is a tracked repository-relative symbolic link to `AGENTS.md`, so Claude Code reads this same body and the rules live in one place.
 
 Nested AGENTS.md files may add narrower rules for their subtree. When rules
 conflict, the narrower file controls only inside its subtree.
