@@ -144,6 +144,10 @@ def sweep_tokens() -> dict[str, set[str]]:
         if relative.startswith(EXCLUDED_PREFIXES):
             continue
         path = REPO_ROOT / relative
+        # A symbolic link carries no bytes of its own; the citation lives in
+        # its target, which the sweep reaches under the target's own path.
+        if path.is_symlink():
+            continue
         try:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
