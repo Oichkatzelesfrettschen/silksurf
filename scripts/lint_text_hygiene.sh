@@ -53,4 +53,5 @@ if [ "$fail" -ne 0 ]; then
 fi
 
 echo "lint_text_hygiene: OK ($checked authored markdown files carry no emoji or typographic substitutes)"
-python3 scripts/check_status_consistency.py
+: "${PYTHON:?Set PYTHON to the intended Python executable}"
+"$PYTHON" scripts/check_status_consistency.py

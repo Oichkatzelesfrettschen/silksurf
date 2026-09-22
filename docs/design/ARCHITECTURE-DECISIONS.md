@@ -2353,12 +2353,9 @@ parks on a waker rather than polling in a loop, and no operation in the
 workspace has that shape: `fetch` parks its resolvers instead, and this loader
 blocks.
 
-`module-record-identity-across-roots` records that `eval_module_graph` calls
-`clear()` on entry (mod.rs:1360) while `execute_static_module_scripts` loops
-over up to `MAX_NAVIGATION_MODULE_ROOTS` = 4 roots passing the whole text set
-each time (page_build.rs:658), so a module two roots share is parsed and
-evaluated once per root instead of once per document. A loader that also
-inserts fetched modules loses them to the same `clear()` at the next root.
+`module-record-identity-across-roots` is resolved by AD-044. Document roots
+share one dependency registry; the standalone `eval_module_graph` API retains
+its independent-graph contract.
 
 `net-completion-registry-reclaim` records that `take_net_resolvers` writes
 `undefined` into the settled slot rather than deleting the property
@@ -3511,6 +3508,104 @@ where the specification bounds each type's buffer and fires
 it clears them.
 
 ---
+
+## AD-042: Present browser chrome before initial navigation
+
+The native window owns a bounded viewport and an address before a page runtime
+exists. `initial_browser_state` allocates the shell frame. Winit's first-present
+callback starts the navigation worker after the presenter accepts that frame.
+Fetch failure leaves the address, reload control, and a bounded diagnostic
+available. Escape dispatches Stop through browser input handling.
+Address submission invalidates a pending navigation generation before replacing
+its receiver, so an initial fetch keeps address entry and Enter available.
+
+```mermaid
+flowchart LR
+    Shell[Address and viewport] --> Present[Native first present]
+    Present --> Fetch[Navigation worker]
+    Fetch -->|payload| Runtime[DOM and JavaScript runtime]
+    Runtime --> Layout[Style, layout, paint]
+    Layout --> Present
+    Fetch -->|failure| Recovery[Diagnostic and retry]
+    Recovery --> Shell
+```
+
+Input probes arm after the first loaded document presents and retain that
+readiness across later navigation. Shell presentation and page readiness are
+separate observations. Page build and JavaScript execution still run in the
+GUI wake callback; the native engine process protocol owns the subsequent
+containment boundary described by AD-027.
+
+## AD-043: Conformance failures determine runner exit status
+
+The synthetic WPT catalog and the selected test262 corpus require a nonempty
+selection whose cases all pass. Failure, skip, execution-limit exhaustion,
+missing corpus, and scorecard write failure produce unsuccessful exits.
+`scripts/conformance_run.sh` propagates runner failures and invokes the
+interpreter selected by `PYTHON`. A scorecard retains its pass, failure, and
+skip counts independently of process status.
+
+The upstream HTML harness keeps its explicit expected-failure ledger. A green
+regression gate over that ledger describes agreement with recorded gaps;
+the scorecard's genuine pass numerator describes conformance. CSS corpus
+acceptance measures parsing robustness. Each evidence class keeps its own
+denominator and oracle.
+
+The stricter synthetic gate exposes a property dispatch defect: `white-space`
+has 11 bytes, while its lookup guard requires 12. The corrected guard reaches
+the existing cascade slot; `css_white_space.html` checks all five supported
+values through parsing, selector matching, and computed style.
+
+## AD-044: Document ownership governs templates, modules, and fetch
+
+HTML template elements own detached `DocumentFragment` nodes. The ordinary
+child tree drives document queries, layout, and script discovery. The template
+content relation drives cloning, fragment serialization, and host-inclusive
+cycle validation. Sparse forward and reverse maps avoid adding a host field to
+every DOM node and avoid scanning all templates during insertion. HTML fragment
+serialization uses the existing html5ever serializer with explicit void-element
+descendant filtering.
+
+`SilkContext::eval_document_modules` parses the external graph once and evaluates
+ordered external and inline roots against one dependency registry. Inline roots
+retain separate module records with the document URL as their source path, so
+relative imports and `import.meta.url` follow the document base. Shared imported
+modules execute once. `ModuleLimits` admits roots and charges inline and external
+source against a shared allowance. Positive environment settings configure the
+compact defaults documented in `crates/silksurf-app/README.md`.
+
+Fetch resolves relative URLs against the document address and shares the
+configured TLS client and partitioned cookie store. Automatic cookies obey the
+request's credentials mode and the origin of each redirect hop. HTTP field
+validation rejects injected delimiters before transport. Script request headers
+pass through a forbidden-header filter. Cross-origin credentialed requests reject
+until CORS enforcement supplies their admission boundary.
+
+The DOM Standard's template host-inclusive ancestor and pre-insert rules, HTML's
+fragment serialization and module script rules, and Fetch's credentials and
+forbidden request-header rules ground these mechanisms. Regression evidence
+lives in `template_fragments`, `template_content`, `document_modules`,
+`fetch_async`, and the app's browser-page tests. The HTML tree scorecard records
+1,578 genuine passes, 148 expected failures, and 192 skips in 1,918 cases.
+
+```mermaid
+flowchart LR
+    Document --> Tree[Connected DOM tree]
+    Document --> Templates[Owned inert fragments]
+    Tree --> Render[Style, layout, paint]
+    Tree --> Roots[Ordered script roots]
+    Roots --> Registry[One module record per URL]
+    Templates --> Clone[Clone and serialize]
+    Document --> Policy[URL, TLS policy, cookie partition]
+    Registry --> Policy
+    Fetch[Page fetch] --> Policy
+```
+
+Template owner-document identity, observation of disconnected mutations, iframe
+browsing contexts, and media playback remain separate implementation boundaries.
+GUI-thread JavaScript execution also remains a responsiveness boundary; shell
+presentation before navigation proves startup visibility, while process isolation
+requires the native runtime protocol integration tracked by AD-027.
 
 ## Future ADRs
 

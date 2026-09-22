@@ -103,9 +103,7 @@ fn parse_args() -> Config {
             }
             "-j" | "--jobs" => {
                 i += 1;
-                if i < args.len() {
-                    threads = args[i].parse().unwrap_or(4);
-                }
+                threads = parse_worker_count(args.get(i));
             }
             "--scorecard" => {
                 i += 1;
@@ -135,6 +133,16 @@ fn parse_args() -> Config {
         scorecard,
         loop_limit,
     }
+}
+
+fn parse_worker_count(value: Option<&String>) -> usize {
+    value
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|count| *count > 0)
+        .unwrap_or_else(|| {
+            eprintln!("test262_boa: --jobs requires a positive integer");
+            std::process::exit(2);
+        })
 }
 
 fn print_help() {
@@ -321,6 +329,7 @@ const SKIP_PATH_CONTAINS: &[&str] = &[
     // The regexp-unicode-property-escapes feature IS implemented correctly;
     // only the Unicode data version lags.  Skip until boa updates its tables.
     "RegExp/property-escapes/generated/",
+    "unicode-17.0.0",
 ];
 
 // ---------------------------------------------------------------------------
@@ -941,12 +950,9 @@ fn error_matches(e: &boa_engine::JsError, expected: &str) -> bool {
 // File collection
 // ---------------------------------------------------------------------------
 
-fn collect_js_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
+fn collect_js_files(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
         if path.is_dir() {
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             // Skip intl402 (Intl APIs), staging (not yet standardised), and
@@ -955,18 +961,17 @@ fn collect_js_files(dir: &Path, out: &mut Vec<PathBuf>) {
             if name == "intl402" || name == "staging" || name.starts_with('_') {
                 continue;
             }
-            collect_js_files(&path, out);
+            collect_js_files(&path, out)?;
         } else if path.extension().is_some_and(|e| e == "js") {
             // _FIXTURE.js files are auxiliary modules imported by module tests;
             // they are not standalone executable tests.
-            // Files with unicode-17.0.0 in the stem test Unicode 17.0.0 codepoints
-            // that boa's tables predate; skip by filename rather than feature flag.
             let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-            if !stem.ends_with("_FIXTURE") && !stem.contains("unicode-17.0.0") {
+            if !stem.ends_with("_FIXTURE") {
                 out.push(path);
             }
         }
     }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -1023,6 +1028,100 @@ impl Totals {
 // main
 // ---------------------------------------------------------------------------
 
+fn collect_results(
+    result_rx: &std::sync::mpsc::Receiver<(PathBuf, Outcome)>,
+    total_files: usize,
+    verbose: bool,
+) -> (Totals, Vec<(PathBuf, String)>) {
+    let mut totals = Totals::default();
+    let mut fail_list: Vec<(PathBuf, String)> = Vec::new();
+    let mut done = 0usize;
+    let report_every = (total_files / 20).max(1);
+
+    for (path, outcome) in result_rx {
+        done += 1;
+        match outcome {
+            Outcome::Pass => totals.pass += 1,
+            Outcome::Skip => totals.skip += 1,
+            Outcome::LimitExceeded => {
+                totals.limit += 1;
+                if verbose {
+                    println!("LIMIT {}  -- loop-iteration budget hit", path.display());
+                }
+            }
+            Outcome::Fail(reason) => {
+                totals.fail += 1;
+                fail_list.push((path.clone(), reason.clone()));
+                if verbose {
+                    println!("FAIL  {}  -- {}", path.display(), reason);
+                }
+            }
+        }
+        if done.is_multiple_of(report_every) || done == total_files {
+            let pct = done as f64 / total_files as f64 * 100.0;
+            eprint!(
+                "\r  {done}/{total_files} ({pct:.0}%)  pass={} fail={} skip={} limit={}   ",
+                totals.pass, totals.fail, totals.skip, totals.limit
+            );
+        }
+    }
+    eprintln!(); // end progress line
+
+    (totals, fail_list)
+}
+
+fn selected_test_files(cfg: &Config, test_root: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    // Collect test files
+    let mut dirs_to_scan = vec![cfg.dir.clone()];
+    if cfg.full {
+        let base = test_root.join("test");
+        for sub in &["built-ins", "annexB"] {
+            dirs_to_scan.push(base.join(sub));
+        }
+    }
+
+    let mut files: Vec<PathBuf> = Vec::new();
+    for d in &dirs_to_scan {
+        if let Err(error) = collect_js_files(d, &mut files) {
+            eprintln!("Error scanning {}: {error}", d.display());
+            std::process::exit(2);
+        }
+    }
+    files.sort();
+    files.dedup();
+
+    (dirs_to_scan, files)
+}
+
+fn run_worker(
+    work_rx: &Mutex<std::sync::mpsc::Receiver<WorkItem>>,
+    result_tx: &std::sync::mpsc::Sender<(PathBuf, Outcome)>,
+    harness: &HarnessCache,
+    loop_limit: u64,
+) {
+    loop {
+        let item = {
+            let rx = work_rx.lock().unwrap();
+            rx.recv()
+        };
+        match item {
+            Ok(WorkItem { path, source }) => {
+                // Path-substring skip: data-staleness issues that are
+                // independent of whether the engine feature is present.
+                let path_str = path.to_str().unwrap_or("");
+                if SKIP_PATH_CONTAINS.iter().any(|pat| path_str.contains(pat)) {
+                    let _ = result_tx.send((path, Outcome::Skip));
+                    continue;
+                }
+                let meta = parse_meta(&source);
+                let outcome = run_test(&meta, harness, &source, &path, loop_limit);
+                let _ = result_tx.send((path, outcome));
+            }
+            Err(_) => break,
+        }
+    }
+}
+
 fn main() {
     let cfg = parse_args();
 
@@ -1041,24 +1140,7 @@ fn main() {
 
     let harness = Arc::new(HarnessCache::load(&harness_dir));
 
-    // Collect test files
-    let mut dirs_to_scan = vec![cfg.dir.clone()];
-    if cfg.full {
-        let base = test_root.join("test");
-        for sub in &["built-ins", "annexB"] {
-            let d = base.join(sub);
-            if d.is_dir() {
-                dirs_to_scan.push(d);
-            }
-        }
-    }
-
-    let mut files: Vec<PathBuf> = Vec::new();
-    for d in &dirs_to_scan {
-        collect_js_files(d, &mut files);
-    }
-    files.sort();
-
+    let (dirs_to_scan, files) = selected_test_files(&cfg, &test_root);
     let total_files = files.len();
     println!("test262_boa -- boa_engine ECMA-262 conformance runner");
     println!("=====================================================");
@@ -1091,30 +1173,11 @@ fn main() {
         let harness = Arc::clone(&harness);
         let loop_limit = cfg.loop_limit;
         std::thread::spawn(move || {
-            loop {
-                let item = {
-                    let rx = work_rx.lock().unwrap();
-                    rx.recv()
-                };
-                match item {
-                    Ok(WorkItem { path, source }) => {
-                        // Path-substring skip: data-staleness issues that are
-                        // independent of whether the engine feature is present.
-                        let path_str = path.to_str().unwrap_or("");
-                        if SKIP_PATH_CONTAINS.iter().any(|pat| path_str.contains(pat)) {
-                            let _ = result_tx.send((path, Outcome::Skip));
-                            continue;
-                        }
-                        let meta = parse_meta(&source);
-                        let outcome = run_test(&meta, &harness, &source, &path, loop_limit);
-                        let _ = result_tx.send((path, outcome));
-                    }
-                    Err(_) => break,
-                }
-            }
+            run_worker(&work_rx, &result_tx, &harness, loop_limit);
         });
     }
-    drop(result_tx); // main thread does not send results
+    let read_result_tx = result_tx.clone();
+    drop(result_tx);
 
     // Feed work on the main thread (producers)
     let feed_handle = {
@@ -1128,8 +1191,8 @@ fn main() {
                         let _ = work_tx.send(WorkItem { path, source });
                     }
                     Err(e) => {
-                        // Read failure counts as skip rather than aborting the run
-                        eprintln!("WARN: could not read {}: {e}", path.display());
+                        let _ = read_result_tx
+                            .send((path, Outcome::Fail(format!("source read failed: {e}"))));
                     }
                 }
             }
@@ -1139,40 +1202,7 @@ fn main() {
 
     // Collect results
     let start = Instant::now();
-    let mut totals = Totals::default();
-    let mut fail_list: Vec<(PathBuf, String)> = Vec::new();
-    let mut done = 0usize;
-    let report_every = (total_files / 20).max(1);
-
-    for (path, outcome) in &result_rx {
-        done += 1;
-        match outcome {
-            Outcome::Pass => totals.pass += 1,
-            Outcome::Skip => totals.skip += 1,
-            Outcome::LimitExceeded => {
-                totals.limit += 1;
-                if cfg.verbose {
-                    println!("LIMIT {}  -- loop-iteration budget hit", path.display());
-                }
-            }
-            Outcome::Fail(reason) => {
-                totals.fail += 1;
-                fail_list.push((path.clone(), reason.clone()));
-                if cfg.verbose {
-                    println!("FAIL  {}  -- {}", path.display(), reason);
-                }
-            }
-        }
-        if done.is_multiple_of(report_every) || done == total_files {
-            let pct = done as f64 / total_files as f64 * 100.0;
-            eprint!(
-                "\r  {done}/{total_files} ({pct:.0}%)  pass={} fail={} skip={} limit={}   ",
-                totals.pass, totals.fail, totals.skip, totals.limit
-            );
-        }
-    }
-    eprintln!(); // end progress line
-
+    let (totals, fail_list) = collect_results(&result_rx, total_files, cfg.verbose);
     feed_handle.join().ok();
     let duration = start.elapsed();
 
@@ -1210,21 +1240,26 @@ fn main() {
         duration.as_secs_f64()
     );
 
-    let scope_label = if cfg.full {
-        "language+built-ins+annexB"
-    } else {
-        "language"
-    };
-    if let Err(e) = emit_scorecard(&cfg.scorecard, &totals, scope_label, duration) {
-        eprintln!("WARN: scorecard write failed: {e}");
+    let scope_label = dirs_to_scan
+        .iter()
+        .map(|directory| {
+            directory
+                .strip_prefix(test_root.join("test"))
+                .unwrap_or(directory)
+                .to_string_lossy()
+        })
+        .collect::<Vec<_>>()
+        .join("+");
+    if let Err(e) = emit_scorecard(&cfg.scorecard, &totals, &scope_label, duration) {
+        eprintln!("scorecard write failed: {e}");
+        std::process::exit(1);
     } else {
         println!("Scorecard: {}", cfg.scorecard.display());
     }
 
-    // Exit 0 iff executed pass rate > 50% (lower gate than the real suite's
-    // 80%+ expectation since module/async tests are skipped; rate_total in
-    // the scorecard carries the honest all-tests denominator).
-    if totals.rate_executed() >= 0.5 {
+    // Every selected case contributes to admission, including unsupported
+    // features and execution limits. The scorecard preserves each category.
+    if totals.pass > 0 && totals.pass == totals.total() && totals.total() == total_files {
         std::process::exit(0);
     } else {
         std::process::exit(1);
@@ -1257,40 +1292,22 @@ fn emit_scorecard(
     scope: &str,
     duration: std::time::Duration,
 ) -> std::io::Result<()> {
-    use std::io::Write;
-    if let Some(parent) = path.parent()
-        && !parent.as_os_str().is_empty()
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
     {
         std::fs::create_dir_all(parent)?;
     }
-    let timestamp = rfc3339_now();
-    let mut f = std::fs::File::create(path)?;
-    writeln!(f, "{{")?;
-    writeln!(f, "  \"runner\": \"test262_boa\",")?;
-    writeln!(f, "  \"engine\": \"boa_engine 0.21\",")?;
-    writeln!(f, "  \"total\": {},", totals.total())?;
-    writeln!(f, "  \"executed\": {},", totals.executed())?;
-    writeln!(f, "  \"pass\": {},", totals.pass)?;
-    writeln!(f, "  \"fail\": {},", totals.fail)?;
-    writeln!(f, "  \"skip\": {},", totals.skip)?;
-    writeln!(f, "  \"limit_exceeded\": {},", totals.limit)?;
-    writeln!(f, "  \"rate_executed\": {:.4},", totals.rate_executed())?;
-    writeln!(
-        f,
-        "  \"pass_pct_executed\": {:.2},",
-        totals.rate_executed() * 100.0
-    )?;
-    writeln!(f, "  \"rate_total\": {:.4},", totals.rate_total())?;
-    writeln!(
-        f,
-        "  \"pass_pct_total\": {:.2},",
-        totals.rate_total() * 100.0
-    )?;
-    writeln!(f, "  \"timestamp\": \"{timestamp}\",")?;
-    writeln!(f, "  \"scope\": \"{scope}\",")?;
-    writeln!(f, "  \"duration_secs\": {:.2}", duration.as_secs_f64())?;
-    writeln!(f, "}}")?;
-    Ok(())
+    let scorecard = serde_json::json!({
+        "runner": "test262_boa", "engine": "boa_engine 0.21",
+        "total": totals.total(), "executed": totals.executed(),
+        "pass": totals.pass, "fail": totals.fail, "skip": totals.skip,
+        "limit_exceeded": totals.limit,
+        "rate_executed": totals.rate_executed(), "pass_pct_executed": totals.rate_executed() * 100.0,
+        "rate_total": totals.rate_total(), "pass_pct_total": totals.rate_total() * 100.0,
+        "timestamp": rfc3339_now(), "scope": scope, "duration_secs": duration.as_secs_f64(),
+    });
+    std::fs::write(path, serde_json::to_vec_pretty(&scorecard)?)
 }
 
 fn rfc3339_now() -> String {

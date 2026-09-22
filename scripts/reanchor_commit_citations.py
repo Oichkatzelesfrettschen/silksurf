@@ -73,6 +73,7 @@ SWEEP_GLOBS = ("*.md", "*.json", "*.ndjson", "*.toml", "*.sh", "*.py", "*.rs")
 # provenance lines.
 CITING_FILES = (
     "AGENTS.md",
+    "crates/silksurf-engine/conformance/wpt-scorecard.json",
     "docs/STATUS.md",
     # An archived document records a superseded state, and a SHA is part of what
     # it records. Re-anchoring keeps that citation naming the same content;
