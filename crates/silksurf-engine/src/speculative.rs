@@ -284,6 +284,12 @@ pub struct SpeculativeRenderer {
 type FetchResult = Result<(HttpResponse, FetchOrigin, std::time::Duration), NetError>;
 
 impl SpeculativeRenderer {
+    /// Share the navigation's TLS provider and cookie partition with script requests.
+    #[must_use]
+    pub fn network_client(&self) -> Arc<BasicClient> {
+        Arc::clone(&self.client)
+    }
+
     #[must_use]
     pub fn new() -> Self {
         Self {

@@ -5,6 +5,43 @@ use crate::*;
 
 pub(crate) const FRAME_WIDTH: u32 = 1280;
 pub(crate) const FRAME_HEIGHT: u32 = 800;
+
+/// The shell owns an address and a viewport before a document runtime exists.
+pub(crate) fn initial_browser_state(url: String) -> BrowserState {
+    BrowserState {
+        frame: BrowserFrame {
+            url: url.clone(),
+            argb: vec![0xffff_ffff; (FRAME_WIDTH * FRAME_HEIGHT) as usize],
+            raster_width: FRAME_WIDTH,
+            raster_height: FRAME_HEIGHT,
+            bitmap_height: FRAME_HEIGHT,
+            bitmap_raster_width: FRAME_WIDTH,
+            bitmap_scroll_y: 0,
+            focus_viewport_cache: None,
+            focus_viewport_retained_sent: false,
+            current_view_retained_sent: false,
+            navigation_start_retained_sent: false,
+            scroll_viewport_caches: Vec::new(),
+            link_targets: Vec::new(),
+            input_targets: Vec::new(),
+        },
+        runtime: None,
+        navigation_pending: false,
+        status_text: "loading".to_string(),
+        hover_status_text: None,
+        history: Vec::new(),
+        history_index: 0,
+        pending_history: None,
+        navigation_generation: 0,
+        address_editing: false,
+        address_select_all: false,
+        address_text: url,
+        address_cursor: 0,
+        focused_input: None,
+        redraw_mode: BrowserRedrawMode::Full,
+        retained_present: None,
+    }
+}
 pub(crate) const MIN_INITIAL_WINDOW_HEIGHT: u32 = 320;
 pub(crate) const BROWSER_CHROME_HEIGHT: f32 = 44.0;
 pub(crate) const FOCUS_VIEWPORT_RETAINED_TAG: silksurf_gui::WinitRetainedBufferTag =
@@ -54,6 +91,72 @@ pub(crate) fn max_navigation_script_bytes() -> usize {
 }
 pub(crate) const MAX_NAVIGATION_MODULE_ROOTS: usize = 4;
 pub(crate) const MAX_NAVIGATION_MODULE_GRAPH_BYTES: usize = 512 * 1024;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ModuleLimits {
+    pub(crate) roots: usize,
+    pub(crate) bytes: usize,
+    pub(crate) urls: usize,
+}
+
+pub(crate) fn module_limits() -> &'static ModuleLimits {
+    static LIMITS: std::sync::OnceLock<ModuleLimits> = std::sync::OnceLock::new();
+    LIMITS.get_or_init(|| {
+        let read = |name, default| {
+            parse_module_limit(name, std::env::var(name).ok().as_deref(), default).unwrap_or_else(
+                |error| {
+                    eprintln!("[SilkSurf] {error}");
+                    std::process::exit(2)
+                },
+            )
+        };
+        ModuleLimits {
+            roots: read("SILKSURF_MAX_MODULE_ROOTS", MAX_NAVIGATION_MODULE_ROOTS),
+            bytes: read(
+                "SILKSURF_MAX_MODULE_BYTES",
+                MAX_NAVIGATION_MODULE_GRAPH_BYTES,
+            ),
+            urls: read("SILKSURF_MAX_MODULE_URLS", MAX_MODULE_GRAPH_URLS),
+        }
+    })
+}
+
+pub(crate) fn parse_module_limit(
+    name: &str,
+    value: Option<&str>,
+    default: usize,
+) -> Result<usize, String> {
+    match value {
+        None => Ok(default),
+        Some(value) => value
+            .parse::<usize>()
+            .ok()
+            .filter(|limit| *limit > 0)
+            .ok_or_else(|| format!("{name} requires a positive integer; got {value:?}")),
+    }
+}
+
+pub(crate) fn admit_module_roots(
+    roots: &[silksurf_js::ModuleScript],
+    limits: &ModuleLimits,
+) -> Result<usize, String> {
+    let bytes: usize = roots
+        .iter()
+        .map(|root| match root {
+            silksurf_js::ModuleScript::Inline(text) => text.len(),
+            silksurf_js::ModuleScript::External(_) => 0,
+        })
+        .sum();
+    if roots.len() > limits.roots || bytes > limits.bytes {
+        return Err(format!(
+            "Module budget exhausted: {} roots / {} allowed, {bytes} inline bytes / {} allowed. Configure SILKSURF_MAX_MODULE_ROOTS and SILKSURF_MAX_MODULE_BYTES.",
+            roots.len(),
+            limits.roots,
+            limits.bytes
+        ));
+    }
+    Ok(bytes)
+}
+
 pub(crate) const MAX_DYNAMIC_SCRIPT_ROUNDS: usize = 8;
 pub(crate) const MAX_MODULE_GRAPH_URLS: usize = 64;
 pub(crate) const MAX_MODULE_GRAPH_ROUNDS: usize = 8;
@@ -434,7 +537,6 @@ pub(crate) struct PixelRect {
 
 pub(crate) struct AppOptions {
     pub(crate) speculative: bool,
-    pub(crate) window_mode: bool,
     pub(crate) headless: bool,
     pub(crate) display_backend: silksurf_gui::WinitDisplayBackend,
     /// Which monitor shows the browser window. `SILKSURF_MONITOR` supplies the

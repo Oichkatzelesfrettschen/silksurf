@@ -1434,13 +1434,13 @@ pub(crate) fn initial_browser_window_height(raster_height: u32) -> u32 {
     raster_height.clamp(MIN_INITIAL_WINDOW_HEIGHT, FRAME_HEIGHT)
 }
 
-pub(crate) fn window_size_exposes_unpainted_area(
+pub(crate) fn window_size_requires_repaint(
     last_width: u32,
     last_height: u32,
     next_width: u32,
     next_height: u32,
 ) -> bool {
-    last_width == 0 || last_height == 0 || next_width > last_width || next_height > last_height
+    last_width == 0 || last_height == 0 || next_width != last_width || next_height != last_height
 }
 
 pub(crate) fn display_item_bottom(item: &silksurf_render::DisplayItem) -> f32 {
@@ -1654,20 +1654,20 @@ pub(crate) fn browser_present_damage(
             silksurf_gui::WinitPresentDamage::rect(
                 ADDRESS_BAR_X,
                 ADDRESS_BAR_Y,
-                ADDRESS_BAR_WIDTH,
+                browser_address_width(window_width),
                 ADDRESS_BAR_HEIGHT,
             )
         }
         BrowserRedrawMode::AddressFullTextChrome => silksurf_gui::WinitPresentDamage::rect(
             ADDRESS_BAR_X + 10,
             ADDRESS_BAR_Y + 7,
-            ADDRESS_BAR_WIDTH - 22,
+            browser_address_width(window_width).saturating_sub(22),
             ADDRESS_BAR_HEIGHT - 14,
         ),
         BrowserRedrawMode::AddressTextChrome => silksurf_gui::WinitPresentDamage::rect(
             ADDRESS_BAR_X + 10,
             ADDRESS_BAR_Y + 7,
-            ADDRESS_BAR_WIDTH - 22,
+            browser_address_width(window_width).saturating_sub(22),
             ADDRESS_BAR_HEIGHT - 14,
         ),
         BrowserRedrawMode::StatusChrome => {
@@ -2020,6 +2020,9 @@ pub(crate) fn browser_status_text(state: &BrowserState) -> &str {
 pub(crate) fn set_browser_status(state: &mut BrowserState, status: impl Into<String>) {
     state.status_text = status.into();
     state.hover_status_text = None;
+    if state.runtime.is_none() {
+        mark_redraw(state, BrowserRedrawMode::Full);
+    }
 }
 
 pub(crate) fn draw_browser_status_from_state(
@@ -2261,6 +2264,15 @@ pub(crate) fn address_cursor_for_state(state: &BrowserState, text: &str) -> usiz
     }
 }
 
+pub(crate) fn browser_address_width(window_width: u32) -> u32 {
+    ADDRESS_BAR_WIDTH.min(window_width.saturating_sub(ADDRESS_BAR_X + 112))
+}
+
+fn address_caret_x(window_width: u32, text_end: u32) -> u32 {
+    let right = ADDRESS_BAR_X + browser_address_width(window_width).saturating_sub(12);
+    text_end.saturating_add(1).min(right.saturating_sub(1))
+}
+
 pub(crate) fn draw_browser_address_overlay(
     pixels: &mut [u32],
     window_width: u32,
@@ -2276,6 +2288,9 @@ pub(crate) fn draw_browser_address_overlay(
         argb(209, 213, 219, 255)
     };
     fill_address_bar_box(pixels, window_width, window_height, fill, border);
+    if browser_address_width(window_width) <= 22 {
+        return;
+    }
     let text_x = ADDRESS_BAR_X + 10;
     let text_y = ADDRESS_BAR_Y + 10;
     draw_bitmap_text(
@@ -2285,7 +2300,7 @@ pub(crate) fn draw_browser_address_overlay(
         text_x,
         text_y,
         text,
-        ADDRESS_BAR_X + ADDRESS_BAR_WIDTH - 12,
+        ADDRESS_BAR_X + browser_address_width(window_width).saturating_sub(12),
         argb(31, 41, 55, 255),
     );
     if editing {
@@ -2293,13 +2308,13 @@ pub(crate) fn draw_browser_address_overlay(
             text_x,
             text,
             cursor_byte,
-            ADDRESS_BAR_X + ADDRESS_BAR_WIDTH - 12,
+            ADDRESS_BAR_X + browser_address_width(window_width).saturating_sub(12),
         );
         fill_argb_rect(
             pixels,
             window_width,
             window_height,
-            cursor_x.saturating_add(1),
+            address_caret_x(window_width, cursor_x),
             ADDRESS_BAR_Y + 7,
             1,
             ADDRESS_BAR_HEIGHT - 14,
@@ -2316,17 +2331,20 @@ pub(crate) fn draw_browser_address_focus_overlay(
     cursor_byte: usize,
 ) {
     fill_address_bar_border(pixels, window_width, window_height, argb(37, 99, 235, 255));
+    if browser_address_width(window_width) <= 22 {
+        return;
+    }
     let cursor_x = bitmap_text_prefix_end_x(
         ADDRESS_BAR_X + 10,
         text,
         cursor_byte,
-        ADDRESS_BAR_X + ADDRESS_BAR_WIDTH - 12,
+        ADDRESS_BAR_X + browser_address_width(window_width).saturating_sub(12),
     );
     fill_argb_rect(
         pixels,
         window_width,
         window_height,
-        cursor_x.saturating_add(1),
+        address_caret_x(window_width, cursor_x),
         ADDRESS_BAR_Y + 7,
         1,
         ADDRESS_BAR_HEIGHT - 14,
@@ -2341,10 +2359,13 @@ pub(crate) fn draw_browser_address_text_strip(
     text: &str,
     cursor_byte: usize,
 ) {
+    if browser_address_width(window_width) <= 22 {
+        return;
+    }
     let text_x = ADDRESS_BAR_X + 10;
     let text_y = ADDRESS_BAR_Y + 10;
     let strip_y = ADDRESS_BAR_Y + 7;
-    let text_max_x = ADDRESS_BAR_X + ADDRESS_BAR_WIDTH - 12;
+    let text_max_x = ADDRESS_BAR_X + browser_address_width(window_width).saturating_sub(12);
     let cursor_x = bitmap_text_prefix_end_x(text_x, text, cursor_byte, text_max_x);
     let text_end_x = bitmap_text_prefix_end_x(text_x, text, text.len(), text_max_x);
     let strip_end_x = text_end_x
@@ -2375,7 +2396,7 @@ pub(crate) fn draw_browser_address_text_strip(
         pixels,
         window_width,
         window_height,
-        cursor_x.saturating_add(1),
+        address_caret_x(window_width, cursor_x),
         strip_y,
         1,
         ADDRESS_BAR_HEIGHT - 14,
@@ -2390,10 +2411,13 @@ pub(crate) fn draw_browser_address_full_text_strip(
     text: &str,
     cursor_byte: usize,
 ) {
+    if browser_address_width(window_width) <= 22 {
+        return;
+    }
     let text_x = ADDRESS_BAR_X + 10;
     let text_y = ADDRESS_BAR_Y + 10;
     let strip_y = ADDRESS_BAR_Y + 7;
-    let text_max_x = ADDRESS_BAR_X + ADDRESS_BAR_WIDTH - 12;
+    let text_max_x = ADDRESS_BAR_X + browser_address_width(window_width).saturating_sub(12);
     let cursor_x = bitmap_text_prefix_end_x(text_x, text, cursor_byte, text_max_x);
     fill_argb_rect(
         pixels,
@@ -2419,7 +2443,7 @@ pub(crate) fn draw_browser_address_full_text_strip(
         pixels,
         window_width,
         window_height,
-        cursor_x.saturating_add(1),
+        address_caret_x(window_width, cursor_x),
         strip_y,
         1,
         ADDRESS_BAR_HEIGHT - 14,
@@ -2439,7 +2463,7 @@ pub(crate) fn fill_address_bar_box(
     }
     let x0 = ADDRESS_BAR_X.min(window_width);
     let x1 = ADDRESS_BAR_X
-        .saturating_add(ADDRESS_BAR_WIDTH)
+        .saturating_add(browser_address_width(window_width))
         .min(window_width);
     let y0 = ADDRESS_BAR_Y.min(window_height);
     let y1 = ADDRESS_BAR_Y
@@ -2453,7 +2477,8 @@ pub(crate) fn fill_address_bar_box(
     let x0_usize = x0 as usize;
     let x1_usize = x1 as usize;
     let left_x = ADDRESS_BAR_X;
-    let right_x = ADDRESS_BAR_X.saturating_add(ADDRESS_BAR_WIDTH - 1);
+    let right_x =
+        ADDRESS_BAR_X.saturating_add(browser_address_width(window_width).saturating_sub(1));
     let bottom_y = ADDRESS_BAR_Y.saturating_add(ADDRESS_BAR_HEIGHT - 1);
     for y in y0..y1 {
         let row_start = y as usize * stride + x0_usize;
@@ -2481,13 +2506,16 @@ pub(crate) fn fill_address_bar_border(
     window_height: u32,
     color: u32,
 ) {
+    if browser_address_width(window_width) == 0 {
+        return;
+    }
     fill_argb_rect(
         pixels,
         window_width,
         window_height,
         ADDRESS_BAR_X,
         ADDRESS_BAR_Y,
-        ADDRESS_BAR_WIDTH,
+        browser_address_width(window_width),
         1,
         color,
     );
@@ -2497,7 +2525,7 @@ pub(crate) fn fill_address_bar_border(
         window_height,
         ADDRESS_BAR_X,
         ADDRESS_BAR_Y + ADDRESS_BAR_HEIGHT - 1,
-        ADDRESS_BAR_WIDTH,
+        browser_address_width(window_width),
         1,
         color,
     );
@@ -2515,7 +2543,7 @@ pub(crate) fn fill_address_bar_border(
         pixels,
         window_width,
         window_height,
-        ADDRESS_BAR_X + ADDRESS_BAR_WIDTH - 1,
+        ADDRESS_BAR_X + browser_address_width(window_width).saturating_sub(1),
         ADDRESS_BAR_Y,
         1,
         ADDRESS_BAR_HEIGHT,
@@ -2563,7 +2591,9 @@ pub(crate) fn browser_status_rect(
     if window_width == 0 || window_height == 0 {
         return None;
     }
-    let x = 1000_u32.min(window_width.saturating_sub(1));
+    let x = 1000_u32
+        .min(window_width.saturating_sub(100))
+        .max(ADDRESS_BAR_X);
     let y = 8_u32.min(window_height.saturating_sub(1));
     let width = window_width.saturating_sub(x).min(170);
     let height = 28_u32.min(window_height.saturating_sub(y));

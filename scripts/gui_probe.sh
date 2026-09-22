@@ -602,7 +602,7 @@ EOF
     cat >"${fixture_dir}/module-child.js" <<'EOF'
 export const fixtureGraph = "module-child";
 EOF
-    python3 - "${fixture_dir}/avatar.png" <<'PY'
+    "${PYTHON:?Set PYTHON to the intended Python executable}" - "${fixture_dir}/avatar.png" <<'PY'
 import base64
 import pathlib
 import sys
@@ -890,7 +890,7 @@ start_fixture_server() {
             ;;
     esac
     fixture_server_log_file="${log_file}"
-    python3 - "${fixture_dir}" "${port_file}" >"${log_file}" 2>&1 <<'PY' &
+    "${PYTHON:?Set PYTHON to the intended Python executable}" - "${fixture_dir}" "${port_file}" >"${log_file}" 2>&1 <<'PY' &
 import http.server
 import pathlib
 import socketserver

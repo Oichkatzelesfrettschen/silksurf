@@ -323,6 +323,8 @@ pub(crate) fn reflow_runtime_for_viewport(
     frame.focus_viewport_cache = None;
     frame.focus_viewport_retained_sent = false;
     frame.scroll_viewport_caches.clear();
+    frame.current_view_retained_sent = false;
+    frame.navigation_start_retained_sent = false;
     let redraw_mode = repaint_runtime_full_document(runtime, frame);
     // repaint_runtime_full_document rasters into frame.argb at the new
     // stride, so the bitmap key records it and refresh_browser_frame_bitmap
@@ -541,7 +543,7 @@ pub(crate) fn repaint_runtime_text_only_dirty_nodes(
         sync_argb_damage_from_rgba(
             &runtime.rgba,
             &mut frame.argb,
-            FRAME_WIDTH,
+            frame.raster_width,
             frame.bitmap_height,
             viewport_damage_rect(damage, frame.bitmap_scroll_y),
         );
@@ -602,7 +604,7 @@ pub(crate) fn repaint_single_runtime_text_node(
         sync_argb_damage_from_rgba(
             &runtime.rgba,
             &mut frame.argb,
-            FRAME_WIDTH,
+            frame.raster_width,
             frame.bitmap_height,
             viewport_damage_rect(damage, frame.bitmap_scroll_y),
         );
@@ -761,7 +763,7 @@ pub(crate) fn repaint_focused_input_value(
         sync_argb_damage_from_rgba(
             &runtime.rgba,
             &mut frame.argb,
-            FRAME_WIDTH,
+            frame.raster_width,
             frame.bitmap_height,
             viewport_damage_rect(damage, frame.bitmap_scroll_y),
         );
@@ -805,21 +807,25 @@ pub(crate) fn paint_text_damage_argb(
     if text_paint.color.a != 255 || !page_bitmap_text_supported(value, text_paint.font_size) {
         return false;
     }
+    let bitmap_width = frame.bitmap_raster_width;
+    if bitmap_width != frame.raster_width {
+        return false;
+    }
     let viewport_damage = viewport_damage_rect(damage, frame.bitmap_scroll_y);
-    let Some(pixel_rect) = pixel_rect_from_rect(viewport_damage, FRAME_WIDTH, frame.bitmap_height)
+    let Some(pixel_rect) = pixel_rect_from_rect(viewport_damage, bitmap_width, frame.bitmap_height)
     else {
         return false;
     };
     let Some(background) = text_damage_background_argb(items, text_index, damage) else {
         return false;
     };
-    let required = FRAME_WIDTH as usize * frame.bitmap_height as usize;
+    let required = bitmap_width as usize * frame.bitmap_height as usize;
     if frame.argb.len() < required {
         return false;
     }
     fill_argb_rect(
         &mut frame.argb,
-        FRAME_WIDTH,
+        bitmap_width,
         frame.bitmap_height,
         pixel_rect.x,
         pixel_rect.y,
@@ -829,7 +835,7 @@ pub(crate) fn paint_text_damage_argb(
     );
     draw_page_bitmap_text_clipped(
         &mut frame.argb,
-        FRAME_WIDTH,
+        bitmap_width,
         frame.bitmap_height,
         text_paint.rect.x,
         text_paint.rect.y - frame.bitmap_scroll_y as f32,
@@ -1089,6 +1095,25 @@ pub(crate) fn suffix_line_span(text: &str) -> usize {
     text.chars().filter(|ch| *ch == '\n').count() + 1
 }
 
+pub(crate) fn mark_navigation_loading(state: &mut BrowserState) {
+    let navigation_start_retained_ready =
+        state.runtime.is_some() && state.frame.navigation_start_retained_sent;
+    set_browser_status(state, "loading");
+    mark_redraw(state, BrowserRedrawMode::NavigationStartChrome);
+    if navigation_start_retained_ready {
+        let damage = browser_navigation_start_present_damage(
+            state.frame.bitmap_raster_width,
+            state.frame.bitmap_height,
+        );
+        if damage != silksurf_gui::WinitPresentDamage::Clean {
+            state.retained_present = Some(BrowserRetainedPresent {
+                tag: NAVIGATION_START_RETAINED_TAG,
+                damage,
+            });
+        }
+    }
+}
+
 pub(crate) fn start_navigation_worker(
     state: &mut BrowserState,
     navigation_rx: &Rc<RefCell<Option<mpsc::Receiver<NavigationMessage>>>>,
@@ -1105,19 +1130,7 @@ pub(crate) fn start_navigation_worker(
     let generation = state.navigation_generation;
     state.navigation_pending = true;
     state.pending_history = Some(history_action);
-    let navigation_start_retained_ready = state.frame.navigation_start_retained_sent;
-    set_browser_status(state, "loading");
-    mark_redraw(state, BrowserRedrawMode::NavigationStartChrome);
-    if navigation_start_retained_ready {
-        let damage =
-            browser_navigation_start_present_damage(FRAME_WIDTH, state.frame.bitmap_height);
-        if damage != silksurf_gui::WinitPresentDamage::Clean {
-            state.retained_present = Some(BrowserRetainedPresent {
-                tag: NAVIGATION_START_RETAINED_TAG,
-                damage,
-            });
-        }
-    }
+    mark_navigation_loading(state);
     let (tx, rx) = mpsc::channel();
     *navigation_rx.borrow_mut() = Some(rx);
     let wake_handle = wake_handle.clone();
@@ -1595,5 +1608,60 @@ mod tests {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         assert_eq!(input_value(&dom, input_node), "AI");
+    }
+    #[test]
+    fn retrying_shell_invalidates_retained_navigation_chrome() {
+        let mut state = initial_browser_state("https://example.test/".to_string());
+        state.redraw_mode = BrowserRedrawMode::Clean;
+        state.frame.navigation_start_retained_sent = true;
+        state.retained_present = Some(BrowserRetainedPresent {
+            tag: NAVIGATION_START_RETAINED_TAG,
+            damage: silksurf_gui::WinitPresentDamage::Full,
+        });
+        mark_navigation_loading(&mut state);
+        assert_eq!(state.redraw_mode, BrowserRedrawMode::Full);
+        assert!(state.retained_present.is_none());
+        assert_eq!(state.status_text, "loading");
+    }
+    #[test]
+    fn direct_text_damage_respects_resized_bitmap_stride() {
+        for (width, left) in [(800, 600.0), (1600, 1400.0)] {
+            let mut state = initial_browser_state("https://example.test/".to_string());
+            let frame = &mut state.frame;
+            frame.raster_width = width;
+            frame.bitmap_raster_width = width;
+            frame.bitmap_height = 60;
+            frame.argb = vec![0xffaa_bbcc; width as usize * 60];
+            let damage = Rect {
+                x: left,
+                y: 20.0,
+                width: 80.0,
+                height: 20.0,
+            };
+            let paint = TextItemPaint {
+                rect: damage,
+                font_size: 14.0,
+                color: silksurf_css::Color {
+                    r: 0,
+                    g: 0,
+                    b: 0,
+                    a: 255,
+                },
+            };
+            assert!(paint_text_damage_argb(&[], 0, frame, damage, paint, "text"));
+            let changed: Vec<_> = frame
+                .argb
+                .iter()
+                .enumerate()
+                .filter(|(_, pixel)| **pixel != 0xffaa_bbcc)
+                .map(|(index, _)| index)
+                .collect();
+            assert!(!changed.is_empty());
+            for index in changed {
+                let x = (index % width as usize) as f32;
+                let y = (index / width as usize) as f32;
+                assert!(x >= left && x < left + 80.0 && (20.0..40.0).contains(&y));
+            }
+        }
     }
 }

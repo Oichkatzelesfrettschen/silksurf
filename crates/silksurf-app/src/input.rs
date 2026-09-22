@@ -13,7 +13,14 @@ pub(crate) fn handle_browser_input(
     let current = runtime.scroll.get();
     if let silksurf_gui::WinitInput::CursorMoved { x, y } = input {
         let mut state = runtime.state.borrow_mut();
-        let cursor = browser_cursor_shape_for_state(&state, runtime.chrome_height, x, y, current);
+        let cursor = browser_cursor_shape_for_state(
+            &state,
+            runtime.window_width,
+            runtime.chrome_height,
+            x,
+            y,
+            current,
+        );
         let redraw = update_hover_status(&mut state, runtime.chrome_height, x, y, current);
         return silksurf_gui::WinitInputResult {
             redraw,
@@ -143,12 +150,13 @@ pub(crate) fn handle_browser_command_input(
 
 pub(crate) fn browser_cursor_shape_for_state(
     state: &BrowserState,
+    window_width: u32,
     chrome_height: u32,
     x: f32,
     y: f32,
     current_scroll: f32,
 ) -> silksurf_gui::WinitCursorShape {
-    if browser_address_bar_contains(x, y)
+    if browser_address_bar_contains(x, y, window_width)
         || hit_test_input(
             &state.frame.input_targets,
             x,
@@ -230,7 +238,7 @@ pub(crate) fn handle_browser_primary_click(
     if let Some(action) = hit_test_chrome_action(x, y) {
         return handle_chrome_click(runtime, action);
     }
-    if browser_address_bar_contains(x, y) {
+    if browser_address_bar_contains(x, y, runtime.window_width) {
         return focus_address_input(runtime);
     }
     let mut redraw_requested = blur_address_input(runtime);
@@ -500,7 +508,7 @@ pub(crate) fn navigate_address_target(
     initiator: Option<&str>,
 ) -> bool {
     let mut state = runtime.state.borrow_mut();
-    if state.navigation_pending {
+    if !prepare_address_navigation(&mut state, initiator.is_some()) {
         return false;
     }
     state.address_editing = false;
@@ -521,6 +529,15 @@ pub(crate) fn navigate_address_target(
         runtime.render_config,
         runtime.image_cache,
     )
+}
+
+pub(crate) fn prepare_address_navigation(state: &mut BrowserState, page_initiated: bool) -> bool {
+    if state.navigation_pending && page_initiated {
+        return false;
+    }
+    // Address submission invalidates the pending generation before replacing its receiver.
+    stop_navigation(state);
+    true
 }
 
 pub(crate) fn navigate_form_request(
@@ -1048,7 +1065,10 @@ pub(crate) fn apply_history_success(state: &mut BrowserState, loaded_url: &str) 
             }
         }
         Some(PendingHistoryAction::MoveTo(index)) => {
-            if index < state.history.len() {
+            if state.history.is_empty() {
+                state.history.push(loaded_url.to_string());
+                state.history_index = 0;
+            } else if index < state.history.len() {
                 state.history_index = index;
             }
         }
@@ -1248,7 +1268,7 @@ pub(crate) fn focus_page_input(state: &mut BrowserState, node: silksurf_dom::Nod
                     state.frame.raster_height,
                     BROWSER_CHROME_HEIGHT as u32,
                     state.frame.bitmap_scroll_y,
-                    FRAME_WIDTH,
+                    state.frame.bitmap_raster_width,
                     state.frame.bitmap_height,
                 );
                 if damage != silksurf_gui::WinitPresentDamage::Clean {
@@ -1991,9 +2011,9 @@ pub(crate) fn browser_home_url() -> String {
         .unwrap_or_else(|| HOME_URL.to_string())
 }
 
-pub(crate) fn browser_address_bar_contains(x: f32, y: f32) -> bool {
+pub(crate) fn browser_address_bar_contains(x: f32, y: f32, window_width: u32) -> bool {
     x >= ADDRESS_BAR_X as f32
-        && x < (ADDRESS_BAR_X + ADDRESS_BAR_WIDTH) as f32
+        && x < (ADDRESS_BAR_X + browser_address_width(window_width)) as f32
         && y >= ADDRESS_BAR_Y as f32
         && y < (ADDRESS_BAR_Y + ADDRESS_BAR_HEIGHT) as f32
 }
@@ -3137,12 +3157,20 @@ mod tests {
         });
 
         assert_eq!(
-            browser_cursor_shape_for_state(&state, BROWSER_CHROME_HEIGHT as u32, 15.0, 22.0, 0.0),
+            browser_cursor_shape_for_state(
+                &state,
+                FRAME_WIDTH,
+                BROWSER_CHROME_HEIGHT as u32,
+                15.0,
+                22.0,
+                0.0
+            ),
             silksurf_gui::WinitCursorShape::Pointer
         );
         assert_eq!(
             browser_cursor_shape_for_state(
                 &state,
+                FRAME_WIDTH,
                 BROWSER_CHROME_HEIGHT as u32,
                 ADDRESS_BAR_X as f32 + 8.0,
                 ADDRESS_BAR_Y as f32 + 8.0,
@@ -3151,15 +3179,36 @@ mod tests {
             silksurf_gui::WinitCursorShape::Text
         );
         assert_eq!(
-            browser_cursor_shape_for_state(&state, BROWSER_CHROME_HEIGHT as u32, 32.0, 90.0, 0.0),
+            browser_cursor_shape_for_state(
+                &state,
+                FRAME_WIDTH,
+                BROWSER_CHROME_HEIGHT as u32,
+                32.0,
+                90.0,
+                0.0
+            ),
             silksurf_gui::WinitCursorShape::Pointer
         );
         assert_eq!(
-            browser_cursor_shape_for_state(&state, BROWSER_CHROME_HEIGHT as u32, 32.0, 130.0, 0.0),
+            browser_cursor_shape_for_state(
+                &state,
+                FRAME_WIDTH,
+                BROWSER_CHROME_HEIGHT as u32,
+                32.0,
+                130.0,
+                0.0
+            ),
             silksurf_gui::WinitCursorShape::Text
         );
         assert_eq!(
-            browser_cursor_shape_for_state(&state, BROWSER_CHROME_HEIGHT as u32, 400.0, 400.0, 0.0),
+            browser_cursor_shape_for_state(
+                &state,
+                FRAME_WIDTH,
+                BROWSER_CHROME_HEIGHT as u32,
+                400.0,
+                400.0,
+                0.0
+            ),
             silksurf_gui::WinitCursorShape::Default
         );
     }
@@ -3296,6 +3345,7 @@ mod tests {
         assert_eq!(
             browser_cursor_shape_for_state(
                 &state,
+                FRAME_WIDTH,
                 BROWSER_CHROME_HEIGHT as u32,
                 BACK_BUTTON_X as f32 + 2.0,
                 NAV_BUTTON_Y as f32 + 2.0,
@@ -3317,6 +3367,7 @@ mod tests {
         assert_eq!(
             browser_cursor_shape_for_state(
                 &state,
+                FRAME_WIDTH,
                 BROWSER_CHROME_HEIGHT as u32,
                 BACK_BUTTON_X as f32 + 2.0,
                 NAV_BUTTON_Y as f32 + 2.0,
@@ -3631,6 +3682,29 @@ mod tests {
 
         assert_eq!(state.history_index, 0);
         assert_eq!(state.history.len(), 2);
+    }
+
+    #[test]
+    fn address_submission_supersedes_pending_navigation() {
+        let mut state = initial_browser_state("https://example.test/".into());
+        state.navigation_pending = true;
+        state.navigation_generation = 7;
+        state.pending_history = Some(PendingHistoryAction::Push);
+        assert!(!prepare_address_navigation(&mut state, true));
+        assert!(state.navigation_pending);
+        assert_eq!(state.navigation_generation, 7);
+
+        assert!(prepare_address_navigation(&mut state, false));
+        assert!(!state.navigation_pending);
+        assert_eq!(state.navigation_generation, 8);
+        assert!(!apply_navigation_result(
+            &mut state,
+            (7, Err("superseded navigation".into())),
+            &Cell::new(0.0),
+            (FRAME_WIDTH, FRAME_HEIGHT),
+        ));
+        assert_eq!(state.status_text, "ready");
+        assert!(state.pending_history.is_none());
     }
 
     fn element_by_attr(

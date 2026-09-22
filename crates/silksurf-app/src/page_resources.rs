@@ -46,38 +46,12 @@ pub(crate) fn collect_module_script_warm_urls(
     }
 }
 
-pub(crate) fn external_module_script_urls(
-    dom: &silksurf_dom::Dom,
-    root: silksurf_dom::NodeId,
-    base_url: &str,
-) -> Vec<String> {
-    let mut urls = Vec::new();
-    collect_external_module_script_urls(dom, root, base_url, &mut urls);
-    dedupe_resource_urls(&urls)
-}
-
-pub(crate) fn collect_external_module_script_urls(
-    dom: &silksurf_dom::Dom,
-    node: silksurf_dom::NodeId,
-    base_url: &str,
-    urls: &mut Vec<String>,
-) {
-    if let Some(url) = module_script_external_url(dom, node, base_url) {
-        urls.push(url);
-    }
-    if let Ok(children) = dom.children(node) {
-        for &child in children {
-            collect_external_module_script_urls(dom, child, base_url, urls);
-        }
-    }
-}
-
 pub(crate) fn module_script_external_url(
     dom: &silksurf_dom::Dom,
     node: silksurf_dom::NodeId,
     base_url: &str,
 ) -> Option<String> {
-    if dom.element_name(node).ok().flatten()? != "script" {
+    if !dom.is_connected(node) || dom.element_name(node).ok().flatten()? != "script" {
         return None;
     }
     let attrs = dom.attributes(node).ok()?;
@@ -93,7 +67,7 @@ pub(crate) fn inline_module_script_text(
     dom: &silksurf_dom::Dom,
     node: silksurf_dom::NodeId,
 ) -> Option<String> {
-    if dom.element_name(node).ok().flatten()? != "script" {
+    if !dom.is_connected(node) || dom.element_name(node).ok().flatten()? != "script" {
         return None;
     }
     let attrs = dom.attributes(node).ok()?;
@@ -314,35 +288,53 @@ pub(crate) fn collect_document_script_nodes(
     }
 }
 
+pub(crate) fn document_module_roots(
+    dom: &silksurf_dom::Dom,
+    root: silksurf_dom::NodeId,
+    base_url: &str,
+) -> Vec<silksurf_js::ModuleScript> {
+    let mut roots = Vec::new();
+    let mut pending = vec![root];
+    while let Some(node) = pending.pop() {
+        if let Some(url) = module_script_external_url(dom, node, base_url) {
+            roots.push(silksurf_js::ModuleScript::External(url));
+        } else if let Some(source) = inline_module_script_text(dom, node) {
+            roots.push(silksurf_js::ModuleScript::Inline(source));
+        }
+        if let Ok(children) = dom.children(node) {
+            pending.extend(children.iter().rev().copied());
+        }
+    }
+    roots
+}
+
 pub(crate) fn load_document_module_texts(
     renderer: &mut SpeculativeRenderer,
     dom: &silksurf_dom::Dom,
     root: silksurf_dom::NodeId,
     base_url: &str,
-) -> Vec<(String, String)> {
-    let roots = external_module_script_urls(dom, root, base_url);
-    let roots = dedupe_resource_urls(&roots);
-    if roots.is_empty() {
-        return Vec::new();
-    }
-    if roots.len() > MAX_NAVIGATION_MODULE_ROOTS {
-        eprintln!(
-            "[SilkSurf] Module execution skipped: {} roots exceed {} root cap",
-            roots.len(),
-            MAX_NAVIGATION_MODULE_ROOTS
-        );
-        return Vec::new();
-    }
+) -> Result<Vec<(String, String)>, String> {
+    let script_roots = document_module_roots(dom, root, base_url);
+    let inline_bytes = admit_module_roots(&script_roots, module_limits())?;
     let import_map = document_import_map(dom, root);
+    let mut roots = Vec::new();
+    for script in &script_roots {
+        match script {
+            silksurf_js::ModuleScript::External(url) => roots.push(url.clone()),
+            silksurf_js::ModuleScript::Inline(text) => {
+                roots.extend(module_static_import_urls(base_url, text, &import_map));
+            }
+        }
+    }
     let modules = fetch_module_graph_texts(renderer, &roots, &import_map);
     let total_bytes: usize = modules.iter().map(|(_, text)| text.len()).sum();
-    if total_bytes > MAX_NAVIGATION_MODULE_GRAPH_BYTES {
-        eprintln!(
-            "[SilkSurf] Module execution skipped: {total_bytes} bytes exceed {MAX_NAVIGATION_MODULE_GRAPH_BYTES} byte cap"
-        );
-        return Vec::new();
+    if total_bytes > module_limits().bytes.saturating_sub(inline_bytes) {
+        return Err(format!(
+            "Module budget exhausted: {total_bytes} external bytes and {inline_bytes} inline bytes exceed {} bytes; configure SILKSURF_MAX_MODULE_BYTES",
+            module_limits().bytes
+        ));
     }
-    modules
+    Ok(modules)
 }
 
 pub(crate) fn fetch_module_graph_texts(
@@ -354,7 +346,7 @@ pub(crate) fn fetch_module_graph_texts(
     let mut pending = dedupe_resource_urls(roots);
     let mut fetched = Vec::new();
     for _round in 0..MAX_MODULE_GRAPH_ROUNDS {
-        if pending.is_empty() || seen.len() >= MAX_MODULE_GRAPH_URLS {
+        if pending.is_empty() || seen.len() >= module_limits().urls {
             break;
         }
         let round_urls = take_module_graph_round_urls(&mut pending, &mut seen);
@@ -419,7 +411,7 @@ pub(crate) fn preload_module_scripts_with_renderer(
     let mut seen = HashSet::new();
     let mut pending = dedupe_resource_urls(urls);
     for round in 0..MAX_MODULE_GRAPH_ROUNDS {
-        if pending.is_empty() || seen.len() >= MAX_MODULE_GRAPH_URLS {
+        if pending.is_empty() || seen.len() >= module_limits().urls {
             return;
         }
         let round_urls = take_module_graph_round_urls(&mut pending, &mut seen);
@@ -457,7 +449,7 @@ pub(crate) fn take_module_graph_round_urls(
 ) -> Vec<String> {
     let mut round_urls = Vec::new();
     for url in std::mem::take(pending) {
-        if seen.len() >= MAX_MODULE_GRAPH_URLS {
+        if seen.len() >= module_limits().urls {
             break;
         }
         if seen.insert(url.clone()) {
@@ -541,8 +533,8 @@ pub(crate) fn module_fetch_budget(
 ) -> silksurf_js::ModuleFetchBudget {
     let spent_bytes: usize = module_texts.iter().map(|(_, text)| text.len()).sum();
     silksurf_js::ModuleFetchBudget {
-        urls: MAX_MODULE_GRAPH_URLS.saturating_sub(module_texts.len()),
-        bytes: MAX_NAVIGATION_MODULE_GRAPH_BYTES.saturating_sub(spent_bytes),
+        urls: module_limits().urls.saturating_sub(module_texts.len()),
+        bytes: module_limits().bytes.saturating_sub(spent_bytes),
     }
 }
 
@@ -1055,7 +1047,7 @@ pub(crate) fn script_ref_for_node(
     node: silksurf_dom::NodeId,
     base_url: &str,
 ) -> Option<DocumentScriptRef> {
-    if dom.element_name(node).ok().flatten()? != "script" {
+    if !dom.is_connected(node) || dom.element_name(node).ok().flatten()? != "script" {
         return None;
     }
     let attrs = dom.attributes(node).ok();

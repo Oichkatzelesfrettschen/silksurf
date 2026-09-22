@@ -134,7 +134,7 @@ pub(crate) fn load_navigation_payload(
         fetch_decoded_images(&mut renderer, &mut image_cache, &image_urls)
     };
     let script_texts = load_document_script_texts(&mut renderer, dom, doc_node, url);
-    let module_texts = load_document_module_texts(&mut renderer, dom, doc_node, url);
+    let module_texts = load_document_module_texts(&mut renderer, dom, doc_node, url)?;
 
     Ok(BrowserPagePayload {
         url: url.to_string(),
@@ -149,11 +149,13 @@ pub(crate) fn load_navigation_payload(
     })
 }
 
+#[cfg(test)]
 pub(crate) fn build_browser_page(payload: BrowserPagePayload) -> Result<BrowserPage, String> {
     build_browser_page_with_buffers(payload, BrowserFrameBuffers::default())
         .map_err(|err| err.message)
 }
 
+#[cfg(test)]
 pub(crate) fn build_browser_page_with_buffers(
     payload: BrowserPagePayload,
     buffers: BrowserFrameBuffers,
@@ -222,6 +224,10 @@ pub(crate) fn build_browser_page_with_buffers_for_window(
         &cookie_host,
     );
     js_ctx.set_document_url(&payload.url);
+    match ephemeral_renderer_from_config(&payload.render_config) {
+        Ok(renderer) => js_ctx.set_fetch_client(renderer.network_client()),
+        Err(message) => return Err(BrowserPageBuildError { message, buffers }),
+    }
     js_ctx.preload_local_storage(crate::profile::load_local_storage(&payload.url));
     js_ctx.set_viewport(viewport.width, viewport.height);
     /*
@@ -655,38 +661,42 @@ pub(crate) fn execute_static_module_scripts(
     module_texts: &[(String, String)],
     trace_build: bool,
 ) {
-    if module_texts.is_empty() {
-        return;
-    }
-    let (root_urls, import_map) = {
+    let (roots, import_map) = {
         let dom = dom_arc
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         (
-            external_module_script_urls(&dom, root, base_url),
+            document_module_roots(&dom, root, base_url),
             document_import_map(&dom, root),
         )
     };
-    // The import map must be in place before the first module resolves a bare
-    // specifier (HTML, 8.1.3.8).
-    js_ctx.set_import_map(import_map);
-    for (idx, root_url) in dedupe_resource_urls(&root_urls).iter().enumerate() {
-        let root_len = module_texts
-            .iter()
-            .find_map(|(url, text)| (url == root_url).then_some(text.len()))
-            .unwrap_or(0);
-        let module_start = std::time::Instant::now();
-        match js_ctx.eval_module_graph(root_url, module_texts) {
-            Ok(()) => trace_navigation_script(
-                trace_build,
-                idx,
-                root_len,
-                "module-done",
-                Some(module_start.elapsed()),
-            ),
-            Err(err) => eprintln!("[SilkSurf] Module {root_url} error: {err}"),
+    let inline_bytes = match admit_module_roots(&roots, module_limits()) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            eprintln!("[SilkSurf] {error}");
+            return;
         }
+    };
+    let mut budget = module_fetch_budget(module_texts);
+    if inline_bytes > budget.bytes {
+        eprintln!("[SilkSurf] Module source bytes exhaust SILKSURF_MAX_MODULE_BYTES");
+        return;
     }
+    budget.bytes -= inline_bytes;
+    js_ctx.set_module_fetch_budget(budget);
+    js_ctx.set_import_map(import_map);
+    let module_start = std::time::Instant::now();
+    match js_ctx.eval_document_modules(base_url, &roots, module_texts) {
+        Ok(results) => {
+            for (index, result) in results.into_iter().enumerate() {
+                if let Err(error) = result {
+                    eprintln!("[SilkSurf] Module root {index} error: {error}");
+                }
+            }
+        }
+        Err(error) => eprintln!("[SilkSurf] Module graph error: {error}"),
+    }
+    trace_navigation_script_phase(trace_build, "document-modules", module_start.elapsed());
     js_ctx.run_pending_jobs();
 }
 
@@ -1680,5 +1690,42 @@ mod tests {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         assert!(find_text_node(&dom, page.runtime.document, "Dynamic").is_some());
+    }
+    #[test]
+    fn browser_page_keeps_template_scripts_inert() {
+        let payload = BrowserPagePayload {
+            url: "https://example.com/".to_string(),
+            html: r"<!doctype html><body><p id='msg'>Inert</p><template></template><script>
+                document.querySelector('template').innerHTML = '<script>document.getElementById(\'msg\').textContent=\'Executed\';<\/script>';
+                </script>".to_string(),
+            css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(), script_texts: Vec::new(), module_texts: Vec::new(),
+            images: Vec::new(), render_config: BrowserRenderConfig::default(), parsed_document: None,
+        };
+        let page = build_browser_page(payload).expect("template page builds");
+        let dom = page
+            .runtime
+            .dom
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert!(find_text_node(&dom, page.runtime.document, "Inert").is_some());
+        assert!(find_text_node(&dom, page.runtime.document, "Executed").is_none());
+    }
+    #[test]
+    fn browser_page_executes_inline_module_without_external_roots() {
+        let payload = BrowserPagePayload {
+            url: "https://example.com/".to_string(),
+            html: "<!doctype html><body><p id='msg'>Waiting</p><script type='module'>document.getElementById('msg').textContent='Module ready';</script>".to_string(),
+            css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(), script_texts: Vec::new(), module_texts: Vec::new(),
+            images: Vec::new(), render_config: BrowserRenderConfig::default(), parsed_document: None,
+        };
+        let page = build_browser_page(payload).expect("inline module page builds");
+        let dom = page
+            .runtime
+            .dom
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert!(find_text_node(&dom, page.runtime.document, "Module ready").is_some());
     }
 }

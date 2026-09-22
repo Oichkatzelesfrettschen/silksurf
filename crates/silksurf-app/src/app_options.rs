@@ -76,10 +76,10 @@ pub(crate) fn install_structured_tracing() {
 }
 
 pub(crate) fn parse_app_options(args: &[String]) -> Result<AppOptions, String> {
+    let _ = module_limits();
     let insecure = args.iter().any(|arg| arg == "--insecure" || arg == "-k");
     let platform_verifier = args.iter().any(|arg| arg == "--platform-verifier");
     let speculative = args.iter().any(|arg| arg == "--speculative" || arg == "-s");
-    let window_mode = args.iter().any(|arg| arg == "--window");
     // --backend=winit stays accepted for compatibility; the windowed UI is
     // the default, so only --headless changes the launch mode.
     let headless = args.iter().any(|arg| arg == "--headless");
@@ -91,7 +91,6 @@ pub(crate) fn parse_app_options(args: &[String]) -> Result<AppOptions, String> {
     log_startup_options(insecure, platform_verifier, tls_ca_file.as_ref());
     Ok(AppOptions {
         speculative,
-        window_mode,
         headless,
         display_backend,
         monitor,
@@ -168,43 +167,6 @@ pub(crate) fn log_startup_options(
     if let Some(path) = tls_ca_file {
         eprintln!("[SilkSurf] Extra CA bundle: {}", path.display());
     }
-}
-
-pub(crate) fn run_legacy_window_mode() -> ! {
-    #[cfg(not(feature = "xcb-backend"))]
-    {
-        eprintln!("[SilkSurf] Rebuild with `--features xcb-backend` to use --window");
-        std::process::exit(1);
-    }
-    #[cfg(feature = "xcb-backend")]
-    {
-        match silksurf_gui::XcbWindow::new("silksurf", 1280, 720) {
-            Ok(mut window) => run_legacy_xcb_window(&mut window),
-            Err(err) => {
-                eprintln!("[SilkSurf] --window: cannot open display: {err}");
-                std::process::exit(1);
-            }
-        }
-    }
-}
-
-#[cfg(feature = "xcb-backend")]
-pub(crate) fn run_legacy_xcb_window(window: &mut silksurf_gui::XcbWindow) -> ! {
-    let mut pixels: Vec<u32> = vec![0; 1280usize * 720usize];
-    silksurf_render::fill_scalar(&mut pixels, 0xFF64_95ED);
-    window.present(&pixels);
-    let mut event_loop = silksurf_gui::EventLoop::new();
-    let run_result = event_loop.run(window, |event| match event {
-        silksurf_gui::Event::Close | silksurf_gui::Event::KeyPress { keysym: 0x09 } => {
-            silksurf_gui::ControlFlow::Exit
-        }
-        _ => silksurf_gui::ControlFlow::Continue,
-    });
-    if let Err(err) = run_result {
-        eprintln!("[SilkSurf] window event loop error: {err}");
-        std::process::exit(1);
-    }
-    std::process::exit(0);
 }
 
 #[cfg(test)]
@@ -349,5 +311,12 @@ mod tests {
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_string()).collect()
+    }
+    #[test]
+    fn window_flag_keeps_the_native_browser_route() {
+        let args = ["silksurf-app", "--window", "https://example.test/"].map(String::from);
+        let options = super::parse_app_options(&args).expect("window options");
+        assert!(!options.headless);
+        assert_eq!(options.url, "https://example.test/");
     }
 }
