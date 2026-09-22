@@ -20,6 +20,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 pub(super) enum NetPayload {
@@ -42,6 +43,8 @@ pub(super) struct NetShared {
     tx: Sender<NetCompletion>,
     next_id: u64,
     in_flight: usize,
+    pub(super) document_url: Option<url::Url>,
+    pub(super) client: Arc<silksurf_net::BasicClient>,
 }
 
 pub(super) type NetSharedRef = Rc<RefCell<NetShared>>;
@@ -59,6 +62,8 @@ impl NetQueue {
                 tx,
                 next_id: 0,
                 in_flight: 0,
+                document_url: None,
+                client: Arc::new(silksurf_net::BasicClient::new()),
             })),
             rx,
         }
@@ -82,6 +87,39 @@ impl NetQueue {
 }
 
 impl NetShared {
+    pub(super) fn prepare_request(
+        &self,
+        mut request: silksurf_net::HttpRequest,
+        credentials: &str,
+    ) -> Result<(silksurf_net::HttpRequest, silksurf_net::BasicClient), String> {
+        let mut target = match &self.document_url {
+            Some(base) => base.join(&request.url),
+            None => url::Url::parse(&request.url),
+        }
+        .map_err(|error| format!("fetch URL: {error}"))?;
+        if !matches!(target.scheme(), "http" | "https") {
+            return Err("fetch requires an HTTP or HTTPS URL".into());
+        }
+        if !target.username().is_empty() || target.password().is_some() {
+            return Err("fetch URL contains credentials".into());
+        }
+        target.set_fragment(None);
+        request.url = target.to_string();
+        let client = self.client.as_ref().clone();
+        let client = match (credentials, self.document_url.as_ref()) {
+            ("omit", _) | ("same-origin" | "include", None) => client.without_cookies(),
+            ("same-origin", Some(base)) => client.with_cookie_origin(base.origin()),
+            ("include", Some(base)) if base.origin() == target.origin() => client
+                .with_cookie_origin(base.origin())
+                .with_request_origin(base.origin()),
+            ("include", Some(_)) => {
+                return Err("credentialed cross-origin fetch requires CORS enforcement".into());
+            }
+            _ => return Err("fetch credentials must be omit, same-origin, or include".into()),
+        };
+        Ok((request, client))
+    }
+
     /// Allocate a request id and count it in flight. Returns the id and a
     /// Sender clone for the worker thread.
     pub(super) fn begin_request(&mut self) -> (u64, Sender<NetCompletion>) {
@@ -97,12 +135,13 @@ pub(super) fn spawn_request(
     id: u64,
     tx: Sender<NetCompletion>,
     request: silksurf_net::HttpRequest,
+    client: silksurf_net::BasicClient,
 ) {
     let url = request.url.clone();
     let started_ms = super::monotonic_now_ms();
     std::thread::spawn(move || {
-        use silksurf_net::{BasicClient, NetClient};
-        let payload = match BasicClient::new().fetch(&request) {
+        use silksurf_net::NetClient;
+        let payload = match client.fetch(&request) {
             Ok(response) => NetPayload::Response(response),
             Err(err) => NetPayload::Error(err.message),
         };

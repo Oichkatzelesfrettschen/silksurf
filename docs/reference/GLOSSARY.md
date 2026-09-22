@@ -7,6 +7,34 @@
 
 ## Project-Specific Terms
 
+### create_document_fragment
+
+Allocates a detached DOM container whose insertion moves its children into the destination.
+
+### is_connected
+
+Walks ordinary parent links to determine whether a node belongs to the document tree.
+
+### template_contents
+
+Returns the owned, inert document fragment of an HTML template element.
+
+### validate_request_header
+
+Rejects invalid HTTP field names and NUL, CR, or LF in field values before transport.
+
+### with_cookie_origin
+
+Restricts automatic request and response cookies to the selected origin on each redirect hop.
+
+### with_request_origin
+
+Rejects requests and redirect hops outside the selected origin before transmission.
+
+### without_cookies
+
+Clones the network client policy with automatic cookie access disabled.
+
 ### Arena Allocator
 **Type**: Memory Management Pattern
 **Definition**: Bump allocator that allocates memory in large chunks ("arenas") and frees all allocations at once. Extremely fast for temporary allocations.

@@ -45,6 +45,13 @@ mod intl_datetime_data;
 mod layout_observers;
 mod module_loader;
 mod mutation_observer;
+/// A document module root retains its external URL or inline source.
+#[derive(Clone, Debug)]
+pub enum ModuleScript {
+    External(String),
+    Inline(String),
+}
+
 pub use module_loader::{ImportMap, ModuleFetchBudget, ModuleFetcher, module_import_specifiers};
 mod net_queue;
 mod performance_timeline;
@@ -1391,6 +1398,12 @@ impl SilkContext {
     pub fn set_document_url(&mut self, url: &str) {
         platform_globals::set_document_url(&mut self.ctx, url);
         self.module_loader.set_document_url(url);
+        self.net.shared.borrow_mut().document_url = url::Url::parse(url).ok();
+    }
+
+    /// Share the embedder's TLS configuration and cookie partition with fetch.
+    pub fn set_fetch_client(&mut self, client: Arc<silksurf_net::BasicClient>) {
+        self.net.shared.borrow_mut().client = client;
     }
 
     /*
@@ -1579,22 +1592,66 @@ impl SilkContext {
         root_url: &str,
         modules: &[(String, String)],
     ) -> Result<(), String> {
+        self.prepare_module_graph(root_url, modules)?;
+        let module = self
+            .module_loader
+            .get(root_url)?
+            .ok_or_else(|| format!("module root {root_url} was not fetched"))?;
+        self.evaluate_module(&module)
+    }
+
+    fn prepare_module_graph(
+        &mut self,
+        document_url: &str,
+        modules: &[(String, String)],
+    ) -> Result<(), String> {
         self.module_loader.clear();
-        self.module_loader.ensure_document_url(root_url);
-        let mut root_module = None;
+        self.module_loader.ensure_document_url(document_url);
+        let mut seen = std::collections::HashSet::new();
         for (module_url, source_text) in modules {
-            let path = PathBuf::from(module_url);
-            let source = Source::from_bytes(source_text.as_bytes()).with_path(path.as_path());
-            let module = Module::parse(source, None, &mut self.ctx)
-                .map_err(|err| format!("module parse {module_url}: {err}"))?;
-            self.module_loader.insert(module_url, module.clone());
-            if module_url == root_url {
-                root_module = Some(module);
+            if !seen.insert(module_url) {
+                return Err(format!("duplicate module source URL: {module_url}"));
+            }
+            match self.parse_module(module_url, source_text) {
+                Ok(module) => self.module_loader.insert(module_url, module),
+                Err(error) => self.module_loader.insert_parse_error(module_url, error),
             }
         }
+        Ok(())
+    }
 
-        let module =
-            root_module.ok_or_else(|| format!("module root {root_url} was not fetched"))?;
+    fn parse_module(&mut self, url: &str, text: &str) -> Result<Module, String> {
+        let path = PathBuf::from(url);
+        let source = Source::from_bytes(text.as_bytes()).with_path(path.as_path());
+        Module::parse(source, None, &mut self.ctx)
+            .map_err(|error| format!("module parse {url}: {error}"))
+    }
+
+    /// Evaluate ordered roots against one URL-keyed dependency registry.
+    /// Inline roots expose the document URL through `import.meta.url`.
+    pub fn eval_document_modules(
+        &mut self,
+        document_url: &str,
+        roots: &[ModuleScript],
+        modules: &[(String, String)],
+    ) -> Result<Vec<Result<(), String>>, String> {
+        self.prepare_module_graph(document_url, modules)?;
+        Ok(roots
+            .iter()
+            .map(|root| {
+                let module = match root {
+                    ModuleScript::External(url) => self
+                        .module_loader
+                        .get(url)?
+                        .ok_or_else(|| format!("module root {url} was not fetched")),
+                    ModuleScript::Inline(text) => self.parse_module(document_url, text),
+                }?;
+                self.evaluate_module(&module)
+            })
+            .collect())
+    }
+
+    fn evaluate_module(&mut self, module: &Module) -> Result<(), String> {
         let promise = module.load_link_evaluate(&mut self.ctx);
         let _ = self.ctx.run_jobs();
         match promise.state() {
@@ -2021,6 +2078,10 @@ impl SilkContext {
     ) -> Self {
         let mut ctx = Self::new();
         dom_bridge::install_document(dom, &mut ctx.ctx, cookie_jar, top_level_site, host);
+        ctx.set_fetch_client(Arc::new(
+            silksurf_net::BasicClient::new()
+                .with_cookie_context(Arc::clone(cookie_jar), top_level_site),
+        ));
         ctx.dom = Some(Arc::clone(dom));
         ctx
     }
@@ -3571,6 +3632,73 @@ fn fetch_signal_is_aborted(args: &[JsValue], ctx: &mut Context) -> boa_engine::J
 
 const PENDING_NET_REGISTRY: &str = "__silksurfPendingNet";
 
+fn fetch_credentials(args: &[JsValue], ctx: &mut Context) -> boa_engine::JsResult<String> {
+    for value in [args.get(1), args.first()].into_iter().flatten() {
+        if let Some(object) = value.as_object() {
+            let credentials = object.get(js_string!("credentials"), ctx)?;
+            if !credentials.is_undefined() {
+                return Ok(credentials.to_string(ctx)?.to_std_string_lossy());
+            }
+        }
+    }
+    Ok("same-origin".into())
+}
+
+fn forbidden_fetch_header(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    name.starts_with("proxy-")
+        || name.starts_with("sec-")
+        || matches!(
+            name.as_str(),
+            "accept-charset"
+                | "accept-encoding"
+                | "access-control-request-headers"
+                | "access-control-request-method"
+                | "connection"
+                | "content-length"
+                | "cookie"
+                | "cookie2"
+                | "date"
+                | "dnt"
+                | "expect"
+                | "host"
+                | "keep-alive"
+                | "origin"
+                | "permissions-policy"
+                | "referer"
+                | "set-cookie"
+                | "te"
+                | "trailer"
+                | "transfer-encoding"
+                | "upgrade"
+                | "via"
+        )
+}
+
+fn append_fetch_headers(
+    init: &JsObject,
+    headers: &mut Vec<(String, String)>,
+    ctx: &mut Context,
+) -> boa_engine::JsResult<()> {
+    let headers_value = init.get(js_string!("headers"), ctx)?;
+    if let Some(headers_object) = headers_value.as_object() {
+        for key in headers_object.own_property_keys(ctx)? {
+            let name = key.to_string();
+            let value = headers_object
+                .get(key, ctx)?
+                .to_string(ctx)?
+                .to_std_string_lossy();
+            silksurf_net::validate_request_header(&name, &value)
+                .map_err(|error| JsNativeError::typ().with_message(error.message))?;
+            if forbidden_fetch_header(&name) {
+                continue;
+            }
+            headers.push((name, value));
+        }
+    }
+    Ok(())
+}
+
 /// Build the `HttpRequest` a `fetch()` call describes: method/headers/body from
 /// the init object (second argument), GET with Accept: */* by default.
 fn fetch_request_from_init(
@@ -3592,17 +3720,7 @@ fn fetch_request_from_init(
                 _ => HttpMethod::Get,
             };
         }
-        let headers_value = init.get(js_string!("headers"), ctx)?;
-        if let Some(headers_object) = headers_value.as_object() {
-            for key in headers_object.own_property_keys(ctx)? {
-                let name = key.to_string();
-                let value = headers_object
-                    .get(key, ctx)?
-                    .to_string(ctx)?
-                    .to_std_string_lossy();
-                headers.push((name, value));
-            }
-        }
+        append_fetch_headers(&init, &mut headers, ctx)?;
         let body_value = init.get(js_string!("body"), ctx)?;
         if !body_value.is_undefined() && !body_value.is_null() {
             body = body_value
@@ -3660,6 +3778,21 @@ fn take_net_resolvers(
     Ok(Some((resolve, reject)))
 }
 
+fn prepare_fetch_call(
+    input: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+    shared: &net_queue::NetSharedRef,
+) -> boa_engine::JsResult<(silksurf_net::HttpRequest, silksurf_net::BasicClient)> {
+    let url = fetch_input_url(input, context)?;
+    let request = fetch_request_from_init(url, args.get(1), context)?;
+    let credentials = fetch_credentials(args, context)?;
+    shared
+        .borrow()
+        .prepare_request(request, &credentials)
+        .map_err(|message| JsNativeError::typ().with_message(message).into())
+}
+
 /// Register the queue-backed `fetch()` global.
 fn install_async_fetch(ctx: &mut Context, shared: &net_queue::NetSharedRef) {
     let shared = Rc::clone(shared);
@@ -3681,12 +3814,20 @@ fn install_async_fetch(ctx: &mut Context, shared: &net_queue::NetSharedRef) {
                     JsNativeError,
                 >(Err(err), ctx)));
             }
-            let url = fetch_input_url(input, ctx)?;
-            let request = fetch_request_from_init(url, args.get(1), ctx)?;
+            let prepared = prepare_fetch_call(input, args, ctx, &shared);
+            let (request, client) = match prepared {
+                Ok(prepared) => prepared,
+                Err(message) => {
+                    return Ok(JsValue::from(JsPromise::from_result::<
+                        JsValue,
+                        boa_engine::JsError,
+                    >(Err(message), ctx)));
+                }
+            };
             let (promise, functions) = JsPromise::new_pending(ctx);
             let (id, tx) = shared.borrow_mut().begin_request();
             park_net_resolvers(id, &functions, ctx)?;
-            net_queue::spawn_request(id, tx, request);
+            net_queue::spawn_request(id, tx, request, client);
             Ok(JsValue::from(promise))
         })
     };
