@@ -24,7 +24,7 @@ use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 
 use silksurf_dom::{Dom, Namespace, NodeId, NodeKind};
-use silksurf_html::parse_html;
+use silksurf_html::{parse_html, parse_html_with_scripting};
 
 const DEFAULT_CORPUS_DIR: &str =
     "silksurf-extras/wpt-css-parser-subset/html/syntax/parsing/resources";
@@ -38,6 +38,7 @@ struct TreeCase {
     data: String,
     document: String,
     fragment_context: Option<String>,
+    scripting_enabled: bool,
 }
 
 /// Split a `.dat` file into cases.
@@ -58,11 +59,17 @@ fn parse_dat_file(file_stem: &str, raw: &str) -> Vec<TreeCase> {
         let mut data = Vec::new();
         let mut document = Vec::new();
         let mut fragment_context = None;
+        let mut scripting_enabled = true;
         let mut section = "data";
 
         for body in lines.by_ref() {
             match body {
-                "#errors" | "#new-errors" | "#script-on" | "#script-off" => {
+                "#script-on" | "#script-off" => {
+                    scripting_enabled = body == "#script-on";
+                    section = "ignored";
+                    continue;
+                }
+                "#errors" | "#new-errors" => {
                     section = "ignored";
                     continue;
                 }
@@ -96,6 +103,7 @@ fn parse_dat_file(file_stem: &str, raw: &str) -> Vec<TreeCase> {
             data: data.join("\n"),
             document: document.join("\n"),
             fragment_context,
+            scripting_enabled,
         });
         index += 1;
     }
@@ -132,7 +140,7 @@ fn serialize_node(dom: &Dom, id: NodeId, depth: usize, out: &mut String) {
     let indent = "  ".repeat(depth);
 
     match node.kind() {
-        NodeKind::Document => {}
+        NodeKind::Document | NodeKind::DocumentFragment => {}
         NodeKind::Doctype {
             name,
             public_id,
@@ -185,6 +193,15 @@ fn serialize_node(dom: &Dom, id: NodeId, depth: usize, out: &mut String) {
         }
     }
 
+    if let Some(contents) = dom.template_contents(id) {
+        let content_indent = "  ".repeat(depth + 1);
+        let _ = writeln!(out, "| {content_indent}content");
+        if let Ok(children) = dom.children(contents) {
+            for &child in children {
+                serialize_node(dom, child, depth + 2, out);
+            }
+        }
+    }
     if let Ok(children) = dom.children(id) {
         for &child in children {
             serialize_node(dom, child, depth + 1, out);
@@ -355,7 +372,7 @@ fn html5lib_tree_construction_conformance() {
     }
 
     report(&summary, &corpus, &expectations);
-    write_scorecard(&summary);
+    write_scorecard(&summary, &corpus);
 
     let fail_on_xpass = env::var("HTML5LIB_TREE_FAIL_ON_XPASS").is_ok_and(|v| v == "1");
     assert!(
@@ -372,7 +389,12 @@ fn html5lib_tree_construction_conformance() {
 }
 
 fn run_case(case: &TreeCase) -> Result<(), String> {
-    let parsed = panic::catch_unwind(AssertUnwindSafe(|| serialize_dom(&parse_html(&case.data))));
+    let parsed = panic::catch_unwind(AssertUnwindSafe(|| {
+        serialize_dom(&parse_html_with_scripting(
+            &case.data,
+            case.scripting_enabled,
+        ))
+    }));
     let actual = parsed.map_err(|_| "parser panicked".to_string())?;
     if actual == case.document {
         return Ok(());
@@ -404,8 +426,8 @@ fn report(summary: &Summary, corpus: &Path, expectations: &Expectations) {
     // failure appears, at any conformance rate.
     eprintln!(
         "[tree-construction] conformance={:.2}% of executed, {:.2}% of total",
-        ratio(summary.passed, executed) * 100.0,
-        ratio(summary.passed, summary.total) * 100.0
+        ratio(summary.passed + summary.xpassed.len(), executed) * 100.0,
+        ratio(summary.passed + summary.xpassed.len(), summary.total) * 100.0
     );
     eprintln!(
         "[tree-construction] gate={} ({} unexpected failure(s), {} recorded gap(s))",
@@ -434,7 +456,7 @@ fn report(summary: &Summary, corpus: &Path, expectations: &Expectations) {
 /// `pass` counts only genuine passes; `xfailed` cases are recorded failures
 /// that the expectations file tolerates, so folding them into `pass` would
 /// restate a known gap as conformance.
-fn write_scorecard(summary: &Summary) {
+fn write_scorecard(summary: &Summary, corpus: &Path) {
     let Ok(raw_path) = env::var("HTML5LIB_TREE_SCORECARD") else {
         return;
     };
@@ -447,33 +469,47 @@ fn write_scorecard(summary: &Summary) {
         repo_root().join(requested)
     };
     let executed = summary.total - summary.skipped;
-    let revision = corpus_revision().unwrap_or_else(|| "unknown".to_string());
-    let json = format!(
-        "{{\n  \"runner\": \"html5lib_tree_construction\",\n  \"runner_kind\": \"wpt-tree-construction\",\n  \"corpus\": \"wpt html/syntax/parsing/resources\",\n  \"corpus_revision\": \"{revision}\",\n  \"oracle\": \"the Dom parse_html builds, serialized in html5lib format, equals the corpus #document; a case whose id the expectations file marks expected-fail counts as a recorded gap rather than a pass\",\n  \"total\": {},\n  \"executed\": {},\n  \"pass\": {},\n  \"expected_fail\": {},\n  \"skip\": {},\n  \"rate_executed\": {:.4},\n  \"rate_total\": {:.4}\n}}\n",
-        summary.total,
-        executed,
-        summary.passed,
-        summary.xfailed,
-        summary.skipped,
-        ratio(summary.passed, executed),
-        ratio(summary.passed, summary.total),
-    );
+    let revision = corpus_revision(corpus).expect("scorecard requires the corpus Git revision");
+    let json = serde_json::json!({
+        "runner": "html5lib_tree_construction",
+        "runner_kind": "wpt-tree-construction",
+        "corpus": "wpt html/syntax/parsing/resources",
+        "corpus_revision": revision,
+        "oracle": "The production parse tree serialized in html5lib format equals the corpus #document. Expected failures remain failures; unexpected passes count as genuine passes and fail the strict expectation gate.",
+        "total": summary.total,
+        "executed": executed,
+        "pass": summary.passed + summary.xpassed.len(),
+        "fail": summary.failures.len(),
+        "expected_fail": summary.xfailed,
+        "unexpected_pass": summary.xpassed.len(),
+        "skip": summary.skipped,
+        "rate_executed": ratio(summary.passed + summary.xpassed.len(), executed),
+        "rate_total": ratio(summary.passed + summary.xpassed.len(), summary.total),
+    });
+    let json = serde_json::to_string_pretty(&json).expect("scorecard JSON serializes");
     if let Err(error) = fs::write(&path, json) {
-        eprintln!(
+        panic!(
             "[tree-construction] scorecard write failed for {}: {error}",
             path.display()
         );
     }
 }
 
-/// Read the pinned corpus revision so a scorecard cannot outlive its corpus.
-fn corpus_revision() -> Option<String> {
-    let manifest = repo_root().join("silksurf-extras/html-css-test-corpora-revisions.txt");
-    let raw = fs::read_to_string(manifest).ok()?;
-    raw.lines()
-        .find(|line| line.starts_with("wpt-css-parser-subset "))
-        .and_then(|line| line.split_whitespace().nth(1))
-        .map(str::to_string)
+/// Record HEAD of the checkout enclosing the selected corpus directory.
+/// Local corpus edits retain that checkout revision.
+fn corpus_revision(corpus: &Path) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(corpus)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let revision = String::from_utf8(output.stdout).ok()?.trim().to_string();
+    (revision.len() == 40 && revision.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .then_some(revision)
 }
 
 fn ratio(numerator: usize, denominator: usize) -> f64 {
@@ -548,6 +584,17 @@ fn dat_parser_records_fragment_context() {
     let raw = "#data\n<td>x\n#errors\n#document-fragment\ntr\n#document\n| <td>\n";
     let cases = parse_dat_file("frag", raw);
     assert_eq!(cases[0].fragment_context.as_deref(), Some("tr"));
+}
+
+#[test]
+fn scripting_directive_controls_noscript_tree_construction() {
+    let raw = "#data\n<head><noscript><!--foo--></noscript>\n#errors\n#script-off\n#document\n| <html>\n|   <head>\n|     <noscript>\n|       <!-- foo -->\n|   <body>\n";
+    let cases = parse_dat_file("noscript", raw);
+    assert!(!cases[0].scripting_enabled);
+    assert!(run_case(&cases[0]).is_ok());
+    let enabled = parse_dat_file("noscript", &raw.replace("#script-off", "#script-on"));
+    assert!(enabled[0].scripting_enabled);
+    assert!(run_case(&enabled[0]).is_err());
 }
 
 #[test]

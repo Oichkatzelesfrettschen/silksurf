@@ -45,11 +45,14 @@ not resolve.
 
 ### Where the failures concentrate
 
-Tree construction: 199 of 286 recorded gaps reach one cause. `silksurf_dom::NodeKind`
-carries neither a template-content fragment nor a processing-instruction
-variant, so `crates/silksurf-html/src/treesink.rs` drops template children
-(109 cases) and renders a processing instruction as a comment (90 cases).
-html5ever itself is spec-grounded; the losses sit in the SilkSurf adapter.
+Tree construction separates adapter loss from tokenizer behavior. The template
+fragment adapter repair resolves 109 recorded failures; preserving the corpus
+scripting flag resolves another 24 cases, and five older expectations already
+pass. The strict rerun records 1,578 / 1,726 executed passes, 148 expected
+failures, and 192 skips. The processing-instruction cases reach html5ever 0.38's
+`<?` bogus-comment tokenizer branch before `TreeSink::create_pi`; adding a DOM
+variant alone cannot resolve those cases. The remaining upstream behavior needs
+a tokenizer-level investigation.
 
 Tokenization: 2,283 of 3,621 recorded gaps are named character references left
 as source text, and 1,238 are `test3` state permutations. The `State` enum in

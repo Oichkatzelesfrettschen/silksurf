@@ -33,7 +33,7 @@
     },
     "corpus_revision": {
       "type": "string",
-      "description": "Full commit SHA of the corpus checkout, matching the pin in silksurf-extras/html-css-test-corpora-revisions.txt. A rate whose corpus moved is a different measurement.",
+      "description": "Full HEAD commit SHA of the checkout enclosing the selected corpus. Local edits retain that revision; exact corpus provenance additionally requires a clean checkout or hashes of the consumed files. Default reference checkouts follow silksurf-extras/html-css-test-corpora-revisions.txt.",
       "pattern": "^[0-9a-f]{40}$"
     },
     "oracle": {
@@ -91,6 +91,16 @@
     "measurement_environment": {
       "description": "Host, toolchain, and revision provenance. scripts/conformance_run.sh embeds it after the harness writes the counts, so one Python implementation serves every artifact.",
       "$ref": "../../perf/measurement-environment.schema.json"
+    },
+    "fail": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Unexpected oracle failures, separate from the recorded expected-failure ledger."
+    },
+    "unexpected_pass": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Genuine passes still marked expected-fail; included in pass and rejected by strict expectation admission."
     }
   }
 }

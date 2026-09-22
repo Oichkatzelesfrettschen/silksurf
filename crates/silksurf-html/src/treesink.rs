@@ -206,10 +206,14 @@ impl TreeSink for SilkDomBuilder {
         let _ = inner.dom.append_child(NodeId::from_raw(0), dt);
     }
 
-    // Template element content fragments: return the element itself as a
-    // placeholder until template content is properly supported.
     fn get_template_contents(&self, target: &usize) -> usize {
-        *target
+        self.inner
+            .borrow()
+            .dom
+            .template_contents(NodeId::from_raw(*target))
+            // UNWRAP-OK: html5ever requests contents only for an HTML template created by the sink.
+            .expect("HTML template owns a content fragment")
+            .raw()
     }
 
     // Add attributes to target only for names not already present.
@@ -282,8 +286,18 @@ fn html5ever_ns_to_silk(ns: &str) -> Namespace {
 /// structurally well-formed.
 #[must_use]
 pub fn parse_html(input: &str) -> Dom {
+    parse_html_with_scripting(input, true)
+}
+
+/// Parse an HTML document with the embedding context's scripting flag.
+///
+/// HTML's noscript insertion modes depend on whether scripting is enabled.
+#[must_use]
+pub fn parse_html_with_scripting(input: &str, scripting_enabled: bool) -> Dom {
     let sink = SilkDomBuilder::new();
-    parse_document(sink, ParseOpts::default()).one(input)
+    let mut options = ParseOpts::default();
+    options.tree_builder.scripting_enabled = scripting_enabled;
+    parse_document(sink, options).one(input)
 }
 
 /// Parse `html` as a fragment in the context of a `context_tag` element and

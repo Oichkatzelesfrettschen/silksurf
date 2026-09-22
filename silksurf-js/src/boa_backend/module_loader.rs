@@ -77,6 +77,7 @@ impl ImportMap {
 #[derive(Default)]
 pub(super) struct PageModuleLoader {
     modules: RefCell<FxHashMap<String, Module>>,
+    parse_errors: RefCell<FxHashMap<String, String>>,
     missing: RefCell<Vec<String>>,
     /// The document's import map, both member lists sorted longest key first
     /// so a prefix never shadows a longer, more specific match. It applies
@@ -95,7 +96,21 @@ pub(super) struct PageModuleLoader {
 impl PageModuleLoader {
     pub(super) fn clear(&self) {
         self.modules.borrow_mut().clear();
+        self.parse_errors.borrow_mut().clear();
         self.missing.borrow_mut().clear();
+    }
+
+    pub(super) fn get(&self, url: &str) -> Result<Option<Module>, String> {
+        if let Some(error) = self.parse_errors.borrow().get(url) {
+            return Err(error.clone());
+        }
+        Ok(self.modules.borrow().get(url).cloned())
+    }
+
+    pub(super) fn insert_parse_error(&self, url: &str, error: String) {
+        self.parse_errors
+            .borrow_mut()
+            .insert(url.to_string(), error);
     }
 
     pub(super) fn insert(&self, url: &str, module: Module) {
@@ -285,8 +300,11 @@ impl ModuleLoader for PageModuleLoader {
                 .with_message(format!("module specifier {specifier} does not resolve"))
                 .into());
         };
-        if let Some(module) = self.modules.borrow().get(&url) {
-            return Ok(module.clone());
+        if let Some(module) = self
+            .get(&url)
+            .map_err(|error| JsNativeError::syntax().with_message(error))?
+        {
+            return Ok(module);
         }
         self.missing.borrow_mut().push(url.clone());
         self.fetch_module(&url, context)

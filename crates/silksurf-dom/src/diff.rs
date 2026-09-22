@@ -147,7 +147,8 @@ fn diff_subtree(
          * Document nodes: just recurse into children.
          * There is always exactly one Document at the root.
          */
-        (NodeKind::Document, NodeKind::Document) => {
+        (NodeKind::Document, NodeKind::Document)
+        | (NodeKind::DocumentFragment, NodeKind::DocumentFragment) => {
             diff_children(old_dom, old_node, new_dom, new_node, result);
         }
 

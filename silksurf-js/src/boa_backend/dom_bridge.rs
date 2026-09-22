@@ -242,6 +242,13 @@ struct NodeSnapshot {
 fn snapshot_node(dom: &Dom, node_id: NodeId) -> NodeSnapshot {
     if let Ok(n) = dom.node(node_id) {
         match n.kind() {
+            NodeKind::DocumentFragment => {
+                return NodeSnapshot {
+                    tag_name: String::new(),
+                    node_name: "#document-fragment".into(),
+                    node_type: 11,
+                };
+            }
             NodeKind::Text { .. } => {
                 return NodeSnapshot {
                     tag_name: String::new(),
@@ -691,7 +698,7 @@ fn node_accessors(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId, ctx: &mut Context)
         ),
         text_content_get: make_getter(ctx, text_content_get_native(dom_arc, node_id)),
         text_content_set: make_getter(ctx, text_content_set_native(dom_arc, node_id)),
-        inner_html_get: make_getter(ctx, text_content_get_native(dom_arc, node_id)),
+        inner_html_get: make_getter(ctx, inner_html_get_native(dom_arc, node_id)),
         inner_html_set: make_getter(ctx, inner_html_set_native(dom_arc, node_id)),
         value_get: make_getter(ctx, value_get_native(dom_arc, node_id)),
         value_set: make_getter(ctx, value_set_native(dom_arc, node_id)),
@@ -912,8 +919,8 @@ fn append_child_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunc
             let child = extract_node_id(child_arg, ctx)?;
             {
                 let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
-                detach_from_parent(&mut dom, child);
-                let _ = dom.append_child(node_id, child);
+                dom.pre_insert(node_id, child, None)
+                    .map_err(|error| dom_mutation_error(&error))?;
             }
             // The mutation queues a record, so the delivery microtask is
             // enqueued before this native returns.
@@ -933,7 +940,8 @@ fn remove_child_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunc
             let child = extract_node_id(child_arg, ctx)?;
             {
                 let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
-                let _ = dom.remove_child(node_id, child);
+                dom.remove_child(node_id, child)
+                    .map_err(|error| dom_mutation_error(&error))?;
             }
             // The mutation queues a record, so the delivery microtask is
             // enqueued before this native returns.
@@ -952,7 +960,7 @@ fn insert_before_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFun
             let child_arg = args.first();
             let child = extract_node_id(child_arg, ctx)?;
             let reference = extract_optional_node_id(args.get(1), ctx)?;
-            insert_before_or_append(&arc, node_id, child, reference);
+            insert_before_or_append(&arc, node_id, child, reference)?;
             // The mutation queues a record, so the delivery microtask is
             // enqueued before this native returns.
             super::mutation_observer::notify(&arc, ctx);
@@ -966,14 +974,17 @@ fn insert_before_or_append(
     parent: NodeId,
     child: NodeId,
     reference: Option<NodeId>,
-) {
+) -> JsResult<()> {
     let mut dom = dom_arc.lock().unwrap_or_else(PoisonError::into_inner);
-    if let Some(reference) = reference {
-        let _ = dom.insert_before(parent, child, reference);
-    } else {
-        detach_from_parent(&mut dom, child);
-        let _ = dom.append_child(parent, child);
-    }
+    dom.pre_insert(parent, child, reference)
+        .map_err(|error| dom_mutation_error(&error))?;
+    Ok(())
+}
+
+fn dom_mutation_error(error: &silksurf_dom::DomError) -> boa_engine::JsError {
+    boa_engine::JsNativeError::typ()
+        .with_message(format!("DOM mutation: {error:?}"))
+        .into()
 }
 
 fn replace_child_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
@@ -987,8 +998,12 @@ fn replace_child_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFun
             let old_child = extract_node_id(old_child_arg, ctx)?;
             {
                 let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
-                let _ = dom.insert_before(node_id, child, old_child);
-                let _ = dom.remove_child(node_id, old_child);
+                dom.insert_before(node_id, child, old_child)
+                    .map_err(|error| dom_mutation_error(&error))?;
+                if child != old_child {
+                    dom.remove_child(node_id, old_child)
+                        .map_err(|error| dom_mutation_error(&error))?;
+                }
             }
             // The mutation queues a record, so the delivery microtask is
             // enqueued before this native returns.
@@ -1087,10 +1102,21 @@ fn node_value_set_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFu
     }
 }
 
-/// innerHTML setter: clear existing children, fragment-parse the markup in
-/// this element's context, splice the result. Scripts in the fragment stay
-/// inert (fragment parsing semantics). The whole operation runs under one
-/// Dom lock acquisition; no JS executes while it is held.
+/// html5ever serializes element contents with HTML escaping and raw-text rules.
+fn inner_html_get_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    // SAFETY: the closure owns the DOM handle and captures no GC-managed values.
+    unsafe {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
+            let dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+            let html = silksurf_html::serialize_fragment(&dom, node_id).map_err(|error| {
+                boa_engine::JsNativeError::error().with_message(error.to_string())
+            })?;
+            Ok(JsValue::from(JsString::from(html.as_str())))
+        })
+    }
+}
+
 fn inner_html_set_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFunction {
     let arc = Arc::clone(dom_arc);
     // SAFETY: Boa stores the native closure with owned DOM handles for the JS function lifetime.
@@ -1109,13 +1135,14 @@ fn inner_html_set_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFu
                 .flatten()
                 .map_or_else(|| "div".to_string(), std::string::ToString::to_string);
             let existing: Vec<NodeId> = dom
-                .children(node_id)
+                .children(dom.template_contents(node_id).unwrap_or(node_id))
                 .map(<[NodeId]>::to_vec)
                 .unwrap_or_default();
+            let destination = dom.template_contents(node_id).unwrap_or(node_id);
             for child in existing {
-                let _ = dom.remove_child(node_id, child);
+                let _ = dom.remove_child(destination, child);
             }
-            silksurf_html::parse_fragment_into(&mut dom, node_id, &context_tag, &html);
+            silksurf_html::parse_fragment_into(&mut dom, destination, &context_tag, &html);
             // The mutation queues a record, so the delivery microtask is
             // enqueued before this native returns. The tree lock drops first,
             // because enqueuing reads the queue depth through the same mutex.
@@ -1191,12 +1218,6 @@ fn node_dispatch_event_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> Nat
         NativeFunction::from_closure(move |this, args, ctx| {
             dispatch_event(this, &arc, node_id, args.first(), ctx)
         })
-    }
-}
-
-fn detach_from_parent(dom: &mut Dom, node_id: NodeId) {
-    if let Ok(Some(parent_id)) = dom.parent(node_id) {
-        let _ = dom.remove_child(parent_id, node_id);
     }
 }
 

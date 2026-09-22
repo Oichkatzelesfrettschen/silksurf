@@ -333,6 +333,13 @@ impl WaylandShmSurface {
         if width == 0 || height == 0 {
             return Err("Wayland surface has zero size".to_string());
         }
+        if self.width != width || self.height != height {
+            for buffer in &mut self.buffers {
+                buffer.retained_tag = None;
+                buffer.age = 0;
+            }
+            self.last_presented_buffer = None;
+        }
         if buffers_cover_size(
             self.buffer_width,
             self.buffer_height,

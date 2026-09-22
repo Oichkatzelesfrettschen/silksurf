@@ -1620,7 +1620,7 @@ fn node_starts_non_rendered_subtree(dom: &Dom, node: NodeId) -> bool {
         return true;
     };
     match dom_node.kind() {
-        NodeKind::Doctype { .. } | NodeKind::Comment { .. } => true,
+        NodeKind::Doctype { .. } | NodeKind::Comment { .. } | NodeKind::DocumentFragment => true,
         NodeKind::Element { name, .. } => matches!(
             name,
             TagName::Head

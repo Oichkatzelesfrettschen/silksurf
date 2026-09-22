@@ -84,6 +84,7 @@ fn interface_name(dom: &Dom, node_id: NodeId) -> &'static str {
         NodeKind::Text { .. } => return "Text",
         NodeKind::Comment { .. } => return "Comment",
         NodeKind::Document => return "Document",
+        NodeKind::DocumentFragment => return "DocumentFragment",
         NodeKind::Element { .. } => {}
         NodeKind::Doctype { .. } => return "Node",
     }
@@ -369,9 +370,11 @@ fn clone_subtree(dom: &mut Dom, node_id: NodeId, deep: bool) -> Option<NodeId> {
         let copy = match node.kind() {
             NodeKind::Text { text, .. } => dom.create_text(text.clone()),
             NodeKind::Comment { data: comment, .. } => dom.create_comment(comment.clone()),
-            NodeKind::Element { .. } => {
+            NodeKind::DocumentFragment => dom.create_document_fragment(),
+            NodeKind::Element { namespace, .. } => {
+                let namespace = namespace.clone();
                 let name = dom.element_name(node_id).ok().flatten()?.to_string();
-                dom.create_element(name)
+                dom.create_element_ns(name, namespace)
             }
             NodeKind::Document | NodeKind::Doctype { .. } => return None,
         };
@@ -398,6 +401,15 @@ fn clone_subtree(dom: &mut Dom, node_id: NodeId, deep: bool) -> Option<NodeId> {
                 let _ = dom.append_child(copy, child_copy);
             }
         }
+        if let (Some(source), Some(destination)) =
+            (dom.template_contents(node_id), dom.template_contents(copy))
+        {
+            let children = dom.children(source).ok()?.to_vec();
+            for child in children {
+                let child_copy = clone_subtree(dom, child, true)?;
+                dom.append_child(destination, child_copy).ok()?;
+            }
+        }
     }
     Some(copy)
 }
@@ -415,7 +427,7 @@ fn create_detached(
     let created = match kind.as_str() {
         "comment" => dom.create_comment(contents),
         "text" => dom.create_text(contents),
-        "fragment" => dom.create_element("#document-fragment"),
+        "fragment" => dom.create_document_fragment(),
         _ => return Ok(JsValue::null()),
     };
     Ok(JsValue::from(created.raw() as u32))
@@ -450,7 +462,30 @@ pub(super) fn set_current_script(
     let _ = document.set(js_string!("currentScript"), value, false, ctx);
 }
 
+fn template_content(
+    dom_arc: &Arc<Mutex<Dom>>,
+    args: &[JsValue],
+    ctx: &mut Context,
+) -> JsResult<JsValue> {
+    let Some(node) = node_id_arg(args, 0, ctx)? else {
+        return Ok(JsValue::null());
+    };
+    let dom = dom_arc.lock().unwrap_or_else(PoisonError::into_inner);
+    Ok(dom
+        .template_contents(node)
+        .map_or_else(JsValue::null, |contents| {
+            JsValue::from(contents.raw() as u32)
+        }))
+}
+
 fn install_node_natives(dom_arc: &Arc<Mutex<Dom>>, ctx: &mut Context) {
+    dom_native!(
+        ctx,
+        dom_arc,
+        "__silksurfTemplateContent",
+        1,
+        template_content
+    );
     dom_native!(ctx, dom_arc, "__silksurfNodeHasAttribute", 2, has_attribute);
     dom_native!(
         ctx,
@@ -628,6 +663,13 @@ const INTERFACE_BOOTSTRAP: &str = r"
         var id = __silksurfNodeClone(this.nodeId, !!deep);
         return id === null ? null : __silksurfWrapNode(id);
     };
+    Object.defineProperty(HTMLTemplateElement.prototype, 'content', {
+        get: function () {
+            var id = __silksurfTemplateContent(this.nodeId);
+            if (id === null) throw new TypeError('HTMLTemplateElement receiver required');
+            return __silksurfWrapNode(id);
+        }
+    });
     Object.defineProperty(Node.prototype, 'isConnected', {
         get: function () { return __silksurfNodeIsConnected(this.nodeId); }
     });

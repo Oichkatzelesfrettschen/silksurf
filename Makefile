@@ -47,6 +47,7 @@ CLIPPY_DENY := \
     -D clippy::complexity
 
 # Read MSRV from workspace; single source of truth.
+export PYTHON
 MSRV := $(shell awk -F'"' '/^rust-version =/ {print $$2; exit}' Cargo.toml)
 
 # Build-tree hygiene. The build/ and build-* directories, infer-out, and
@@ -77,6 +78,7 @@ BOLT_OPTS     ?= -reorder-blocks=ext-tsp -reorder-functions=cdsort \
 # Fast gate: format check + clippy -D warnings + lint helpers.
 # Wired into pre-commit hook.
 check:
+	@test -n "$(PYTHON)" || { echo 'Set PYTHON to the intended Python executable' >&2; exit 1; }
 	@echo "==> rustfmt check"
 	cargo fmt --all -- --check
 	@echo "==> clippy -D warnings"
@@ -102,14 +104,14 @@ check:
 	@# perf/schema.json declared a required field set and additionalProperties
 	@# false that no run enforced, because append_history.py builds each record
 	@# by hand. These two check the published artifacts against their schemas.
-	@python3 scripts/validate_measurement_artifacts.py
+	@"$(PYTHON)" scripts/validate_measurement_artifacts.py
 	@# reanchor_commit_citations.py repoints cited SHAs across a history
 	@# rewrite from an explicit file list, so a file gaining its first
 	@# citation is invisible to it. --verify asks git which hex tokens
 	@# resolve to commits, which makes an unlisted citing file fail here
 	@# rather than silently miss the next rewrite.
-	@python3 scripts/reanchor_commit_citations.py --verify
-	@python3 -m unittest discover -q -s scripts -p 'test_*.py'
+	@"$(PYTHON)" scripts/reanchor_commit_citations.py --verify
+	@"$(PYTHON)" -m unittest discover -q -s scripts -p 'test_*.py'
 
 # Workspace tests with -D warnings.
 # Wired into full gate (pre-push hook) via the full target.
@@ -282,7 +284,7 @@ bolt-opt:
 	    BOLT_OPTS="$(BOLT_OPTS)" scripts/bolt_build.sh $(BIN)
 
 perf-guardrails:
-	$(RUSTFLAGS_DENY) python3 scripts/perf_guardrails.py
+	$(RUSTFLAGS_DENY) "$(PYTHON)" scripts/perf_guardrails.py
 
 perf-baselines:
 	./perf/run_baselines.sh

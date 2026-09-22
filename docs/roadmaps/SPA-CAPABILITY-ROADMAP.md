@@ -9,6 +9,55 @@ anchors) plus a falsification pass over the prior roadmaps
 (docs/roadmaps/DEBT-RECONCILIATION-ROADMAP.md;
 docs/archive/roadmaps/SNAZZY-WAFFLE-COMPLETION.md).
 
+## Browser runtime and embedded-content validation
+
+The browser presents its native shell before network work, retains recoverable
+navigation errors, and routes Escape to Stop. Resize invalidation covers growth
+and shrink; presentation uses the bitmap's recorded stride. HTML templates own
+inert fragments, and inline module roots execute through one document dependency
+registry. Fetch carries the document URL, TLS policy, and cookie partition.
+AD-042 through AD-044 record the mechanisms and boundaries.
+
+- Compact-engine evidence: the upstream HTML tree run records 1,578 of 1,726
+  executed passes, 148 expected failures, and 192 skips; test262 numeric literals
+  pass 157 of 157 at corpus revision
+  `045bf6f9966ce3291b8fbc1e0403cd97b9201b00`.
+- The same test262 snapshot's `built-ins/Promise` selection records 637 passes,
+  89 failures, and six skips across 732 cases. The runner exits 1. Failures split
+  into `allKeyed` (44), `allSettledKeyed` (43), and `try` (two); the selected
+  snapshot defines that compatibility boundary.
+- Embedded-page evidence: native X11 probes pass local page click-to-repaint,
+  chat-fixture text input, and pending-navigation Stop. Template content remains
+  outside connected document script discovery.
+- `native-runtime-default-supervision`: GUI callbacks still execute page build
+  and JavaScript. AD-027 integration must move those operations behind the
+  supervised process boundary before hostile-script responsiveness is claimed.
+- `document-create-element-ns`: the JS bridge returns null for `createElementNS`;
+  namespace validation and element construction need implementation before SVG
+  creation by page libraries is supported.
+- `template-owner-document-and-observers`: inert owner-document identity and
+  direct observation of disconnected fragments need DOM bridge coverage.
+- `cross-origin-fetch-policy`: CORS, preflight, and credentialed cross-origin
+  admission need a complete Fetch policy layer. Response readers still buffer
+  the full body before exposing chunks.
+- `iframe-browsing-context` and `media-element-stack`: child document ownership,
+  event routing, isolation, resource selection, decoding, and playback remain
+  open under the embedded-content decision gate below.
+- `classic-script-dynamic-import-bootstrap`: native loading installs the module
+  fetcher after classic scripts and their jobs run. Registry initialization and
+  fetch admission must precede classic-script imports while preserving module
+  identity across later roots.
+- `shadow-root-interface-and-tree`: ChatGPT's fetched HTML setter polyfill throws
+  `ReferenceError: ShadowRoot is not defined`. Shadow-tree ownership and DOM
+  interfaces need implementation before that script can execute.
+- `headless-script-parity`: the headless path drops external classic scripts and
+  omits module-loader setup; native and headless results require separate probes.
+- `chatgpt-live-acceptance`: silksurf receives HTTP 200 and executes inline
+  bootstrap code, then reproduces a TypeError in a 69,750-byte inline script.
+  The native capture shows a blank page under functioning chrome. A second native
+  request receives HTTP 403 for a dynamic script. Headless reports zero display
+  items. Login, prompt submission, and streamed reply remain unverified.
+
 ## Acceptance frame: the site ladder
 
 Each rung is a reproducible acceptance target; a rung is claimed only

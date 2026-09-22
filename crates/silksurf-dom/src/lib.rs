@@ -321,6 +321,7 @@ impl AttributeName {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum NodeKind {
     Document,
+    DocumentFragment,
     Doctype {
         name: Option<String>,
         public_id: Option<String>,
@@ -400,6 +401,8 @@ pub struct Dom {
     /// the document root connectedness is measured against.
     mutations: mutation::MutationLog,
     document_root: Option<NodeId>,
+    template_contents: HashMap<NodeId, NodeId>,
+    template_hosts: HashMap<NodeId, NodeId>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -408,6 +411,8 @@ pub enum DomError {
     AlreadyHasParent(NodeId),
     NotElement(NodeId),
     NotText(NodeId),
+    NotChild(NodeId),
+    HierarchyRequest(NodeId),
 }
 
 impl From<DomError> for silksurf_core::SilkError {
@@ -441,6 +446,8 @@ impl Dom {
             pending_structure_change: false,
             pending_style_change: false,
             canvas_surfaces: HashMap::new(),
+            template_contents: HashMap::new(),
+            template_hosts: HashMap::new(),
         }
     }
 
@@ -521,11 +528,27 @@ impl Dom {
     pub fn create_element_ns(&mut self, name: impl Into<String>, namespace: Namespace) -> NodeId {
         let name = name.into();
         let name = TagName::from_str(&name);
-        self.push_node(NodeKind::Element {
+        let is_template = namespace == Namespace::Html && name.as_str() == "template";
+        let element = self.push_node(NodeKind::Element {
             name,
             namespace,
             attributes: Vec::new(),
-        })
+        });
+        if is_template {
+            let contents = self.create_document_fragment();
+            self.template_contents.insert(element, contents);
+            self.template_hosts.insert(contents, element);
+        }
+        element
+    }
+
+    pub fn create_document_fragment(&mut self) -> NodeId {
+        self.push_node(NodeKind::DocumentFragment)
+    }
+
+    /// HTML template contents live outside the element's ordinary child list.
+    pub fn template_contents(&self, template: NodeId) -> Option<NodeId> {
+        self.template_contents.get(&template).copied()
     }
 
     pub fn create_text(&mut self, text: impl Into<String>) -> NodeId {
@@ -549,7 +572,106 @@ impl Dom {
         })
     }
 
+    fn validate_insertion(&self, parent: NodeId, child: NodeId) -> Result<(), DomError> {
+        if !matches!(
+            self.node(parent)?.kind(),
+            NodeKind::Document | NodeKind::DocumentFragment | NodeKind::Element { .. }
+        ) {
+            return Err(DomError::HierarchyRequest(parent));
+        }
+        self.node(child)?;
+        let mut ancestor = Some(parent);
+        while let Some(node) = ancestor {
+            if node == child {
+                return Err(DomError::HierarchyRequest(child));
+            }
+            ancestor = self
+                .parent(node)?
+                .or_else(|| self.template_hosts.get(&node).copied());
+        }
+        Ok(())
+    }
+
+    fn splice_fragment(
+        &mut self,
+        parent: NodeId,
+        fragment: NodeId,
+        reference: Option<NodeId>,
+    ) -> Result<(), DomError> {
+        let children = self.children(fragment)?.to_vec();
+        if children.is_empty() {
+            return Ok(());
+        }
+        for &child in &children {
+            self.validate_insertion(parent, child)?;
+        }
+        let parent_index = self.node_index(parent)?;
+        let fragment_index = self.node_index(fragment)?;
+        let position = match reference {
+            Some(reference) => self.nodes[parent_index]
+                .children
+                .iter()
+                .position(|child| *child == reference)
+                .ok_or(DomError::NotChild(reference))?,
+            None => self.nodes[parent_index].children.len(),
+        };
+        let previous = position
+            .checked_sub(1)
+            .and_then(|index| self.nodes[parent_index].children.get(index).copied());
+        self.nodes[fragment_index].children.clear();
+        for (offset, &child) in children.iter().enumerate() {
+            self.nodes[child.raw()].parent = Some(parent);
+            self.nodes[parent_index]
+                .children
+                .insert(position + offset, child);
+            self.mark_dirty(child);
+        }
+        self.record_structure_change();
+        self.mark_dirty(parent);
+        self.mark_dirty(fragment);
+        self.queue_mutation(
+            fragment,
+            MutationKind::ChildList {
+                added: Vec::new(),
+                removed: children.clone(),
+                previous: None,
+                next: None,
+            },
+        );
+        self.queue_mutation(
+            parent,
+            MutationKind::ChildList {
+                added: children,
+                removed: Vec::new(),
+                previous,
+                next: reference,
+            },
+        );
+        Ok(())
+    }
+
+    /// Validate the destination before moving a node or splicing a fragment.
+    pub fn pre_insert(
+        &mut self,
+        parent: NodeId,
+        child: NodeId,
+        reference: Option<NodeId>,
+    ) -> Result<(), DomError> {
+        if let Some(reference) = reference {
+            return self.insert_before(parent, child, reference);
+        }
+        self.validate_insertion(parent, child)?;
+        if let Some(old_parent) = self.parent(child)? {
+            self.remove_child(old_parent, child)?;
+        }
+        self.append_child(parent, child)
+    }
+
     pub fn append_child(&mut self, parent: NodeId, child: NodeId) -> Result<(), DomError> {
+        self.validate_insertion(parent, child)?;
+        if matches!(self.node(child)?.kind(), NodeKind::DocumentFragment) {
+            return self.splice_fragment(parent, child, None);
+        }
         let parent_index = self.node_index(parent)?;
         let child_index = self.node_index(child)?;
 
@@ -592,6 +714,7 @@ impl Dom {
     ) -> Result<NodeId, DomError> {
         let new_node = match src.node(src_node)?.kind() {
             NodeKind::Document => return Err(DomError::UnknownNode(src_node)),
+            NodeKind::DocumentFragment => self.create_document_fragment(),
             NodeKind::Doctype {
                 name,
                 public_id,
@@ -615,11 +738,19 @@ impl Dom {
             NodeKind::Text { text } => self.create_text(text.clone()),
             NodeKind::Comment { data } => self.create_comment(data.clone()),
         };
-        self.append_child(dest_parent, new_node)?;
         let children: Vec<NodeId> = src.children(src_node)?.to_vec();
         for child in children {
             self.import_subtree(src, child, new_node)?;
         }
+        if let (Some(source), Some(destination)) = (
+            src.template_contents(src_node),
+            self.template_contents(new_node),
+        ) {
+            for &child in src.children(source)? {
+                self.import_subtree(src, child, destination)?;
+            }
+        }
+        self.append_child(dest_parent, new_node)?;
         Ok(new_node)
     }
 
@@ -630,14 +761,17 @@ impl Dom {
         let position = self.nodes[parent_index]
             .children
             .iter()
-            .position(|id| *id == child);
-        let (previous, next) = position.map_or((None, None), |at| {
+            .position(|id| *id == child)
+            .ok_or(DomError::NotChild(child))?;
+        let (previous, next) = {
             let children = &self.nodes[parent_index].children;
             (
-                at.checked_sub(1).and_then(|i| children.get(i).copied()),
-                children.get(at + 1).copied(),
+                position
+                    .checked_sub(1)
+                    .and_then(|i| children.get(i).copied()),
+                children.get(position + 1).copied(),
             )
-        });
+        };
         self.nodes[parent_index].children.retain(|id| *id != child);
         self.nodes[child_index].parent = None;
         self.record_structure_change();
@@ -661,16 +795,23 @@ impl Dom {
         new_child: NodeId,
         ref_child: NodeId,
     ) -> Result<(), DomError> {
+        self.validate_insertion(parent, new_child)?;
+        if self.parent(ref_child)? != Some(parent) {
+            return Err(DomError::NotChild(ref_child));
+        }
+        if new_child == ref_child {
+            return Ok(());
+        }
+        if matches!(self.node(new_child)?.kind(), NodeKind::DocumentFragment) {
+            return self.splice_fragment(parent, new_child, Some(ref_child));
+        }
         let parent_index = self.node_index(parent)?;
         let new_index = self.node_index(new_child)?;
         let _ = self.node_index(ref_child)?; // validate ref exists
 
         // Detach new_child from old parent if needed
         if let Some(old_parent) = self.nodes[new_index].parent {
-            let old_parent_index = self.node_index(old_parent)?;
-            self.nodes[old_parent_index]
-                .children
-                .retain(|id| *id != new_child);
+            self.remove_child(old_parent, new_child)?;
         }
 
         self.nodes[new_index].parent = Some(parent);
@@ -754,7 +895,7 @@ impl Dom {
                 }
                 Ok(())
             }
-            NodeKind::Element { .. } | NodeKind::Document => {
+            NodeKind::Element { .. } | NodeKind::Document | NodeKind::DocumentFragment => {
                 let old_children: Vec<NodeId> =
                     self.nodes[index].children.iter().copied().collect();
                 self.nodes[index].children.clear();
@@ -926,7 +1067,7 @@ impl Dom {
     /// Whether `id` hangs off the document root. A record is queued only for a
     /// connected target, so building a subtree before splicing it in reports
     /// the splice rather than each construction step.
-    fn is_connected(&self, id: NodeId) -> bool {
+    pub fn is_connected(&self, id: NodeId) -> bool {
         let Some(root) = self.document_root else {
             return false;
         };

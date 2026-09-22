@@ -160,10 +160,13 @@ pub struct CookieContext {
     pub top_level_site: String,
 }
 
+#[derive(Clone)]
 pub struct BasicClient {
     tls: Arc<dyn TlsProvider + Send + Sync>,
     max_redirects: usize,
     cookie_context: Option<CookieContext>,
+    cookie_origin: Option<url::Origin>,
+    request_origin: Option<url::Origin>,
 }
 
 impl BasicClient {
@@ -173,6 +176,8 @@ impl BasicClient {
             tls: shared_default_tls_provider(),
             max_redirects: 5,
             cookie_context: None,
+            cookie_origin: None,
+            request_origin: None,
         }
     }
 
@@ -182,6 +187,8 @@ impl BasicClient {
             tls,
             max_redirects: 5,
             cookie_context: None,
+            cookie_origin: None,
+            request_origin: None,
         }
     }
 
@@ -209,6 +216,33 @@ impl BasicClient {
         Arc::clone(&self.tls)
     }
 
+    /// Restrict automatic cookie reads and writes to one origin, including redirects.
+    #[must_use]
+    pub fn with_cookie_origin(mut self, origin: url::Origin) -> Self {
+        self.cookie_origin = Some(origin);
+        self
+    }
+
+    /// Omit automatic request cookies and response cookie storage.
+    #[must_use]
+    pub fn without_cookies(mut self) -> Self {
+        self.cookie_context = None;
+        self
+    }
+
+    /// Reject redirects outside the supplied origin before sending a request.
+    #[must_use]
+    pub fn with_request_origin(mut self, origin: url::Origin) -> Self {
+        self.request_origin = Some(origin);
+        self
+    }
+
+    fn permits_cookies(&self, target: &RequestTarget) -> bool {
+        self.cookie_origin
+            .as_ref()
+            .is_none_or(|origin| *origin == target.parsed.origin())
+    }
+
     /// Compute the `Cookie` request header for a target from the partition the
     /// request belongs to (keyed by top-level site + resource site), or `None`
     /// when no context is attached, the partition is empty, or the caller
@@ -224,7 +258,7 @@ impl BasicClient {
         target: &RequestTarget,
         nav_context: Option<cookie::SameSiteContext>,
     ) -> Option<String> {
-        if has_header(&request.headers, "cookie") {
+        if !self.permits_cookies(target) || has_header(&request.headers, "cookie") {
             return None;
         }
         let context = self.cookie_context.as_ref()?;
@@ -250,6 +284,9 @@ impl BasicClient {
     /// Store every `Set-Cookie` header from a response into the request's
     /// partition.
     fn store_response_cookies(&self, response: &HttpResponse, target: &RequestTarget) {
+        if !self.permits_cookies(target) {
+            return;
+        }
         let Some(context) = self.cookie_context.as_ref() else {
             return;
         };
@@ -341,6 +378,15 @@ impl BasicClient {
         nav_context: Option<cookie::SameSiteContext>,
     ) -> Result<(url::Url, HttpResponse), NetError> {
         let target = RequestTarget::parse(current_url)?;
+        if self
+            .request_origin
+            .as_ref()
+            .is_some_and(|origin| *origin != target.parsed.origin())
+        {
+            return Err(NetError::new(
+                "credentialed cross-origin fetch requires CORS enforcement",
+            ));
+        }
         let cookie_header = self.request_cookie_header(request, &target, nav_context);
         let request_bytes = build_http1_request(request, &target, cookie_header.as_deref())?;
         let response_bytes = send_http1_request(self.tls.as_ref(), &target, &request_bytes)?;
@@ -447,11 +493,24 @@ fn write_content_encoding_header(
     Ok(())
 }
 
+/// Validate HTTP field syntax before a request reaches the transport.
+pub fn validate_request_header(name: &str, value: &str) -> Result<(), NetError> {
+    let valid_name = !name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte));
+    if !valid_name || value.bytes().any(|byte| matches!(byte, 0 | b'\r' | b'\n')) {
+        return Err(NetError::new("Invalid HTTP request header"));
+    }
+    Ok(())
+}
+
 fn write_custom_headers(
     request_bytes: &mut Vec<u8>,
     headers: &[(String, String)],
 ) -> Result<(), NetError> {
     for (name, value) in headers {
+        validate_request_header(name, value)?;
         write!(request_bytes, "{name}: {value}\r\n")
             .map_err(|e| NetError::new(format!("Write error: {e}")))?;
     }

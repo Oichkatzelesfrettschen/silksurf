@@ -255,7 +255,7 @@ pub fn lookup_property_id(name: &str) -> PropertyId {
         // 'w' prefix
         (b'w', 5) if name.eq_ignore_ascii_case("width") => PropertyId::Width,
         (b'w', 12) if name.eq_ignore_ascii_case("word-spacing") => PropertyId::WordSpacing,
-        (b'w', 12) if name.eq_ignore_ascii_case("white-space") => PropertyId::WhiteSpace,
+        (b'w', 11) if name.eq_ignore_ascii_case("white-space") => PropertyId::WhiteSpace,
         // 'a' prefix
         (b'a', 9) if name.eq_ignore_ascii_case("animation") => PropertyId::Animation,
         (b'a', 11) if name.eq_ignore_ascii_case("align-items") => PropertyId::AlignItems,

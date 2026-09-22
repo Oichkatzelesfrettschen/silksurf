@@ -9,7 +9,8 @@
  * Usage:
  *   wpt_runner [--dir <path>] [--scorecard <path>] [--verbose]
  *
- * Exit code 0 means the evaluated pass rate is at least 50%.
+ * Exit code 0 requires a nonempty catalog with every fixture passing and a
+ * successfully written scorecard.
  */
 
 use silksurf_css::{
@@ -30,7 +31,7 @@ use std::time::Instant;
 /// Runner version stamped into every scorecard. Bump when the check
 /// catalogue or schema changes so downstream diff tools can flag the
 /// transition.
-const RUNNER_VERSION: &str = "0.1.0";
+const RUNNER_VERSION: &str = "0.2.0";
 
 const DEFAULT_FIXTURE_DIR: &str = "crates/silksurf-engine/conformance/wpt/fixtures";
 const DEFAULT_SCORECARD_PATH: &str = "crates/silksurf-engine/conformance/wpt-scorecard.json";
@@ -51,6 +52,10 @@ struct Totals {
 }
 
 impl Totals {
+    fn passed(&self) -> bool {
+        self.total > 0 && self.pass == self.total && self.fail == 0 && self.skip == 0
+    }
+
     fn record(&mut self, outcome: &Outcome) {
         self.total += 1;
         match outcome {
@@ -130,8 +135,13 @@ fn main() {
 
     let mut entries: Vec<PathBuf> = match std::fs::read_dir(&dir) {
         Ok(rd) => rd
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
+            .map(|entry| entry.map(|entry| entry.path()))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap_or_else(|error| {
+                eprintln!("fixture directory entry: {error}");
+                std::process::exit(1);
+            })
+            .into_iter()
             .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("html"))
             .collect(),
         Err(e) => {
@@ -166,14 +176,11 @@ fn main() {
     );
 
     if let Err(e) = emit_scorecard(&scorecard, &totals, &dir, duration) {
-        eprintln!(
-            "WARN: failed to write scorecard {}: {}",
-            scorecard.display(),
-            e
-        );
+        eprintln!("failed to write scorecard {}: {}", scorecard.display(), e);
+        std::process::exit(1);
     }
 
-    if totals.rate() >= 0.5 {
+    if totals.passed() {
         std::process::exit(0);
     } else {
         std::process::exit(1);

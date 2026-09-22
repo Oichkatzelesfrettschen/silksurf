@@ -46,6 +46,9 @@ pub(crate) fn render_browser_window_frame(
         window_height,
         pixels,
     );
+    if state.runtime.is_none() && (seed_full_buffer || render_mode == BrowserRedrawMode::Full) {
+        draw_browser_shell(&state, pixels, window_width, window_height);
+    }
     let blit_elapsed = blit_start.elapsed();
     let chrome_start = std::time::Instant::now();
     draw_browser_window_chrome(
@@ -83,6 +86,29 @@ pub(crate) fn render_browser_window_frame(
     )
 }
 
+fn draw_browser_shell(state: &BrowserState, pixels: &mut [u32], width: u32, height: u32) {
+    for (row, text) in [
+        "Silksurf",
+        "Enter an address with Ctrl+L. Reload retries the current address.",
+        "Escape stops a pending load. The window stays available.",
+        state.status_text.as_str(),
+    ]
+    .iter()
+    .enumerate()
+    {
+        draw_bitmap_text(
+            pixels,
+            width,
+            height,
+            24,
+            BROWSER_CHROME_HEIGHT as u32 + 32 + row as u32 * 24,
+            text,
+            width.saturating_sub(24),
+            0xff20_2933,
+        );
+    }
+}
+
 pub(crate) fn prepare_browser_bitmap_for_window(
     state: &mut BrowserState,
     last_width: &Cell<u32>,
@@ -95,7 +121,7 @@ pub(crate) fn prepare_browser_bitmap_for_window(
 ) {
     let reflowed = reflow_browser_page_for_window(state, window_width, window_height);
     let exposes_unpainted_area = reflowed
-        || window_size_exposes_unpainted_area(
+        || window_size_requires_repaint(
             last_width.get(),
             last_height.get(),
             window_width,
@@ -163,7 +189,7 @@ pub(crate) fn blit_browser_window_frame(
     if seed_full_buffer || render_mode == BrowserRedrawMode::Full {
         blit_browser_frame(
             &state.frame.argb,
-            FRAME_WIDTH,
+            state.frame.bitmap_raster_width,
             state.frame.bitmap_height,
             chrome_height,
             0,
@@ -178,7 +204,7 @@ pub(crate) fn blit_browser_window_frame(
     {
         blit_browser_frame_damage(
             &state.frame.argb,
-            FRAME_WIDTH,
+            state.frame.bitmap_raster_width,
             state.frame.bitmap_height,
             chrome_height,
             state.frame.bitmap_scroll_y,
@@ -255,7 +281,7 @@ pub(crate) fn browser_render_ready(
     window_width: u32,
     window_height: u32,
 ) -> bool {
-    window_size_exposes_unpainted_area(
+    window_size_requires_repaint(
         last_width.get(),
         last_height.get(),
         window_width,
@@ -270,7 +296,7 @@ pub(crate) fn browser_render_action(
     window_width: u32,
     window_height: u32,
 ) -> silksurf_gui::WinitRenderAction {
-    if window_size_exposes_unpainted_area(
+    if window_size_requires_repaint(
         last_width.get(),
         last_height.get(),
         window_width,
@@ -601,7 +627,8 @@ pub(crate) fn handle_browser_wake(
         *navigation_rx.borrow_mut() = None;
         return apply_navigation_result(&mut state, result, scroll, live_window_size);
     }
-    tick_browser_runtime(&mut state)
+    let changed = tick_browser_runtime(&mut state);
+    changed || state.redraw_mode != BrowserRedrawMode::Clean
 }
 
 pub(crate) fn apply_navigation_result(
@@ -619,7 +646,7 @@ pub(crate) fn apply_navigation_result(
         Ok(payload) => apply_navigation_payload(state, payload, scroll, live_window_size),
         Err(message) => {
             eprintln!("[SilkSurf] Navigation error: {message}");
-            mark_navigation_error(state);
+            mark_navigation_error(state, &message);
             true
         }
     }
@@ -656,7 +683,7 @@ pub(crate) fn apply_navigation_payload(
             let message = err.message;
             restore_browser_frame_buffers(state, err.buffers);
             eprintln!("[SilkSurf] Navigation render error: {message}");
-            mark_navigation_error(state);
+            mark_navigation_error(state, &message);
         }
     }
     true
@@ -694,10 +721,20 @@ pub(crate) fn restore_browser_frame_buffers(
     }
 }
 
-pub(crate) fn mark_navigation_error(state: &mut BrowserState) {
+pub(crate) fn mark_navigation_error(state: &mut BrowserState, message: &str) {
     state.pending_history = None;
-    set_browser_status(state, "error");
-    mark_redraw(state, BrowserRedrawMode::Chrome);
+    let message: String = message
+        .chars()
+        .filter(|ch| !ch.is_control())
+        .take(240)
+        .collect();
+    set_browser_status(state, format!("Load failed: {message}"));
+    let mode = if state.runtime.is_some() {
+        BrowserRedrawMode::Chrome
+    } else {
+        BrowserRedrawMode::Full
+    };
+    mark_redraw(state, mode);
 }
 
 // Geometry tests assert exact pixel-aligned f32 coordinates produced by
@@ -710,6 +747,81 @@ mod tests {
     #[allow(clippy::wildcard_imports)]
     use crate::*;
     use silksurf_render::DisplayItem;
+
+    #[test]
+    fn initial_failure_keeps_shell_address_and_draws_recovery_text() {
+        let url = "http://127.0.0.1:1/";
+        let state = Rc::new(RefCell::new(initial_browser_state(url.to_string())));
+        let mut pixels = vec![0; (FRAME_WIDTH * FRAME_HEIGHT) as usize];
+        let scroll = Cell::new(0.0);
+        let width = Cell::new(0);
+        let height = Cell::new(0);
+        render_browser_window_frame(
+            &state,
+            &scroll,
+            &width,
+            &height,
+            BROWSER_CHROME_HEIGHT as u32,
+            false,
+            FRAME_WIDTH,
+            FRAME_HEIGHT,
+            0,
+            &mut pixels,
+        );
+        let content = &pixels[(FRAME_WIDTH * 60) as usize..];
+        assert!(content.contains(&0xff20_2933));
+        {
+            let mut state = state.borrow_mut();
+            state.navigation_generation = 1;
+            state.navigation_pending = true;
+            state.pending_history = Some(PendingHistoryAction::Push);
+            assert!(apply_navigation_result(
+                &mut state,
+                (1, Err("Connection refused".to_string())),
+                &scroll,
+                (FRAME_WIDTH, FRAME_HEIGHT),
+            ));
+            assert_eq!(state.frame.url, url);
+            assert_eq!(state.address_text, url);
+            assert!(state.runtime.is_none());
+            assert!(!state.navigation_pending);
+            assert!(state.history.is_empty());
+            assert!(state.status_text.contains("Connection refused"));
+            assert_eq!(state.redraw_mode, BrowserRedrawMode::Full);
+            state.pending_history = Some(PendingHistoryAction::MoveTo(0));
+            apply_history_success(&mut state, url);
+            state.pending_history = Some(PendingHistoryAction::Push);
+            apply_history_success(&mut state, "https://example.com/");
+            assert_eq!(history_back_target(&state), Some((0, url.to_string())));
+        }
+    }
+
+    #[test]
+    fn shell_wake_presents_pending_status_and_rejects_stopped_completion() {
+        let state = Rc::new(RefCell::new(initial_browser_state(
+            "https://example.com/".into(),
+        )));
+        let receiver = Rc::new(RefCell::new(None));
+        let scroll = Cell::new(0.0);
+        assert!(handle_browser_wake(
+            &state,
+            &receiver,
+            &scroll,
+            (FRAME_WIDTH, FRAME_HEIGHT)
+        ));
+        let mut state = state.borrow_mut();
+        state.navigation_generation = 1;
+        state.navigation_pending = true;
+        assert!(stop_navigation(&mut state));
+        let status = state.status_text.clone();
+        assert!(!apply_navigation_result(
+            &mut state,
+            (1, Err("late failure".into())),
+            &scroll,
+            (FRAME_WIDTH, FRAME_HEIGHT),
+        ));
+        assert_eq!(state.status_text, status);
+    }
 
     #[test]
     fn browser_frame_blit_keeps_chrome_fixed_while_scrolling() {
@@ -813,12 +925,12 @@ mod tests {
     }
 
     #[test]
-    fn window_size_repaint_policy_skips_clean_shrinks() {
-        assert!(window_size_exposes_unpainted_area(0, 0, 1280, 320));
-        assert!(window_size_exposes_unpainted_area(1280, 320, 1281, 320));
-        assert!(window_size_exposes_unpainted_area(1280, 320, 1280, 321));
-        assert!(!window_size_exposes_unpainted_area(1280, 320, 1280, 319));
-        assert!(!window_size_exposes_unpainted_area(1280, 320, 1279, 319));
+    fn window_size_repaint_policy_covers_shrinks_and_growth() {
+        assert!(window_size_requires_repaint(0, 0, 1280, 320));
+        assert!(window_size_requires_repaint(1280, 320, 1281, 320));
+        assert!(window_size_requires_repaint(1280, 320, 1280, 321));
+        assert!(window_size_requires_repaint(1280, 320, 1280, 319));
+        assert!(window_size_requires_repaint(1280, 320, 1279, 319));
     }
 
     #[test]
@@ -1952,5 +2064,84 @@ mod tests {
             "scroll and height agree, so only the stride can force the re-raster"
         );
         assert_eq!(state.frame.bitmap_raster_width, 900);
+    }
+    #[test]
+    fn resized_bitmap_uses_recorded_stride_for_full_and_damage_blits() {
+        let mut state = initial_browser_state("https://example.test/".to_string());
+        state.frame.bitmap_raster_width = 800;
+        state.frame.bitmap_height = 3;
+        state.frame.argb = (0..2400).map(|index| 0xff00_0000 | index).collect();
+        let damage = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 800.0,
+            height: 3.0,
+        };
+        for mode in [BrowserRedrawMode::Full, BrowserRedrawMode::Damage(damage)] {
+            let mut pixels = vec![0; 800 * 3];
+            blit_browser_window_frame(&state, false, mode, 0, 800, 3, &mut pixels);
+            assert_eq!(pixels, state.frame.argb);
+        }
+    }
+
+    #[test]
+    fn address_text_writes_stay_inside_present_damage_at_all_widths() {
+        for width in [220, 221, 242, 320, 800, 1280] {
+            let mut pixels = vec![0; width as usize * 44];
+            let text = "https://example.test/".repeat(100);
+            draw_browser_address_full_text_strip(&mut pixels, width, 44, &text, text.len());
+            let damage = browser_present_damage(
+                BrowserRedrawMode::AddressFullTextChrome,
+                44,
+                44,
+                0,
+                width,
+                44,
+            );
+            for (index, &pixel) in pixels.iter().enumerate().filter(|(_, pixel)| **pixel != 0) {
+                let x = index as u32 % width;
+                let y = index as u32 / width;
+                let silksurf_gui::WinitPresentDamage::Rect(rect) = damage else {
+                    panic!("pixel {pixel} at {x},{y} escapes {damage:?}");
+                };
+                assert!(
+                    x >= rect.x
+                        && x < rect.x + rect.width
+                        && y >= rect.y
+                        && y < rect.y + rect.height,
+                    "width {width}: pixel {x},{y} escapes {rect:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn module_limits_validate_overrides_and_charge_inline_source() {
+        assert_eq!(parse_module_limit("limit", None, 4), Ok(4));
+        assert_eq!(parse_module_limit("limit", Some("12"), 4), Ok(12));
+        for value in ["", "0", "-1", "bad", "999999999999999999999999999999"] {
+            assert!(parse_module_limit("limit", Some(value), 4).is_err());
+        }
+        let limits = ModuleLimits {
+            roots: 2,
+            bytes: 4,
+            urls: 2,
+        };
+        let roots = vec![silksurf_js::ModuleScript::Inline("1234".into())];
+        assert_eq!(admit_module_roots(&roots, &limits), Ok(4));
+        assert!(
+            admit_module_roots(
+                &[silksurf_js::ModuleScript::Inline("12345".into())],
+                &limits
+            )
+            .is_err()
+        );
+        assert!(
+            admit_module_roots(
+                &vec![silksurf_js::ModuleScript::Inline(String::new()); 3],
+                &limits
+            )
+            .is_err()
+        );
     }
 }

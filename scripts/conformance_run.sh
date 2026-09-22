@@ -7,7 +7,7 @@
 # Available harnesses:
 #   html5lib   -- HTML tokenizer corpus smoke through silksurf-html tests
 #   css        -- external CSS corpus parser sweep through silksurf-css tests
-#   test262    -- silksurf-js lexer-only test262 runner (subset by default)
+#   test262    -- Boa parse/evaluate test262 runner (subset by default)
 #   tls        -- silksurf-tls loader sanity unit tests
 #   h2spec     -- HTTP/2 conformance via the external `h2spec` binary
 #                 (skipped if not installed)
@@ -22,11 +22,15 @@
 #                                                 # custom test262 subset
 
 set -euo pipefail
+: "${PYTHON:?Set PYTHON to the intended Python executable}"
+export RUSTFLAGS="${RUSTFLAGS:-} -D warnings"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-SCORECARD_DIR="docs/conformance"
+WPT_SCORECARD="${SCORECARD_DIR:+$SCORECARD_DIR/wpt-scorecard.json}"
+WPT_SCORECARD="${WPT_SCORECARD:-crates/silksurf-engine/conformance/wpt-scorecard.json}"
+SCORECARD_DIR="${SCORECARD_DIR:-docs/conformance}"
 mkdir -p "$SCORECARD_DIR"
 
 # A rate reproduces from a corpus revision plus the host and toolchain that
@@ -40,13 +44,40 @@ mkdir -p "$SCORECARD_DIR"
 # published record would read git.dirty true.
 ENVIRONMENT_ENVELOPE="$(mktemp -t silksurf-measurement-environment.XXXXXX.json)"
 trap 'rm -f "$ENVIRONMENT_ENVELOPE"' EXIT
-python3 scripts/measurement_environment.py --output "$ENVIRONMENT_ENVELOPE" >/dev/null
+"$PYTHON" scripts/measurement_environment.py --output "$ENVIRONMENT_ENVELOPE" >/dev/null
 
 embed_environment() {
     local scorecard="$1"
     [ -f "$scorecard" ] || return 0
-    python3 scripts/measurement_environment.py \
+    "$PYTHON" scripts/measurement_environment.py \
         --from "$ENVIRONMENT_ENVELOPE" --inject "$scorecard" >/dev/null
+}
+
+# Each invocation owns fresh output; failed builds preserve published evidence.
+run_scorecard() {
+    local destination="$1" output_variable="$2"
+    shift 2
+    local evidence scorecard result=0 published
+    mkdir -p target/conformance-runs "$(dirname "$destination")"
+    evidence="$(mktemp -d target/conformance-runs/run.XXXXXX)"
+    scorecard="$REPO_ROOT/$evidence/scorecard.json"
+    if [ "$output_variable" = --scorecard ]; then
+        "$@" --scorecard "$scorecard" >"$evidence/runner.log" 2>&1 || result=$?
+    else
+        env "$output_variable=$scorecard" "$@" >"$evidence/runner.log" 2>&1 || result=$?
+    fi
+    cat "$evidence/runner.log"
+    printf '%s\n' "$result" >"$evidence/exit-status"
+    if [ ! -f "$scorecard" ]; then
+        echo "    runner produced no scorecard; evidence: $evidence" >&2
+        if [ "$result" -eq 0 ]; then result=1; fi
+        return "$result"
+    fi
+    embed_environment "$scorecard" || return 1
+    published="$(mktemp "${destination}.XXXXXX")"
+    cp "$scorecard" "$published" && mv "$published" "$destination" || return 1
+    echo "    evidence: $evidence"
+    return "$result"
 }
 
 run_html5lib() {
@@ -56,17 +87,15 @@ run_html5lib() {
             export HTML5LIB_TESTS_DIR="$REPO_ROOT/silksurf-extras/html5lib-tests/tokenizer"
         else
             echo "    html5lib corpus not present; run scripts/fetch_html_css_test_corpora.sh."
-            echo "    test emits a skip notice."
+            return 1
         fi
     fi
     if [ -n "${HTML5LIB_TESTS_DIR:-}" ]; then
         echo "    HTML5LIB_TESTS_DIR=$HTML5LIB_TESTS_DIR"
     fi
-    HTML5LIB_SCORECARD="$SCORECARD_DIR/html5lib-tokenizer-scorecard.json" \
-    HTML5LIB_FAIL_ON_XPASS=1 \
-    RUSTFLAGS='-D warnings' cargo test -p silksurf-html \
+    run_scorecard "$SCORECARD_DIR/html5lib-tokenizer-scorecard.json" HTML5LIB_SCORECARD \
+        env HTML5LIB_FAIL_ON_XPASS=1 cargo test -p silksurf-html \
         --test html5lib_harness -- --nocapture
-    embed_environment "$SCORECARD_DIR/html5lib-tokenizer-scorecard.json"
 }
 
 run_css() {
@@ -83,10 +112,8 @@ run_css() {
         fi
         echo "    CSS_TESTS_DIR=$CSS_TESTS_DIR"
     fi
-    CSS_HARNESS_SCORECARD="$SCORECARD_DIR/css-parse-robustness-scorecard.json" \
-    CSS_HARNESS_FAIL_ON_XPASS=1 \
-    RUSTFLAGS='-D warnings' cargo test -p silksurf-css --test css_harness -- --nocapture
-    embed_environment "$SCORECARD_DIR/css-parse-robustness-scorecard.json"
+    run_scorecard "$SCORECARD_DIR/css-parse-robustness-scorecard.json" CSS_HARNESS_SCORECARD \
+        env CSS_HARNESS_FAIL_ON_XPASS=1 cargo test -p silksurf-css --test css_harness -- --nocapture
 }
 
 run_test262() {
@@ -97,18 +124,18 @@ run_test262() {
     local subset="${TEST262_PATH:-}"
     echo "==> test262 (boa runner)"
     if [ ! -d "silksurf-js/test262/test" ]; then
-        echo "    test262 corpus not present at silksurf-js/test262/test; skipping."
-        return 0
+        echo "    test262 corpus absent at silksurf-js/test262/test."
+        return 1
     fi
-    cargo build --release -p silksurf-js --bin test262_boa --quiet
-    set -- --scorecard "$SCORECARD_DIR/test262-boa-scorecard.json"
+    set --
     if [ "${TEST262_FULL:-0}" = "1" ]; then
         set -- "$@" --full
     fi
     if [ -n "$subset" ]; then
         set -- "$@" --dir "silksurf-js/test262/test/$subset"
     fi
-    ./target/release/test262_boa "$@" || true
+    run_scorecard "$SCORECARD_DIR/test262-boa-scorecard.json" --scorecard \
+        cargo run --release -p silksurf-js --bin test262_boa --quiet -- "$@"
 }
 
 run_tls() {
@@ -119,9 +146,9 @@ run_tls() {
 run_h2spec() {
     echo "==> h2spec (external)"
     if ! command -v h2spec >/dev/null 2>&1; then
-        echo "    h2spec not installed; skipping."
+        echo "    h2spec is required for the selected HTTP/2 lane."
         echo "    install: https://github.com/summerwind/h2spec"
-        return 0
+        return 1
     fi
     # Delegate to the dedicated driver. It writes the scorecard JSON
     # itself, so we do not need to capture stdout. Exit 2 means "no
@@ -132,8 +159,8 @@ run_h2spec() {
     set -e
     case "$rc" in
         0) ;;
-        2) echo "    no in-tree h2 server yet; skipping (set SILKSURF_H2_HOST to override)" ;;
-        *) echo "    h2spec driver exited $rc; see crates/silksurf-engine/conformance/h2spec-results.txt" ;;
+        2) echo "    set SILKSURF_H2_HOST to select an HTTP/2 server"; return 1 ;;
+        *) echo "    h2spec driver exited $rc; see crates/silksurf-engine/conformance/h2spec-results.txt"; return "$rc" ;;
     esac
 }
 
@@ -145,27 +172,23 @@ run_tree_construction() {
             export WPT_HTML_PARSING_DIR="$default_dir"
         else
             echo "    corpus absent; run scripts/fetch_html_css_test_corpora.sh."
-            echo "    test emits a skip notice rather than a pass."
+            return 1
         fi
     fi
     if [ -n "${WPT_HTML_PARSING_DIR:-}" ]; then
         echo "    WPT_HTML_PARSING_DIR=$WPT_HTML_PARSING_DIR"
     fi
-    HTML5LIB_TREE_SCORECARD="$SCORECARD_DIR/html5lib-tree-construction-scorecard.json" \
-    HTML5LIB_TREE_FAIL_ON_XPASS=1 \
-    RUSTFLAGS='-D warnings' cargo test -p silksurf-html \
+    run_scorecard "$SCORECARD_DIR/html5lib-tree-construction-scorecard.json" HTML5LIB_TREE_SCORECARD \
+        env HTML5LIB_TREE_FAIL_ON_XPASS=1 cargo test -p silksurf-html \
         --test html5lib_tree_construction -- --nocapture
-    embed_environment "$SCORECARD_DIR/html5lib-tree-construction-scorecard.json"
 }
 
 run_wpt() {
     echo "==> wpt (synthetic in-tree subset)"
-    cargo build --release -p silksurf-engine --bin wpt_runner \
-        --features js-conformance --quiet
-    ./target/release/wpt_runner \
-        --dir crates/silksurf-engine/conformance/wpt/fixtures \
-        --scorecard crates/silksurf-engine/conformance/wpt-scorecard.json \
-        || true
+    run_scorecard "$WPT_SCORECARD" --scorecard \
+        cargo run --release -p silksurf-engine --bin wpt_runner \
+        --features js-conformance --quiet -- \
+        --dir crates/silksurf-engine/conformance/wpt/fixtures
 }
 
 # Default: run everything available.

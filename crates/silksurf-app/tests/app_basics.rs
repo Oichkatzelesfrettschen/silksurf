@@ -57,6 +57,7 @@ const TEST_TIMEOUT: Duration = Duration::from_secs(30);
 fn run_with_args(args: &[&str]) -> (String, String, i32) {
     let bin = binary_path();
     let mut child = Command::new(&bin)
+        .arg("--headless")
         .args(args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())

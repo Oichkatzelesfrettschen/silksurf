@@ -131,29 +131,10 @@ fn run_winit_browser_page(
     monitor: silksurf_gui::WinitMonitorChoice,
     render_config: &BrowserRenderConfig,
     image_cache: &Arc<Mutex<ImageResourceCache>>,
-    page: BrowserPage,
+    url: String,
 ) {
-    let url = page.frame.url.clone();
-    let initial_modulepreload_urls = runtime_module_warm_urls(&page.runtime, &url);
-    let initial_window_height = initial_browser_window_height(page.frame.raster_height);
-    let browser_state = Rc::new(RefCell::new(BrowserState {
-        frame: page.frame,
-        runtime: Some(page.runtime),
-        navigation_pending: false,
-        status_text: "ready".to_string(),
-        hover_status_text: None,
-        history: vec![url.clone()],
-        history_index: 0,
-        pending_history: None,
-        navigation_generation: 0,
-        address_editing: false,
-        address_select_all: false,
-        address_text: url,
-        address_cursor: 0,
-        focused_input: None,
-        redraw_mode: BrowserRedrawMode::Full,
-        retained_present: None,
-    }));
+    let initial_window_height = FRAME_HEIGHT;
+    let browser_state = Rc::new(RefCell::new(initial_browser_state(url.clone())));
     #[cfg(feature = "accessibility")]
     log_accessibility_snapshot(&browser_state.borrow());
     let navigation_rx: Rc<RefCell<Option<mpsc::Receiver<NavigationMessage>>>> =
@@ -177,6 +158,34 @@ fn run_winit_browser_page(
     eprintln!(
         "[SilkSurf] Display backend: configured={display_backend:?} resolved={resolved_display_backend:?}"
     );
+
+    let startup_state = Rc::clone(&browser_state);
+    let startup_navigation_rx = Rc::clone(&navigation_rx);
+    let startup_config = render_config.clone();
+    let startup_images = Arc::clone(image_cache);
+    let probe_state = Rc::clone(&browser_state);
+    let initial_document_presented = Cell::new(false);
+    let window = window
+        .with_first_present(move |wake| {
+            eprintln!("[SilkSurf] Browser chrome presented; starting initial navigation");
+            start_navigation_worker(
+                &mut startup_state.borrow_mut(),
+                &startup_navigation_rx,
+                BrowserNavigationRequest::get(url),
+                PendingHistoryAction::Push,
+                wake,
+                &startup_config,
+                &startup_images,
+            );
+            wake.wake();
+        })
+        .with_probe_ready(move || {
+            let state = probe_state.borrow();
+            if state.runtime.is_some() && !state.navigation_pending {
+                initial_document_presented.set(true);
+            }
+            initial_document_presented.get()
+        });
 
     /*
      * JS timers drive the event-loop sleep: the backend waits until the
@@ -219,11 +228,6 @@ fn run_winit_browser_page(
     let render_scroll = Rc::clone(&scroll_y);
     let render_last_width = Rc::clone(&last_render_width);
     let render_last_height = Rc::clone(&last_render_height);
-    let render_modulepreload = Rc::new(RefCell::new(Some((
-        initial_modulepreload_urls,
-        render_config.clone(),
-    ))));
-    let render_modulepreload_state = Rc::clone(&render_modulepreload);
     let ready_state = Rc::clone(&browser_state);
     let ready_last_width = Rc::clone(&last_render_width);
     let ready_last_height = Rc::clone(&last_render_height);
@@ -248,7 +252,7 @@ fn run_winit_browser_page(
 
     window.run_with_input_wake_and_render_actions(
         move |width, height, buffer_age, pixels| {
-            let damage = render_browser_window_frame(
+            render_browser_window_frame(
                 &render_state,
                 &render_scroll,
                 &render_last_width,
@@ -259,11 +263,7 @@ fn run_winit_browser_page(
                 height,
                 buffer_age,
                 pixels,
-            );
-            if let Some((urls, config)) = render_modulepreload_state.borrow_mut().take() {
-                preload_module_scripts(&urls, &config);
-            }
-            damage
+            )
         },
         move |width, height| {
             browser_render_ready(
@@ -353,18 +353,6 @@ fn main() {
         .map(silksurf_net::cookie::site_of_url)
         .unwrap_or_default();
 
-    /*
-     * --window opens the XCB backend, presents a placeholder frame, and pumps
-     * events until Close or Escape. This legacy backend isolates XCB window
-     * setup from the fetch, JS, layout, and raster paths.
-     *
-     * XcbWindow::new() reports headless display failures as SilkError. The app
-     * converts that error into stderr plus exit code 1.
-     */
-    if options.window_mode {
-        run_legacy_window_mode();
-    }
-
     // --list-monitors reports the display server's monitor names and exits
     // without loading a page; the names it prints are what --monitor matches.
     if options.monitor == silksurf_gui::WinitMonitorChoice::List {
@@ -372,38 +360,26 @@ fn main() {
     }
 
     let image_cache = Arc::new(Mutex::new(ImageResourceCache::new()));
+    // The windowed browser is the default entry point; --headless selects
+    // the one-shot static render pipeline (fetch -> parse -> raster -> exit).
+    if !options.headless {
+        run_winit_browser_page(
+            options.display_backend,
+            options.monitor.clone(),
+            &options.render_config,
+            &image_cache,
+            options.url.clone(),
+        );
+        return;
+    }
+
     let mut renderer = match renderer_from_config(&options.render_config) {
         Ok(renderer) => renderer,
         Err(message) => {
             eprintln!("[SilkSurf] {message}");
-            return;
+            std::process::exit(1);
         }
     };
-
-    // The windowed browser is the default entry point; --headless selects
-    // the one-shot static render pipeline (fetch -> parse -> raster -> exit).
-    if !options.headless {
-        match load_navigation_payload(
-            &BrowserNavigationRequest::get(options.url.clone()),
-            &options.render_config,
-            &image_cache,
-        )
-        .and_then(build_browser_page)
-        {
-            Ok(page) => {
-                run_winit_browser_page(
-                    options.display_backend,
-                    options.monitor.clone(),
-                    &options.render_config,
-                    &image_cache,
-                    page,
-                );
-            }
-            Err(message) => eprintln!("[SilkSurf] {message}"),
-        }
-        return;
-    }
-
     run_static_browser_render(&options, &mut renderer, &image_cache);
     eprintln!(
         "[SilkSurf] Headless static render finished; run without --headless for the windowed browser."
@@ -581,6 +557,7 @@ fn run_static_browser_render(
     // location.href backs every same-origin URL a page builds; page script runs
     // after the document address is in place.
     js_ctx.set_document_url(&options.url);
+    js_ctx.set_fetch_client(renderer.network_client());
     // matchMedia answers from this size, and a startup script that branches on
     // it -- chatgpt.com sets data-desktop-layout from `(min-width: 48rem)` --
     // selects which shell the document renders.

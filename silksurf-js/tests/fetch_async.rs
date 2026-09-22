@@ -8,10 +8,130 @@
 
 use std::io::{Read, Write};
 use std::net::TcpListener;
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use silksurf_js::SilkContext;
+
+fn cookie_context(base: &str) -> SilkContext {
+    let mut dom = silksurf_dom::Dom::new();
+    dom.create_document();
+    let dom = Arc::new(Mutex::new(dom));
+    let jar = Arc::new(Mutex::new(
+        silksurf_net::cookie::PartitionedCookieStore::new(),
+    ));
+    let url = url::Url::parse(base).expect("server URL");
+    let mut context = SilkContext::with_dom_and_cookies(
+        &dom,
+        &jar,
+        &silksurf_net::cookie::site_of_url(&url),
+        "127.0.0.1",
+    );
+    context.set_document_url(base);
+    context
+        .eval("document.cookie = 'session=local; Path=/; SameSite=Lax'")
+        .expect("session cookie");
+    context
+}
+
+fn cookie_server(count: usize) -> (String, mpsc::Receiver<String>, thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("cookie server binds");
+    let address = listener.local_addr().expect("server address");
+    let (sender, receiver) = mpsc::channel();
+    let worker = thread::spawn(move || {
+        for sequence in 1..=count {
+            let (mut stream, _) = listener.accept().expect("request accepted");
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .expect("read deadline");
+            let mut request = Vec::new();
+            let mut buffer = [0; 1024];
+            while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                let count = stream.read(&mut buffer).expect("request header");
+                assert!(count > 0, "complete request header");
+                request.extend_from_slice(&buffer[..count]);
+            }
+            sender
+                .send(String::from_utf8(request).expect("HTTP request text"))
+                .expect("capture request");
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nSet-Cookie: network={sequence}; Path=/; SameSite=Lax\r\nConnection: close\r\n\r\nok").expect("response");
+        }
+    });
+    (format!("http://{address}/app/page"), receiver, worker)
+}
+
+#[test]
+fn relative_fetch_shares_cookies_and_omit_suppresses_both_directions() {
+    let (base, requests, server) = cookie_server(3);
+    let mut context = cookie_context(&base);
+    context.eval("globalThis.done = false; globalThis.failure = '';\n\
+        fetch('../api#local').then(function () {\n\
+            if (!document.cookie.includes('network=1')) throw new Error('response cookie missing');\n\
+            return fetch('/omit', {credentials:'omit', headers:{Cookie:'forged=1', Host:'forged.example'}});\n\
+        }).then(function () {\n\
+            if (!document.cookie.includes('network=1')) throw new Error('omit stored a cookie');\n\
+            return fetch('/again');\n\
+        }).then(function () { done = true; }).catch(function (error) { failure = String(error); done = true; });").expect("fetch script");
+    assert!(pump_until(&mut context, "done", Duration::from_secs(5)));
+    context
+        .eval("if (failure) throw new Error(failure)")
+        .expect("requests settle successfully");
+    let first = requests
+        .recv_timeout(Duration::from_secs(1))
+        .expect("first request");
+    assert!(first.starts_with("GET /api HTTP/1.1"), "{first}");
+    assert!(first.contains("session=local"), "{first}");
+    let omitted = requests
+        .recv_timeout(Duration::from_secs(1))
+        .expect("omitted request");
+    assert!(
+        !omitted.to_ascii_lowercase().contains("\r\ncookie:"),
+        "{omitted}"
+    );
+    let again = requests
+        .recv_timeout(Duration::from_secs(1))
+        .expect("final request");
+    assert!(again.contains("network=1"), "{again}");
+    assert!(!omitted.contains("forged.example"), "{omitted}");
+    server.join().expect("server exits");
+}
+
+#[test]
+fn same_origin_credentials_exclude_another_port() {
+    let (target, requests, server) = cookie_server(1);
+    let mut context = cookie_context("http://127.0.0.1:1/app/page");
+    context
+        .eval(&format!(
+            "globalThis.done = false; fetch({target:?}).then(function () {{ done = true; }});"
+        ))
+        .expect("cross-origin fetch");
+    assert!(pump_until(&mut context, "done", Duration::from_secs(5)));
+    let request = requests
+        .recv_timeout(Duration::from_secs(1))
+        .expect("request");
+    assert!(
+        !request.to_ascii_lowercase().contains("\r\ncookie:"),
+        "{request}"
+    );
+    context.eval("if (document.cookie.includes('network=')) throw new Error('cross-origin cookie stored')").expect("response cookie isolation");
+    server.join().expect("server exits");
+}
+
+#[test]
+fn invalid_fetch_url_and_credentials_reject_promises() {
+    let mut context = cookie_context("http://127.0.0.1:1/");
+    context.eval("globalThis.rejections = 0;\n\
+        fetch('file:///etc/passwd').catch(function () { rejections++; });\n\
+        fetch('/', {credentials:'typo'}).catch(function () { rejections++; });\n\
+        fetch('http://127.0.0.1:2/', {credentials:'include'}).catch(function () { rejections++; });").expect("invalid requests return promises");
+    assert!(pump_until(
+        &mut context,
+        "rejections === 3",
+        Duration::from_secs(1)
+    ));
+    assert_eq!(context.inflight_network_requests(), 0);
+}
 
 /// Serve exactly `request_count` HTTP/1.1 requests, echoing method and body
 /// as JSON. Mirror of the XHR test harness.
@@ -221,4 +341,95 @@ fn response_body_reader_yields_chunks_then_done() {
         "reader yields at least one chunk then done"
     );
     server.join().expect("server thread joins");
+}
+
+#[test]
+fn fetch_rejects_header_injection_before_connecting() {
+    let mut context = cookie_context("http://127.0.0.1:1/");
+    context.eval(r"globalThis.rejections = 0;
+        fetch('/', {credentials:'omit', headers:{'X-Probe':'ok\r\nCookie: forged=1'}}).catch(() => rejections++);
+        fetch('/', {headers:{'X-Probe\r\nCookie':'forged=1'}}).catch(() => rejections++);
+        fetch('/', {headers:{'X-Probe':'bad\u0000value'}}).catch(() => rejections++);
+    ").expect("header validation returns promises");
+    assert!(pump_until(
+        &mut context,
+        "rejections === 3",
+        Duration::from_secs(1)
+    ));
+}
+
+fn redirect_server(destination: String) -> (String, thread::JoinHandle<String>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("redirect listener");
+    let address = listener.local_addr().expect("redirect address");
+    let worker = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("redirect request");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("read deadline");
+        let mut request = Vec::new();
+        let mut buffer = [0; 1024];
+        while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+            let count = stream.read(&mut buffer).expect("redirect request header");
+            assert!(count > 0);
+            request.extend_from_slice(&buffer[..count]);
+        }
+        write!(stream, "HTTP/1.1 302 Found\r\nLocation: {destination}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").expect("redirect response");
+        String::from_utf8(request).expect("request text")
+    });
+    (format!("http://{address}/"), worker)
+}
+
+#[test]
+fn same_origin_credentials_drop_cookies_on_cross_origin_redirect() {
+    let (destination, requests, destination_worker) = cookie_server(1);
+    let (base, origin_worker) = redirect_server(destination);
+    let mut context = cookie_context(&base);
+    context
+        .eval("globalThis.done = false; fetch('/redirect').then(() => done = true);")
+        .expect("redirect script");
+    assert!(pump_until(&mut context, "done", Duration::from_secs(5)));
+    assert!(
+        origin_worker
+            .join()
+            .expect("origin completes")
+            .contains("session=local")
+    );
+    let request = requests
+        .recv_timeout(Duration::from_secs(1))
+        .expect("redirect destination request");
+    assert!(!request.to_ascii_lowercase().contains("\r\ncookie:"));
+    context
+        .eval(
+            "if (document.cookie.includes('network=')) throw new Error('redirect cookie stored');",
+        )
+        .expect("response cookie isolation");
+    destination_worker.join().expect("destination completes");
+}
+
+#[test]
+fn include_rejects_cross_origin_redirect_before_destination_connect() {
+    let destination = TcpListener::bind("127.0.0.1:0").expect("destination listener");
+    destination
+        .set_nonblocking(true)
+        .expect("nonblocking accept");
+    let (base, origin_worker) = redirect_server(format!(
+        "http://{}/",
+        destination.local_addr().expect("destination address")
+    ));
+    let mut context = cookie_context(&base);
+    context.eval("globalThis.rejected = false; fetch('/redirect', {credentials:'include'}).catch(() => rejected = true);").expect("redirect script");
+    assert!(pump_until(&mut context, "rejected", Duration::from_secs(5)));
+    assert!(
+        origin_worker
+            .join()
+            .expect("origin completes")
+            .contains("session=local")
+    );
+    assert_eq!(
+        destination
+            .accept()
+            .expect_err("destination stays unconnected")
+            .kind(),
+        std::io::ErrorKind::WouldBlock
+    );
 }

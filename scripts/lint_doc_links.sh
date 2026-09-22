@@ -36,6 +36,7 @@ path_is_exempt() {
     case "$1" in
         silksurf-extras/*|silksurf-js/test262*|target/*) return 0 ;;
         crates/silksurf-engine/conformance/h2spec-results.txt) return 0 ;;
+        diff-analysis/tools-output/|perf/results/) return 0 ;;
         *) return 1 ;;
     esac
 }

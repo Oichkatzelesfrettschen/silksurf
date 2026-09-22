@@ -50,6 +50,8 @@ type PresentedCallback = dyn FnMut(WinitPresentedFrame);
 type InputCallback = dyn FnMut(WinitInput, u32, u32, &WinitWakeHandle) -> WinitInputResult;
 type WakeCallback = dyn FnMut() -> bool;
 type HostWorkDeadlineCallback = dyn FnMut() -> Option<Instant>;
+type FirstPresentCallback = dyn FnOnce(&WinitWakeHandle);
+type ProbeReadyCallback = dyn Fn() -> bool;
 const MAX_PRESENT_DAMAGE_RECTS: usize = 5;
 const BUFFER_WAIT_TRACE_THRESHOLD: Duration = Duration::from_millis(1);
 const WAYLAND_REDRAW_PACE_INITIAL: Duration = Duration::from_millis(1);
@@ -332,7 +334,7 @@ pub fn resolve_winit_wayland_presenter(
 /// Cross-platform window backed by winit and a native pixel presenter.
 ///
 /// Call `run()` to enter the event loop. The call blocks until the window
-/// is closed (`CloseRequested`) or Escape is pressed.
+/// is closed (`CloseRequested`) or the configured probe completes.
 /*
  * Which monitor shows the window.
  *
@@ -521,6 +523,8 @@ pub struct WinitWindow {
     wayland_presenter: WinitWaylandPresenter,
     monitor: WinitMonitorChoice,
     host_work_deadline_fn: Option<Box<HostWorkDeadlineCallback>>,
+    first_present_fn: Option<Box<FirstPresentCallback>>,
+    probe_ready_fn: Option<Box<ProbeReadyCallback>>,
 }
 
 impl WinitWindow {
@@ -538,7 +542,23 @@ impl WinitWindow {
             wayland_presenter: WinitWaylandPresenter::Auto,
             monitor: WinitMonitorChoice::Compositor,
             host_work_deadline_fn: None,
+            first_present_fn: None,
+            probe_ready_fn: None,
         })
+    }
+
+    /// Start background work after the first native frame reaches the presenter.
+    #[must_use]
+    pub fn with_first_present(mut self, callback: impl FnOnce(&WinitWakeHandle) + 'static) -> Self {
+        self.first_present_fn = Some(Box::new(callback));
+        self
+    }
+
+    /// Arm input probes when the application has presented its loaded document.
+    #[must_use]
+    pub fn with_probe_ready(mut self, callback: impl Fn() -> bool + 'static) -> Self {
+        self.probe_ready_fn = Some(Box::new(callback));
+        self
     }
 
     /// Register a deadline source for scheduled host work (JS timers).
@@ -732,6 +752,8 @@ impl WinitWindow {
             }),
             wake_fn: Box::new(wake_fn),
             host_work_deadline_fn: self.host_work_deadline_fn,
+            first_present_fn: self.first_present_fn,
+            probe_ready_fn: self.probe_ready_fn,
         };
         if let Err(e) = event_loop.run_app(&mut app) {
             eprintln!("[SilkSurf] winit: event loop error: {e}");
@@ -917,7 +939,9 @@ fn translate_logical_key(key: &Key<&str>, modifiers: ModifiersState) -> Option<W
         Key::Named(NamedKey::BrowserForward) => Some(WinitInput::Forward),
         Key::Named(NamedKey::BrowserHome) => Some(WinitInput::BrowserHome),
         Key::Named(NamedKey::BrowserRefresh | NamedKey::F5) => Some(WinitInput::Reload),
-        Key::Named(NamedKey::BrowserStop | NamedKey::Cancel) => Some(WinitInput::Stop),
+        Key::Named(NamedKey::BrowserStop | NamedKey::Cancel | NamedKey::Escape) => {
+            Some(WinitInput::Stop)
+        }
         Key::Named(NamedKey::Enter) => Some(WinitInput::SubmitAddress),
         Key::Named(NamedKey::Backspace) => Some(WinitInput::Backspace),
         Key::Named(NamedKey::Tab) => Some(WinitInput::FocusNextPageInput),
@@ -983,6 +1007,8 @@ struct WinitApp {
     input_fn: Box<InputCallback>,
     wake_fn: Box<WakeCallback>,
     host_work_deadline_fn: Option<Box<HostWorkDeadlineCallback>>,
+    first_present_fn: Option<Box<FirstPresentCallback>>,
+    probe_ready_fn: Option<Box<ProbeReadyCallback>>,
 }
 
 impl ApplicationHandler<WinitUserEvent> for WinitApp {
@@ -1039,7 +1065,7 @@ impl ApplicationHandler<WinitUserEvent> for WinitApp {
             WindowEvent::KeyboardInput {
                 event: key_event, ..
             } => {
-                self.handle_keyboard_input(event_loop, &key_event);
+                self.handle_keyboard_input(&key_event);
             }
 
             WindowEvent::ModifiersChanged(modifiers) => {
@@ -1094,11 +1120,7 @@ impl ApplicationHandler<WinitUserEvent> for WinitApp {
 }
 
 impl WinitApp {
-    fn handle_keyboard_input(&mut self, event_loop: &ActiveEventLoop, key_event: &KeyEvent) {
-        if key_event.logical_key == Key::Named(NamedKey::Escape) {
-            event_loop.exit();
-            return;
-        }
+    fn handle_keyboard_input(&mut self, key_event: &KeyEvent) {
         if key_event.state != ElementState::Pressed {
             return;
         }
@@ -1271,6 +1293,9 @@ impl WinitApp {
             damage,
             retained_tag,
         });
+        if let Some(callback) = self.first_present_fn.take() {
+            callback(&self.wake_handle);
+        }
         true
     }
 
@@ -1458,6 +1483,9 @@ impl WinitApp {
     }
 
     fn mark_probe_frame_presented(&mut self, event_loop: &ActiveEventLoop) {
+        if self.probe_ready_fn.as_ref().is_some_and(|ready| !ready()) {
+            return;
+        }
         if let Some(probe) = &mut self.input_probe {
             probe.arm_next_input();
             if probe.exit_after_finish && probe.finished() && probe.exit_delay_elapsed() {
@@ -2690,6 +2718,13 @@ mod monitor_tests {
         assert_eq!(
             WinitMonitorChoice::default(),
             WinitMonitorChoice::Compositor
+        );
+    }
+    #[test]
+    fn escape_translates_to_stop_navigation() {
+        assert_eq!(
+            super::translate_logical_key(&Key::Named(NamedKey::Escape), ModifiersState::empty()),
+            Some(WinitInput::Stop)
         );
     }
 }

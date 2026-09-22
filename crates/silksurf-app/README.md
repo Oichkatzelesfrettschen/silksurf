@@ -12,9 +12,9 @@ input routing, retained page state, and native presentation.
 cargo run -p silksurf-app -- https://example.com
 ```
 
-The default path loads the URL, builds a live DOM, executes supported scripts
-through `silksurf_js::SilkContext`, lays out and paints the page, opens a winit
-window, and routes native input and host callbacks through incremental repaint.
+The default path presents the winit browser shell, loads the URL, builds a live
+DOM, executes supported scripts through `silksurf_js::SilkContext`, and lays out
+and paints the page. Native input and host callbacks drive incremental repaint.
 Wayland and X11 are supported through the winit backend; presenter selection is
 handled by `silksurf-gui`.
 
@@ -26,10 +26,21 @@ cargo run -p silksurf-app -- --headless https://example.com
 
 This runs a one-shot fetch/parse/script/layout/raster pipeline and exits.
 
-### Legacy XCB probe
+### Window startup and module limits
 
-`--window` uses the optional `xcb-backend` feature and is retained as an
-isolated legacy presenter probe. It is not the default browser path.
+`--window` selects the default winit browser path. The browser presents its
+address bar and navigation controls before fetching the initial document.
+Fetch failure leaves a diagnostic with address entry and retry available.
+Escape stops navigation.
+
+Module execution uses compact defaults of four document roots, 512 KiB of
+combined inline and external source, and 64 fetched module URLs. Set
+`SILKSURF_MAX_MODULE_ROOTS`, `SILKSURF_MAX_MODULE_BYTES`, and
+`SILKSURF_MAX_MODULE_URLS` to positive integers to select a larger allowance.
+For example, `SILKSURF_MAX_MODULE_BYTES=8388608` admits 8 MiB of module source.
+Invalid values fail startup. Source-byte limits bound admitted source; Boa
+objects, decoded responses, DOM nodes, and rendered surfaces consume additional
+memory. Peak RSS requires a separate measurement.
 
 ## Common flags
 
