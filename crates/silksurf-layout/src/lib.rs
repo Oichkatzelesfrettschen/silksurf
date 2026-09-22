@@ -173,7 +173,9 @@ fn build_layout_box<'a>(
                 display
             }
         }
-        Some(NodeKind::Doctype { .. } | NodeKind::Comment { .. }) => Display::None,
+        Some(NodeKind::Doctype { .. } | NodeKind::Comment { .. } | NodeKind::DocumentFragment) => {
+            Display::None
+        }
         None => return None,
     };
     if display == Display::None {
@@ -206,7 +208,7 @@ fn node_starts_non_rendered_subtree(dom: &Dom, node: NodeId) -> bool {
         return true;
     };
     match dom_node.kind() {
-        NodeKind::Doctype { .. } | NodeKind::Comment { .. } => true,
+        NodeKind::Doctype { .. } | NodeKind::Comment { .. } | NodeKind::DocumentFragment => true,
         NodeKind::Element { name, .. } => matches!(
             name,
             TagName::Head

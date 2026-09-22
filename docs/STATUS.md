@@ -81,17 +81,16 @@ remain open program items.
 - runner kind: `wpt-tree-construction`
 - corpus: WPT `html/syntax/parsing/resources`, the home html5lib moved its
   tree-construction `.dat` files to
-- result: 1,440 / 1,726 executed = **83.43%**; 1,440 / 1,918 total = **75.08%**
+- result: 1,578 / 1,726 executed = **91.43%**; 1,578 / 1,918 total = **82.27%**
 - path under test: `silksurf_html::parse_html`, the html5ever entry point
   `silksurf-engine` uses
 - 192 fragment cases count as skipped; `parse_html` is document-mode only
-- 286 recorded gaps sit in
-  `crates/silksurf-html/tests/html5lib-tree-construction.expectations`. Template
-  content (109) and processing instructions (90) account for 199 of them, both
-  reaching the same cause: `silksurf_dom::NodeKind` carries no template-content
-  fragment and no processing-instruction variant, so the adapter in
-  `crates/silksurf-html/src/treesink.rs` drops template children and renders a
-  processing instruction as a comment.
+- 148 recorded gaps sit in
+  `crates/silksurf-html/tests/html5lib-tree-construction.expectations`. HTML
+  templates own detached content fragments, resolving 109 adapter failures.
+  Scripting flags resolve 24 cases, and five stale expectations are removed.
+  Processing-instruction input still reaches html5ever's bogus-comment tokenizer
+  path; adding a DOM variant alone cannot resolve that boundary.
 
 ### HTML tokenization (upstream corpus, tooling parse path)
 
