@@ -51,6 +51,13 @@ pub struct Rect {
     pub height: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ReplacedSize {
+    pub node: NodeId,
+    pub width: f32,
+    pub height: f32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct EdgeSizes {
     pub top: f32,

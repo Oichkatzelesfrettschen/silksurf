@@ -807,6 +807,10 @@ files and the relevant ADRs.
 **Type**: Engine output structure
 **Definition**: Output of a render pass: `pixels: Vec<u8>` (ARGB framebuffer, `width * height * 4` bytes), `layout: LayoutTree`, `display_list: DisplayListTiles`, `styled_count: usize`.
 
+### ReplacedSize
+**Type**: Intrinsic replaced-element dimensions
+**Definition**: `silksurf-layout` records the DOM node and its intrinsic width and height. The fused pipeline uses the dimensions for auto sizing, and Taffy uses their ratio when CSS specifies one dimension.
+
 ### root_store_diagnostics
 **Type**: TLS diagnostic function
 **Definition**: Inspects the rustls root certificate store and returns a `RootStoreDiagnostics` record. Used by `tls-probe` to report trust-store composition.

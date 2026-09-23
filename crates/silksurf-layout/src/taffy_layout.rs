@@ -42,7 +42,9 @@ use taffy::{
     },
 };
 
-use crate::{EdgeSizes, Rect, neighbor_table::LayoutNeighborTable, unresolved_font_relative_px};
+use crate::{
+    EdgeSizes, Rect, ReplacedSize, neighbor_table::LayoutNeighborTable, unresolved_font_relative_px,
+};
 
 pub struct SilkTaffy {
     styles: Vec<Style>,
@@ -712,7 +714,27 @@ impl TaffyLayout {
         table: &LayoutNeighborTable,
         styles: &[Option<ComputedStyle>],
     ) {
+        self.rebuild_with_replaced_sizes(dom, table, styles, &[]);
+    }
+
+    pub fn rebuild_with_replaced_sizes(
+        &mut self,
+        dom: &Dom,
+        table: &LayoutNeighborTable,
+        styles: &[Option<ComputedStyle>],
+        replaced_sizes: &[ReplacedSize],
+    ) {
         let trace_taffy = std::env::var_os("SILKSURF_TRACE_TAFFY").is_some();
+        let intrinsic_ratios: FxHashMap<DomNodeId, f32> = replaced_sizes
+            .iter()
+            .filter_map(|size| {
+                (size.width.is_finite()
+                    && size.height.is_finite()
+                    && size.width > 0.0
+                    && size.height > 0.0)
+                    .then_some((size.node, size.width / size.height))
+            })
+            .collect();
         let mut stats = TaffyRebuildStats::default();
         let n = table.len();
         if self.taffy_nodes.capacity() < n {
@@ -746,16 +768,28 @@ impl TaffyLayout {
             }
             self.create_static_placeholder(table, styles, i);
             let style_start = trace_start(trace_taffy);
-            let taffy_style = css_to_taffy_style_for_index(
+            let mut taffy_style = css_to_taffy_style_for_index(
                 table,
                 styles,
                 i,
                 &mut self.flattened_children_scratch,
             );
+            taffy_style.aspect_ratio = intrinsic_ratios.get(&table.bfs_order[i]).copied();
             record_elapsed(&mut stats.style_time, style_start);
             let child_start = trace_start(trace_taffy);
             self.child_ids_scratch.clear();
-            self.collect_flow_children(table, styles, i);
+            let is_replaced_leaf = intrinsic_ratios.contains_key(&table.bfs_order[i])
+                && dom
+                    .element_name(table.bfs_order[i])
+                    .ok()
+                    .flatten()
+                    .is_some_and(|name| {
+                        matches!(TagName::from_str(name), TagName::Img | TagName::Canvas)
+                            || name == "svg"
+                    });
+            if !is_replaced_leaf {
+                self.collect_flow_children(table, styles, i);
+            }
             // An absolute box whose nearest positioned ancestor is not its DOM
             // parent joins that ancestor's taffy children instead, so taffy
             // resolves its insets against the box CSS names.

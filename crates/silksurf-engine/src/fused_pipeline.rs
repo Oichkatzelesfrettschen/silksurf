@@ -17,12 +17,7 @@ use silksurf_layout::taffy_layout::TaffyLayout;
 use silksurf_layout::{EdgeSizes, Rect};
 use silksurf_render::DisplayItem;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ReplacedSize {
-    pub node: NodeId,
-    pub width: f32,
-    pub height: f32,
-}
+pub use silksurf_layout::ReplacedSize;
 
 /*
  * FusedWorkspace -- pre-allocated scratch for zero-alloc steady-state renders.
@@ -107,6 +102,8 @@ pub struct FusedWorkspace {
     /// index carries new ComputedStyle for the same DOM, which CSSStyleSheet
     /// insertRule produces while both DOM generations stand still.
     taffy_style_index: u64,
+    /// Intrinsic dimensions used to build the retained Taffy styles.
+    taffy_replaced_sizes: Vec<ReplacedSize>,
     /// Seconds since the document timeline began, which the style pass
     /// samples each running animation at.
     timeline_seconds: f32,
@@ -193,6 +190,7 @@ impl FusedWorkspace {
             },
             taffy_style_generation: u64::MAX,
             taffy_style_index: u64::MAX,
+            taffy_replaced_sizes: Vec::new(),
             timeline_seconds: 0.0,
             animations_advance: false,
         }
@@ -368,12 +366,20 @@ impl FusedWorkspace {
             || style_gen != self.taffy_style_generation
             || viewport != self.taffy_viewport
             || style_index.build_id() != self.taffy_style_index
+            || replaced_sizes != self.taffy_replaced_sizes
         {
-            self.taffy_layout.rebuild(dom, &self.table, &self.styles);
+            self.taffy_layout.rebuild_with_replaced_sizes(
+                dom,
+                &self.table,
+                &self.styles,
+                replaced_sizes,
+            );
             self.taffy_structure_generation = structure_gen;
             self.taffy_style_generation = style_gen;
             self.taffy_viewport = viewport;
             self.taffy_style_index = style_index.build_id();
+            self.taffy_replaced_sizes.clear();
+            self.taffy_replaced_sizes.extend_from_slice(replaced_sizes);
         }
         trace_fused_phase(
             trace_fused,
@@ -688,7 +694,7 @@ pub fn fused_style_layout_paint_with_replaced_sizes(
     // Pass 2: taffy layout
     let phase_start = std::time::Instant::now();
     let mut taffy_layout = TaffyLayout::new();
-    taffy_layout.rebuild(dom, &table, &styles);
+    taffy_layout.rebuild_with_replaced_sizes(dom, &table, &styles, replaced_sizes);
     trace_fused_phase(
         trace_fused,
         "taffy-rebuild",
@@ -826,18 +832,16 @@ fn apply_replaced_size(
     style: &mut ComputedStyle,
     replaced_sizes: &[ReplacedSize],
 ) {
-    if style.display == Display::None || !is_image_element(dom, node) {
+    if style.display == Display::None || !is_replaced_element(dom, node) {
         return;
     }
-    if style.width == LengthOrAuto::Auto
-        && let Some(width) = image_replaced_width(node, replaced_sizes)
-    {
-        style.width = LengthOrAuto::Length(Length::Px(width));
-    }
-    if style.height == LengthOrAuto::Auto
-        && let Some(height) = image_replaced_height(node, replaced_sizes)
-    {
-        style.height = LengthOrAuto::Length(Length::Px(height));
+    if style.width == LengthOrAuto::Auto && style.height == LengthOrAuto::Auto {
+        if let Some(width) = image_replaced_width(node, replaced_sizes) {
+            style.width = LengthOrAuto::Length(Length::Px(width));
+        }
+        if let Some(height) = image_replaced_height(node, replaced_sizes) {
+            style.height = LengthOrAuto::Length(Length::Px(height));
+        }
     }
 }
 
@@ -855,13 +859,10 @@ fn image_replaced_height(node: NodeId, replaced_sizes: &[ReplacedSize]) -> Optio
         .map(|size| size.height)
 }
 
-fn is_image_element(dom: &Dom, node: NodeId) -> bool {
-    // Canvas is a replaced element too: its intrinsic size comes from the
-    // width/height attributes, substituted the same way as an image's.
-    dom.element_name(node)
-        .ok()
-        .flatten()
-        .is_some_and(|name| matches!(TagName::from_str(name), TagName::Img | TagName::Canvas))
+fn is_replaced_element(dom: &Dom, node: NodeId) -> bool {
+    dom.element_name(node).ok().flatten().is_some_and(|name| {
+        matches!(TagName::from_str(name), TagName::Img | TagName::Canvas) || name == "svg"
+    })
 }
 
 /*
