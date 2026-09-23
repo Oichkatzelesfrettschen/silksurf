@@ -3768,6 +3768,26 @@ values. HTML tag names may contain a colon without establishing a prefix.
 `create_element_ns` qualified-name entry point performs the split for DOM API
 callers. Subtree import and `cloneNode` retain the stored parts directly.
 
+## AD-050: Fragment Parsing Carries Context Namespace and Scripting
+
+**Status**: Accepted
+
+HTML fragment parsing depends on the context element's local name, namespace,
+and document scripting flag. `silksurf-html` exposes
+`parse_fragment_into_in_context` for namespace-aware fragment parsing and
+`parse_fragment_into_with_scripting` for HTML contexts with the document's
+scripting state. The existing `parse_fragment_into` entry point retains its
+inert HTML-fragment behavior for DOM bridge callers.
+
+The upstream tree-construction runner passes every `#document-fragment` case
+through the same html5ever adapter used by fragment insertion. The context
+namespace preserves SVG and MathML integration modes, and the scripting flag
+selects `noscript` tokenization. The import boundary omits a top-level `input`
+emitted by html5ever 0.38 in a `select` fragment because WPT
+`tests_innerHTML_1:75` requires that token to be ignored. The pinned WPT corpus
+records the execution count and remaining parser gaps in the tree-construction
+scorecard.
+
 ## Future ADRs
 
 Planned (renumbered after the 2026-04-30 batch):

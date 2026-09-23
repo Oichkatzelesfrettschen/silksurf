@@ -3,9 +3,9 @@
 //! html5lib retired its own `tree-construction/` directory; the corpus now
 //! lives in WPT under `html/syntax/parsing/resources/` as `.dat` files. Each
 //! case pairs a `#data` input with the `#document` tree the HTML standard
-//! requires. This harness feeds `#data` through `silksurf_html::parse_html` --
-//! the same entry point `silksurf_engine` uses at `lib.rs` -- and compares a
-//! html5lib-format serialization of the resulting `Dom` against `#document`.
+//! requires. Document cases use `silksurf_html::parse_html`; fragment cases
+//! use `parse_fragment_into_in_context`, the production fragment adapter.
+//! Both paths compare html5lib-format serialization against `#document`.
 //!
 //! Known failures are recorded as `expected-fail` directives in the
 //! expectations file rather than filtered out of the corpus, so both a
@@ -24,7 +24,7 @@ use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 
 use silksurf_dom::{Dom, Namespace, NodeId, NodeKind};
-use silksurf_html::{parse_html, parse_html_with_scripting};
+use silksurf_html::{parse_fragment_into_in_context, parse_html, parse_html_with_scripting};
 
 const DEFAULT_CORPUS_DIR: &str =
     "silksurf-extras/wpt-css-parser-subset/html/syntax/parsing/resources";
@@ -120,8 +120,11 @@ fn parse_dat_file(file_stem: &str, raw: &str) -> Vec<TreeCase> {
 /// name on their own line one level below their element, both per the format
 /// html5lib-tests documents.
 fn serialize_dom(dom: &Dom) -> String {
+    serialize_dom_children(dom, NodeId::from_raw(0))
+}
+
+fn serialize_dom_children(dom: &Dom, root: NodeId) -> String {
     let mut out = String::new();
-    let root = NodeId::from_raw(0);
     if let Ok(children) = dom.children(root) {
         for &child in children {
             serialize_node(dom, child, 0, &mut out);
@@ -350,14 +353,6 @@ fn html5lib_tree_construction_conformance() {
                 continue;
             }
 
-            // Fragment cases need an innerHTML-mode entry point that takes a
-            // context element; parse_html is document-mode only. They count as
-            // skipped rather than failed so the rate reflects what ran.
-            if case.fragment_context.is_some() {
-                summary.skipped += 1;
-                continue;
-            }
-
             let outcome = run_case(&case);
             match (expected, &outcome) {
                 (Expected::Pass, Ok(())) => summary.passed += 1,
@@ -389,13 +384,32 @@ fn html5lib_tree_construction_conformance() {
 }
 
 fn run_case(case: &TreeCase) -> Result<(), String> {
-    let parsed = panic::catch_unwind(AssertUnwindSafe(|| {
-        serialize_dom(&parse_html_with_scripting(
-            &case.data,
-            case.scripting_enabled,
-        ))
+    let parsed = panic::catch_unwind(AssertUnwindSafe(|| -> Result<String, String> {
+        if let Some(context_tag) = &case.fragment_context {
+            let (context_namespace, context_local_name) = parse_fragment_context(context_tag)?;
+            let mut dom = Dom::new();
+            let document = dom.create_document();
+            let context =
+                dom.create_element_ns_local(context_local_name, None, context_namespace.clone());
+            dom.append_child(document, context)
+                .map_err(|error| format!("append fragment context: {error:?}"))?;
+            parse_fragment_into_in_context(
+                &mut dom,
+                context,
+                context_local_name,
+                &context_namespace,
+                &case.data,
+                case.scripting_enabled,
+            );
+            Ok(serialize_dom_children(&dom, context))
+        } else {
+            Ok(serialize_dom(&parse_html_with_scripting(
+                &case.data,
+                case.scripting_enabled,
+            )))
+        }
     }));
-    let actual = parsed.map_err(|_| "parser panicked".to_string())?;
+    let actual = parsed.map_err(|_| "parser panicked".to_string())??;
     if actual == case.document {
         return Ok(());
     }
@@ -403,6 +417,19 @@ fn run_case(case: &TreeCase) -> Result<(), String> {
         "input {:?}\n     expected:\n{}\n     actual:\n{}",
         case.data, case.document, actual
     ))
+}
+
+fn parse_fragment_context(context: &str) -> Result<(Namespace, &str), String> {
+    if let Some((namespace, local_name)) = context.split_once(' ') {
+        let namespace = match namespace {
+            "svg" => Namespace::Svg,
+            "math" => Namespace::MathMl,
+            other => return Err(format!("unsupported fragment namespace {other:?}")),
+        };
+        Ok((namespace, local_name))
+    } else {
+        Ok((Namespace::Html, context))
+    }
 }
 
 fn report(summary: &Summary, corpus: &Path, expectations: &Expectations) {

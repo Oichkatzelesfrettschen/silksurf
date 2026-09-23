@@ -1148,11 +1148,13 @@ fn inner_html_set_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFu
                 .transpose()?
                 .unwrap_or_default();
             let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+            let context_node = dom.shadow_host(node_id).map_or(node_id, |(host, _)| host);
             let context_tag = dom
-                .element_name(dom.shadow_host(node_id).map_or(node_id, |(host, _)| host))
+                .element_name(context_node)
                 .ok()
                 .flatten()
                 .map_or_else(|| "div".to_string(), std::string::ToString::to_string);
+            let context_namespace = dom.element_namespace(context_node);
             let existing: Vec<NodeId> = dom
                 .children(dom.template_contents(node_id).unwrap_or(node_id))
                 .map(<[NodeId]>::to_vec)
@@ -1161,7 +1163,14 @@ fn inner_html_set_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFu
             for child in existing {
                 let _ = dom.remove_child(destination, child);
             }
-            silksurf_html::parse_fragment_into(&mut dom, destination, &context_tag, &html);
+            silksurf_html::parse_fragment_into_in_context(
+                &mut dom,
+                destination,
+                &context_tag,
+                &context_namespace,
+                &html,
+                true,
+            );
             // The mutation queues a record, so the delivery microtask is
             // enqueued before this native returns. The tree lock drops first,
             // because enqueuing reads the queue depth through the same mutex.
@@ -2259,7 +2268,7 @@ fn parse_rgb_function(inner: &str) -> Option<[u8; 4]> {
 #[cfg(test)]
 mod tests {
     use crate::boa_backend::SilkContext;
-    use silksurf_dom::{Dom, NodeId, NodeKind};
+    use silksurf_dom::{Dom, Namespace, NodeId, NodeKind};
     use std::sync::{Arc, Mutex};
 
     fn simple_dom() -> (Arc<Mutex<Dom>>, NodeId) {
@@ -2697,6 +2706,37 @@ mod tests {
         .expect("eval should succeed");
         let mut dom = arc.lock().unwrap();
         assert!(!dom.take_dirty_nodes().is_empty());
+    }
+
+    #[test]
+    fn inner_html_uses_svg_context_and_html_integration_points() {
+        let mut dom = Dom::new();
+        let document = dom.create_document();
+        let svg = dom.create_element_ns_local("svg", None, Namespace::Svg);
+        dom.set_attribute(svg, "id", "vector").expect("set id");
+        dom.append_child(document, svg).expect("append svg");
+        dom.materialize_resolve_table();
+        let arc = Arc::new(Mutex::new(dom));
+        let mut ctx = SilkContext::with_dom(&arc);
+
+        ctx.eval(
+            "document.getElementById('vector').innerHTML = \
+             '<foreignObject><div id=\"html-child\"></div></foreignObject>';",
+        )
+        .expect("SVG innerHTML uses the SVG fragment context");
+
+        let dom = arc.lock().expect("DOM lock");
+        let foreign_object = dom.children(svg).expect("SVG children")[0];
+        assert_eq!(
+            dom.element_name(foreign_object).unwrap(),
+            Some("foreignObject")
+        );
+        assert_eq!(dom.element_namespace(foreign_object), Namespace::Svg);
+        let html_child = dom
+            .children(foreign_object)
+            .expect("foreignObject children")[0];
+        assert_eq!(dom.element_name(html_child).unwrap(), Some("div"));
+        assert_eq!(dom.element_namespace(html_child), Namespace::Html);
     }
 
     #[test]

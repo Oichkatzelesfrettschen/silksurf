@@ -8,8 +8,10 @@ HTML tree construction over html5ever, plus an auxiliary tokenizer for tooling.
     html5ever's `TreeSink`. This is the production path; `silksurf-engine`
     imports it as `html5ever_parse`.
   * `parse_fragment_into` -- parses a fragment in a context element's
-    insertion mode and splices the nodes under a live parent, matching
-    innerHTML semantics. Scripts in the fragment stay inert.
+    insertion mode and splices the nodes under a live parent in the HTML
+    namespace. `parse_fragment_into_with_scripting` also accepts the document's
+    scripting flag, and `parse_fragment_into_in_context` accepts a context
+    namespace for SVG and MathML fragments. Scripts in fragments stay inert.
   * `treesink::SilkDomBuilder` -- the `TreeSink` implementation. Its `finish`
     calls `Dom::materialize_resolve_table`, the initial materialization
     boundary `silksurf-dom` and `silksurf-css` both build against.

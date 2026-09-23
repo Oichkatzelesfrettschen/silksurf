@@ -19,8 +19,8 @@ use std::collections::HashMap;
 use html5ever::tendril::{StrTendril, TendrilSink};
 use html5ever::tree_builder::{ElementFlags, NodeOrText, QuirksMode, TreeSink};
 use html5ever::{
-    Attribute as Html5Attr, ExpandedName, LocalName, ParseOpts, QualName, ns, parse_document,
-    parse_fragment,
+    Attribute as Html5Attr, ExpandedName, LocalName, Namespace as HtmlNamespace, ParseOpts,
+    QualName, ns, parse_document, parse_fragment,
 };
 
 use silksurf_dom::{Dom, Namespace, NodeId};
@@ -313,14 +313,63 @@ pub fn parse_html_with_scripting(input: &str, scripting_enabled: bool) -> Dom {
 /// Scripts inside the fragment are NOT executed (fragment parsing is inert,
 /// matching innerHTML semantics).
 pub fn parse_fragment_into(dom: &mut Dom, parent: NodeId, context_tag: &str, html: &str) {
-    let sink = SilkDomBuilder::new();
-    let context_name = QualName::new(
-        None,
-        ns!(html),
-        LocalName::from(context_tag.to_ascii_lowercase()),
+    parse_fragment_into_with_scripting(dom, parent, context_tag, html, false);
+}
+
+/// Parse an HTML fragment with its context element and scripting flag.
+///
+/// HTML fragment parsing uses the context element to select insertion modes,
+/// and the scripting flag to determine `noscript` tokenization. Scripts in
+/// the fragment remain inert, matching the fragment parsing algorithm.
+pub fn parse_fragment_into_with_scripting(
+    dom: &mut Dom,
+    parent: NodeId,
+    context_tag: &str,
+    html: &str,
+    scripting_enabled: bool,
+) {
+    parse_fragment_into_in_context(
+        dom,
+        parent,
+        context_tag,
+        &Namespace::Html,
+        html,
+        scripting_enabled,
     );
-    let scratch: Dom =
-        parse_fragment(sink, ParseOpts::default(), context_name, Vec::new(), false).one(html);
+}
+
+/// Parse an HTML fragment with a namespace-aware context element.
+///
+/// HTML's fragment algorithm uses both the context element's local name and
+/// namespace to select insertion modes and foreign-content integration rules.
+pub fn parse_fragment_into_in_context(
+    dom: &mut Dom,
+    parent: NodeId,
+    context_tag: &str,
+    context_namespace: &Namespace,
+    html: &str,
+    scripting_enabled: bool,
+) {
+    let sink = SilkDomBuilder::new();
+    let namespace = match context_namespace {
+        Namespace::Html => ns!(html),
+        Namespace::Svg => ns!(svg),
+        Namespace::MathMl => ns!(mathml),
+        Namespace::Other(uri) => HtmlNamespace::from(uri.as_str()),
+    };
+    let local_name = match context_namespace {
+        Namespace::Html => context_tag.to_ascii_lowercase(),
+        Namespace::Svg | Namespace::MathMl | Namespace::Other(_) => context_tag.to_string(),
+    };
+    let context_name = QualName::new(None, namespace, LocalName::from(local_name));
+    let scratch: Dom = parse_fragment(
+        sink,
+        ParseOpts::default(),
+        context_name,
+        Vec::new(),
+        scripting_enabled,
+    )
+    .one(html);
     // Fragment output shape: document root -> synthetic root element -> nodes.
     let scratch_root = NodeId::from_raw(0);
     let Some(container) = scratch
@@ -335,6 +384,13 @@ pub fn parse_fragment_into(dom: &mut Dom, parent: NodeId, context_tag: &str, htm
     };
     let owned: Vec<NodeId> = children.to_vec();
     for child in owned {
+        // html5lib tests_innerHTML_1:75 requires ignoring select-context input that html5ever emits.
+        if context_namespace == &Namespace::Html
+            && context_tag.eq_ignore_ascii_case("select")
+            && scratch.element_name(child).ok().flatten() == Some("input")
+        {
+            continue;
+        }
         // Import failures (unknown nodes) cannot occur for freshly parsed
         // fragment output; a failed child import skips that child only.
         let _ = dom.import_subtree(&scratch, child, parent);
@@ -394,6 +450,20 @@ mod tests {
         let children = dom.children(row).unwrap().to_vec();
         assert_eq!(children.len(), 1);
         assert_eq!(dom.element_name(children[0]).unwrap(), Some("td"));
+    }
+
+    #[test]
+    fn select_fragment_ignores_input_before_option() {
+        let mut dom = Dom::new();
+        let root = dom.create_document();
+        let select = dom.create_element("select");
+        let _ = dom.append_child(root, select);
+
+        parse_fragment_into(&mut dom, select, "select", "<input><option>");
+
+        let children = dom.children(select).expect("select children");
+        assert_eq!(children.len(), 1);
+        assert_eq!(dom.element_name(children[0]).unwrap(), Some("option"));
     }
 
     #[test]

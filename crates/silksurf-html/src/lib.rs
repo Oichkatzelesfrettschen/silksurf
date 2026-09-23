@@ -11,7 +11,10 @@ mod serialize;
 pub mod treesink;
 
 pub use serialize::serialize_fragment;
-pub use treesink::{parse_fragment_into, parse_html, parse_html_with_scripting};
+pub use treesink::{
+    parse_fragment_into, parse_fragment_into_in_context, parse_fragment_into_with_scripting,
+    parse_html, parse_html_with_scripting,
+};
 
 /*
  * MAX_TOKENS_PER_FEED -- DoS bound on Tokenizer::feed output size.

@@ -18,8 +18,8 @@ inert fragments, and inline module roots execute through one document dependency
 registry. Fetch carries the document URL, TLS policy, and cookie partition.
 AD-042 through AD-044 record the mechanisms and boundaries.
 
-- Compact-engine evidence: the upstream HTML tree run records 1,578 of 1,726
-  executed passes, 148 expected failures, and 192 skips; test262 numeric literals
+- Compact-engine evidence: the upstream HTML tree run records 1,792 of 1,918
+  passes, 126 expected failures, and zero skips; test262 numeric literals
   pass 157 of 157 at corpus revision
   `045bf6f9966ce3291b8fbc1e0403cd97b9201b00`.
 - The same test262 snapshot's `built-ins/Promise` selection records 637 passes,
@@ -40,9 +40,16 @@ AD-042 through AD-044 record the mechanisms and boundaries.
 - `cross-origin-fetch-policy`: CORS, preflight, and credentialed cross-origin
   admission need a complete Fetch policy layer. Response readers still buffer
   the full body before exposing chunks.
-- `iframe-browsing-context` and `media-element-stack`: child document ownership,
-  event routing, isolation, resource selection, decoding, and playback remain
-  open under the embedded-content decision gate below.
+- `iframe-browsing-context`: child-document ownership, event routing, isolation,
+  and damage propagation remain open under the nested-context decision gate
+  below.
+- `media-element-stack`: video and audio decoding and playback remain open
+  under the media decision below. Image source selection has a separate path.
+- `responsive-image-source-selection`: `picture`, `source`, `srcset`, and
+  `sizes` selection remains open inside the existing image fetch and decode path.
+- `html-fragment-context-conformance`: all upstream `#document-fragment` cases
+  execute with context namespace and scripting state through the production
+  html5ever adapter; AD-050 records the mechanism.
 - `import-map-incremental-registration`: maps inserted before first resolution
   register before the next classic script or at the later root scan; merging
   additional maps after resolution
@@ -269,11 +276,9 @@ share files with the workstreams above and should land opportunistically:
 
 ## Named deferrals (not in this execution; each needs its own landing)
 
-- **nested-browsing-context-damage-model** -- OPEN, and it gates every
-  HTML 4.8 embedded-content element. `iframe`, `video`, `audio`,
-  `object`, `picture`, and `srcset` return zero hits across crates/ and
-  silksurf-js/. `iframe` is the decision gate rather than the cheapest
-  item: a nested browsing context needs its own document, style tree,
+- **nested-browsing-context-damage-model** -- OPEN for `iframe` and
+  document-backed `object` content. A nested browsing context needs its own
+  document, style tree,
   layout root, and paint subtree, and the shell owns exactly one
   BrowserPageRuntime. The question to answer before any element work is
   whether the retained damage model survives a second document. A nested
@@ -285,10 +290,13 @@ share files with the workstreams above and should land opportunistically:
   upstream-corpus number moves repeats the synthetic-scorecard failure
   docs/findings/conformance-instrument-fidelity.md records.
 - **media-element-stack** -- OPEN. `video` and `audio` need demux,
-  decode, and audio output the workspace does not have and does not
-  target. `picture` and `srcset` are tractable inside the existing
-  crates/silksurf-image surface and are the cheapest real
-  embedded-content capability once the damage-model question resolves.
+  decode, and audio output the workspace does not have and does not target.
+- **responsive-image-source-selection** -- OPEN and independent of nested
+  browsing contexts. `picture`, `source`, `srcset`, and `sizes` select image
+  resources through the existing image fetch and decode path.
+- **html-fragment-context-conformance** -- LANDED in the parser API and upstream
+  tree harness. Every fragment case executes with its context namespace and
+  scripting state; the scorecard records the pinned result and parser gaps.
 
 - **boa-bundle-throughput-spike** -- RUN 2026-07-12; verdict and numbers
   in docs/findings/boa-react-bundle-throughput.md. React 18 mounts and
