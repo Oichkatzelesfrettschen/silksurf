@@ -1510,16 +1510,10 @@ fn form_control_text(dom: &Dom, node: NodeId) -> Option<String> {
     }
     let attrs = dom.attributes(node).ok()?;
     if input_type_matches(attrs, "checkbox") {
-        return attrs
-            .iter()
-            .any(|attr| attr.name.as_str() == "checked")
-            .then(|| "x".to_string());
+        return dom.input_checked(node).then(|| "x".to_string());
     }
     if input_type_matches(attrs, "radio") {
-        return attrs
-            .iter()
-            .any(|attr| attr.name.as_str() == "checked")
-            .then(|| "*".to_string());
+        return dom.input_checked(node).then(|| "*".to_string());
     }
     let value = attrs
         .iter()

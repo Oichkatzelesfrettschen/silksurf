@@ -40,11 +40,13 @@ mod css_object;
 mod dom_bridge;
 mod dom_interfaces;
 mod event_dispatch;
+mod form_controls;
 mod intl_datetime;
 mod intl_datetime_data;
 mod layout_observers;
 mod module_loader;
 mod mutation_observer;
+mod shadow_dom;
 /// A document module root retains its external URL or inline source.
 #[derive(Clone, Debug)]
 pub enum ModuleScript {

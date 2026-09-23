@@ -3,6 +3,7 @@
 pub mod a11y;
 pub mod canvas2d;
 pub mod diff;
+mod forms;
 pub mod mutation;
 
 pub use canvas2d::CanvasSurface;
@@ -403,6 +404,9 @@ pub struct Dom {
     document_root: Option<NodeId>,
     template_contents: HashMap<NodeId, NodeId>,
     template_hosts: HashMap<NodeId, NodeId>,
+    checked_states: HashMap<NodeId, forms::CheckedState>,
+    shadow_roots: HashMap<NodeId, NodeId>,
+    shadow_hosts: HashMap<NodeId, (NodeId, bool)>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -426,6 +430,27 @@ impl From<DomError> for silksurf_core::SilkError {
 /// spinning.
 const MAX_CONNECTED_WALK: usize = 1024;
 
+fn valid_custom_shadow_host(name: &str) -> bool {
+    name.contains('-')
+        && name.starts_with(|character: char| character.is_ascii_lowercase())
+        && name.chars().all(custom_element_name_character)
+        && !matches!(
+            name,
+            "annotation-xml"
+                | "color-profile"
+                | "font-face"
+                | "font-face-src"
+                | "font-face-uri"
+                | "font-face-format"
+                | "font-face-name"
+                | "missing-glyph"
+        )
+}
+
+fn custom_element_name_character(character: char) -> bool {
+    matches!(character, '-' | '.' | '_' | '0'..='9' | 'a'..='z' | '\u{b7}' | '\u{c0}'..='\u{d6}' | '\u{d8}'..='\u{f6}' | '\u{f8}'..='\u{37d}' | '\u{37f}'..='\u{1fff}' | '\u{200c}'..='\u{200d}' | '\u{203f}'..='\u{2040}' | '\u{2070}'..='\u{218f}' | '\u{2c00}'..='\u{2fef}' | '\u{3001}'..='\u{d7ff}' | '\u{f900}'..='\u{fdcf}' | '\u{fdf0}'..='\u{fffd}' | '\u{10000}'..='\u{effff}')
+}
+
 impl Dom {
     pub fn new() -> Self {
         use std::sync::atomic::{AtomicU32, Ordering};
@@ -448,6 +473,9 @@ impl Dom {
             canvas_surfaces: HashMap::new(),
             template_contents: HashMap::new(),
             template_hosts: HashMap::new(),
+            checked_states: HashMap::new(),
+            shadow_roots: HashMap::new(),
+            shadow_hosts: HashMap::new(),
         }
     }
 
@@ -559,6 +587,57 @@ impl Dom {
         self.push_node(NodeKind::Comment { data: data.into() })
     }
 
+    /// Attach a distinct fragment tree to an HTML shadow host.
+    /// `closed` controls the Element.shadowRoot accessor; DOM ownership retains both modes.
+    pub fn attach_shadow(&mut self, host: NodeId, closed: bool) -> Result<NodeId, DomError> {
+        let node = self.node(host)?;
+        let NodeKind::Element {
+            name, namespace, ..
+        } = node.kind()
+        else {
+            return Err(DomError::NotElement(host));
+        };
+        let valid_host = matches!(
+            name.as_str(),
+            "article"
+                | "aside"
+                | "blockquote"
+                | "body"
+                | "div"
+                | "footer"
+                | "h1"
+                | "h2"
+                | "h3"
+                | "h4"
+                | "h5"
+                | "h6"
+                | "header"
+                | "main"
+                | "nav"
+                | "p"
+                | "section"
+                | "span"
+        ) || valid_custom_shadow_host(name.as_str());
+        if namespace != &Namespace::Html || !valid_host || self.shadow_roots.contains_key(&host) {
+            return Err(DomError::HierarchyRequest(host));
+        }
+        let root = self.create_document_fragment();
+        self.shadow_roots.insert(host, root);
+        self.shadow_hosts.insert(root, (host, closed));
+        self.record_structure_change();
+        Ok(root)
+    }
+
+    /// Return the host's shadow root, including closed roots for engine traversal.
+    pub fn shadow_root(&self, host: NodeId) -> Option<NodeId> {
+        self.shadow_roots.get(&host).copied()
+    }
+
+    /// Return a shadow root's host and closed-mode bit.
+    pub fn shadow_host(&self, root: NodeId) -> Option<(NodeId, bool)> {
+        self.shadow_hosts.get(&root).copied()
+    }
+
     pub fn create_doctype(
         &mut self,
         name: Option<String>,
@@ -587,7 +666,8 @@ impl Dom {
             }
             ancestor = self
                 .parent(node)?
-                .or_else(|| self.template_hosts.get(&node).copied());
+                .or_else(|| self.template_hosts.get(&node).copied())
+                .or_else(|| self.shadow_host(node).map(|(host, _)| host));
         }
         Ok(())
     }
@@ -996,6 +1076,9 @@ impl Dom {
                 }
                 self.record_style_change();
                 self.mark_dirty(id);
+                if name.eq_ignore_ascii_case("checked") {
+                    self.checked_attribute_changed(id, true);
+                }
                 self.queue_mutation(id, MutationKind::Attributes { name, old });
                 Ok(())
             }
@@ -1036,6 +1119,9 @@ impl Dom {
                 attributes.remove(position);
                 self.record_style_change();
                 self.mark_dirty(id);
+                if name.eq_ignore_ascii_case("checked") {
+                    self.checked_attribute_changed(id, false);
+                }
                 self.queue_mutation(id, MutationKind::Attributes { name, old });
                 Ok(true)
             }
@@ -1080,6 +1166,7 @@ impl Dom {
                 .node_index(current)
                 .ok()
                 .and_then(|i| self.nodes[i].parent)
+                .or_else(|| self.shadow_host(current).map(|(host, _)| host))
             {
                 Some(parent) => current = parent,
                 None => return false,

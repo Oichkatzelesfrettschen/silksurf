@@ -263,6 +263,13 @@ fn snapshot_node(dom: &Dom, node_id: NodeId) -> NodeSnapshot {
                     node_type: 9,
                 };
             }
+            NodeKind::Doctype { name, .. } => {
+                return NodeSnapshot {
+                    tag_name: String::new(),
+                    node_name: name.clone().unwrap_or_default(),
+                    node_type: 10,
+                };
+            }
             NodeKind::Comment { .. } => {
                 return NodeSnapshot {
                     tag_name: String::new(),
@@ -270,7 +277,7 @@ fn snapshot_node(dom: &Dom, node_id: NodeId) -> NodeSnapshot {
                     node_type: 8,
                 };
             }
-            _ => {}
+            NodeKind::Element { .. } => {}
         }
     }
     let tag = dom
@@ -1130,7 +1137,7 @@ fn inner_html_set_native(dom_arc: &Arc<Mutex<Dom>>, node_id: NodeId) -> NativeFu
                 .unwrap_or_default();
             let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
             let context_tag = dom
-                .element_name(node_id)
+                .element_name(dom.shadow_host(node_id).map_or(node_id, |(host, _)| host))
                 .ok()
                 .flatten()
                 .map_or_else(|| "div".to_string(), std::string::ToString::to_string);
@@ -1307,7 +1314,30 @@ pub(super) fn install_document(
     let _ = ctx.register_global_property(js_string!("document"), document, Attribute::all());
     // The interface bootstrap reads `document`, so it runs after registration.
     super::dom_interfaces::install_dom_interfaces(dom_arc, ctx);
+    install_document_node_identity(dom_arc, root, ctx);
     install_window_event_target(dom_arc, ctx);
+}
+
+fn install_document_node_identity(dom_arc: &Arc<Mutex<Dom>>, root: NodeId, ctx: &mut Context) {
+    let node = node_to_js_object(dom_arc, root, ctx);
+    let _ =
+        ctx.register_global_property(js_string!("__silksurfDocumentNode"), node, Attribute::all());
+    let source = r"
+        for (const key of Reflect.ownKeys(__silksurfDocumentNode)) {
+            if (!Object.prototype.hasOwnProperty.call(document, key)) {
+                Object.defineProperty(document, key, Object.getOwnPropertyDescriptor(__silksurfDocumentNode, key));
+            }
+        }
+        Object.defineProperty(document, 'ownerDocument', { get: function () { return null; }, configurable: true });
+        Object.setPrototypeOf(document, Document.prototype);
+        delete globalThis.__silksurfDocumentNode;
+    ";
+    if let Err(error) = ctx.eval(boa_engine::Source::from_bytes(source)) {
+        eprintln!("silksurf-js: document node identity failed: {error}");
+    }
+    if let Ok(document) = ctx.global_object().clone().get(js_string!("document"), ctx) {
+        store_wrapper(root, &document, ctx);
+    }
 }
 
 /*

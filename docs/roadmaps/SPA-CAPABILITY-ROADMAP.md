@@ -43,20 +43,25 @@ AD-042 through AD-044 record the mechanisms and boundaries.
 - `iframe-browsing-context` and `media-element-stack`: child document ownership,
   event routing, isolation, resource selection, decoding, and playback remain
   open under the embedded-content decision gate below.
-- `classic-script-dynamic-import-bootstrap`: native loading installs the module
-  fetcher after classic scripts and their jobs run. Registry initialization and
-  fetch admission must precede classic-script imports while preserving module
-  identity across later roots.
-- `shadow-root-interface-and-tree`: ChatGPT's fetched HTML setter polyfill throws
-  `ReferenceError: ShadowRoot is not defined`. Shadow-tree ownership and DOM
-  interfaces need implementation before that script can execute.
+- `import-map-incremental-registration`: maps inserted before first resolution
+  register at the later root scan; merging additional maps after resolution
+  requires HTML's resolved-module filtering and map-registration hooks.
+- `shadow-flat-tree-rendering`: shadow ownership and interfaces execute the
+  fetched HTML setter polyfill. Slot assignment, scoped style, flat-tree layout,
+  and composed event retargeting require integrated rendering evidence.
+- `form-parser-owner-and-reset`: live collections, native input, JavaScript,
+  CSS, and paint share DOM form ownership and checkedness. Parser-established
+  nonancestor ownership, reset, and group normalization after name/type/owner
+  changes require the remaining HTML control-state transitions.
 - `headless-script-parity`: the headless path drops external classic scripts and
   omits module-loader setup; native and headless results require separate probes.
-- `chatgpt-live-acceptance`: silksurf receives HTTP 200 and executes inline
-  bootstrap code, then reproduces a TypeError in a 69,750-byte inline script.
-  The native capture shows a blank page under functioning chrome. A second native
-  request receives HTTP 403 for a dynamic script. Headless reports zero display
-  items. Login, prompt submission, and streamed reply remain unverified.
+- `chatgpt-live-acceptance`: the native run executes the 69,750-byte bootstrap,
+  its dynamic import, and the 4,481-byte HTML setter polyfill. The page remains
+  visually incomplete. Nested functional-selector parsing previously broadens a
+  class-specific hidden rule onto document roots; the repaired native run emits
+  55 display items and visible content with overlapping geometry. The remaining
+  layout boundary includes display:contents and computed sizing. Login, prompt
+  submission, and streamed reply remain unverified.
 
 ## Acceptance frame: the site ladder
 
