@@ -81,14 +81,15 @@ remain open program items.
 - runner kind: `wpt-tree-construction`
 - corpus: WPT `html/syntax/parsing/resources`, the home html5lib moved its
   tree-construction `.dat` files to
-- result: 1,578 / 1,726 executed = **91.43%**; 1,578 / 1,918 total = **82.27%**
+- result: 1,600 / 1,726 executed = **92.70%**; 1,600 / 1,918 total = **83.42%**
 - path under test: `silksurf_html::parse_html`, the html5ever entry point
   `silksurf-engine` uses
 - 192 fragment cases count as skipped; `parse_html` is document-mode only
-- 148 recorded gaps sit in
+- 126 recorded gaps sit in
   `crates/silksurf-html/tests/html5lib-tree-construction.expectations`. HTML
   templates own detached content fragments, resolving 109 adapter failures.
-  Scripting flags resolve 24 cases, and five stale expectations are removed.
+  Scripting flags resolve 24 cases. Preserving colon-bearing HTML local names
+  resolves 22 further cases at WPT revision `1924c6e9784b3c1da4ad5bfcbfeea64b2a886e7b`.
   Processing-instruction input still reaches html5ever's bogus-comment tokenizer
   path; adding a DOM variant alone cannot resolve that boundary.
 

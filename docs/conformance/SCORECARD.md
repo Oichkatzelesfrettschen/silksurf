@@ -6,6 +6,11 @@
 
 ## Last refresh
 
+  * Date: 2026-09-22. The HTML tree-construction corpus at revision
+    `1924c6e9784b3c1da4ad5bfcbfeea64b2a886e7b` passes 1600 of 1726
+    executed cases on source commit `e5b2064`. The parser now preserves
+    colon-bearing HTML local names. The other harness rows retain their
+    recorded measurement dates.
   * Date: 2026-08-06. Three upstream-corpus rows join the table: HTML tree
     construction, HTML tokenization, and CSS parse robustness. Each names its
     corpus revision in its scorecard JSON, and
@@ -24,8 +29,10 @@
 
 The three upstream-corpus scorecards in this directory carry a
 `measurement_environment` object defined by
-`perf/measurement-environment.schema.json`, captured once before the harnesses
-ran. The current rows come from:
+`perf/measurement-environment.schema.json`. The refreshed HTML tree row records
+commit `e5b206483447455dffa36809c9057aa9fe13c4a0`, a clean working tree,
+Rust 1.94.1, and Linux 7.2.5-1-cachyos. The other upstream rows retain their
+original environment:
 
   * commit `6f3beef19ea54e7a89f53fec553435f25fd0efc9`, clean working tree
   * `rustc 1.94.1 (e408947bf 2026-03-25)`
@@ -48,7 +55,7 @@ limit.
 | **test262** (lexer-only, legacy VM) | runner removed (AD-025) | 157 of ~53 040 .js files (numeric-literals subset) | 104 / 157 = 66.24 % at lexer level (2026-05-14 baseline, historical). JSON retained: `docs/archive/conformance/test262-lexer-scorecard.json` |
 | **TLS loader sanity** (silksurf-tls) | functional | 4 unit tests covering empty PEM, malformed PEM, default-host loader, root-store diagnostics | 4 / 4 pass |
 | **HTTP/2 (h2spec)** | scaffolded | `scripts/run_h2spec.sh` driver + JSON scorecard schema; in-tree h2 server still pending | 0 / 0 (stub -- needs in-tree server or operator-supplied `SILKSURF_H2_HOST`). See `crates/silksurf-engine/conformance/h2spec-scorecard.json` |
-| **HTML tree construction (upstream WPT corpus)** | functional | 1918 cases from WPT `html/syntax/parsing/resources`, the home html5lib moved its tree-construction `.dat` files to; driven through `silksurf_html::parse_html`, the production html5ever path | 1578 / 1726 executed = **91.43%**, 1578 / 1918 total = **82.27%**. The harness skips 192 fragment cases and records 148 expected failures. Template fragment ownership and the corpus scripting flag resolve adapter failures; processing-instruction cases still reach html5ever's bogus-comment tokenizer path. See `docs/conformance/html5lib-tree-construction-scorecard.json` |
+| **HTML tree construction (upstream WPT corpus)** | functional | 1918 cases from WPT `html/syntax/parsing/resources`, the home html5lib moved its tree-construction `.dat` files to; driven through `silksurf_html::parse_html`, the production html5ever path | 1600 / 1726 executed = **92.70%**, 1600 / 1918 total = **83.42%**. The harness skips 192 fragment cases and records 126 expected failures. Preserving colon-bearing HTML local names closes 22 recorded gaps; processing-instruction cases still reach html5ever's bogus-comment tokenizer path. See `docs/conformance/html5lib-tree-construction-scorecard.json` |
 | **HTML tokenization (html5lib corpus)** | functional | 6806 cases from html5lib-tests `tokenizer`; drives `silksurf_html::Tokenizer`, which serves `wpt_runner` and the CSS harness rather than page loads | 3019 / 6640 executed = **45.47%**, 3019 / 6806 total = 44.36%. 166 cases need tokenizer states or `lastStartTag` the public API does not expose. Named character references (2283) and `test3` state permutations (1238) lead the 3621 recorded gaps; the `State` enum carries 8 states against roughly 80 in the standard |
 | **CSS parse robustness (upstream WPT corpus)** | functional | 871 files from WPT `css/CSS2/syntax`, `css/css-syntax`, `css/selectors/parsing` | 603 / 603 executed accepted. The oracle is `parse_stylesheet_bytes` returning without error or panic, and the parsed stylesheet is discarded, so this measures parser robustness over the corpus. Cascade and computed-value correctness are NOT YET MEASURED; this is not a CSS conformance number |
 | **HTML / CSS / Layout / Paint / JS-event WPT (synthetic)** | functional | 71 in-tree fixtures exercising HTML structure, CSS selectors and properties, inline style cascade, Taffy layout rects, fused paint-list suppression, and JS checks (event dispatch, complex selectors, innerHTML reparse, live style-to-cascade, matchMedia, getComputedStyle; js-conformance feature) | 71 / 0 / 0 (pass / fail / skip), 100.00 % @ 2026-09-22 refresh; runner v0.2.0 requires every selected fixture to pass. See `crates/silksurf-engine/conformance/wpt-scorecard.json` |
