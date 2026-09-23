@@ -787,8 +787,11 @@ pub(crate) fn append_image_display_items(
     svg_cache: &mut SvgSurfaceCache,
     items: &mut Vec<silksurf_render::DisplayItem>,
 ) {
-    for &node in &fused.table.bfs_order {
+    for (index, &node) in fused.table.bfs_order.iter().enumerate() {
         if let Some(src) = image_src_for_node(dom, node) {
+            if !box_is_exposed(fused, index) {
+                continue;
+            }
             let resolved = resolve_resource_url(base_url, &src);
             let Some(image) = images.iter().find(|image| image.url == resolved) else {
                 continue;
@@ -804,6 +807,9 @@ pub(crate) fn append_image_display_items(
                 image: image.surface.clone(),
             });
         } else if let Some(image) = canvas_surface_image(dom, node) {
+            if !box_is_exposed(fused, index) {
+                continue;
+            }
             let Some(rect) = fused_node_rect(fused, node) else {
                 continue;
             };
@@ -812,6 +818,9 @@ pub(crate) fn append_image_display_items(
             }
             items.push(silksurf_render::DisplayItem::Image { rect, image });
         } else if let Some(rect) = svg_paint_rect(dom, fused, node) {
+            if !box_is_exposed(fused, index) {
+                continue;
+            }
             let Some(surface) = svg_cache.surface(dom, node, rect) else {
                 continue;
             };
@@ -1524,6 +1533,49 @@ mod tests {
         let size = svg_replaced_size_for_node(&dom, svg).expect("replaced size");
         assert!((size.width - 16.0).abs() < f32::EPSILON, "{}", size.width);
         assert!((size.height - 16.0).abs() < f32::EPSILON, "{}", size.height);
+    }
+
+    #[test]
+    fn boxless_svg_subtrees_emit_no_image_items() {
+        let parsed = silksurf_engine::parse_html(
+            "<!doctype html><html><body><div style='width:64px;height:64px'>\
+             <svg style='display:none' viewBox='0 0 4 4'><rect width='4' height='4'/></svg>\
+             </div><div style='display:none'>\
+             <svg viewBox='0 0 4 4'><rect width='4' height='4'/></svg></div>\
+             <svg viewBox='0 0 4 4' width='16' height='16'>\
+             <rect width='4' height='4'/></svg></body></html>",
+        )
+        .expect("fixture parses");
+        let stylesheet = test_stylesheet(&parsed.dom);
+        let viewport = silksurf_layout::Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 800.0,
+            height: 600.0,
+        };
+        let replaced =
+            collect_image_replaced_sizes(&parsed.dom, parsed.document, "http://example.test/", &[]);
+        let fused = silksurf_engine::fused_pipeline::fused_style_layout_paint_with_replaced_sizes(
+            &parsed.dom,
+            &stylesheet,
+            parsed.document,
+            viewport,
+            &replaced,
+        );
+        let mut items = fused.display_items.clone();
+        append_image_display_items(
+            &parsed.dom,
+            &fused,
+            "http://example.test/",
+            &[],
+            &mut SvgSurfaceCache::default(),
+            &mut items,
+        );
+        let images: Vec<_> = items
+            .iter()
+            .filter(|item| matches!(item, silksurf_render::DisplayItem::Image { .. }))
+            .collect();
+        assert_eq!(images.len(), 1);
     }
 
     /// An `<svg>` with neither sizing attributes nor a viewBox has no
