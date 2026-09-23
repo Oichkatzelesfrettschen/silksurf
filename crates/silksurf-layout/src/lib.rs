@@ -186,14 +186,12 @@ fn build_layout_box<'a>(
             BoxType::BlockNode(node)
         }
         Display::Inline => BoxType::InlineNode(node),
-        Display::None => BoxType::Anonymous,
+        Display::Contents | Display::None => BoxType::Anonymous,
     };
     let mut children = arena.vec();
     if let Ok(node_children) = dom.children(node) {
         for child in node_children {
-            if let Some(child_box) = build_layout_box(arena, dom, styles, *child) {
-                children.push(child_box);
-            }
+            append_layout_child(arena, dom, styles, *child, &mut children);
         }
     }
     Some(arena.alloc(LayoutBox {
@@ -201,6 +199,30 @@ fn build_layout_box<'a>(
         dimensions: Cell::new(Dimensions::default()),
         children,
     }))
+}
+
+fn append_layout_child<'a>(
+    arena: &'a SilkArena,
+    dom: &Dom,
+    styles: &FxHashMap<NodeId, ComputedStyle>,
+    node: NodeId,
+    children: &mut ArenaVec<'a, &'a LayoutBox<'a>>,
+) {
+    if node_starts_non_rendered_subtree(dom, node) {
+        return;
+    }
+    if styles
+        .get(&node)
+        .is_some_and(|style| style.display == Display::Contents)
+    {
+        if let Ok(grandchildren) = dom.children(node) {
+            for grandchild in grandchildren {
+                append_layout_child(arena, dom, styles, *grandchild, children);
+            }
+        }
+    } else if let Some(child_box) = build_layout_box(arena, dom, styles, node) {
+        children.push(child_box);
+    }
 }
 
 fn node_starts_non_rendered_subtree(dom: &Dom, node: NodeId) -> bool {

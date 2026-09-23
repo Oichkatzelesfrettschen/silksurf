@@ -60,8 +60,10 @@ AD-042 through AD-044 record the mechanisms and boundaries.
   its dynamic import, and the 4,481-byte HTML setter polyfill. The page remains
   visually incomplete. Nested functional-selector parsing previously broadens a
   class-specific hidden rule onto document roots; the repaired native run emits
-  55 display items and visible content with overlapping geometry. The remaining
-  layout boundary includes display:contents and computed sizing. Login, prompt
+  55 display items and visible content with overlapping geometry. The box-tree
+  path now flattens ordinary `display:contents` wrappers in block and flex
+  flow; inline formatting, SVG box-generation exceptions, and computed sizing
+  still need live geometry evidence. Login, prompt
   submission, and streamed reply remain unverified.
 
 ## Acceptance frame: the site ladder

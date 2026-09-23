@@ -292,6 +292,7 @@ pub struct TaffyLayout {
     taffy_to_bfs: FxHashMap<TaffyId, usize>,
     /// Reused child-id list for parent node construction.
     child_ids_scratch: Vec<TaffyId>,
+    flattened_children_scratch: Vec<usize>,
     /// Text measurement cache keyed by BFS index and guarded by DOM generation.
     text_measure_cache: Vec<CachedTextMeasures>,
     text_measure_generation: u64,
@@ -515,6 +516,7 @@ impl TaffyLayout {
             taffy_nodes: Vec::new(),
             taffy_to_bfs: FxHashMap::default(),
             child_ids_scratch: Vec::new(),
+            flattened_children_scratch: Vec::new(),
             text_measure_cache: Vec::new(),
             text_measure_generation: u64::MAX,
             viewport_root: None,
@@ -628,6 +630,43 @@ impl TaffyLayout {
         }
     }
 
+    fn collect_flow_children(
+        &mut self,
+        table: &LayoutNeighborTable,
+        styles: &[Option<ComputedStyle>],
+        parent_index: usize,
+    ) {
+        let first_child = table.child_start[parent_index];
+        if first_child == u32::MAX {
+            return;
+        }
+        let start = first_child as usize;
+        let end = start + usize::from(table.child_count[parent_index]);
+        self.flattened_children_scratch.clear();
+        self.flattened_children_scratch.extend((start..end).rev());
+        while let Some(child_index) = self.flattened_children_scratch.pop() {
+            if styles[child_index]
+                .as_ref()
+                .is_some_and(|style| style.display == CssDisplay::Contents)
+            {
+                let first_grandchild = table.child_start[child_index];
+                if first_grandchild != u32::MAX {
+                    let start = first_grandchild as usize;
+                    let end = start + usize::from(table.child_count[child_index]);
+                    self.flattened_children_scratch.extend((start..end).rev());
+                }
+                continue;
+            }
+            if (self.placements[child_index].block == ContainingBlock::DomParent
+                || self.placements[child_index].block
+                    == ContainingBlock::Ancestor(parent_index as u32))
+                && let Some(child_node) = self.taffy_nodes[child_index]
+            {
+                self.child_ids_scratch.push(child_node);
+            }
+        }
+    }
+
     pub fn rebuild(
         &mut self,
         dom: &Dom,
@@ -669,20 +708,7 @@ impl TaffyLayout {
             record_elapsed(&mut stats.style_time, style_start);
             let child_start = trace_start(trace_taffy);
             self.child_ids_scratch.clear();
-            let first_child = table.child_start[i];
-            if first_child != u32::MAX {
-                let start = first_child as usize;
-                let end = start + usize::from(table.child_count[i]);
-                self.child_ids_scratch.extend(
-                    (start..end)
-                        .filter(|&child_idx| {
-                            self.placements[child_idx].block == ContainingBlock::DomParent
-                                || self.placements[child_idx].block
-                                    == ContainingBlock::Ancestor(i as u32)
-                        })
-                        .filter_map(|child_idx| self.taffy_nodes[child_idx]),
-                );
-            }
+            self.collect_flow_children(table, styles, i);
             // An absolute box whose nearest positioned ancestor is not its DOM
             // parent joins that ancestor's taffy children instead, so taffy
             // resolves its insets against the box CSS names.
@@ -1181,7 +1207,7 @@ fn taffy_node_merges_into_parent(
     if styles
         .get(index)
         .and_then(Option::as_ref)
-        .is_none_or(|style| style.display == CssDisplay::None)
+        .is_none_or(|style| matches!(style.display, CssDisplay::None | CssDisplay::Contents))
     {
         return index != 0;
     }
@@ -1572,7 +1598,7 @@ fn css_to_taffy_style(style: Option<&ComputedStyle>) -> Style {
     // suppressed here so future Inline-specific handling stays distinct.
     #[allow(clippy::match_same_arms)]
     let display = match style.display {
-        CssDisplay::Block => TaffyDisplay::Block,
+        CssDisplay::Block | CssDisplay::Contents => TaffyDisplay::Block,
         CssDisplay::Flex | CssDisplay::InlineFlex => TaffyDisplay::Flex,
         CssDisplay::Grid => TaffyDisplay::Grid,
         CssDisplay::None => TaffyDisplay::None,

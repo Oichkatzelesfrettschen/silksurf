@@ -1355,6 +1355,9 @@ fn emit_workspace_paint(
     font_scale: f32,
     display_items: &mut Vec<DisplayItem>,
 ) {
+    if style.display == Display::Contents {
+        return;
+    }
     emit_box_shadow(style, content_rect, display_items);
     emit_rounded_background(style, content_rect, display_items);
     emit_text_content(dom, node, style, content_rect, font_scale, display_items);
@@ -1369,6 +1372,9 @@ fn emit_allocating_paint(
     font_scale: f32,
     display_items: &mut Vec<DisplayItem>,
 ) {
+    if style.display == Display::Contents {
+        return;
+    }
     emit_square_background(style, content_rect, display_items);
     emit_text_content(dom, node, style, content_rect, font_scale, display_items);
     emit_form_control_text(dom, node, style, content_rect, font_scale, display_items);

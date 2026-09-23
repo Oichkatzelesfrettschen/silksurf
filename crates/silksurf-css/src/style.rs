@@ -54,6 +54,7 @@ const INLINE_STYLE_SPECIFICITY: Specificity = Specificity {
 pub enum Display {
     Inline,
     Block,
+    Contents,
     Flex,
     InlineFlex,
     Grid,
@@ -2738,7 +2739,7 @@ pub fn compute_style_for_node_with_workspace(
         }
         return parent.cloned().unwrap_or_default();
     }
-    cascade_for_node(
+    let mut style = cascade_for_node(
         dom,
         node,
         stylesheet,
@@ -2747,7 +2748,40 @@ pub fn compute_style_for_node_with_workspace(
         cascade_view,
         parent,
     )
-    .resolve(parent, rem_base_px, viewport)
+    .resolve(parent, rem_base_px, viewport);
+    if style.display == Display::Contents {
+        if dom.parent(node).ok().flatten().is_some_and(|parent| {
+            dom.node(parent)
+                .ok()
+                .is_some_and(|parent| matches!(parent.kind(), NodeKind::Document))
+        }) {
+            style.display = Display::Block;
+        } else if dom.element_namespace(node) == silksurf_dom::Namespace::Html
+            && dom.element_name(node).ok().flatten().is_some_and(|name| {
+                matches!(
+                    name,
+                    "br" | "wbr"
+                        | "meter"
+                        | "progress"
+                        | "canvas"
+                        | "embed"
+                        | "object"
+                        | "audio"
+                        | "iframe"
+                        | "img"
+                        | "video"
+                        | "frame"
+                        | "frameset"
+                        | "input"
+                        | "textarea"
+                        | "select"
+                )
+            })
+        {
+            style.display = Display::None;
+        }
+    }
+    style
 }
 
 /// Resolves `declarations` over `base`, keeping every property they leave
@@ -4567,6 +4601,7 @@ fn parse_display(tokens: &[CssToken]) -> Option<Display> {
     })?;
     match ident.to_ascii_lowercase().as_str() {
         "block" => Some(Display::Block),
+        "contents" => Some(Display::Contents),
         "inline" => Some(Display::Inline),
         "flex" => Some(Display::Flex),
         "inline-flex" => Some(Display::InlineFlex),

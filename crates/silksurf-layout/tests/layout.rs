@@ -53,3 +53,58 @@ fn lays_out_block_boxes_vertically() {
 
     assert!(box2.dimensions().content.y > box1.dimensions().content.y);
 }
+
+#[test]
+fn contents_wrapper_flattens_children_in_layout_tree() {
+    let stylesheet = parse_stylesheet(
+        "body { margin: 0 } #wrapper { display: contents } \
+         #first, #second { display: block } \
+         #first { height: 10px } #second { height: 20px }",
+    )
+    .expect("stylesheet parses");
+    let mut dom = Dom::new();
+    let document = dom.create_document();
+    let body = dom.create_element("body");
+    dom.append_child(document, body).expect("body attaches");
+    let wrapper = dom.create_element("div");
+    dom.set_attribute(wrapper, "id", "wrapper")
+        .expect("wrapper id attaches");
+    dom.append_child(body, wrapper).expect("wrapper attaches");
+    let first = dom.create_element("div");
+    dom.set_attribute(first, "id", "first")
+        .expect("first id attaches");
+    dom.append_child(wrapper, first).expect("first attaches");
+    let second = dom.create_element("div");
+    dom.set_attribute(second, "id", "second")
+        .expect("second id attaches");
+    dom.append_child(body, second).expect("second attaches");
+    let styles = compute_styles(&dom, document, &stylesheet);
+    let arena = SilkArena::new();
+    let tree = build_layout_tree(
+        &arena,
+        &dom,
+        &styles,
+        document,
+        Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 400.0,
+            height: 300.0,
+        },
+    )
+    .expect("layout tree exists");
+    assert!(find_box(tree.root, wrapper).is_none());
+    let body_box = find_box(tree.root, body).expect("body has a box");
+    let child_nodes: Vec<_> = body_box
+        .children
+        .iter()
+        .map(|child| child.box_type)
+        .collect();
+    assert_eq!(
+        child_nodes,
+        vec![
+            silksurf_layout::BoxType::BlockNode(first),
+            silksurf_layout::BoxType::BlockNode(second)
+        ]
+    );
+}
