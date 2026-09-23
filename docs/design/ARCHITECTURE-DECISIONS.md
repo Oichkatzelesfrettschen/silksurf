@@ -3676,7 +3676,9 @@ flowchart LR
 CSS tokenization includes the opening parenthesis in `Function(name)`.
 `collect_paren_tokens` and `skip_parens` therefore count both function tokens
 and explicit opening parentheses. Selector-list parsing requires a comma
-between alternatives and rejects a stray suffix.
+between alternatives and rejects a stray suffix. Selectors 4 forgiving lists
+inside `:is()` and `:where()` retain valid arms after invalid or unsupported
+arms, while ordinary lists and `:not()` remain strict.
 
 An omitted function-depth increment terminates an outer `:where` at an inner
 closing parenthesis. The leaked `:not` suffix then becomes a broad alternative

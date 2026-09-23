@@ -77,3 +77,24 @@ fn stray_tokens_cannot_manufacture_a_selector_alternative() {
         );
     }
 }
+
+#[test]
+fn forgiving_is_and_where_drop_invalid_and_unsupported_arms() {
+    let (dom, _, html, target) = fixture();
+    for text in [
+        ".target:is(.target, [broken)",
+        ".target:where(:unsupported, .target)",
+        ".target:is(.absent, :unknown(#missing), .target)",
+    ] {
+        let parsed = selectors(text);
+        assert_eq!(parsed.selectors.len(), 1, "{text}: {parsed:?}");
+        assert!(!matches_selector_list(&dom, html, &parsed), "{text}");
+        assert!(matches_selector_list(&dom, target, &parsed), "{text}");
+    }
+}
+
+#[test]
+fn strict_not_rejects_an_invalid_argument_arm() {
+    let parsed = selectors(".target:not(.absent, [broken)");
+    assert!(parsed.selectors.is_empty(), "{parsed:?}");
+}
