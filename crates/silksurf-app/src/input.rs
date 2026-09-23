@@ -2142,6 +2142,45 @@ mod tests {
     }
 
     #[test]
+    fn contents_editor_uses_its_text_box_for_input_focus() {
+        let document = parse_html(
+            "<!doctype html><html><body><div id='composer' contenteditable='true' \
+             style='display:contents'>Edit here</div></body></html>",
+        )
+        .expect("html parses");
+        let stylesheet = test_stylesheet(&document.dom);
+        let viewport = Rect {
+            x: 0.0,
+            y: BROWSER_CHROME_HEIGHT,
+            width: FRAME_WIDTH as f32,
+            height: FRAME_HEIGHT as f32 - BROWSER_CHROME_HEIGHT,
+        };
+        let fused =
+            fused_style_layout_paint(&document.dom, &stylesheet, document.document, viewport);
+        let targets = collect_input_targets(&document.dom, &fused);
+        assert_eq!(targets.len(), 1);
+        let target = &targets[0];
+        let text_rect = fused
+            .display_items
+            .iter()
+            .find_map(|item| match item {
+                silksurf_render::DisplayItem::Text { text, rect, .. }
+                    if text.as_str() == "Edit here" =>
+                {
+                    Some(*rect)
+                }
+                _ => None,
+            })
+            .expect("editor text paints");
+        assert!(rect_contains(
+            target.rect,
+            text_rect.x + 1.0,
+            text_rect.y + 1.0
+        ));
+        assert!(is_text_content_editable_node(&document.dom, target.node));
+    }
+
+    #[test]
     fn checkbox_and_radio_submission_uses_checked_controls() {
         let document = parse_html(concat!(
             "<!doctype html><html><body>",

@@ -3719,7 +3719,12 @@ Anonymous text generates an inline box even when its DOM parent computes to
 `contents`. MathML elements compute `contents` to `none`. A boxless wrapper
 passes inherited paint transforms through without composing its own transform.
 Grid lowering and item sizing use the flattened box-tree parent, and native
-input and event hit tests exclude boxless nodes and hidden subtrees.
+input and event hit tests exclude boxless nodes and hidden subtrees. A zero-size
+block-flow marker retains the static position of an auto-inset box reparented
+through a contents wrapper. Paint sequencing uses a depth-first rank when a
+contents wrapper changes box-tree order. Direct contents text supplies an
+event target for its DOM parent, and a contents contenteditable element uses
+visible descendant boxes for its input target.
 
 ## Future ADRs
 
