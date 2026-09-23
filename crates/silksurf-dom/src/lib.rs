@@ -550,12 +550,16 @@ impl Dom {
     }
 
     pub fn create_element(&mut self, name: impl Into<String>) -> NodeId {
-        self.create_element_ns(name, Namespace::Html)
+        self.create_element_ns(name.into().to_ascii_lowercase(), Namespace::Html)
     }
 
     pub fn create_element_ns(&mut self, name: impl Into<String>, namespace: Namespace) -> NodeId {
         let name = name.into();
-        let name = TagName::from_str(&name);
+        let name = if namespace == Namespace::Html && name == name.to_ascii_lowercase() {
+            TagName::from_str(&name)
+        } else {
+            TagName::Custom(SmallString::from(name))
+        };
         let is_template = namespace == Namespace::Html && name.as_str() == "template";
         let element = self.push_node(NodeKind::Element {
             name,

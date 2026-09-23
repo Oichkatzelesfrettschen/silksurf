@@ -3726,6 +3726,23 @@ contents wrapper changes box-tree order. Direct contents text supplies an
 event target for its DOM parent, and a contents contenteditable element uses
 visible descendant boxes for its input target.
 
+## AD-049: Namespaced Element Construction Retains DOM Identity
+
+**Status**: Accepted
+
+DOM's `createElementNS` validate-and-extract algorithm checks an XML Name,
+an XML QName, and the reserved `xml` and `xmlns` namespace constraints before
+it creates an element. The Boa document bridge uses `oxixml-qname` for XML
+name validation and stores the qualified name and namespace in `silksurf-dom`.
+The element wrapper derives `namespaceURI`, `prefix`, `localName`, `tagName`,
+and its prototype from that stored identity. HTML `createElement` still folds
+the local name to ASCII lowercase.
+
+The `create_element_ns` regression checks SVG case and prototype identity,
+custom and null namespaces, clone identity, and validation errors. The
+namespace URI and qualified name remain distinct so later SVG and MathML
+rendering can use the same DOM node rather than a parallel element type.
+
 ## Future ADRs
 
 Planned (renumbered after the 2026-04-30 batch):

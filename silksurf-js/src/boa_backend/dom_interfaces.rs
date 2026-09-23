@@ -26,7 +26,7 @@ use boa_engine::{
     Context, JsObject, JsResult, JsValue, NativeFunction, Source, js_string,
     object::builtins::JsArray,
 };
-use silksurf_dom::{Dom, NodeId, NodeKind};
+use silksurf_dom::{Dom, Namespace, NodeId, NodeKind};
 
 /// Hidden global holding `{ interfaceName: prototypeObject }`.
 const INTERFACE_PROTOTYPES: &str = "__silksurfInterfacePrototypes";
@@ -99,6 +99,11 @@ fn interface_name(dom: &Dom, node_id: NodeId) -> &'static str {
     let Ok(Some(name)) = dom.element_name(node_id) else {
         return "HTMLElement";
     };
+    match dom.element_namespace(node_id) {
+        Namespace::Svg => return "SVGElement",
+        Namespace::MathMl | Namespace::Other(_) => return "Element",
+        Namespace::Html => {}
+    }
     html_element_interface(&name.to_ascii_lowercase())
 }
 
@@ -164,7 +169,6 @@ fn html_element_interface(tag: &str) -> &'static str {
         "track" => "HTMLTrackElement",
         "ul" => "HTMLUListElement",
         "video" => "HTMLVideoElement",
-        "svg" | "path" | "circle" | "rect" | "g" | "defs" | "use" => "SVGElement",
         _ => "HTMLElement",
     }
 }
@@ -347,9 +351,47 @@ fn local_name(dom_arc: &Arc<Mutex<Dom>>, args: &[JsValue], ctx: &mut Context) ->
         .element_name(node_id)
         .ok()
         .flatten()
-        .map(str::to_ascii_lowercase)
+        .map(|name| name.split_once(':').map_or(name, |(_, local)| local))
         .unwrap_or_default();
-    Ok(js_string!(name.as_str()).into())
+    Ok(js_string!(name).into())
+}
+
+fn namespace_uri(
+    dom_arc: &Arc<Mutex<Dom>>,
+    args: &[JsValue],
+    ctx: &mut Context,
+) -> JsResult<JsValue> {
+    let Some(node_id) = node_id_arg(args, 0, ctx)? else {
+        return Ok(JsValue::null());
+    };
+    let dom = dom_arc.lock().unwrap_or_else(PoisonError::into_inner);
+    let Some(_) = dom.element_name(node_id).ok().flatten() else {
+        return Ok(JsValue::null());
+    };
+    let namespace = match dom.element_namespace(node_id) {
+        Namespace::Html => "http://www.w3.org/1999/xhtml".to_string(),
+        Namespace::Svg => "http://www.w3.org/2000/svg".to_string(),
+        Namespace::MathMl => "http://www.w3.org/1998/Math/MathML".to_string(),
+        Namespace::Other(value) => value,
+    };
+    if namespace.is_empty() {
+        Ok(JsValue::null())
+    } else {
+        Ok(js_string!(namespace.as_str()).into())
+    }
+}
+
+fn prefix(dom_arc: &Arc<Mutex<Dom>>, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
+    let Some(node_id) = node_id_arg(args, 0, ctx)? else {
+        return Ok(JsValue::null());
+    };
+    let dom = dom_arc.lock().unwrap_or_else(PoisonError::into_inner);
+    let prefix = dom
+        .element_name(node_id)
+        .ok()
+        .flatten()
+        .and_then(|name| name.split_once(':').map(|(prefix, _)| prefix));
+    Ok(prefix.map_or_else(JsValue::null, |prefix| js_string!(prefix).into()))
 }
 
 /// Copy a node, and its subtree when `deep`, returning the new node's id.
@@ -549,6 +591,8 @@ fn install_node_natives(dom_arc: &Arc<Mutex<Dom>>, ctx: &mut Context) {
     dom_native!(ctx, dom_arc, "__silksurfNodeContains", 2, contains_node);
     dom_native!(ctx, dom_arc, "__silksurfNodeIsConnected", 1, is_connected);
     dom_native!(ctx, dom_arc, "__silksurfNodeLocalName", 1, local_name);
+    dom_native!(ctx, dom_arc, "__silksurfNodeNamespaceURI", 1, namespace_uri);
+    dom_native!(ctx, dom_arc, "__silksurfNodePrefix", 1, prefix);
     dom_native!(ctx, dom_arc, "__silksurfNodeClone", 2, clone_node);
     dom_native!(ctx, dom_arc, "__silksurfCreateDetached", 2, create_detached);
 
@@ -749,7 +793,10 @@ const INTERFACE_BOOTSTRAP: &str = r"
         get: function () { return __silksurfNodeLocalName(this.nodeId); }
     });
     Object.defineProperty(Element.prototype, 'namespaceURI', {
-        get: function () { return 'http://www.w3.org/1999/xhtml'; }
+        get: function () { return __silksurfNodeNamespaceURI(this.nodeId); }
+    });
+    Object.defineProperty(Element.prototype, 'prefix', {
+        get: function () { return __silksurfNodePrefix(this.nodeId); }
     });
     Object.defineProperty(Element.prototype, 'childElementCount', {
         get: function () { return this.children.length; }

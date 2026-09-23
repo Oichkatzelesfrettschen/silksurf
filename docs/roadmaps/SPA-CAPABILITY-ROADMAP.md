@@ -32,9 +32,9 @@ AD-042 through AD-044 record the mechanisms and boundaries.
 - `native-runtime-default-supervision`: GUI callbacks still execute page build
   and JavaScript. AD-027 integration must move those operations behind the
   supervised process boundary before hostile-script responsiveness is claimed.
-- `document-create-element-ns`: the JS bridge returns null for `createElementNS`;
-  namespace validation and element construction need implementation before SVG
-  creation by page libraries is supported.
+- `document-create-element-ns`: the JS bridge validates XML qualified names and
+  constructs namespaced DOM nodes with reflected identity. SVG paint and
+  element-specific interfaces still need live page evidence.
 - `template-owner-document-and-observers`: inert owner-document identity and
   direct observation of disconnected fragments need DOM bridge coverage.
 - `cross-origin-fetch-policy`: CORS, preflight, and credentialed cross-origin
