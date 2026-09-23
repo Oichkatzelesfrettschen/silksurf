@@ -1324,10 +1324,16 @@ fn install_document_node_identity(dom_arc: &Arc<Mutex<Dom>>, root: NodeId, ctx: 
         ctx.register_global_property(js_string!("__silksurfDocumentNode"), node, Attribute::all());
     let source = r"
         for (const key of Reflect.ownKeys(__silksurfDocumentNode)) {
-            if (!Object.prototype.hasOwnProperty.call(document, key)) {
+            if (key !== 'textContent' && !Object.prototype.hasOwnProperty.call(document, key)) {
                 Object.defineProperty(document, key, Object.getOwnPropertyDescriptor(__silksurfDocumentNode, key));
             }
         }
+        Object.defineProperty(document, 'textContent', {
+            get: function () { return null; },
+            set: function (_value) {},
+            configurable: true,
+            enumerable: true
+        });
         Object.defineProperty(document, 'ownerDocument', { get: function () { return null; }, configurable: true });
         Object.setPrototypeOf(document, Document.prototype);
         delete globalThis.__silksurfDocumentNode;

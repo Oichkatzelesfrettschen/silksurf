@@ -3651,7 +3651,9 @@ root lookup traverse the host relationship. Fragment insertion transfers
 children while retaining host ownership. Host-inclusive cycle checks protect
 insertion, and root cloning raises `NotSupportedError`. Shadow `innerHTML`
 uses the host's parsing context. `document` occupies the same wrapper registry
-as every node, preserving identity across parent traversal.
+as every node, preserving identity across parent traversal. Its `textContent`
+descriptor returns null and ignores assignment under the DOM Standard's
+Document branch.
 
 The DOM shadow-tree, pre-insertion, and cloning rules ground these boundaries.
 `form_controls` and `shadow_dom` exercise live membership, radio state, tree
