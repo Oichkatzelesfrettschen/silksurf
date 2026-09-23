@@ -87,8 +87,8 @@ pub struct FusedWorkspace {
     /// retained so a repaint reuses the allocation.
     stacking: StackingOrder,
     paint_order: Vec<u32>,
-    /// Whether each BFS-indexed node generates a box, retained so a repaint
-    /// reuses the allocation.
+    /// Whether each BFS-indexed node survives display:none ancestry; a
+    /// display:contents wrapper survives while generating no own box.
     rendered: Vec<bool>,
     /// Cached tree-shape generation for the BFS table.
     table_generation: u64,
@@ -500,6 +500,7 @@ impl FusedWorkspace {
     pub fn snapshot_result(&self) -> FusedResult {
         FusedResult {
             styles: self.styles.clone(),
+            rendered: self.rendered.clone(),
             display_items: self.display_items.clone(),
             node_rects: self.node_rects.clone(),
             node_borders: self.node_borders.clone(),
@@ -513,6 +514,7 @@ impl FusedWorkspace {
     pub fn take_result(&mut self) -> FusedResult {
         FusedResult {
             styles: std::mem::take(&mut self.styles),
+            rendered: std::mem::take(&mut self.rendered),
             display_items: std::mem::take(&mut self.display_items),
             node_rects: std::mem::take(&mut self.node_rects),
             node_borders: std::mem::take(&mut self.node_borders),
@@ -524,6 +526,7 @@ impl FusedWorkspace {
     /// Recycle result vector storage for the next workspace run.
     pub fn recycle_result_storage(&mut self, mut result: FusedResult) {
         self.styles = std::mem::take(&mut result.styles);
+        self.rendered = std::mem::take(&mut result.rendered);
         self.display_items = std::mem::take(&mut result.display_items);
         self.node_rects = std::mem::take(&mut result.node_rects);
         self.node_borders = std::mem::take(&mut result.node_borders);
@@ -551,6 +554,8 @@ impl FusedWorkspace {
 pub struct FusedResult {
     /// Style per node in BFS order. None for display:none or skipped nodes.
     pub styles: Vec<Option<ComputedStyle>>,
+    /// Whether each BFS-indexed node and its ancestors generate rendered content.
+    pub rendered: Vec<bool>,
     pub display_items: Vec<DisplayItem>,
     /// Border-box rect per node in BFS order, in document coordinates.
     pub node_rects: Vec<Rect>,
@@ -791,6 +796,7 @@ pub fn fused_style_layout_paint_with_replaced_sizes(
 
     FusedResult {
         styles,
+        rendered,
         display_items,
         node_rects,
         node_borders,
