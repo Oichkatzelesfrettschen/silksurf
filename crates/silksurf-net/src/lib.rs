@@ -17,7 +17,9 @@
  *
  * HTTP/2 path (BasicClient::fetch_parallel):
  *   - Groups same-HTTPS-host requests and tries h2 via ALPN
- *   - On h2 success: all requests multiplexed over one TLS connection
+ *   - On h2 success: all requests multiplex over one TLS connection
+ *   - Redirect responses continue through the bounded HTTP/1.1 redirect loop
+ *   - Origin-restricted requests use HTTP/1.1 checks before opening a socket
  *   - On h2 failure: falls back to sequential HTTP/1.1 per request
  *   - Internal tokio current_thread runtime (no extra OS threads)
  *
@@ -371,6 +373,28 @@ impl BasicClient {
         }
     }
 
+    fn follow_h2_redirects(
+        &self,
+        request: &HttpRequest,
+        mut response: HttpResponse,
+    ) -> Result<HttpResponse, NetError> {
+        let mut current_url = request.url.clone();
+        let mut redirects = 0;
+
+        loop {
+            let parsed = url::Url::parse(&current_url)
+                .map_err(|error| NetError::new(format!("Invalid URL: {error}")))?;
+            let Some(next_url) = redirect_target(&parsed, &response, redirects, self.max_redirects)
+            else {
+                return Ok(response);
+            };
+            current_url = next_url;
+            redirects += 1;
+            let (_, next_response) = self.fetch_http1_once(request, &current_url, None)?;
+            response = next_response;
+        }
+    }
+
     fn fetch_http1_once(
         &self,
         request: &HttpRequest,
@@ -408,15 +432,19 @@ impl RequestTarget {
     fn parse(current_url: &str) -> Result<Self, NetError> {
         let parsed =
             url::Url::parse(current_url).map_err(|e| NetError::new(format!("Invalid URL: {e}")))?;
+        Self::from_parsed(&parsed)
+    }
+
+    fn from_parsed(parsed: &url::Url) -> Result<Self, NetError> {
         let host = parsed
             .host_str()
             .ok_or_else(|| NetError::new("No host in URL"))?
             .to_string();
         let is_https = parsed.scheme() == "https";
         let port = parsed.port().unwrap_or(if is_https { 443 } else { 80 });
-        let path = request_path(&parsed);
+        let path = request_path(parsed);
         Ok(Self {
-            parsed,
+            parsed: parsed.clone(),
             host,
             is_https,
             port,
@@ -636,17 +664,32 @@ impl BasicClient {
             .iter()
             .map(|r| url::Url::parse(&r.url).ok())
             .collect();
+        let h2_targets = parsed_urls.as_ref().and_then(|urls| {
+            urls.iter()
+                .map(RequestTarget::from_parsed)
+                .collect::<Result<Vec<_>, _>>()
+                .ok()
+        });
         if let Some(parsed_urls) = &parsed_urls
+            && let Some(h2_targets) = &h2_targets
+            && self.request_origin_permits_urls(parsed_urls)
             && let Some((host, port)) = same_https_host(parsed_urls)
         {
             let h2_config = self.tls.h2_config();
             let h2_reqs: Vec<h2_client::H2Request> = requests
                 .iter()
                 .zip(parsed_urls)
-                .map(|(r, parsed)| h2_client::H2Request {
-                    path: parsed.path().to_string(),
-                    query: parsed.query().map(std::string::ToString::to_string),
-                    extra_headers: r.headers.clone(),
+                .zip(h2_targets)
+                .map(|((request, parsed), target)| {
+                    let mut extra_headers = request.headers.clone();
+                    if let Some(cookie) = self.request_cookie_header(request, target, None) {
+                        extra_headers.push(("Cookie".to_string(), cookie));
+                    }
+                    h2_client::H2Request {
+                        path: parsed.path().to_string(),
+                        query: parsed.query().map(std::string::ToString::to_string),
+                        extra_headers,
+                    }
                 })
                 .collect();
 
@@ -654,12 +697,20 @@ impl BasicClient {
                 Ok(responses) => {
                     return responses
                         .into_iter()
-                        .map(|r| {
-                            decode_response(HttpResponse {
-                                status: r.status,
-                                headers: r.headers,
-                                body: r.body,
-                            })
+                        .zip(requests)
+                        .zip(h2_targets)
+                        .map(|((response, request), target)| {
+                            let response = decode_response(HttpResponse {
+                                status: response.status,
+                                headers: response.headers,
+                                body: response.body,
+                            })?;
+                            self.store_response_cookies(&response, target);
+                            if is_redirect_status(response.status) {
+                                self.follow_h2_redirects(request, response)
+                            } else {
+                                Ok(response)
+                            }
                         })
                         .collect();
                 }
@@ -671,6 +722,12 @@ impl BasicClient {
 
         // HTTP/1.1 sequential fallback (different hosts, HTTP, or h2 failure).
         requests.iter().map(|req| self.fetch(req)).collect()
+    }
+
+    fn request_origin_permits_urls(&self, parsed_urls: &[url::Url]) -> bool {
+        self.request_origin
+            .as_ref()
+            .is_none_or(|origin| parsed_urls.iter().all(|parsed| *origin == parsed.origin()))
     }
 }
 
@@ -957,9 +1014,9 @@ fn read_decoded_body(reader: &mut dyn Read, coding: &str) -> Result<Vec<u8>, Net
 
 #[cfg(test)]
 mod tests {
-    use super::parse_response;
+    use super::{BasicClient, HttpMethod, HttpRequest, HttpResponse, parse_response};
     #[cfg(feature = "content-encoding")]
-    use super::{HttpResponse, decode_response, has_header};
+    use super::{decode_response, has_header};
 
     #[cfg(feature = "content-encoding")]
     use flate2::Compression;
@@ -1018,6 +1075,72 @@ mod tests {
         let err = parse_response(&raw).expect_err("incomplete chunk fails");
 
         assert!(err.message.contains("Incomplete chunked response body"));
+    }
+
+    #[test]
+    fn h2_redirect_continues_from_the_location_without_replaying_the_initial_request() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::thread;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+        let address = listener.local_addr().expect("test server address");
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept redirected request");
+            let mut request_bytes = [0_u8; 512];
+            let read = stream.read(&mut request_bytes).expect("read request");
+            let request = String::from_utf8_lossy(&request_bytes[..read]);
+            assert!(request.starts_with("GET /final HTTP/1.1"));
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\npassed",
+                )
+                .expect("write final response");
+        });
+
+        let request = HttpRequest {
+            method: HttpMethod::Get,
+            url: format!("http://{address}/start"),
+            headers: Vec::new(),
+            body: Vec::new(),
+        };
+        let redirect = HttpResponse {
+            status: 302,
+            headers: vec![("Location".to_string(), "/final".to_string())],
+            body: Vec::new(),
+        };
+
+        let response = BasicClient::new()
+            .follow_h2_redirects(&request, redirect)
+            .expect("follow redirect through HTTP/1.1");
+
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, b"passed");
+        server.join().expect("test server thread");
+    }
+
+    #[test]
+    fn parallel_fetch_checks_request_origin_before_using_h2() {
+        let allowed_origin = url::Url::parse("https://allowed.example/")
+            .expect("valid allowed origin")
+            .origin();
+        let request = HttpRequest {
+            method: HttpMethod::Get,
+            url: "https://blocked.example/script.js".to_string(),
+            headers: Vec::new(),
+            body: Vec::new(),
+        };
+
+        let result = BasicClient::new()
+            .with_request_origin(allowed_origin)
+            .fetch_parallel(&[request]);
+
+        let error = result
+            .into_iter()
+            .next()
+            .expect("one result")
+            .expect_err("origin restriction rejects the request before network access");
+        assert!(error.message.contains("cross-origin fetch requires CORS"));
     }
 
     #[cfg(feature = "content-encoding")]

@@ -43,6 +43,11 @@ AD-042 through AD-044 record the mechanisms and boundaries.
 - `iframe-browsing-context`: child-document ownership, event routing, isolation,
   and damage propagation remain open under the nested-context decision gate
   below.
+- `cloudflare-turnstile-interaction`: HTTP/2 subresource redirects now continue
+  through the bounded HTTP/1.1 redirect path. The official interactive test key
+  loads the Turnstile API and returns a widget identifier, while the document
+  still has zero iframe elements; the checkbox remains behind the open nested
+  browsing-context boundary.
 - `media-element-stack`: video and audio decoding and playback remain open
   under the media decision below. Image source selection has a separate path.
 - `responsive-image-source-selection`: `picture`, `source`, `srcset`, and
