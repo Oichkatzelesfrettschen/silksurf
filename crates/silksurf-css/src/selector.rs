@@ -545,7 +545,12 @@ impl<'a> SelectorParser<'a> {
         let mut type_selector = None;
         match self.peek() {
             Some(CssToken::Ident(name)) => {
-                type_selector = Some(TypeSelector::Tag(TagName::from_str(name)));
+                let tag = if name.bytes().any(|byte| byte.is_ascii_uppercase()) {
+                    TagName::Custom(SmallString::from(name.as_str()))
+                } else {
+                    TagName::from_str(name)
+                };
+                type_selector = Some(TypeSelector::Tag(tag));
                 self.next();
             }
             Some(CssToken::Delim('*')) => {

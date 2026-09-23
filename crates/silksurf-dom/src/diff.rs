@@ -183,7 +183,8 @@ fn diff_subtree(
         }
 
         /*
-         * Element nodes: compare tag, then attributes, then children.
+         * Element nodes: compare local name, prefix, and namespace before
+         * attributes and children.
          *
          * If the tag changed: the subtrees are structurally incompatible --
          * mark old as removed and new as added (no point diffing children).
@@ -191,8 +192,21 @@ fn diff_subtree(
          * If the tag matches: compare attributes for changes, then recurse
          * into children.
          */
-        (NodeKind::Element { name: old_tag, .. }, NodeKind::Element { name: new_tag, .. }) => {
-            if old_tag != new_tag {
+        (
+            NodeKind::Element {
+                name: old_tag,
+                prefix: old_prefix,
+                namespace: old_namespace,
+                ..
+            },
+            NodeKind::Element {
+                name: new_tag,
+                prefix: new_prefix,
+                namespace: new_namespace,
+                ..
+            },
+        ) => {
+            if old_tag != new_tag || old_prefix != new_prefix || old_namespace != new_namespace {
                 // Structurally incompatible: treat as full replacement.
                 collect_subtree_ids(old_dom, old_node, &mut result.removed);
                 collect_subtree_ids(new_dom, new_node, &mut result.added);

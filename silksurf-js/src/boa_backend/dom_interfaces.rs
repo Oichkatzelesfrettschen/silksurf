@@ -104,7 +104,7 @@ fn interface_name(dom: &Dom, node_id: NodeId) -> &'static str {
         Namespace::MathMl | Namespace::Other(_) => return "Element",
         Namespace::Html => {}
     }
-    html_element_interface(&name.to_ascii_lowercase())
+    html_element_interface(name)
 }
 
 fn html_element_interface(tag: &str) -> &'static str {
@@ -347,12 +347,7 @@ fn local_name(dom_arc: &Arc<Mutex<Dom>>, args: &[JsValue], ctx: &mut Context) ->
         return Ok(JsValue::from(js_string!("")));
     };
     let dom = dom_arc.lock().unwrap_or_else(PoisonError::into_inner);
-    let name = dom
-        .element_name(node_id)
-        .ok()
-        .flatten()
-        .map(|name| name.split_once(':').map_or(name, |(_, local)| local))
-        .unwrap_or_default();
+    let name = dom.element_name(node_id).ok().flatten().unwrap_or_default();
     Ok(js_string!(name).into())
 }
 
@@ -386,11 +381,7 @@ fn prefix(dom_arc: &Arc<Mutex<Dom>>, args: &[JsValue], ctx: &mut Context) -> JsR
         return Ok(JsValue::null());
     };
     let dom = dom_arc.lock().unwrap_or_else(PoisonError::into_inner);
-    let prefix = dom
-        .element_name(node_id)
-        .ok()
-        .flatten()
-        .and_then(|name| name.split_once(':').map(|(prefix, _)| prefix));
+    let prefix = dom.element_prefix(node_id).ok().flatten();
     Ok(prefix.map_or_else(JsValue::null, |prefix| js_string!(prefix).into()))
 }
 
@@ -428,7 +419,12 @@ pub(super) fn dom_exception(name: &str, message: &str, ctx: &mut Context) -> boa
         );
         let _ = object.set(
             js_string!("code"),
-            if name == "NotSupportedError" { 9 } else { 0 },
+            match name {
+                "InvalidCharacterError" => 5,
+                "NotSupportedError" => 9,
+                "NamespaceError" => 14,
+                _ => 0,
+            },
             false,
             ctx,
         );
@@ -443,10 +439,15 @@ fn clone_subtree(dom: &mut Dom, node_id: NodeId, deep: bool) -> Option<NodeId> {
             NodeKind::Text { text, .. } => dom.create_text(text.clone()),
             NodeKind::Comment { data: comment, .. } => dom.create_comment(comment.clone()),
             NodeKind::DocumentFragment => dom.create_document_fragment(),
-            NodeKind::Element { namespace, .. } => {
+            NodeKind::Element {
+                namespace, prefix, ..
+            } => {
                 let namespace = namespace.clone();
                 let name = dom.element_name(node_id).ok().flatten()?.to_string();
-                dom.create_element_ns(name, namespace)
+                let qualified_name = prefix
+                    .as_ref()
+                    .map_or(name.clone(), |prefix| format!("{}:{name}", prefix.as_ref()));
+                dom.create_element_ns(qualified_name, namespace)
             }
             NodeKind::Document | NodeKind::Doctype { .. } => return None,
         };

@@ -31,7 +31,7 @@ use crate::{
     AttributeOperator, AttributeSelector, Combinator, CompoundSelector, PseudoClassArg, Selector,
     SelectorIdent, SelectorList, SelectorModifier, TypeSelector,
 };
-use silksurf_dom::{Attribute, AttributeName, Dom, NodeId, NodeKind};
+use silksurf_dom::{Attribute, AttributeName, Dom, Namespace, NodeId, NodeKind, TagName};
 
 /// Cascade sort key for one declaration within an origin, ordered by derived
 /// `Ord` over its fields in declaration order.
@@ -260,7 +260,7 @@ fn matches_compound(
                 match type_selector {
                     TypeSelector::Any => {}
                     TypeSelector::Tag(expected) => {
-                        if &entry.tag != expected {
+                        if !type_selector_tag_matches(dom, node, &entry.tag, expected) {
                             return false;
                         }
                     }
@@ -283,7 +283,7 @@ fn matches_compound(
         match type_selector {
             TypeSelector::Any => {}
             TypeSelector::Tag(expected) => {
-                if name != expected {
+                if !type_selector_tag_matches(dom, node, name, expected) {
                     return false;
                 }
             }
@@ -295,6 +295,17 @@ fn matches_compound(
         }
     }
     true
+}
+
+fn type_selector_tag_matches(
+    dom: &Dom,
+    node: NodeId,
+    actual: &TagName,
+    expected: &TagName,
+) -> bool {
+    actual == expected
+        || (dom.element_namespace(node) == Namespace::Html
+            && actual.as_str().eq_ignore_ascii_case(expected.as_str()))
 }
 
 /*

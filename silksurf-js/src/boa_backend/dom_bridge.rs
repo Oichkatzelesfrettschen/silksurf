@@ -286,10 +286,15 @@ fn snapshot_node(dom: &Dom, node_id: NodeId) -> NodeSnapshot {
         .ok()
         .flatten()
         .map(|name| {
+            let qualified = dom
+                .element_prefix(node_id)
+                .ok()
+                .flatten()
+                .map_or_else(|| name.to_string(), |prefix| format!("{prefix}:{name}"));
             if dom.element_namespace(node_id) == silksurf_dom::Namespace::Html {
-                name.to_uppercase()
+                qualified.to_uppercase()
             } else {
-                name.to_string()
+                qualified
             }
         })
         .unwrap_or_default();
@@ -1593,7 +1598,7 @@ fn document_create_element_ns_native(dom_arc: &Arc<Mutex<Dom>>) -> NativeFunctio
                     .with_message("createElementNS requires namespace and qualifiedName")
                     .into());
             }
-            let namespace = if args[0].is_null() {
+            let namespace = if args[0].is_null() || args[0].is_undefined() {
                 String::new()
             } else {
                 args[0].to_string(ctx)?.to_std_string_lossy()

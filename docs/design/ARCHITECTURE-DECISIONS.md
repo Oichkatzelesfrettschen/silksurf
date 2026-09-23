@@ -3733,15 +3733,19 @@ visible descendant boxes for its input target.
 DOM's `createElementNS` validate-and-extract algorithm checks an XML Name,
 an XML QName, and the reserved `xml` and `xmlns` namespace constraints before
 it creates an element. The Boa document bridge uses `oxixml-qname` for XML
-name validation and stores the qualified name and namespace in `silksurf-dom`.
-The element wrapper derives `namespaceURI`, `prefix`, `localName`, `tagName`,
-and its prototype from that stored identity. HTML `createElement` still folds
-the local name to ASCII lowercase.
+name validation and stores the local name, optional prefix, and namespace in
+`silksurf-dom`. Layout, SVG paint, and type selectors read the local name;
+the element wrapper reconstructs the qualified `tagName` and exposes the
+stored `prefix`, `localName`, `namespaceURI`, and prototype. HTML
+`createElement` still folds the local name to ASCII lowercase. Type-selector
+matching folds ASCII case for HTML elements and retains case for foreign
+elements.
 
-The `create_element_ns` regression checks SVG case and prototype identity,
-custom and null namespaces, clone identity, and validation errors. The
-namespace URI and qualified name remain distinct so later SVG and MathML
-rendering can use the same DOM node rather than a parallel element type.
+The `create_element_ns` regressions check SVG case and prototype identity,
+prefix preservation through cloning and subtree import, custom and null
+namespaces, exception codes, and namespace-sensitive selector matching. SVG
+rasterization consumes the local name, and HTML serialization reconstructs
+the qualified name from the prefix and local name.
 
 ## Future ADRs
 
