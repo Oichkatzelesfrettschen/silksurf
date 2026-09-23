@@ -551,7 +551,7 @@ impl Dom {
     }
 
     pub fn create_element(&mut self, name: impl Into<String>) -> NodeId {
-        self.create_element_ns(name.into().to_ascii_lowercase(), Namespace::Html)
+        self.create_element_ns_local(name.into().to_ascii_lowercase(), None, Namespace::Html)
     }
 
     pub fn create_element_ns(&mut self, name: impl Into<String>, namespace: Namespace) -> NodeId {
@@ -559,18 +559,28 @@ impl Dom {
         let (prefix, local_name) = name
             .split_once(':')
             .map_or((None, name.as_str()), |(prefix, local)| {
-                (Some(Box::from(prefix)), local)
+                (Some(prefix), local)
             });
+        self.create_element_ns_local(local_name, prefix, namespace)
+    }
+
+    pub fn create_element_ns_local(
+        &mut self,
+        local_name: impl Into<String>,
+        prefix: Option<&str>,
+        namespace: Namespace,
+    ) -> NodeId {
+        let local_name = local_name.into();
         let name = if namespace == Namespace::Html && local_name == local_name.to_ascii_lowercase()
         {
-            TagName::from_str(local_name)
+            TagName::from_str(&local_name)
         } else {
-            TagName::Custom(SmallString::from(local_name))
+            TagName::Custom(SmallString::from(local_name.as_str()))
         };
         let is_template = namespace == Namespace::Html && name.as_str() == "template";
         let element = self.push_node(NodeKind::Element {
             name,
-            prefix,
+            prefix: prefix.map(Box::from),
             namespace,
             attributes: Vec::new(),
         });
@@ -822,11 +832,11 @@ impl Dom {
                     .iter()
                     .map(|attr| (attr.name.as_str().to_string(), attr.value.to_string()))
                     .collect();
-                let qualified_name = prefix.as_ref().map_or_else(
-                    || name.as_str().to_string(),
-                    |prefix| format!("{}:{}", prefix.as_ref(), name.as_str()),
+                let element = self.create_element_ns_local(
+                    name.as_str(),
+                    prefix.as_deref(),
+                    namespace.clone(),
                 );
-                let element = self.create_element_ns(qualified_name, namespace.clone());
                 for (attr_name, attr_value) in pairs {
                     self.set_attribute(element, attr_name, attr_value)?;
                 }

@@ -60,3 +60,11 @@ fn a_parsed_html_element_still_lowercases_its_attributes() {
     let div = first(&dom, NodeId::from_raw(0), "div").expect("div");
     assert_eq!(attribute(&dom, div, "data-x").as_deref(), Some("1"));
 }
+
+#[test]
+fn an_html_tag_with_a_colon_keeps_the_colon_in_its_local_name() {
+    let dom = parse_html("<!DOCTYPE html><html><body><xyz:abc></xyz:abc></body></html>");
+    let element = first(&dom, NodeId::from_raw(0), "xyz:abc").expect("HTML element");
+    assert_eq!(dom.element_namespace(element), Namespace::Html);
+    assert_eq!(dom.element_prefix(element).expect("prefix reads"), None);
+}

@@ -7,10 +7,7 @@
 
 expected-fail adoption01:11
 expected-fail html5test-com:11
-expected-fail namespace-sensitivity:0
 expected-fail pending-spec-changes-plain-text-unsafe:0
-expected-fail plain-text-unsafe:13
-expected-fail plain-text-unsafe:27
 expected-fail processing-instructions:0
 expected-fail processing-instructions:1
 expected-fail processing-instructions:2
@@ -105,8 +102,6 @@ expected-fail scripted_adoption01:0
 expected-fail scripted_ark:0
 expected-fail scripted_webkit01:0
 expected-fail scripted_webkit01:1
-expected-fail tables01:17
-expected-fail template:99
 expected-fail tests1:32
 expected-fail tests1:39
 expected-fail tests1:40
@@ -117,26 +112,11 @@ expected-fail tests10:22
 expected-fail tests10:23
 expected-fail tests10:24
 expected-fail tests10:25
-expected-fail tests10:30
-expected-fail tests10:31
-expected-fail tests10:36
-expected-fail tests10:38
-expected-fail tests10:52
-expected-fail tests10:53
-expected-fail tests11:8
-expected-fail tests11:9
-expected-fail tests11:10
-expected-fail tests12:0
-expected-fail tests12:1
 expected-fail tests19:89
-expected-fail tests20:48
 expected-fail tests20:54
 expected-fail tests20:55
 expected-fail tests20:56
 expected-fail tests20:57
-expected-fail tests21:13
-expected-fail tests26:10
-expected-fail tests26:11
 expected-fail tests7:31
 expected-fail tests7:32
 expected-fail tests8:6
@@ -145,8 +125,6 @@ expected-fail tests9:24
 expected-fail tests9:25
 expected-fail tests9:26
 expected-fail tricky01:8
-expected-fail webkit02:19
-expected-fail webkit02:20
 expected-fail webkit02:22
 expected-fail webkit02:23
 expected-fail webkit02:44

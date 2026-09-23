@@ -3747,6 +3747,12 @@ namespaces, exception codes, and namespace-sensitive selector matching. SVG
 rasterization consumes the local name, and HTML serialization reconstructs
 the qualified name from the prefix and local name.
 
+The HTML parser supplies `QualName.local` and `QualName.prefix` as separate
+values. HTML tag names may contain a colon without establishing a prefix.
+`create_element_ns_local` accepts those parts directly; the
+`create_element_ns` qualified-name entry point performs the split for DOM API
+callers. Subtree import and `cloneNode` retain the stored parts directly.
+
 ## Future ADRs
 
 Planned (renumbered after the 2026-04-30 batch):
