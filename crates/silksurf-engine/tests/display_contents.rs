@@ -148,6 +148,33 @@ fn nested_contents_children_keep_order_in_a_flex_container() {
 }
 
 #[test]
+fn flattened_child_paints_before_a_later_overlapping_flex_item() {
+    let parsed = parse_html(
+        "<html><body><div id='row'><div id='wrapper'><div id='early'></div></div>\
+         <div id='late'></div></div></body></html>",
+    )
+    .expect("fixture parses");
+    let stylesheet = parse_stylesheet(
+        "body { margin: 0 } #row { display: flex } #wrapper { display: contents } \
+         #early { width: 20px; height: 20px; background: #00ff00 } \
+         #late { width: 20px; height: 20px; background: #ff0000; transform: translateX(-20px) }",
+    )
+    .expect("stylesheet parses");
+    let fused = fused_style_layout_paint(&parsed.dom, &stylesheet, parsed.document, VIEWPORT);
+    let colors: Vec<_> = fused
+        .display_items
+        .iter()
+        .filter_map(|item| match item {
+            DisplayItem::SolidColor { color, .. } if color.g == 255 || color.r == 255 => {
+                Some((color.r, color.g, color.b))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(colors, vec![(0, 255, 0), (255, 0, 0)]);
+}
+
+#[test]
 fn absolute_descendant_uses_positioned_ancestor_through_contents() {
     let parsed = parse_html(
         "<html><body><div id='outer'><div id='wrapper'>\
