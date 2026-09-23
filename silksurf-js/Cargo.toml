@@ -42,6 +42,7 @@ url = { workspace = true }
 
 # Module registry keyed by absolute URL in the page module loader.
 rustc-hash = { workspace = true }
+oxixml-qname = "=0.1.2"
 
 # Browser crypto host APIs use OS randomness directly.
 getrandom = { workspace = true }

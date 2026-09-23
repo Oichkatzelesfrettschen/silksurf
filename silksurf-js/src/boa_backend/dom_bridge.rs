@@ -19,8 +19,9 @@ use boa_engine::{
     },
     property::Attribute,
 };
+use oxixml_qname::{is_name, is_qname};
 use silksurf_css::{CssTokenizer, SelectorList, matches_selector_list, parse_selector_list};
-use silksurf_dom::{Dom, DomError, NodeId, NodeKind, TagName};
+use silksurf_dom::{Dom, DomError, Namespace, NodeId, NodeKind, TagName};
 
 use super::event_dispatch;
 
@@ -284,7 +285,18 @@ fn snapshot_node(dom: &Dom, node_id: NodeId) -> NodeSnapshot {
         .element_name(node_id)
         .ok()
         .flatten()
-        .map(str::to_uppercase)
+        .map(|name| {
+            let qualified = dom
+                .element_prefix(node_id)
+                .ok()
+                .flatten()
+                .map_or_else(|| name.to_string(), |prefix| format!("{prefix}:{name}"));
+            if dom.element_namespace(node_id) == silksurf_dom::Namespace::Html {
+                qualified.to_uppercase()
+            } else {
+                qualified
+            }
+        })
         .unwrap_or_default();
     NodeSnapshot {
         node_name: tag.clone(),
@@ -1262,12 +1274,8 @@ pub(super) fn install_document(
             1,
         )
         .function(methods.create_element, js_string!("createElement"), 1)
+        .function(methods.create_element_ns, js_string!("createElementNS"), 2)
         .function(methods.create_text_node, js_string!("createTextNode"), 1)
-        .function(
-            NativeFunction::from_fn_ptr(|_, _, _| Ok(JsValue::null())),
-            js_string!("createElementNS"),
-            2,
-        )
         .function(
             methods.add_event_listener,
             js_string!("addEventListener"),
@@ -1390,6 +1398,7 @@ struct DocumentMethods {
     query_selector_all: NativeFunction,
     get_elements_by_tag_name: NativeFunction,
     create_element: NativeFunction,
+    create_element_ns: NativeFunction,
     create_text_node: NativeFunction,
     add_event_listener: NativeFunction,
     remove_event_listener: NativeFunction,
@@ -1415,6 +1424,7 @@ fn document_methods(dom_arc: &Arc<Mutex<Dom>>, root: NodeId) -> DocumentMethods 
         query_selector_all: document_query_selector_all_native(dom_arc, root),
         get_elements_by_tag_name: document_get_elements_by_tag_name_native(dom_arc, root),
         create_element: document_create_element_native(dom_arc),
+        create_element_ns: document_create_element_ns_native(dom_arc),
         create_text_node: document_create_text_node_native(dom_arc),
         add_event_listener: node_add_event_listener_native(root),
         remove_event_listener: node_remove_event_listener_native(root),
@@ -1544,6 +1554,62 @@ fn document_create_element_native(dom_arc: &Arc<Mutex<Dom>>) -> NativeFunction {
             let node_id = {
                 let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
                 dom.create_element(tag.as_str())
+            };
+            Ok(node_to_js_object(&arc, node_id, ctx))
+        })
+    }
+}
+
+fn validated_element_namespace(
+    namespace: &str,
+    qualified_name: &str,
+) -> Result<Namespace, (&'static str, &'static str)> {
+    const XML_NAMESPACE: &str = "http://www.w3.org/XML/1998/namespace";
+    const XMLNS_NAMESPACE: &str = "http://www.w3.org/2000/xmlns/";
+    if !is_name(qualified_name) {
+        return Err(("InvalidCharacterError", "qualifiedName is not an XML Name"));
+    }
+    if !is_qname(qualified_name) {
+        return Err(("NamespaceError", "qualifiedName is not an XML QName"));
+    }
+    let prefix = qualified_name.split_once(':').map(|(prefix, _)| prefix);
+    if (prefix.is_some() && namespace.is_empty())
+        || (prefix == Some("xml") && namespace != XML_NAMESPACE)
+        || ((qualified_name == "xmlns" || prefix == Some("xmlns")) && namespace != XMLNS_NAMESPACE)
+        || (namespace == XMLNS_NAMESPACE && qualified_name != "xmlns" && prefix != Some("xmlns"))
+    {
+        return Err(("NamespaceError", "qualifiedName and namespace do not match"));
+    }
+    Ok(match namespace {
+        "http://www.w3.org/1999/xhtml" => Namespace::Html,
+        "http://www.w3.org/2000/svg" => Namespace::Svg,
+        "http://www.w3.org/1998/Math/MathML" => Namespace::MathMl,
+        _ => Namespace::Other(namespace.to_string()),
+    })
+}
+
+fn document_create_element_ns_native(dom_arc: &Arc<Mutex<Dom>>) -> NativeFunction {
+    let arc = Arc::clone(dom_arc);
+    // SAFETY: Boa stores the native closure with an owned DOM handle for the JS function lifetime.
+    unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            if args.len() < 2 {
+                return Err(JsNativeError::typ()
+                    .with_message("createElementNS requires namespace and qualifiedName")
+                    .into());
+            }
+            let namespace = if args[0].is_null() || args[0].is_undefined() {
+                String::new()
+            } else {
+                args[0].to_string(ctx)?.to_std_string_lossy()
+            };
+            let qualified_name = args[1].to_string(ctx)?.to_std_string_lossy();
+            let namespace = validated_element_namespace(&namespace, &qualified_name).map_err(
+                |(name, message)| super::dom_interfaces::dom_exception(name, message, ctx),
+            )?;
+            let node_id = {
+                let mut dom = arc.lock().unwrap_or_else(PoisonError::into_inner);
+                dom.create_element_ns(qualified_name, namespace)
             };
             Ok(node_to_js_object(&arc, node_id, ctx))
         })

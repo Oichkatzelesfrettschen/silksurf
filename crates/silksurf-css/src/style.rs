@@ -2343,7 +2343,11 @@ fn selector_key(selector: &Selector) -> SelectorKey {
         return SelectorKey::Class(class);
     }
     match compound.type_selector.as_ref() {
-        Some(TypeSelector::Tag(tag)) => SelectorKey::Tag(tag.clone()),
+        Some(TypeSelector::Tag(tag))
+            if tag.as_str().bytes().all(|byte| !byte.is_ascii_uppercase()) =>
+        {
+            SelectorKey::Tag(tag.clone())
+        }
         _ => SelectorKey::Universal,
     }
 }
@@ -3120,7 +3124,7 @@ fn collect_candidate_rules(
     cascade_view: Option<&crate::cascade_view::CascadeView>,
 ) {
     if let Some(view) = cascade_view {
-        collect_view_candidates(node, index, workspace, view);
+        collect_view_candidates(dom, node, index, workspace, view);
     } else {
         collect_dom_candidates(dom, node, index, workspace);
     }
@@ -3130,15 +3134,14 @@ fn collect_candidate_rules(
 }
 
 fn collect_view_candidates(
+    dom: &Dom,
     node: NodeId,
     index: &StyleIndex,
     workspace: &mut CascadeWorkspace,
     view: &crate::cascade_view::CascadeView,
 ) {
     let entry = &view.entries[node.raw()];
-    if let Some(entries) = index.tag_rules.get(&entry.tag) {
-        workspace.candidates.extend_from_slice(entries);
-    }
+    collect_tag_candidates(dom, node, &entry.tag, index, workspace);
     if let Some(id_ident) = view.id_ident(entry)
         && let Some(entries) = index.id_rules.get(id_ident)
     {
@@ -3158,10 +3161,8 @@ fn collect_dom_candidates(
     workspace: &mut CascadeWorkspace,
 ) {
     let (tag, id_key) = node_tag_id_class(dom, node, &mut workspace.class_keys);
-    if let Some(tag) = tag
-        && let Some(entries) = index.tag_rules.get(&tag)
-    {
-        workspace.candidates.extend_from_slice(entries);
+    if let Some(tag) = tag {
+        collect_tag_candidates(dom, node, &tag, index, workspace);
     }
     if let Some(ref id_key) = id_key
         && let Some(entries) = index.id_rules.get(id_key)
@@ -3170,6 +3171,26 @@ fn collect_dom_candidates(
     }
     for class_key in &workspace.class_keys {
         if let Some(entries) = index.class_rules.get(class_key) {
+            workspace.candidates.extend_from_slice(entries);
+        }
+    }
+}
+
+fn collect_tag_candidates(
+    dom: &Dom,
+    node: NodeId,
+    tag: &TagName,
+    index: &StyleIndex,
+    workspace: &mut CascadeWorkspace,
+) {
+    if let Some(entries) = index.tag_rules.get(tag) {
+        workspace.candidates.extend_from_slice(entries);
+    }
+    if tag.as_str().bytes().any(|byte| byte.is_ascii_uppercase())
+        && dom.element_namespace(node) == silksurf_dom::Namespace::Html
+    {
+        let lower = TagName::from_str(tag.as_str());
+        if let Some(entries) = index.tag_rules.get(&lower) {
             workspace.candidates.extend_from_slice(entries);
         }
     }

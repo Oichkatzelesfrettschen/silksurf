@@ -330,6 +330,7 @@ pub enum NodeKind {
     },
     Element {
         name: TagName,
+        prefix: Option<Box<str>>,
         namespace: Namespace,
         attributes: Vec<Attribute>,
     },
@@ -550,15 +551,26 @@ impl Dom {
     }
 
     pub fn create_element(&mut self, name: impl Into<String>) -> NodeId {
-        self.create_element_ns(name, Namespace::Html)
+        self.create_element_ns(name.into().to_ascii_lowercase(), Namespace::Html)
     }
 
     pub fn create_element_ns(&mut self, name: impl Into<String>, namespace: Namespace) -> NodeId {
         let name = name.into();
-        let name = TagName::from_str(&name);
+        let (prefix, local_name) = name
+            .split_once(':')
+            .map_or((None, name.as_str()), |(prefix, local)| {
+                (Some(Box::from(prefix)), local)
+            });
+        let name = if namespace == Namespace::Html && local_name == local_name.to_ascii_lowercase()
+        {
+            TagName::from_str(local_name)
+        } else {
+            TagName::Custom(SmallString::from(local_name))
+        };
         let is_template = namespace == Namespace::Html && name.as_str() == "template";
         let element = self.push_node(NodeKind::Element {
             name,
+            prefix,
             namespace,
             attributes: Vec::new(),
         });
@@ -802,6 +814,7 @@ impl Dom {
             } => self.create_doctype(name.clone(), public_id.clone(), system_id.clone()),
             NodeKind::Element {
                 name,
+                prefix,
                 namespace,
                 attributes,
             } => {
@@ -809,7 +822,11 @@ impl Dom {
                     .iter()
                     .map(|attr| (attr.name.as_str().to_string(), attr.value.to_string()))
                     .collect();
-                let element = self.create_element_ns(name.as_str(), namespace.clone());
+                let qualified_name = prefix.as_ref().map_or_else(
+                    || name.as_str().to_string(),
+                    |prefix| format!("{}:{}", prefix.as_ref(), name.as_str()),
+                );
+                let element = self.create_element_ns(qualified_name, namespace.clone());
                 for (attr_name, attr_value) in pairs {
                     self.set_attribute(element, attr_name, attr_value)?;
                 }
@@ -1367,6 +1384,14 @@ impl Dom {
         let index = self.node_index(id)?;
         match &self.nodes[index].kind {
             NodeKind::Element { name, .. } => Ok(Some(name.as_str())),
+            _ => Ok(None),
+        }
+    }
+
+    pub fn element_prefix(&self, id: NodeId) -> Result<Option<&str>, DomError> {
+        let index = self.node_index(id)?;
+        match &self.nodes[index].kind {
+            NodeKind::Element { prefix, .. } => Ok(prefix.as_deref()),
             _ => Ok(None),
         }
     }

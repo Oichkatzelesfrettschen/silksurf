@@ -33,6 +33,23 @@ fn the_root_declares_the_svg_namespace() {
     assert!(source.contains("viewBox=\"0 0 16 16\""), "{source}");
 }
 
+#[test]
+fn a_prefixed_svg_root_uses_its_local_name_for_rasterization() {
+    let mut dom = Dom::new();
+    let svg = dom.create_element_ns("s:svg", Namespace::Svg);
+    dom.set_attribute(svg, "viewBox", "0 0 4 4")
+        .expect("viewBox attaches");
+    let rect = dom.create_element_ns("s:rect", Namespace::Svg);
+    for (name, value) in [("width", "4"), ("height", "4"), ("fill", "#ff0000")] {
+        dom.set_attribute(rect, name, value)
+            .expect("attribute attaches");
+    }
+    dom.append_child(svg, rect).expect("rect attaches");
+    let source = serialize_svg(&dom, svg).expect("prefixed SVG serializes");
+    let surface = rasterize_svg(&source, 4, 4).expect("prefixed SVG rasterizes");
+    assert_eq!(&surface.rgba[0..4], &[255, 0, 0, 255]);
+}
+
 /// A child element writes as its own start tag, children, and end tag.
 #[test]
 fn a_child_element_round_trips_with_its_attributes() {

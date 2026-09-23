@@ -56,6 +56,11 @@ Clones the network client policy with automatic cookie access disabled.
 **Definition**: The namespace an element node carries, defaulting to HTML for a non-element node.
 **SilkSurf Usage**: `silksurf_dom::Dom::element_namespace`; selects the attribute-name case rule, since HTML matches names case-insensitively while SVG defines `viewBox` and `preserveAspectRatio` with camel case (AD-040)
 
+### element_prefix
+**Type**: DOM accessor
+**Definition**: Returns the optional prefix of a qualified element name; `element_name` supplies the local name for layout, selectors, and paint.
+**SilkSurf Usage**: `silksurf_dom::Dom::element_prefix`; DOM reflection and HTML serialization reconstruct the qualified name from the prefix and local name (AD-049).
+
 ### BPE (Byte Pair Encoding)
 **Type**: Compression/Tokenization Algorithm
 **Definition**: Maps registered byte sequences (common HTML fragments) to single u16 tokens via greedy longest-prefix trie matching, with raw byte values as the lossless fallback.

@@ -10,8 +10,11 @@ use silksurf_dom::{Dom, Namespace, NodeId, NodeKind};
 pub fn serialize_fragment(dom: &Dom, root: NodeId) -> io::Result<String> {
     let parent_name = match dom.node(root).map_err(|error| dom_error(&error))?.kind() {
         NodeKind::Element {
-            name, namespace, ..
-        } => Some(qualified_name(name.as_str(), namespace)),
+            name,
+            prefix,
+            namespace,
+            ..
+        } => Some(qualified_name(name.as_str(), prefix.as_deref(), namespace)),
         _ => None,
     };
     let mut bytes = Vec::new();
@@ -38,6 +41,7 @@ fn serialize_node(
     match dom.node(node).map_err(|error| dom_error(&error))?.kind() {
         NodeKind::Element {
             name,
+            prefix,
             namespace,
             attributes,
         } => {
@@ -61,7 +65,7 @@ fn serialize_node(
                         | "track"
                         | "wbr"
                 );
-            let name = qualified_name(name.as_str(), namespace);
+            let name = qualified_name(name.as_str(), prefix.as_deref(), namespace);
             if closing {
                 return serializer.end_elem(name);
             }
@@ -102,14 +106,17 @@ fn push_children(dom: &Dom, node: NodeId, pending: &mut Vec<(NodeId, bool)>) -> 
     Ok(())
 }
 
-fn qualified_name(name: &str, namespace: &Namespace) -> QualName {
+fn qualified_name(name: &str, prefix: Option<&str>, namespace: &Namespace) -> QualName {
     let namespace = match namespace {
         Namespace::Html => ns!(html),
         Namespace::Svg => ns!(svg),
         Namespace::MathMl => ns!(mathml),
         Namespace::Other(value) => html5ever::Namespace::from(value.as_str()),
     };
-    QualName::new(None, namespace, LocalName::from(name))
+    // html5ever's HTML serializer writes QualName.local as the tag spelling.
+    let serialized_name =
+        prefix.map_or_else(|| name.to_string(), |prefix| format!("{prefix}:{name}"));
+    QualName::new(None, namespace, LocalName::from(serialized_name))
 }
 
 fn dom_error(error: &silksurf_dom::DomError) -> io::Error {
@@ -131,6 +138,18 @@ mod tests {
         assert_eq!(
             serialize_fragment(&dom, fragment).expect("serialize"),
             "<br>visible</br>"
+        );
+    }
+
+    #[test]
+    fn foreign_element_retains_its_prefix_during_serialization() {
+        let mut dom = Dom::new();
+        let fragment = dom.create_document_fragment();
+        let svg = dom.create_element_ns("s:svg", Namespace::Svg);
+        dom.append_child(fragment, svg).expect("svg attaches");
+        assert_eq!(
+            serialize_fragment(&dom, fragment).expect("serializes"),
+            "<s:svg></s:svg>"
         );
     }
 }

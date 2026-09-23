@@ -2577,6 +2577,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxixml-qname"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9caf21e5676e02e6c7953180af5bff88049a4f6426ffd754702d5753cae8ad8b"
+dependencies = [
+ "oxixml-unicode",
+]
+
+[[package]]
+name = "oxixml-unicode"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f4fe405939d195999b5e957038d6c66e14ee766c94a98b08309afa04548bdb6"
+
+[[package]]
 name = "page_size"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3560,6 +3575,7 @@ dependencies = [
  "futures-util",
  "getrandom 0.3.4",
  "mimalloc",
+ "oxixml-qname",
  "rustc-hash",
  "serde_json",
  "silksurf-css",
