@@ -288,6 +288,8 @@ pub struct TaffyLayout {
     tree: SilkTaffy,
     /// BFS index -> taffy node id.
     taffy_nodes: Vec<Option<TaffyId>>,
+    /// Zero-size flow markers retain block-flow static positions for reparented boxes.
+    static_placeholders: Vec<Option<TaffyId>>,
     /// Reverse map: taffy id -> BFS index (for the measure-function lookup).
     taffy_to_bfs: FxHashMap<TaffyId, usize>,
     /// Reused child-id list for parent node construction.
@@ -359,7 +361,7 @@ enum ContainingBlock {
  * `static_x` and `static_y` mark the axes where both insets compute to auto.
  * CSS keeps the static position in that case, which is the position the box
  * would occupy in its own flow parent rather than in the containing block it
- * was reparented onto. `write_rects` restores it from the DOM parent's origin.
+ * was reparented onto. A block-flow marker records that insertion point.
  */
 #[derive(Clone, Copy, Default)]
 struct Placement {
@@ -514,6 +516,7 @@ impl TaffyLayout {
         Self {
             tree: new_taffy_tree(16),
             taffy_nodes: Vec::new(),
+            static_placeholders: Vec::new(),
             taffy_to_bfs: FxHashMap::default(),
             child_ids_scratch: Vec::new(),
             flattened_children_scratch: Vec::new(),
@@ -657,6 +660,9 @@ impl TaffyLayout {
                 }
                 continue;
             }
+            if let Some(placeholder) = self.static_placeholders[child_index] {
+                self.child_ids_scratch.push(placeholder);
+            }
             if (self.placements[child_index].block == ContainingBlock::DomParent
                 || self.placements[child_index].block
                     == ContainingBlock::Ancestor(parent_index as u32))
@@ -665,6 +671,39 @@ impl TaffyLayout {
                 self.child_ids_scratch.push(child_node);
             }
         }
+    }
+
+    fn create_static_placeholder(
+        &mut self,
+        table: &LayoutNeighborTable,
+        styles: &[Option<ComputedStyle>],
+        index: usize,
+    ) {
+        let placement = self.placements[index];
+        if placement.block == ContainingBlock::DomParent
+            || (!placement.static_x && !placement.static_y)
+        {
+            return;
+        }
+        let mut flow_parent = table.parent_idx[index];
+        while flow_parent != u32::MAX && self.merges_into_parent[flow_parent as usize] {
+            flow_parent = table.parent_idx[flow_parent as usize];
+        }
+        if flow_parent == u32::MAX
+            || !styles[flow_parent as usize].as_ref().is_some_and(|style| {
+                matches!(style.display, CssDisplay::Block | CssDisplay::Inline)
+            })
+        {
+            return;
+        }
+        self.static_placeholders[index] = Some(self.tree.new_leaf(Style {
+            display: TaffyDisplay::Block,
+            size: Size {
+                width: Dimension::length(0.0),
+                height: Dimension::length(0.0),
+            },
+            ..Default::default()
+        }));
     }
 
     pub fn rebuild(
@@ -683,6 +722,8 @@ impl TaffyLayout {
         }
         self.taffy_nodes.clear();
         self.taffy_nodes.resize(n, None);
+        self.static_placeholders.clear();
+        self.static_placeholders.resize(n, None);
         self.taffy_to_bfs.clear();
         self.viewport_root = None;
         let any_viewport_rooted = self.assign_placements(dom, table, styles);
@@ -703,6 +744,7 @@ impl TaffyLayout {
                 }
                 continue;
             }
+            self.create_static_placeholder(table, styles, i);
             let style_start = trace_start(trace_taffy);
             let taffy_style = css_to_taffy_style_for_index(
                 table,
@@ -1037,8 +1079,8 @@ impl TaffyLayout {
 
             // taffy reports a location relative to the taffy parent, which is
             // the node of the containing block the box was reparented onto.
-            // An axis whose insets both compute to auto keeps the CSS static
-            // position instead, which the DOM parent's origin supplies.
+            // An axis whose insets both compute to auto keeps the flow marker's
+            // position. Flex and grid boxes retain the DOM parent's origin.
             let placement = self.placements.get(i).copied().unwrap_or_default();
             let (block_x, block_y) = match placement.block {
                 ContainingBlock::DomParent => (dom_parent_x, dom_parent_y),
@@ -1057,15 +1099,31 @@ impl TaffyLayout {
             let reparented = placement.block != ContainingBlock::DomParent;
             let static_x = reparented && placement.static_x;
             let static_y = reparented && placement.static_y;
+            let static_origin = self.static_placeholders[i].map(|placeholder| {
+                let mut flow_parent = dom_parent;
+                while let Some(parent) = flow_parent {
+                    if self.taffy_nodes[parent].is_some() {
+                        break;
+                    }
+                    flow_parent = (parent_idx[parent] != u32::MAX)
+                        .then(|| parent_idx[parent] as usize)
+                        .filter(|&ancestor| ancestor < node_rects.len());
+                }
+                let (origin_x, origin_y) = flow_parent.map_or((viewport.x, viewport.y), |parent| {
+                    (node_rects[parent].x, node_rects[parent].y)
+                });
+                let location = self.tree.layout(placeholder).location;
+                (origin_x + location.x, origin_y + location.y)
+            });
 
             node_rects[i] = Rect {
                 x: if static_x {
-                    dom_parent_x
+                    static_origin.map_or(dom_parent_x, |origin| origin.0)
                 } else {
                     block_x + layout.location.x
                 },
                 y: if static_y {
-                    dom_parent_y
+                    static_origin.map_or(dom_parent_y, |origin| origin.1)
                 } else {
                     block_y + layout.location.y
                 },
@@ -1397,6 +1455,12 @@ fn text_node_parent_is_text_leaf(
         return false;
     }
     let parent = parent as usize;
+    if styles[parent]
+        .as_ref()
+        .is_some_and(|style| style.display == CssDisplay::Contents)
+    {
+        return false;
+    }
     let Some(parent_node) = table.bfs_order.get(parent).copied() else {
         return false;
     };

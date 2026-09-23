@@ -78,13 +78,26 @@ fn contents_children_join_parent_flow_without_painting_the_wrapper() {
 
 #[test]
 fn direct_text_inside_contents_wrapper_keeps_its_inline_box() {
-    let parsed = parse_html("<html><body><div id='wrapper'>visible text</div></body></html>")
-        .expect("fixture parses");
-    let stylesheet = parse_stylesheet("#wrapper { display: contents }").expect("stylesheet parses");
+    let parsed = parse_html(
+        "<html><body><div id='wrapper'>visible text</div><div id='after'></div></body></html>",
+    )
+    .expect("fixture parses");
+    let stylesheet = parse_stylesheet(
+        "body { margin: 0 } #wrapper { display: contents } #after { height: 10px }",
+    )
+    .expect("stylesheet parses");
     let fused = fused_style_layout_paint(&parsed.dom, &stylesheet, parsed.document, VIEWPORT);
-    assert!(fused.display_items.iter().any(|item| {
-        matches!(item, DisplayItem::Text { text, .. } if text.contains("visible text"))
-    }));
+    let text_rect = fused
+        .display_items
+        .iter()
+        .find_map(|item| match item {
+            DisplayItem::Text { text, rect, .. } if text.contains("visible text") => Some(rect),
+            _ => None,
+        })
+        .expect("direct text paints");
+    let after = find_by_id(&parsed.dom, parsed.document, "after").expect("sibling exists");
+    let after_rect = fused.node_rects[node_index(&fused, after)];
+    assert!(after_rect.y >= text_rect.y + text_rect.height);
 }
 
 #[test]
@@ -160,4 +173,41 @@ fn absolute_descendant_uses_positioned_ancestor_through_contents() {
     ] {
         assert_close(actual, expected, label);
     }
+}
+
+#[test]
+fn absolute_auto_insets_keep_static_position_through_contents() {
+    let parsed = parse_html(
+        "<html><body><div id='outer'><div id='first'></div><div id='wrapper'>\
+         <div id='absolute'></div></div></div></body></html>",
+    )
+    .expect("fixture parses");
+    let stylesheet = parse_stylesheet(
+        "body { margin: 0 } #outer { position: relative; width: 100px; height: 100px } \
+         #first { height: 20px } #wrapper { display: contents } \
+         #absolute { position: absolute; width: 10px; height: 10px }",
+    )
+    .expect("stylesheet parses");
+    let fused = fused_style_layout_paint(&parsed.dom, &stylesheet, parsed.document, VIEWPORT);
+    let absolute = find_by_id(&parsed.dom, parsed.document, "absolute").expect("box exists");
+    let rect = fused.node_rects[node_index(&fused, absolute)];
+    assert_close(rect.y, 20.0, "absolute static y");
+}
+
+#[test]
+fn static_position_placeholder_does_not_add_a_flex_gap() {
+    let parsed = parse_html(
+        "<html><body><div id='row'><div id='first'></div><div id='wrapper'>\
+         <div id='absolute'></div></div><div id='last'></div></div></body></html>",
+    )
+    .expect("fixture parses");
+    let stylesheet = parse_stylesheet(
+        "body { margin: 0 } #row { display: flex; gap: 10px; position: relative } \
+         #first, #last { width: 20px; height: 10px } #wrapper { display: contents } \
+         #absolute { position: absolute; width: 10px; height: 10px }",
+    )
+    .expect("stylesheet parses");
+    let fused = fused_style_layout_paint(&parsed.dom, &stylesheet, parsed.document, VIEWPORT);
+    let last = find_by_id(&parsed.dom, parsed.document, "last").expect("last exists");
+    assert_close(fused.node_rects[node_index(&fused, last)].x, 30.0, "last x");
 }
