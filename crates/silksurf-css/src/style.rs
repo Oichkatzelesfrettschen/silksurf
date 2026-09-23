@@ -2750,7 +2750,9 @@ pub fn compute_style_for_node_with_workspace(
     )
     .resolve(parent, rem_base_px, viewport);
     if style.display == Display::Contents {
-        if dom.parent(node).ok().flatten().is_some_and(|parent| {
+        if dom.element_namespace(node) == silksurf_dom::Namespace::MathMl {
+            style.display = Display::None;
+        } else if dom.parent(node).ok().flatten().is_some_and(|parent| {
             dom.node(parent)
                 .ok()
                 .is_some_and(|parent| matches!(parent.kind(), NodeKind::Document))

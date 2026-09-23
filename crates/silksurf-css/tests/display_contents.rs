@@ -1,5 +1,5 @@
 use silksurf_css::{Display, compute_styles, parse_stylesheet};
-use silksurf_dom::Dom;
+use silksurf_dom::{Dom, Namespace};
 
 #[test]
 fn contents_keeps_inheritance_and_adjusts_root_and_replaced_elements() {
@@ -30,4 +30,19 @@ fn contents_keeps_inheritance_and_adjusts_root_and_replaced_elements() {
     assert_eq!(styles[&image].display, Display::None);
     assert_eq!(styles[&input].display, Display::None);
     assert_eq!(styles[&child].color.r, 255);
+}
+
+#[test]
+fn mathml_contents_computes_to_none() {
+    let mut dom = Dom::new();
+    let document = dom.create_document();
+    let html = dom.create_element("html");
+    let body = dom.create_element("body");
+    let math = dom.create_element_ns("math", Namespace::MathMl);
+    dom.append_child(document, html).expect("html attaches");
+    dom.append_child(html, body).expect("body attaches");
+    dom.append_child(body, math).expect("math attaches");
+    let stylesheet = parse_stylesheet("math { display: contents }").expect("stylesheet parses");
+    let styles = compute_styles(&dom, document, &stylesheet);
+    assert_eq!(styles[&math].display, Display::None);
 }
