@@ -782,7 +782,7 @@ impl ComputedStyle {
             return Self::default();
         };
         Self {
-            display: parent.display,
+            display: Display::Inline,
             color: parent.color,
             font_size: parent.font_size,
             line_height: parent.line_height,
@@ -6498,7 +6498,7 @@ mod tests {
 
         let text = super::ComputedStyle::anonymous_text(Some(&parent));
 
-        assert_eq!(text.display, parent.display);
+        assert_eq!(text.display, super::Display::Inline);
         assert_eq!(text.color, parent.color);
         assert_eq!(text.font_size, parent.font_size);
         assert_eq!(text.line_height, parent.line_height);

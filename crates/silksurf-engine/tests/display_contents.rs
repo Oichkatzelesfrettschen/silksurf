@@ -77,6 +77,17 @@ fn contents_children_join_parent_flow_without_painting_the_wrapper() {
 }
 
 #[test]
+fn direct_text_inside_contents_wrapper_keeps_its_inline_box() {
+    let parsed = parse_html("<html><body><div id='wrapper'>visible text</div></body></html>")
+        .expect("fixture parses");
+    let stylesheet = parse_stylesheet("#wrapper { display: contents }").expect("stylesheet parses");
+    let fused = fused_style_layout_paint(&parsed.dom, &stylesheet, parsed.document, VIEWPORT);
+    assert!(fused.display_items.iter().any(|item| {
+        matches!(item, DisplayItem::Text { text, .. } if text.contains("visible text"))
+    }));
+}
+
+#[test]
 fn nested_contents_children_keep_order_in_a_flex_container() {
     let parsed = parse_html(
         "<html><body><div id='row'><div id='outer'><div id='left'></div>\
