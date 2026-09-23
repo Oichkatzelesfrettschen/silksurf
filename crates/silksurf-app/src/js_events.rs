@@ -43,10 +43,7 @@ pub(crate) fn hit_test_event_target(
         return None;
     }
     let document_y = window_y + scroll_y;
-    if let Some(target) = contents_text_event_target(runtime, window_x, document_y) {
-        return Some(target);
-    }
-    let mut best: Option<(f32, silksurf_dom::NodeId)> = None;
+    let mut best = contents_text_event_target(runtime, window_x, document_y);
     // The lock covers rect filtering only; no JS runs while it is held.
     let dom = runtime
         .dom
@@ -75,20 +72,39 @@ pub(crate) fn hit_test_event_target(
         }
         let area = rect.width * rect.height;
         // Smallest containing rect wins; BFS order breaks ties toward the
-        // deeper node because descendants appear after ancestors.
+        // deeper node because descendants appear after ancestors. A contents
+        // text box retains a tie against its box-owning ancestor.
         match best {
             Some((best_area, _)) if area > best_area => {}
+            Some((best_area, best_node))
+                if area.to_bits() == best_area.to_bits()
+                    && is_ancestor_of(&dom, node, best_node) => {}
             _ => best = Some((area, node)),
         }
     }
     best.map(|(_, node)| node)
 }
 
+fn is_ancestor_of(
+    dom: &silksurf_dom::Dom,
+    ancestor: silksurf_dom::NodeId,
+    descendant: silksurf_dom::NodeId,
+) -> bool {
+    let mut current = dom.parent(descendant).ok().flatten();
+    while let Some(node) = current {
+        if node == ancestor {
+            return true;
+        }
+        current = dom.parent(node).ok().flatten();
+    }
+    false
+}
+
 fn contents_text_event_target(
     runtime: &BrowserPageRuntime,
     window_x: f32,
     document_y: f32,
-) -> Option<silksurf_dom::NodeId> {
+) -> Option<(f32, silksurf_dom::NodeId)> {
     for item in runtime.display_list.items.iter().rev() {
         let silksurf_render::DisplayItem::Text { rect, node, .. } = item else {
             continue;
@@ -109,7 +125,13 @@ fn contents_text_event_target(
             .is_some_and(|style| style.display == silksurf_css::Display::Contents)
             && box_is_exposed(&runtime.fused, text_index as usize)
         {
-            return runtime.fused.table.bfs_order.get(parent_index).copied();
+            return runtime
+                .fused
+                .table
+                .bfs_order
+                .get(parent_index)
+                .copied()
+                .map(|node| (rect.width * rect.height, node));
         }
     }
     None
@@ -446,6 +468,32 @@ mod tests {
         )
         .expect("anchor listener runs");
         assert!(outcome.default_prevented);
+    }
+
+    #[test]
+    fn overlapping_box_takes_the_click_from_contents_text() {
+        let page = page_with_script(
+            "<!doctype html><html><body style='margin:0'><a id='link' style='display:contents'>go</a>\
+             <button id='cover' style='position:absolute;left:0;top:0;width:10px;height:10px'></button>\
+             </body></html>",
+            "",
+        );
+        let cover = node_by_id(&page, "cover");
+        let text_rect = page
+            .runtime
+            .display_list
+            .items
+            .iter()
+            .find_map(|item| match item {
+                silksurf_render::DisplayItem::Text { text, rect, .. } if text.as_str() == "go" => {
+                    Some(*rect)
+                }
+                _ => None,
+            })
+            .expect("link text paints");
+        let target =
+            hit_test_event_target(&page.runtime, text_rect.x + 1.0, text_rect.y + 1.0, 0.0, 0);
+        assert_eq!(target, Some(cover));
     }
 
     #[test]
