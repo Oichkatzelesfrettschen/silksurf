@@ -263,6 +263,19 @@ impl PageGeometry {
         self.boxes.clear();
         self.boxes.reserve(fused.table.bfs_order.len());
         for (index, node) in fused.table.bfs_order.iter().enumerate() {
+            if fused
+                .styles
+                .get(index)
+                .and_then(Option::as_ref)
+                .is_some_and(|style| {
+                    matches!(
+                        style.display,
+                        silksurf_css::Display::None | silksurf_css::Display::Contents
+                    )
+                })
+            {
+                continue;
+            }
             let (Some(rect), Some(border), Some(padding)) = (
                 fused.node_rects.get(index),
                 fused.node_borders.get(index),
@@ -411,5 +424,23 @@ mod page_geometry_tests {
             geometry.get(silksurf_dom::NodeId::from_raw(999)).is_none(),
             "a node outside the layout answers nothing"
         );
+    }
+
+    #[test]
+    fn a_contents_element_exposes_no_geometry_box() {
+        let (div, mut fused) = fixture(Rect {
+            x: 20.0,
+            y: 30.0,
+            width: 100.0,
+            height: 40.0,
+        });
+        let index = fused.table.node_to_bfs_idx[&div] as usize;
+        fused.styles[index] = Some(silksurf_css::ComputedStyle {
+            display: silksurf_css::Display::Contents,
+            ..Default::default()
+        });
+        let mut geometry = PageGeometry::default();
+        geometry.refresh(&fused);
+        assert!(geometry.get(div).is_none());
     }
 }

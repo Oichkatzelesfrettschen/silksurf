@@ -3693,6 +3693,39 @@ Syntax's function-token representation and Selectors' list grammar ground the
 boundary. A retained native ChatGPT run produces 55 display items after the
 repair; remaining layout fidelity requires separate geometry evidence.
 
+## AD-048: Display Contents Flattens the Box Tree
+
+**Status**: Accepted
+
+CSS Display 3, `display: contents`, removes the element's generated box while
+its children retain their boxes and text sequences. DOM ancestry, selector
+matching, and inherited style continue through the element. The fused layout
+tree therefore keeps the element in the BFS cascade table, omits its Taffy
+node, and inserts its box-generating descendants into the nearest ancestor's
+child list in tree order. Paint and page geometry omit the wrapper. A reused
+scratch stack grows with the flattened child frontier and avoids recursive
+box-tree flattening in the fused path.
+
+CSS Display 3 computes `display: contents` to `block` on the document root and
+to `none` on replaced HTML elements and the listed form controls. The cascade
+applies those computed-value changes before either layout path sees the style.
+
+The `display_contents` regressions check computed values, block flow, nested
+flex children, positioned descendants, and wrapper paint exclusion. The
+page-geometry test checks the boxless DOM geometry boundary. Inline formatting
+and SVG box-generation exceptions remain separate CSS Display obligations.
+
+Anonymous text generates an inline box even when its DOM parent computes to
+`contents`. MathML elements compute `contents` to `none`. A boxless wrapper
+passes inherited paint transforms through without composing its own transform.
+Grid lowering and item sizing use the flattened box-tree parent, and native
+input and event hit tests exclude boxless nodes and hidden subtrees. A zero-size
+block-flow marker retains the static position of an auto-inset box reparented
+through a contents wrapper. Paint sequencing uses a depth-first rank when a
+contents wrapper changes box-tree order. Direct contents text supplies an
+event target for its DOM parent, and a contents contenteditable element uses
+visible descendant boxes for its input target.
+
 ## Future ADRs
 
 Planned (renumbered after the 2026-04-30 batch):

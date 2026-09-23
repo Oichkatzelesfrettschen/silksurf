@@ -288,10 +288,13 @@ pub struct TaffyLayout {
     tree: SilkTaffy,
     /// BFS index -> taffy node id.
     taffy_nodes: Vec<Option<TaffyId>>,
+    /// Zero-size flow markers retain block-flow static positions for reparented boxes.
+    static_placeholders: Vec<Option<TaffyId>>,
     /// Reverse map: taffy id -> BFS index (for the measure-function lookup).
     taffy_to_bfs: FxHashMap<TaffyId, usize>,
     /// Reused child-id list for parent node construction.
     child_ids_scratch: Vec<TaffyId>,
+    flattened_children_scratch: Vec<usize>,
     /// Text measurement cache keyed by BFS index and guarded by DOM generation.
     text_measure_cache: Vec<CachedTextMeasures>,
     text_measure_generation: u64,
@@ -358,7 +361,7 @@ enum ContainingBlock {
  * `static_x` and `static_y` mark the axes where both insets compute to auto.
  * CSS keeps the static position in that case, which is the position the box
  * would occupy in its own flow parent rather than in the containing block it
- * was reparented onto. `write_rects` restores it from the DOM parent's origin.
+ * was reparented onto. A block-flow marker records that insertion point.
  */
 #[derive(Clone, Copy, Default)]
 struct Placement {
@@ -513,8 +516,10 @@ impl TaffyLayout {
         Self {
             tree: new_taffy_tree(16),
             taffy_nodes: Vec::new(),
+            static_placeholders: Vec::new(),
             taffy_to_bfs: FxHashMap::default(),
             child_ids_scratch: Vec::new(),
+            flattened_children_scratch: Vec::new(),
             text_measure_cache: Vec::new(),
             text_measure_generation: u64::MAX,
             viewport_root: None,
@@ -628,6 +633,79 @@ impl TaffyLayout {
         }
     }
 
+    fn collect_flow_children(
+        &mut self,
+        table: &LayoutNeighborTable,
+        styles: &[Option<ComputedStyle>],
+        parent_index: usize,
+    ) {
+        let first_child = table.child_start[parent_index];
+        if first_child == u32::MAX {
+            return;
+        }
+        let start = first_child as usize;
+        let end = start + usize::from(table.child_count[parent_index]);
+        self.flattened_children_scratch.clear();
+        self.flattened_children_scratch.extend((start..end).rev());
+        while let Some(child_index) = self.flattened_children_scratch.pop() {
+            if styles[child_index]
+                .as_ref()
+                .is_some_and(|style| style.display == CssDisplay::Contents)
+            {
+                let first_grandchild = table.child_start[child_index];
+                if first_grandchild != u32::MAX {
+                    let start = first_grandchild as usize;
+                    let end = start + usize::from(table.child_count[child_index]);
+                    self.flattened_children_scratch.extend((start..end).rev());
+                }
+                continue;
+            }
+            if let Some(placeholder) = self.static_placeholders[child_index] {
+                self.child_ids_scratch.push(placeholder);
+            }
+            if (self.placements[child_index].block == ContainingBlock::DomParent
+                || self.placements[child_index].block
+                    == ContainingBlock::Ancestor(parent_index as u32))
+                && let Some(child_node) = self.taffy_nodes[child_index]
+            {
+                self.child_ids_scratch.push(child_node);
+            }
+        }
+    }
+
+    fn create_static_placeholder(
+        &mut self,
+        table: &LayoutNeighborTable,
+        styles: &[Option<ComputedStyle>],
+        index: usize,
+    ) {
+        let placement = self.placements[index];
+        if placement.block == ContainingBlock::DomParent
+            || (!placement.static_x && !placement.static_y)
+        {
+            return;
+        }
+        let mut flow_parent = table.parent_idx[index];
+        while flow_parent != u32::MAX && self.merges_into_parent[flow_parent as usize] {
+            flow_parent = table.parent_idx[flow_parent as usize];
+        }
+        if flow_parent == u32::MAX
+            || !styles[flow_parent as usize].as_ref().is_some_and(|style| {
+                matches!(style.display, CssDisplay::Block | CssDisplay::Inline)
+            })
+        {
+            return;
+        }
+        self.static_placeholders[index] = Some(self.tree.new_leaf(Style {
+            display: TaffyDisplay::Block,
+            size: Size {
+                width: Dimension::length(0.0),
+                height: Dimension::length(0.0),
+            },
+            ..Default::default()
+        }));
+    }
+
     pub fn rebuild(
         &mut self,
         dom: &Dom,
@@ -644,6 +722,8 @@ impl TaffyLayout {
         }
         self.taffy_nodes.clear();
         self.taffy_nodes.resize(n, None);
+        self.static_placeholders.clear();
+        self.static_placeholders.resize(n, None);
         self.taffy_to_bfs.clear();
         self.viewport_root = None;
         let any_viewport_rooted = self.assign_placements(dom, table, styles);
@@ -664,25 +744,18 @@ impl TaffyLayout {
                 }
                 continue;
             }
+            self.create_static_placeholder(table, styles, i);
             let style_start = trace_start(trace_taffy);
-            let taffy_style = css_to_taffy_style_for_index(table, styles, i);
+            let taffy_style = css_to_taffy_style_for_index(
+                table,
+                styles,
+                i,
+                &mut self.flattened_children_scratch,
+            );
             record_elapsed(&mut stats.style_time, style_start);
             let child_start = trace_start(trace_taffy);
             self.child_ids_scratch.clear();
-            let first_child = table.child_start[i];
-            if first_child != u32::MAX {
-                let start = first_child as usize;
-                let end = start + usize::from(table.child_count[i]);
-                self.child_ids_scratch.extend(
-                    (start..end)
-                        .filter(|&child_idx| {
-                            self.placements[child_idx].block == ContainingBlock::DomParent
-                                || self.placements[child_idx].block
-                                    == ContainingBlock::Ancestor(i as u32)
-                        })
-                        .filter_map(|child_idx| self.taffy_nodes[child_idx]),
-                );
-            }
+            self.collect_flow_children(table, styles, i);
             // An absolute box whose nearest positioned ancestor is not its DOM
             // parent joins that ancestor's taffy children instead, so taffy
             // resolves its insets against the box CSS names.
@@ -1006,8 +1079,8 @@ impl TaffyLayout {
 
             // taffy reports a location relative to the taffy parent, which is
             // the node of the containing block the box was reparented onto.
-            // An axis whose insets both compute to auto keeps the CSS static
-            // position instead, which the DOM parent's origin supplies.
+            // An axis whose insets both compute to auto keeps the flow marker's
+            // position. Flex and grid boxes retain the DOM parent's origin.
             let placement = self.placements.get(i).copied().unwrap_or_default();
             let (block_x, block_y) = match placement.block {
                 ContainingBlock::DomParent => (dom_parent_x, dom_parent_y),
@@ -1026,15 +1099,31 @@ impl TaffyLayout {
             let reparented = placement.block != ContainingBlock::DomParent;
             let static_x = reparented && placement.static_x;
             let static_y = reparented && placement.static_y;
+            let static_origin = self.static_placeholders[i].map(|placeholder| {
+                let mut flow_parent = dom_parent;
+                while let Some(parent) = flow_parent {
+                    if self.taffy_nodes[parent].is_some() {
+                        break;
+                    }
+                    flow_parent = (parent_idx[parent] != u32::MAX)
+                        .then(|| parent_idx[parent] as usize)
+                        .filter(|&ancestor| ancestor < node_rects.len());
+                }
+                let (origin_x, origin_y) = flow_parent.map_or((viewport.x, viewport.y), |parent| {
+                    (node_rects[parent].x, node_rects[parent].y)
+                });
+                let location = self.tree.layout(placeholder).location;
+                (origin_x + location.x, origin_y + location.y)
+            });
 
             node_rects[i] = Rect {
                 x: if static_x {
-                    dom_parent_x
+                    static_origin.map_or(dom_parent_x, |origin| origin.0)
                 } else {
                     block_x + layout.location.x
                 },
                 y: if static_y {
-                    dom_parent_y
+                    static_origin.map_or(dom_parent_y, |origin| origin.1)
                 } else {
                     block_y + layout.location.y
                 },
@@ -1181,7 +1270,7 @@ fn taffy_node_merges_into_parent(
     if styles
         .get(index)
         .and_then(Option::as_ref)
-        .is_none_or(|style| style.display == CssDisplay::None)
+        .is_none_or(|style| matches!(style.display, CssDisplay::None | CssDisplay::Contents))
     {
         return index != 0;
     }
@@ -1366,6 +1455,12 @@ fn text_node_parent_is_text_leaf(
         return false;
     }
     let parent = parent as usize;
+    if styles[parent]
+        .as_ref()
+        .is_some_and(|style| style.display == CssDisplay::Contents)
+    {
+        return false;
+    }
     let Some(parent_node) = table.bfs_order.get(parent).copied() else {
         return false;
     };
@@ -1461,15 +1556,16 @@ fn css_to_taffy_style_for_index(
     table: &LayoutNeighborTable,
     styles: &[Option<ComputedStyle>],
     index: usize,
+    scratch: &mut Vec<usize>,
 ) -> Style {
     let style = styles.get(index).and_then(Option::as_ref);
     let mut taffy_style = css_to_taffy_style(style);
-    if simple_fr_grid_container_columns(table, styles, index).is_some() {
+    if simple_fr_grid_container_columns(table, styles, index, scratch).is_some() {
         taffy_style.display = TaffyDisplay::Flex;
         taffy_style.flex_direction = FlexDirection::Row;
         taffy_style.flex_wrap = FlexWrap::Wrap;
     }
-    if let Some(columns) = parent_simple_fr_grid_columns(table, styles, index) {
+    if let Some(columns) = parent_simple_fr_grid_columns(table, styles, index, scratch) {
         taffy_style.flex_basis = Dimension::percent(1.0 / columns as f32);
         taffy_style.flex_grow = 0.0;
         taffy_style.flex_shrink = 1.0;
@@ -1481,6 +1577,7 @@ fn simple_fr_grid_container_columns(
     table: &LayoutNeighborTable,
     styles: &[Option<ComputedStyle>],
     index: usize,
+    scratch: &mut Vec<usize>,
 ) -> Option<usize> {
     let style = styles.get(index).and_then(Option::as_ref)?;
     if style.display != CssDisplay::Grid
@@ -1492,19 +1589,30 @@ fn simple_fr_grid_container_columns(
         return None;
     }
     let columns = equal_fr_track_count(&style.grid_container.template_columns)?;
-    children_have_auto_grid_placement(table, styles, index).then_some(columns)
+    children_have_auto_grid_placement(table, styles, index, scratch).then_some(columns)
 }
 
 fn parent_simple_fr_grid_columns(
     table: &LayoutNeighborTable,
     styles: &[Option<ComputedStyle>],
     index: usize,
+    scratch: &mut Vec<usize>,
 ) -> Option<usize> {
-    let parent = table.parent_idx.get(index).copied().unwrap_or(u32::MAX);
-    if parent == u32::MAX {
-        return None;
+    let mut parent = table.parent_idx.get(index).copied().unwrap_or(u32::MAX);
+    while parent != u32::MAX
+        && styles[parent as usize]
+            .as_ref()
+            .is_some_and(|style| style.display == CssDisplay::Contents)
+    {
+        parent = table
+            .parent_idx
+            .get(parent as usize)
+            .copied()
+            .unwrap_or(u32::MAX);
     }
-    simple_fr_grid_container_columns(table, styles, parent as usize)
+    (parent != u32::MAX)
+        .then(|| simple_fr_grid_container_columns(table, styles, parent as usize, scratch))
+        .flatten()
 }
 
 fn equal_fr_track_count(tracks: &[CssGridTrackSize]) -> Option<usize> {
@@ -1528,6 +1636,7 @@ fn children_have_auto_grid_placement(
     table: &LayoutNeighborTable,
     styles: &[Option<ComputedStyle>],
     index: usize,
+    scratch: &mut Vec<usize>,
 ) -> bool {
     let Some(first_child) = table.child_start.get(index).copied() else {
         return false;
@@ -1537,14 +1646,24 @@ fn children_have_auto_grid_placement(
     }
     let start = first_child as usize;
     let end = start + usize::from(table.child_count[index]);
-    (start..end).all(|child| {
-        styles
-            .get(child)
-            .and_then(Option::as_ref)
-            .is_some_and(|style| {
-                style.display == CssDisplay::None || grid_item_uses_auto_placement(style)
-            })
-    })
+    scratch.clear();
+    scratch.extend((start..end).rev());
+    while let Some(child) = scratch.pop() {
+        let Some(style) = styles.get(child).and_then(Option::as_ref) else {
+            continue;
+        };
+        if style.display == CssDisplay::Contents {
+            let first_grandchild = table.child_start[child];
+            if first_grandchild != u32::MAX {
+                let start = first_grandchild as usize;
+                let end = start + usize::from(table.child_count[child]);
+                scratch.extend((start..end).rev());
+            }
+        } else if style.display != CssDisplay::None && !grid_item_uses_auto_placement(style) {
+            return false;
+        }
+    }
+    true
 }
 
 fn grid_item_uses_auto_placement(style: &ComputedStyle) -> bool {
@@ -1572,7 +1691,7 @@ fn css_to_taffy_style(style: Option<&ComputedStyle>) -> Style {
     // suppressed here so future Inline-specific handling stays distinct.
     #[allow(clippy::match_same_arms)]
     let display = match style.display {
-        CssDisplay::Block => TaffyDisplay::Block,
+        CssDisplay::Block | CssDisplay::Contents => TaffyDisplay::Block,
         CssDisplay::Flex | CssDisplay::InlineFlex => TaffyDisplay::Flex,
         CssDisplay::Grid => TaffyDisplay::Grid,
         CssDisplay::None => TaffyDisplay::None,
@@ -2470,12 +2589,53 @@ mod tests {
             ..Default::default()
         });
 
-        let grid_style = css_to_taffy_style_for_index(&table, &styles, grid_idx);
-        let child_style = css_to_taffy_style_for_index(&table, &styles, first_idx);
+        let grid_style = css_to_taffy_style_for_index(&table, &styles, grid_idx, &mut Vec::new());
+        let child_style = css_to_taffy_style_for_index(&table, &styles, first_idx, &mut Vec::new());
 
         assert_eq!(grid_style.display, TaffyDisplay::Flex);
         assert_eq!(grid_style.flex_wrap, FlexWrap::Wrap);
         assert_eq!(child_style.flex_basis, Dimension::percent(0.5));
+    }
+
+    #[test]
+    fn contents_descendants_use_the_grid_box_parent() {
+        let mut dom = Dom::new();
+        let root = dom.create_document();
+        let grid = dom.create_element("div");
+        let wrapper = dom.create_element("div");
+        let child = dom.create_element("article");
+        dom.append_child(root, grid).unwrap();
+        dom.append_child(grid, wrapper).unwrap();
+        dom.append_child(wrapper, child).unwrap();
+        let table = LayoutNeighborTable::build(&dom, root);
+        let mut styles = vec![Some(ComputedStyle::default()); table.len()];
+        let grid_idx = table.node_to_bfs_idx[&grid] as usize;
+        let wrapper_idx = table.node_to_bfs_idx[&wrapper] as usize;
+        let child_idx = table.node_to_bfs_idx[&child] as usize;
+        styles[grid_idx] = Some(ComputedStyle {
+            display: CssDisplay::Grid,
+            grid_container: silksurf_css::GridContainerStyle {
+                template_columns: vec![CssGridTrackSize::Fr(1.0), CssGridTrackSize::Fr(1.0)],
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        styles[wrapper_idx] = Some(ComputedStyle {
+            display: CssDisplay::Contents,
+            ..Default::default()
+        });
+        let grid_style = css_to_taffy_style_for_index(&table, &styles, grid_idx, &mut Vec::new());
+        let child_style = css_to_taffy_style_for_index(&table, &styles, child_idx, &mut Vec::new());
+        assert_eq!(grid_style.display, TaffyDisplay::Flex);
+        assert_eq!(child_style.flex_basis, Dimension::percent(0.5));
+
+        styles[child_idx]
+            .as_mut()
+            .expect("child style exists")
+            .grid_item
+            .column_start = CssGridLine::Line(1);
+        let placed_grid = css_to_taffy_style_for_index(&table, &styles, grid_idx, &mut Vec::new());
+        assert_eq!(placed_grid.display, TaffyDisplay::Grid);
     }
 
     #[test]
@@ -2541,7 +2701,7 @@ mod tests {
             ..Default::default()
         });
 
-        let grid_style = css_to_taffy_style_for_index(&table, &styles, grid_idx);
+        let grid_style = css_to_taffy_style_for_index(&table, &styles, grid_idx, &mut Vec::new());
 
         assert_eq!(grid_style.display, TaffyDisplay::Grid);
     }

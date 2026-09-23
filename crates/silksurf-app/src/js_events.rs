@@ -14,7 +14,7 @@
  */
 
 use crate::browser_types::{BrowserFrame, BrowserPageRuntime, BrowserRedrawMode, BrowserState};
-use crate::dom_hit_test::rect_contains;
+use crate::dom_hit_test::{box_is_exposed, rect_contains};
 use crate::runtime_repaint::repaint_runtime_dirty_nodes;
 use silksurf_js::{SyntheticEvent, SyntheticField};
 
@@ -43,7 +43,7 @@ pub(crate) fn hit_test_event_target(
         return None;
     }
     let document_y = window_y + scroll_y;
-    let mut best: Option<(f32, silksurf_dom::NodeId)> = None;
+    let mut best = contents_text_event_target(runtime, window_x, document_y);
     // The lock covers rect filtering only; no JS runs while it is held.
     let dom = runtime
         .dom
@@ -67,15 +67,74 @@ pub(crate) fn hit_test_event_target(
         if !rect_contains(*rect, window_x, document_y) {
             continue;
         }
+        if !box_is_exposed(&runtime.fused, idx) {
+            continue;
+        }
         let area = rect.width * rect.height;
         // Smallest containing rect wins; BFS order breaks ties toward the
-        // deeper node because descendants appear after ancestors.
+        // deeper node because descendants appear after ancestors. A contents
+        // text box retains a tie against its box-owning ancestor.
         match best {
             Some((best_area, _)) if area > best_area => {}
+            Some((best_area, best_node))
+                if area.to_bits() == best_area.to_bits()
+                    && is_ancestor_of(&dom, node, best_node) => {}
             _ => best = Some((area, node)),
         }
     }
     best.map(|(_, node)| node)
+}
+
+fn is_ancestor_of(
+    dom: &silksurf_dom::Dom,
+    ancestor: silksurf_dom::NodeId,
+    descendant: silksurf_dom::NodeId,
+) -> bool {
+    let mut current = dom.parent(descendant).ok().flatten();
+    while let Some(node) = current {
+        if node == ancestor {
+            return true;
+        }
+        current = dom.parent(node).ok().flatten();
+    }
+    false
+}
+
+fn contents_text_event_target(
+    runtime: &BrowserPageRuntime,
+    window_x: f32,
+    document_y: f32,
+) -> Option<(f32, silksurf_dom::NodeId)> {
+    for item in runtime.display_list.items.iter().rev() {
+        let silksurf_render::DisplayItem::Text { rect, node, .. } = item else {
+            continue;
+        };
+        if !rect_contains(*rect, window_x, document_y) {
+            continue;
+        }
+        let Some(&text_index) = runtime.fused.table.node_to_bfs_idx.get(node) else {
+            continue;
+        };
+        let parent_index = runtime.fused.table.parent_idx[text_index as usize];
+        if parent_index == u32::MAX {
+            continue;
+        }
+        let parent_index = parent_index as usize;
+        if runtime.fused.styles[parent_index]
+            .as_ref()
+            .is_some_and(|style| style.display == silksurf_css::Display::Contents)
+            && box_is_exposed(&runtime.fused, text_index as usize)
+        {
+            return runtime
+                .fused
+                .table
+                .bfs_order
+                .get(parent_index)
+                .copied()
+                .map(|node| (rect.width * rect.height, node));
+        }
+    }
+    None
 }
 
 /// Dispatch one synthetic event and repaint any listener DOM mutations.
@@ -353,6 +412,88 @@ mod tests {
         )
         .expect("point inside inner hits a node");
         assert_eq!(hit, inner);
+    }
+
+    #[test]
+    fn hit_test_skips_a_contents_wrapper_without_a_box() {
+        let page = page_with_script(
+            "<!doctype html><html><body><div id='outer' style='width:100px;height:100px'>\
+             <div id='wrapper' style='display:contents'><div style='width:10px;height:10px'></div>\
+             </div></div></body></html>",
+            "",
+        );
+        let outer = node_by_id(&page, "outer");
+        let wrapper = node_by_id(&page, "wrapper");
+        let index = page.runtime.fused.table.node_to_bfs_idx[&outer] as usize;
+        let rect = page.runtime.fused.node_rects[index];
+        let hit = hit_test_event_target(
+            &page.runtime,
+            rect.x + rect.width - 2.0,
+            rect.y + rect.height - 2.0,
+            0.0,
+            0,
+        );
+        assert_eq!(hit, Some(outer));
+        assert_ne!(hit, Some(wrapper));
+    }
+
+    #[test]
+    fn direct_text_in_a_contents_link_targets_its_anchor_listener() {
+        let mut page = page_with_script(
+            "<!doctype html><html><body><a id='go' href='/next' style='display:contents'>go</a></body></html>",
+            "document.getElementById('go').addEventListener('click', function (event) { event.preventDefault(); });",
+        );
+        let anchor = node_by_id(&page, "go");
+        let text_rect = page
+            .runtime
+            .display_list
+            .items
+            .iter()
+            .find_map(|item| match item {
+                silksurf_render::DisplayItem::Text { text, rect, .. } if text.as_str() == "go" => {
+                    Some(*rect)
+                }
+                _ => None,
+            })
+            .expect("link text paints");
+        let hit =
+            hit_test_event_target(&page.runtime, text_rect.x + 1.0, text_rect.y + 1.0, 0.0, 0)
+                .expect("text receives an event target");
+        assert_eq!(hit, anchor);
+        let outcome = dispatch_synthetic_event(
+            &mut page.runtime,
+            &mut page.frame,
+            hit,
+            &silksurf_js::SyntheticEvent::new("click", true, true),
+        )
+        .expect("anchor listener runs");
+        assert!(outcome.default_prevented);
+    }
+
+    #[test]
+    fn overlapping_box_takes_the_click_from_contents_text() {
+        let page = page_with_script(
+            "<!doctype html><html><body style='margin:0'><a id='link' style='display:contents'>go</a>\
+             <button id='cover' style='position:absolute;left:0;top:0;width:10px;height:10px'></button>\
+             </body></html>",
+            "",
+        );
+        let cover = node_by_id(&page, "cover");
+        let text_rect = page
+            .runtime
+            .display_list
+            .items
+            .iter()
+            .find_map(|item| match item {
+                silksurf_render::DisplayItem::Text { text, rect, .. } if text.as_str() == "go" => {
+                    Some(*rect)
+                }
+                _ => None,
+            })
+            .expect("link text paints");
+        let target =
+            hit_test_event_target(&page.runtime, text_rect.x + 1.0, text_rect.y + 1.0, 0.0, 0);
+        assert_eq!(target, Some(cover));
     }
 
     #[test]

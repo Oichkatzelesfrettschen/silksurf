@@ -25,11 +25,23 @@ pub(crate) fn collect_input_targets(
     fused: &FusedResult,
 ) -> Vec<InputTarget> {
     let mut targets = Vec::new();
-    for &node in &fused.table.bfs_order {
+    let mut descendants = Vec::new();
+    for (index, &node) in fused.table.bfs_order.iter().enumerate() {
         if !is_editable_input_node(dom, node) {
             continue;
         }
-        let Some(rect) = fused_node_rect(fused, node) else {
+        let contents_editor = fused.styles[index].as_ref().is_some_and(|style| {
+            style.display == silksurf_css::Display::Contents
+                && is_text_content_editable_node(dom, node)
+        });
+        let rect = if contents_editor {
+            contents_editor_rect(fused, index, &mut descendants)
+        } else if box_is_exposed(fused, index) {
+            fused_node_rect(fused, node)
+        } else {
+            None
+        };
+        let Some(rect) = rect else {
             continue;
         };
         if rect.width > 0.0 && rect.height > 0.0 {
@@ -37,6 +49,67 @@ pub(crate) fn collect_input_targets(
         }
     }
     targets
+}
+
+fn contents_editor_rect(
+    fused: &FusedResult,
+    index: usize,
+    descendants: &mut Vec<usize>,
+) -> Option<Rect> {
+    descendants.clear();
+    descendants.push(index);
+    let mut bounds = None;
+    while let Some(parent) = descendants.pop() {
+        let first = fused.table.child_start[parent];
+        if first == u32::MAX {
+            continue;
+        }
+        let start = first as usize;
+        let end = start + usize::from(fused.table.child_count[parent]);
+        for child in start..end {
+            if !box_is_exposed(fused, child) {
+                if fused.styles[child]
+                    .as_ref()
+                    .is_some_and(|style| style.display == silksurf_css::Display::Contents)
+                {
+                    descendants.push(child);
+                }
+                continue;
+            }
+            if let Some(rect) = fused.node_rects.get(child).copied()
+                && rect.width > 0.0
+                && rect.height > 0.0
+            {
+                bounds = Some(bounds.map_or(rect, |current| union_rect(current, rect)));
+            }
+            descendants.push(child);
+        }
+    }
+    bounds
+}
+
+pub(crate) fn box_is_exposed(fused: &FusedResult, index: usize) -> bool {
+    let mut current = index;
+    loop {
+        let Some(style) = fused.styles.get(current).and_then(Option::as_ref) else {
+            return false;
+        };
+        if style.display == silksurf_css::Display::None
+            || (current == index && style.display == silksurf_css::Display::Contents)
+        {
+            return false;
+        }
+        let parent = fused
+            .table
+            .parent_idx
+            .get(current)
+            .copied()
+            .unwrap_or(u32::MAX);
+        if parent == u32::MAX {
+            return true;
+        }
+        current = parent as usize;
+    }
 }
 
 pub(crate) fn is_editable_input_node(dom: &silksurf_dom::Dom, node: silksurf_dom::NodeId) -> bool {
