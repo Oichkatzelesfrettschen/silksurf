@@ -7,13 +7,17 @@
 
 ## Project-Specific Terms
 
+### attach_shadow
+
+Allocates a separate document-fragment tree and records its host and open or closed mode.
+
 ### create_document_fragment
 
 Allocates a detached DOM container whose insertion moves its children into the destination.
 
 ### is_connected
 
-Walks ordinary parent links to determine whether a node belongs to the document tree.
+Walks parent links and shadow-host links to determine whether a node belongs to the document tree.
 
 ### template_contents
 

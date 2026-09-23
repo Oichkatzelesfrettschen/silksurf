@@ -3607,6 +3607,92 @@ GUI-thread JavaScript execution also remains a responsiveness boundary; shell
 presentation before navigation proves startup visibility, while process isolation
 requires the native runtime protocol integration tracked by AD-027.
 
+## AD-045: Document Bootstrap Lifetime
+
+**Status**: Accepted
+
+`prepare_document_module_runtime` installs an empty import map, fetcher,
+remaining source allowance, and URL registry before classic scripts execute.
+Each classic script receives only maps preceding its element in document order.
+Inline module sources reserve bytes before classic imports spend the same
+allowance.
+Later roots retain prior module records, parse failures, and consumed budget.
+An external root discovered after bootstrap uses `PageModuleLoader::get_or_fetch`,
+the same admission path as an imported dependency. A fetched syntax failure
+occupies its URL record and prevents repeated network charges.
+
+HTML's module map and module-script processing rules ground the document
+lifetime. `document_modules` covers classic imports followed by roots, late
+external roots, exhausted allowances, and cached parse failures. Import maps
+inserted before the first specifier resolution register before the next classic
+script or during the later root scan. Incremental import-map merging after
+resolution remains a separate registration mechanism.
+
+## AD-046: Shared Form State and Separate Shadow Trees
+
+**Status**: Accepted
+
+`Dom::form_owner` and `Dom::form_controls` resolve ordinary-tree ancestry and
+explicit connected `form` references in tree order. The first matching ID
+controls association, including foreign-element blockers. Empty IDs establish
+zero associations. `HTMLFormControlsCollection` retains wrapper identity while
+indexed and named reads observe the live DOM. Duplicate names return a live
+`RadioNodeList`.
+
+`Dom::input_checked` separates checkedness from the content attribute.
+`set_input_checked` shares the state across native interaction, JavaScript,
+CSS `:checked`, form submission, and paint. Radio-group updates preserve each
+sibling's dirty flag. Input cloning copies both fields. The HTML form-owner,
+form collection, radio-group, and input-cloning algorithms ground the model.
+
+Shadow roots occupy document-fragment nodes with sparse host and mode maps.
+Ordinary parents and selectors stay tree-scoped; connectedness and composed
+root lookup traverse the host relationship. Fragment insertion transfers
+children while retaining host ownership. Host-inclusive cycle checks protect
+insertion, and root cloning raises `NotSupportedError`. Shadow `innerHTML`
+uses the host's parsing context. `document` occupies the same wrapper registry
+as every node, preserving identity across parent traversal. Its `textContent`
+descriptor returns null and ignores assignment under the DOM Standard's
+Document branch.
+
+The DOM shadow-tree, pre-insertion, and cloning rules ground these boundaries.
+`form_controls` and `shadow_dom` exercise live membership, radio state, tree
+isolation, fragment transfer, cycles, and document identity. Flat-tree layout,
+slot assignment, scoped style, composed event retargeting, parser-established
+form ownership, form reset, and radio regrouping after owner/name/type mutation
+remain explicit capability boundaries in the SPA roadmap.
+
+```mermaid
+flowchart LR
+    Classic[Classic bootstrap] --> Modules[Document module registry and allowance]
+    Roots[Later module roots] --> Modules
+    Form[Form collection] --> Owner[DOM form owner and checkedness]
+    Native[Native input] --> Owner
+    Owner --> Paint[CSS, submission, paint]
+    Host[Shadow host] --> Shadow[Separate fragment tree]
+    Shadow --> Composed[Composed root and connectedness]
+```
+
+## AD-047: Functional Selectors Retain Balanced Token Boundaries
+
+**Status**: Accepted
+
+CSS tokenization includes the opening parenthesis in `Function(name)`.
+`collect_paren_tokens` and `skip_parens` therefore count both function tokens
+and explicit opening parentheses. Selector-list parsing requires a comma
+between alternatives and rejects a stray suffix. Selectors 4 forgiving lists
+inside `:is()` and `:where()` retain valid arms after invalid or unsupported
+arms, while ordinary lists and `:not()` remain strict.
+
+An omitted function-depth increment terminates an outer `:where` at an inner
+closing parenthesis. The leaked `:not` suffix then becomes a broad alternative
+and can apply `display:none` to the document roots. The
+`nested_function_selectors` regressions preserve one selector, reject stray
+suffixes, keep ancestors visible, and hide the intended class target. CSS
+Syntax's function-token representation and Selectors' list grammar ground the
+boundary. A retained native ChatGPT run produces 55 display items after the
+repair; remaining layout fidelity requires separate geometry evidence.
+
 ## Future ADRs
 
 Planned (renumbered after the 2026-04-30 batch):

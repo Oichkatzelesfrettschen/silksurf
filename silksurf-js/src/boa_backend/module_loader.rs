@@ -79,6 +79,7 @@ pub(super) struct PageModuleLoader {
     modules: RefCell<FxHashMap<String, Module>>,
     parse_errors: RefCell<FxHashMap<String, String>>,
     missing: RefCell<Vec<String>>,
+    resolution_started: Cell<bool>,
     /// The document's import map, both member lists sorted longest key first
     /// so a prefix never shadows a longer, more specific match. It applies
     /// before URL resolution per HTML's resolve-a-module-specifier.
@@ -98,6 +99,7 @@ impl PageModuleLoader {
         self.modules.borrow_mut().clear();
         self.parse_errors.borrow_mut().clear();
         self.missing.borrow_mut().clear();
+        self.resolution_started.set(false);
     }
 
     pub(super) fn get(&self, url: &str) -> Result<Option<Module>, String> {
@@ -131,6 +133,27 @@ impl PageModuleLoader {
 
     pub(super) fn budget(&self) -> ModuleFetchBudget {
         self.budget.get()
+    }
+
+    pub(super) fn get_or_fetch(
+        &self,
+        url: &str,
+        context: &RefCell<&mut Context>,
+    ) -> JsResult<Module> {
+        if let Some(module) = self
+            .get(url)
+            .map_err(|error| JsNativeError::syntax().with_message(error))?
+        {
+            return Ok(module);
+        }
+        self.missing.borrow_mut().push(url.to_string());
+        self.fetch_module(url, context)
+    }
+
+    pub(super) fn update_unresolved_import_map(&self, map: ImportMap) {
+        if !self.resolution_started.get() {
+            self.set_import_map(map);
+        }
     }
 
     /// Fetch, parse, and register the module at `url`.
@@ -176,8 +199,11 @@ impl PageModuleLoader {
 
         let path = std::path::PathBuf::from(url);
         let source = Source::from_bytes(source_text.as_bytes()).with_path(path.as_path());
-        let module = Module::parse(source, None, &mut context.borrow_mut())
-            .map_err(|err| JsNativeError::typ().with_message(format!("module {url}: {err}")))?;
+        let module = Module::parse(source, None, &mut context.borrow_mut()).map_err(|error| {
+            let message = format!("module {url}: {error}");
+            self.insert_parse_error(url, message.clone());
+            JsNativeError::syntax().with_message(message)
+        })?;
         self.modules
             .borrow_mut()
             .insert(url.to_string(), module.clone());
@@ -242,6 +268,7 @@ impl PageModuleLoader {
 
     /// Apply the import map, then resolve against the referrer's URL.
     fn resolve(&self, referrer: &Referrer, specifier: &str) -> Option<String> {
+        self.resolution_started.set(true);
         let base = self.referrer_url(referrer);
         let mapped = self.apply_import_map(&base, specifier);
         if let Ok(absolute) = url::Url::parse(&mapped) {
@@ -300,14 +327,7 @@ impl ModuleLoader for PageModuleLoader {
                 .with_message(format!("module specifier {specifier} does not resolve"))
                 .into());
         };
-        if let Some(module) = self
-            .get(&url)
-            .map_err(|error| JsNativeError::syntax().with_message(error))?
-        {
-            return Ok(module);
-        }
-        self.missing.borrow_mut().push(url.clone());
-        self.fetch_module(&url, context)
+        self.get_or_fetch(&url, context)
     }
 
     fn init_import_meta(

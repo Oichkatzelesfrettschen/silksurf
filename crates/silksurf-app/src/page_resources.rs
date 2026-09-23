@@ -583,7 +583,18 @@ pub(crate) fn document_import_map(
 ) -> silksurf_js::ImportMap {
     let mut map = silksurf_js::ImportMap::default();
     let mut found = false;
-    collect_import_map(dom, root, &mut map, &mut found);
+    let _ = collect_import_map_until(dom, root, None, &mut map, &mut found);
+    map
+}
+
+pub(crate) fn document_import_map_before(
+    dom: &silksurf_dom::Dom,
+    root: silksurf_dom::NodeId,
+    script: silksurf_dom::NodeId,
+) -> silksurf_js::ImportMap {
+    let mut map = silksurf_js::ImportMap::default();
+    let mut found = false;
+    let _ = collect_import_map_until(dom, root, Some(script), &mut map, &mut found);
     map
 }
 
@@ -605,12 +616,16 @@ fn import_map_entries(object: &serde_json::Value) -> Vec<(String, String)> {
         .unwrap_or_default()
 }
 
-fn collect_import_map(
+fn collect_import_map_until(
     dom: &silksurf_dom::Dom,
     node: silksurf_dom::NodeId,
+    stop: Option<silksurf_dom::NodeId>,
     map: &mut silksurf_js::ImportMap,
     found: &mut bool,
-) {
+) -> bool {
+    if stop == Some(node) {
+        return true;
+    }
     if !*found
         && dom.element_name(node).ok().flatten() == Some("script")
         && script_type_value(dom.attributes(node).ok())
@@ -628,13 +643,16 @@ fn collect_import_map(
                 .map(|(prefix, entries)| (prefix.clone(), import_map_entries(entries)))
                 .collect();
         }
-        return;
+        return false;
     }
     if let Ok(children) = dom.children(node) {
         for &child in children {
-            collect_import_map(dom, child, map, found);
+            if collect_import_map_until(dom, child, stop, map, found) {
+                return true;
+            }
         }
     }
+    false
 }
 
 pub(crate) fn module_response_text(
@@ -1400,6 +1418,27 @@ mod tests {
                 &map,
             ),
             vec!["https://example.com/vendor/react.js".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_classic_script_sees_only_preceding_import_maps() {
+        let document = silksurf_engine::parse_html(
+            "<html><head><script>import('pkg')</script>\
+             <script type='importmap'>{\"imports\":{\"pkg\":\"/pkg.js\"}}</script>\
+             <script>import('pkg')</script></head></html>",
+        )
+        .expect("fixture parses");
+        let scripts =
+            extract_document_script_nodes(&document.dom, document.document, "https://example.com/");
+        assert_eq!(scripts.len(), 2);
+        assert_eq!(
+            document_import_map_before(&document.dom, document.document, scripts[0].node),
+            silksurf_js::ImportMap::default()
+        );
+        assert_eq!(
+            document_import_map_before(&document.dom, document.document, scripts[1].node),
+            silksurf_js::ImportMap::from_imports(vec![("pkg".to_string(), "/pkg.js".to_string())])
         );
     }
 

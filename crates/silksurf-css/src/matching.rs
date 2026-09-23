@@ -444,8 +444,7 @@ fn matches_pseudo_class(dom: &Dom, node: NodeId, name: &SelectorIdent) -> bool {
         // :disabled / :enabled: reflect the disabled attribute on form elements.
         "disabled" => has_attr(dom, node, "disabled"),
         "enabled" => !has_attr(dom, node, "disabled"),
-        // :checked: true when input[type=checkbox|radio] has the checked attr,
-        // or <option> has the selected attribute.
+        // :checked reads input checkedness and option selectedness.
         "checked" => {
             let tag = dom
                 .element_name(node)
@@ -454,7 +453,7 @@ fn matches_pseudo_class(dom: &Dom, node: NodeId, name: &SelectorIdent) -> bool {
                 .unwrap_or("")
                 .to_ascii_lowercase();
             match tag.as_str() {
-                "input" => has_attr(dom, node, "checked"),
+                "input" => dom.input_checked(node),
                 "option" => has_attr(dom, node, "selected"),
                 _ => false,
             }

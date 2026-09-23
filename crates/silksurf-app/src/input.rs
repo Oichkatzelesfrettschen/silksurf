@@ -1427,58 +1427,15 @@ pub(crate) fn toggle_checkbox_control(
     dom: &mut silksurf_dom::Dom,
     node: silksurf_dom::NodeId,
 ) -> Result<bool, silksurf_dom::DomError> {
-    if input_checked(dom, node) {
-        dom.remove_attribute(node, "checked")
-    } else {
-        dom.set_attribute(node, "checked", "")?;
-        Ok(true)
-    }
+    dom.set_input_checked(node, !dom.input_checked(node))
 }
 
 pub(crate) fn check_radio_control(
     dom: &mut silksurf_dom::Dom,
-    root: silksurf_dom::NodeId,
+    _root: silksurf_dom::NodeId,
     node: silksurf_dom::NodeId,
 ) -> Result<bool, silksurf_dom::DomError> {
-    let mut changed = false;
-    if !input_checked(dom, node) {
-        dom.set_attribute(node, "checked", "")?;
-        changed = true;
-    }
-    let Some(name) = element_attribute(dom, node, "name").map(str::to_string) else {
-        return Ok(changed);
-    };
-    if name.is_empty() {
-        return Ok(changed);
-    }
-    let group_root = nearest_form_node(dom, node).unwrap_or(root);
-    let mut radios = Vec::new();
-    collect_radio_group_nodes(dom, group_root, name.as_str(), &mut radios);
-    for radio in radios {
-        if radio != node && dom.remove_attribute(radio, "checked")? {
-            changed = true;
-        }
-    }
-    Ok(changed)
-}
-
-pub(crate) fn collect_radio_group_nodes(
-    dom: &silksurf_dom::Dom,
-    node: silksurf_dom::NodeId,
-    name: &str,
-    radios: &mut Vec<silksurf_dom::NodeId>,
-) {
-    if input_control_kind(dom, node) == Some(InputControlKind::Radio)
-        && element_attribute(dom, node, "name").is_some_and(|value| value == name)
-    {
-        radios.push(node);
-    }
-    let Ok(children) = dom.children(node) else {
-        return;
-    };
-    for &child in children {
-        collect_radio_group_nodes(dom, child, name, radios);
-    }
+    dom.set_input_checked(node, true)
 }
 
 pub(crate) fn focus_next_page_input(state: &mut BrowserState) -> bool {
@@ -1956,7 +1913,7 @@ pub(crate) fn checkbox_radio_value(dom: &silksurf_dom::Dom, node: silksurf_dom::
 }
 
 pub(crate) fn input_checked(dom: &silksurf_dom::Dom, node: silksurf_dom::NodeId) -> bool {
-    element_attribute(dom, node, "checked").is_some()
+    dom.input_checked(node)
 }
 
 pub(crate) fn option_selected(dom: &silksurf_dom::Dom, node: silksurf_dom::NodeId) -> bool {

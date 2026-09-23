@@ -38,6 +38,8 @@ pub(super) fn install_dom_interfaces(dom_arc: &Arc<Mutex<Dom>>, ctx: &mut Contex
     if let Err(err) = ctx.eval(Source::from_bytes(INTERFACE_BOOTSTRAP.as_bytes())) {
         eprintln!("silksurf-js: DOM interface bootstrap failed: {err}");
     }
+    super::form_controls::install(dom_arc, ctx);
+    super::shadow_dom::install(dom_arc, ctx);
     // The reflection table reads __silksurfInterfacePrototypes, which the
     // interface bootstrap records, so it runs second.
     if let Err(err) = ctx.eval(Source::from_bytes(REFLECTION_BOOTSTRAP.as_bytes())) {
@@ -84,9 +86,15 @@ fn interface_name(dom: &Dom, node_id: NodeId) -> &'static str {
         NodeKind::Text { .. } => return "Text",
         NodeKind::Comment { .. } => return "Comment",
         NodeKind::Document => return "Document",
-        NodeKind::DocumentFragment => return "DocumentFragment",
+        NodeKind::DocumentFragment => {
+            return if dom.shadow_host(node_id).is_some() {
+                "ShadowRoot"
+            } else {
+                "DocumentFragment"
+            };
+        }
         NodeKind::Element { .. } => {}
-        NodeKind::Doctype { .. } => return "Node",
+        NodeKind::Doctype { .. } => return "DocumentType",
     }
     let Ok(Some(name)) = dom.element_name(node_id) else {
         return "HTMLElement";
@@ -327,14 +335,7 @@ fn is_connected(
         return Ok(JsValue::from(false));
     };
     let dom = dom_arc.lock().unwrap_or_else(PoisonError::into_inner);
-    let mut current = node_id;
-    while let Ok(Some(parent)) = dom.parent(current) {
-        current = parent;
-    }
-    Ok(JsValue::from(matches!(
-        dom.node(current).map(silksurf_dom::Node::kind),
-        Ok(NodeKind::Document)
-    )))
+    Ok(JsValue::from(dom.is_connected(node_id)))
 }
 
 fn local_name(dom_arc: &Arc<Mutex<Dom>>, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
@@ -358,10 +359,39 @@ fn clone_node(dom_arc: &Arc<Mutex<Dom>>, args: &[JsValue], ctx: &mut Context) ->
     };
     let deep = args.get(1).is_some_and(JsValue::to_boolean);
     let mut dom = dom_arc.lock().unwrap_or_else(PoisonError::into_inner);
+    if dom.shadow_host(node_id).is_some() {
+        return Err(dom_exception(
+            "NotSupportedError",
+            "ShadowRoot cloning",
+            ctx,
+        ));
+    }
     let Some(copy) = clone_subtree(&mut dom, node_id, deep) else {
         return Ok(JsValue::null());
     };
     Ok(JsValue::from(copy.raw() as u32))
+}
+
+pub(super) fn dom_exception(name: &str, message: &str, ctx: &mut Context) -> boa_engine::JsError {
+    let error = boa_engine::JsError::from(
+        boa_engine::JsNativeError::error().with_message(message.to_owned()),
+    )
+    .to_opaque(ctx);
+    if let Some(object) = error.as_object() {
+        let _ = object.set(
+            js_string!("name"),
+            boa_engine::JsString::from(name),
+            false,
+            ctx,
+        );
+        let _ = object.set(
+            js_string!("code"),
+            if name == "NotSupportedError" { 9 } else { 0 },
+            false,
+            ctx,
+        );
+    }
+    boa_engine::JsError::from_opaque(error)
 }
 
 fn clone_subtree(dom: &mut Dom, node_id: NodeId, deep: bool) -> Option<NodeId> {
@@ -395,6 +425,7 @@ fn clone_subtree(dom: &mut Dom, node_id: NodeId, deep: bool) -> Option<NodeId> {
     for (name, value) in attributes {
         let _ = dom.set_attribute(copy, &name, &value);
     }
+    dom.copy_input_state(node_id, copy);
     if deep {
         for child in children {
             if let Some(child_copy) = clone_subtree(dom, child, true) {
@@ -556,6 +587,8 @@ const INTERFACE_BOOTSTRAP: &str = r"
         CharacterData: 'Node',
         Document: 'Node',
         DocumentFragment: 'Node',
+        ShadowRoot: 'DocumentFragment',
+        DocumentType: 'Node',
         Text: 'CharacterData',
         Comment: 'CharacterData',
         HTMLElement: 'Element',
@@ -680,10 +713,13 @@ const INTERFACE_BOOTSTRAP: &str = r"
         }
     });
     Node.prototype.hasChildNodes = function () { return this.childNodes.length > 0; };
-    Node.prototype.getRootNode = function () {
+    Node.prototype.getRootNode = function (options) {
         var current = this;
-        while (current.parentNode) { current = current.parentNode; }
-        return current;
+        while (true) {
+            if (current.parentNode) { current = current.parentNode; }
+            else if (options && options.composed && current instanceof ShadowRoot) { current = current.host; }
+            else { return current; }
+        }
     };
     Node.prototype.remove = function () {
         var parent = this.parentNode;
@@ -882,7 +918,7 @@ const INTERFACE_BOOTSTRAP: &str = r"
         return document.querySelectorAll('[name=' + JSON.stringify(String(name)) + ']');
     };
     document.contains = function (node) {
-        return !!node && !!node.nodeId && __silksurfNodeIsConnected(node.nodeId);
+        return !!node && __silksurfNodeContains(this.nodeId, node.nodeId);
     };
     Object.defineProperty(document, 'defaultView', { get: function () { return globalThis; } });
     Object.defineProperty(document, 'activeElement', { get: function () { return this.body; } });

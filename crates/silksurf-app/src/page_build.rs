@@ -228,6 +228,17 @@ pub(crate) fn build_browser_page_with_buffers_for_window(
         Ok(renderer) => js_ctx.set_fetch_client(renderer.network_client()),
         Err(message) => return Err(BrowserPageBuildError { message, buffers }),
     }
+    let reserved_inline_bytes = match prepare_document_module_runtime(
+        &payload.url,
+        &dom_arc,
+        doc_node,
+        &mut js_ctx,
+        &payload.module_texts,
+        &payload.render_config,
+    ) {
+        Ok(bytes) => bytes,
+        Err(message) => return Err(BrowserPageBuildError { message, buffers }),
+    };
     js_ctx.preload_local_storage(crate::profile::load_local_storage(&payload.url));
     js_ctx.set_viewport(viewport.width, viewport.height);
     /*
@@ -280,6 +291,15 @@ pub(crate) fn build_browser_page_with_buffers_for_window(
     let script_phase_start = phase_start;
     let static_eval_start = std::time::Instant::now();
     for (idx, (node, script)) in scripts.iter().enumerate() {
+        if let Some(node) = node {
+            let map = {
+                let dom = dom_arc
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                document_import_map_before(&dom, doc_node, *node)
+            };
+            js_ctx.update_unresolved_import_map(map);
+        }
         if script.len() > max_navigation_script_bytes() {
             eprintln!(
                 "[SilkSurf] Navigation script {idx}: {} bytes skipped",
@@ -328,16 +348,13 @@ pub(crate) fn build_browser_page_with_buffers_for_window(
     );
     trace_navigation_script_phase(trace_build, "dynamic-total", dynamic_start.elapsed());
     let module_start = std::time::Instant::now();
-    // The loader fetches a specifier the static walk did not predict, under
-    // what that walk left of the navigation's module allowance (AD-032).
-    js_ctx.set_module_fetcher(module_fetcher(&payload.render_config));
-    js_ctx.set_module_fetch_budget(module_fetch_budget(&payload.module_texts));
     execute_static_module_scripts(
         &payload.url,
         &dom_arc,
         doc_node,
         &mut js_ctx,
         &payload.module_texts,
+        reserved_inline_bytes,
         trace_build,
     );
     trace_navigation_script_phase(trace_build, "module-total", module_start.elapsed());
@@ -653,22 +670,47 @@ pub(crate) fn execute_dynamic_classic_scripts(
     );
 }
 
+pub(crate) fn prepare_document_module_runtime(
+    base_url: &str,
+    dom_arc: &Arc<Mutex<silksurf_dom::Dom>>,
+    root: silksurf_dom::NodeId,
+    js_ctx: &mut SilkContext,
+    module_texts: &[(String, String)],
+    config: &BrowserRenderConfig,
+) -> Result<usize, String> {
+    let dom = dom_arc
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let roots = document_module_roots(&dom, root, base_url);
+    let inline_bytes = admit_module_roots(&roots, module_limits())?;
+    let mut budget = module_fetch_budget(module_texts);
+    budget.bytes = budget
+        .bytes
+        .checked_sub(inline_bytes)
+        .ok_or_else(|| "Module source bytes exhaust SILKSURF_MAX_MODULE_BYTES".to_string())?;
+    js_ctx.set_import_map(silksurf_js::ImportMap::default());
+    drop(dom);
+    js_ctx.set_module_fetcher(module_fetcher(config));
+    js_ctx.set_module_fetch_budget(budget);
+    js_ctx.prepare_document_modules(base_url, module_texts)?;
+    Ok(inline_bytes)
+}
+
 pub(crate) fn execute_static_module_scripts(
     base_url: &str,
     dom_arc: &Arc<Mutex<silksurf_dom::Dom>>,
     root: silksurf_dom::NodeId,
     js_ctx: &mut SilkContext,
     module_texts: &[(String, String)],
+    reserved_inline_bytes: usize,
     trace_build: bool,
 ) {
-    let (roots, import_map) = {
+    let roots = {
         let dom = dom_arc
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        (
-            document_module_roots(&dom, root, base_url),
-            document_import_map(&dom, root),
-        )
+        js_ctx.update_unresolved_import_map(document_import_map(&dom, root));
+        document_module_roots(&dom, root, base_url)
     };
     let inline_bytes = match admit_module_roots(&roots, module_limits()) {
         Ok(bytes) => bytes,
@@ -677,14 +719,14 @@ pub(crate) fn execute_static_module_scripts(
             return;
         }
     };
-    let mut budget = module_fetch_budget(module_texts);
-    if inline_bytes > budget.bytes {
+    let mut budget = js_ctx.module_fetch_budget();
+    let additional_inline_bytes = inline_bytes.saturating_sub(reserved_inline_bytes);
+    if additional_inline_bytes > budget.bytes {
         eprintln!("[SilkSurf] Module source bytes exhaust SILKSURF_MAX_MODULE_BYTES");
         return;
     }
-    budget.bytes -= inline_bytes;
+    budget.bytes -= additional_inline_bytes;
     js_ctx.set_module_fetch_budget(budget);
-    js_ctx.set_import_map(import_map);
     let module_start = std::time::Instant::now();
     match js_ctx.eval_document_modules(base_url, &roots, module_texts) {
         Ok(results) => {
@@ -1427,6 +1469,28 @@ mod tests {
                 .any(|text| text.contains("parsed handoff document"))
         );
         assert!(!text_items.iter().any(|text| text.contains("fallback html")));
+    }
+
+    #[test]
+    fn classic_bootstrap_imports_share_the_later_document_module_registry() {
+        let payload = BrowserPagePayload {
+            url: "https://example.test/app/".into(),
+            html: concat!(
+                "<!doctype html><html><body>",
+                "<script>import('./shared.js').then(m => document.body.setAttribute('data-imported', String(m.value)));</script>",
+                "<script type=module>import './shared.js';</script>",
+                "</body></html>"
+            ).into(),
+            css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(),
+            script_texts: Vec::new(),
+            module_texts: vec![("https://example.test/app/shared.js".into(), "globalThis.executions = (globalThis.executions || 0) + 1; export const value = 42;".into())],
+            images: Vec::new(),
+            render_config: BrowserRenderConfig::default(),
+            parsed_document: None,
+        };
+        let mut page = build_browser_page(payload).expect("bootstrap builds");
+        page.runtime.js_ctx.eval("if (executions !== 1 || document.body.getAttribute('data-imported') !== '42') throw new Error('bootstrap import');").expect("classic and module scripts share execution");
     }
 
     #[test]
