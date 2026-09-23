@@ -44,7 +44,8 @@ AD-042 through AD-044 record the mechanisms and boundaries.
   event routing, isolation, resource selection, decoding, and playback remain
   open under the embedded-content decision gate below.
 - `import-map-incremental-registration`: maps inserted before first resolution
-  register at the later root scan; merging additional maps after resolution
+  register before the next classic script or at the later root scan; merging
+  additional maps after resolution
   requires HTML's resolved-module filtering and map-registration hooks.
 - `shadow-flat-tree-rendering`: shadow ownership and interfaces execute the
   fetched HTML setter polyfill. Slot assignment, scoped style, flat-tree layout,

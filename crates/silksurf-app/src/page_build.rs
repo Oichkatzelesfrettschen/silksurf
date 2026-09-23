@@ -291,6 +291,15 @@ pub(crate) fn build_browser_page_with_buffers_for_window(
     let script_phase_start = phase_start;
     let static_eval_start = std::time::Instant::now();
     for (idx, (node, script)) in scripts.iter().enumerate() {
+        if let Some(node) = node {
+            let map = {
+                let dom = dom_arc
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                document_import_map_before(&dom, doc_node, *node)
+            };
+            js_ctx.update_unresolved_import_map(map);
+        }
         if script.len() > max_navigation_script_bytes() {
             eprintln!(
                 "[SilkSurf] Navigation script {idx}: {} bytes skipped",
@@ -679,7 +688,7 @@ pub(crate) fn prepare_document_module_runtime(
         .bytes
         .checked_sub(inline_bytes)
         .ok_or_else(|| "Module source bytes exhaust SILKSURF_MAX_MODULE_BYTES".to_string())?;
-    js_ctx.set_import_map(document_import_map(&dom, root));
+    js_ctx.set_import_map(silksurf_js::ImportMap::default());
     drop(dom);
     js_ctx.set_module_fetcher(module_fetcher(config));
     js_ctx.set_module_fetch_budget(budget);

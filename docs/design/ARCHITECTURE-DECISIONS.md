@@ -3611,9 +3611,11 @@ requires the native runtime protocol integration tracked by AD-027.
 
 **Status**: Accepted
 
-`prepare_document_module_runtime` installs the import map, fetcher, remaining
-source allowance, and URL registry before classic scripts execute. Inline
-module sources reserve bytes before classic imports spend the same allowance.
+`prepare_document_module_runtime` installs an empty import map, fetcher,
+remaining source allowance, and URL registry before classic scripts execute.
+Each classic script receives only maps preceding its element in document order.
+Inline module sources reserve bytes before classic imports spend the same
+allowance.
 Later roots retain prior module records, parse failures, and consumed budget.
 An external root discovered after bootstrap uses `PageModuleLoader::get_or_fetch`,
 the same admission path as an imported dependency. A fetched syntax failure
@@ -3622,9 +3624,9 @@ occupies its URL record and prevents repeated network charges.
 HTML's module map and module-script processing rules ground the document
 lifetime. `document_modules` covers classic imports followed by roots, late
 external roots, exhausted allowances, and cached parse failures. Import maps
-inserted before the first specifier resolution register during the later root
-scan. Incremental import-map merging after resolution remains a separate
-registration mechanism.
+inserted before the first specifier resolution register before the next classic
+script or during the later root scan. Incremental import-map merging after
+resolution remains a separate registration mechanism.
 
 ## AD-046: Shared Form State and Separate Shadow Trees
 
