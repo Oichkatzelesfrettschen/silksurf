@@ -995,8 +995,13 @@ fn assign_contexts(
     for (i, style) in styles.iter().take(n).enumerate() {
         let index = u32::try_from(i).unwrap_or(u32::MAX);
         let style = style.as_ref();
-        let positioned = style.is_some_and(|style| style.position != CssPosition::Static);
-        state.z[i] = style.map_or(0, |style| style.z_index);
+        let positioned = style.is_some_and(|style| {
+            style.position != CssPosition::Static
+                && !matches!(style.display, Display::None | Display::Contents)
+        });
+        state.z[i] = style
+            .filter(|_| positioned)
+            .map_or(0, |style| style.z_index);
         let parent_context = table
             .parent_idx
             .get(i)
@@ -2039,6 +2044,31 @@ mod paint_order_tests {
         styles[2] = Some(positioned(1));
         styles[3] = Some(positioned(5));
         assert_eq!(order_for(&styles, &table), vec![0, 1, 2, 4, 3]);
+    }
+
+    #[test]
+    fn contents_wrapper_does_not_isolate_its_child_in_a_stacking_context() {
+        let table = four_child_document();
+        let mut styles = vec![Some(ComputedStyle::default()); 5];
+        styles[2] = Some(ComputedStyle {
+            display: Display::Contents,
+            position: CssPosition::Relative,
+            z_index: 10,
+            ..Default::default()
+        });
+        styles[3] = Some(positioned(5));
+        let order = order_for(&styles, &table);
+        // UNWRAP-OK: order_for includes each child in the fixture table.
+        let child = order
+            .iter()
+            .position(|&index| index == 4)
+            .expect("child paints");
+        // UNWRAP-OK: order_for includes each sibling in the fixture table.
+        let sibling = order
+            .iter()
+            .position(|&index| index == 3)
+            .expect("sibling paints");
+        assert!(child < sibling);
     }
 
     #[test]
