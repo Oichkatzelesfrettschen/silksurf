@@ -49,3 +49,19 @@ fn namespace_and_prefix_changes_replace_the_element_identity() {
     assert_eq!(namespace_diff.removed, vec![old]);
     assert_eq!(namespace_diff.added, vec![other_namespace]);
 }
+
+#[test]
+fn importing_an_html_local_name_with_a_colon_keeps_it_unprefixed() {
+    let mut source = Dom::new();
+    let element = source.create_element("xyz:abc");
+    let mut target = Dom::new();
+    let target_document = target.create_document();
+    let imported = target
+        .import_subtree(&source, element, target_document)
+        .expect("imports element");
+    assert_eq!(
+        target.element_name(imported).expect("name reads"),
+        Some("xyz:abc")
+    );
+    assert_eq!(target.element_prefix(imported).expect("prefix reads"), None);
+}

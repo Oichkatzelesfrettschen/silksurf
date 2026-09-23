@@ -2,12 +2,12 @@
   "corpus": "wpt html/syntax/parsing/resources",
   "corpus_revision": "1924c6e9784b3c1da4ad5bfcbfeea64b2a886e7b",
   "executed": 1726,
-  "expected_fail": 148,
+  "expected_fail": 126,
   "fail": 0,
   "oracle": "The production parse tree serialized in html5lib format equals the corpus #document. Expected failures remain failures; unexpected passes count as genuine passes and fail the strict expectation gate.",
-  "pass": 1578,
-  "rate_executed": 0.9142526071842411,
-  "rate_total": 0.8227320125130344,
+  "pass": 1600,
+  "rate_executed": 0.9269988412514485,
+  "rate_total": 0.8342022940563086,
   "runner": "html5lib_tree_construction",
   "runner_kind": "wpt-tree-construction",
   "skip": 192,
@@ -15,11 +15,11 @@
   "unexpected_pass": 0,
   "measurement_environment": {
     "schema_version": 1,
-    "timestamp_utc": "2026-09-22T07:36:23Z",
+    "timestamp_utc": "2026-09-23T05:28:20Z",
     "git": {
-      "commit": "97e10f4f78f79078c5f9d96286b6a7f1bc99db80",
-      "branch": "fix/browser-runtime-conformance",
-      "dirty": true
+      "commit": "e5b206483447455dffa36809c9057aa9fe13c4a0",
+      "branch": "fix/html-colon-local-name",
+      "dirty": false
     },
     "toolchain": {
       "rustc": "1.94.1",
@@ -45,9 +45,9 @@
         11
       ],
       "load_average": [
-        12.92724609375,
-        21.501953125,
-        19.19189453125
+        12.20361328125,
+        14.041015625,
+        19.89697265625
       ],
       "cpu_governors": [
         "performance"

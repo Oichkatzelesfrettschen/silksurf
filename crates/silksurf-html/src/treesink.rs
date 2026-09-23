@@ -104,7 +104,8 @@ impl TreeSink for SilkDomBuilder {
         let mut inner = self.inner.borrow_mut();
         let local = name.local.as_ref();
         let ns = html5ever_ns_to_silk(name.ns.as_ref());
-        let id = inner.dom.create_element_ns(local, ns);
+        let prefix = name.prefix.as_ref().map(|prefix| prefix.as_ref());
+        let id = inner.dom.create_element_ns_local(local, prefix, ns);
         let raw = id.raw();
         for attr in attrs {
             let attr_local = attr.name.local.as_ref();

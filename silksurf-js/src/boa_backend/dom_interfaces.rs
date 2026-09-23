@@ -443,11 +443,9 @@ fn clone_subtree(dom: &mut Dom, node_id: NodeId, deep: bool) -> Option<NodeId> {
                 namespace, prefix, ..
             } => {
                 let namespace = namespace.clone();
+                let prefix = prefix.as_ref().map(ToString::to_string);
                 let name = dom.element_name(node_id).ok().flatten()?.to_string();
-                let qualified_name = prefix
-                    .as_ref()
-                    .map_or(name.clone(), |prefix| format!("{}:{name}", prefix.as_ref()));
-                dom.create_element_ns(qualified_name, namespace)
+                dom.create_element_ns_local(name, prefix.as_deref(), namespace)
             }
             NodeKind::Document | NodeKind::Doctype { .. } => return None,
         };

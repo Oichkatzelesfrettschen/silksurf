@@ -549,7 +549,11 @@ files and the relevant ADRs.
 
 ### create_element_ns
 **Type**: DOM allocation function
-**Definition**: Allocates a new `Element` node in a specified XML namespace (SVG, MathML, etc.). Used by the HTML5 tree builder for foreign content.
+**Definition**: Splits a qualified name into its prefix and local name, then allocates an `Element` in the specified namespace.
+
+### create_element_ns_local
+**Type**: DOM allocation function
+**Definition**: Allocates an `Element` from a local name and optional prefix supplied separately by the HTML tree builder or an existing DOM node. A colon inside an HTML local name remains part of that name.
 
 ### CssError
 **Type**: Error type

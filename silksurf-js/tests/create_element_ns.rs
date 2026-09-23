@@ -51,6 +51,9 @@ fn namespaced_elements_retain_namespace_case_and_prototype() {
              if (html.localName !== 'div' || html.tagName !== 'DIV' ||
                  html.namespaceURI !== 'http://www.w3.org/1999/xhtml')
                  throw new Error('HTML identity');
+             const colonName = document.createElement('xyz:abc').cloneNode();
+             if (colonName.localName !== 'xyz:abc' || colonName.prefix !== null)
+                 throw new Error('HTML colon local name');
              const upperTemplate = document.createElementNS(
                  'http://www.w3.org/1999/xhtml', 'TEMPLATE');
              if (upperTemplate.localName !== 'TEMPLATE' ||
