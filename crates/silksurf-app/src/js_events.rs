@@ -43,6 +43,9 @@ pub(crate) fn hit_test_event_target(
         return None;
     }
     let document_y = window_y + scroll_y;
+    if let Some(target) = contents_text_event_target(runtime, window_x, document_y) {
+        return Some(target);
+    }
     let mut best: Option<(f32, silksurf_dom::NodeId)> = None;
     // The lock covers rect filtering only; no JS runs while it is held.
     let dom = runtime
@@ -79,6 +82,37 @@ pub(crate) fn hit_test_event_target(
         }
     }
     best.map(|(_, node)| node)
+}
+
+fn contents_text_event_target(
+    runtime: &BrowserPageRuntime,
+    window_x: f32,
+    document_y: f32,
+) -> Option<silksurf_dom::NodeId> {
+    for item in runtime.display_list.items.iter().rev() {
+        let silksurf_render::DisplayItem::Text { rect, node, .. } = item else {
+            continue;
+        };
+        if !rect_contains(*rect, window_x, document_y) {
+            continue;
+        }
+        let Some(&text_index) = runtime.fused.table.node_to_bfs_idx.get(node) else {
+            continue;
+        };
+        let parent_index = runtime.fused.table.parent_idx[text_index as usize];
+        if parent_index == u32::MAX {
+            continue;
+        }
+        let parent_index = parent_index as usize;
+        if runtime.fused.styles[parent_index]
+            .as_ref()
+            .is_some_and(|style| style.display == silksurf_css::Display::Contents)
+            && box_is_exposed(&runtime.fused, text_index as usize)
+        {
+            return runtime.fused.table.bfs_order.get(parent_index).copied();
+        }
+    }
+    None
 }
 
 /// Dispatch one synthetic event and repaint any listener DOM mutations.
@@ -379,6 +413,39 @@ mod tests {
         );
         assert_eq!(hit, Some(outer));
         assert_ne!(hit, Some(wrapper));
+    }
+
+    #[test]
+    fn direct_text_in_a_contents_link_targets_its_anchor_listener() {
+        let mut page = page_with_script(
+            "<!doctype html><html><body><a id='go' href='/next' style='display:contents'>go</a></body></html>",
+            "document.getElementById('go').addEventListener('click', function (event) { event.preventDefault(); });",
+        );
+        let anchor = node_by_id(&page, "go");
+        let text_rect = page
+            .runtime
+            .display_list
+            .items
+            .iter()
+            .find_map(|item| match item {
+                silksurf_render::DisplayItem::Text { text, rect, .. } if text.as_str() == "go" => {
+                    Some(*rect)
+                }
+                _ => None,
+            })
+            .expect("link text paints");
+        let hit =
+            hit_test_event_target(&page.runtime, text_rect.x + 1.0, text_rect.y + 1.0, 0.0, 0)
+                .expect("text receives an event target");
+        assert_eq!(hit, anchor);
+        let outcome = dispatch_synthetic_event(
+            &mut page.runtime,
+            &mut page.frame,
+            hit,
+            &silksurf_js::SyntheticEvent::new("click", true, true),
+        )
+        .expect("anchor listener runs");
+        assert!(outcome.default_prevented);
     }
 
     #[test]
