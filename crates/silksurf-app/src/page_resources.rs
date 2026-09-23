@@ -788,10 +788,10 @@ pub(crate) fn append_image_display_items(
     items: &mut Vec<silksurf_render::DisplayItem>,
 ) {
     for (index, &node) in fused.table.bfs_order.iter().enumerate() {
+        if !box_is_exposed(fused, index) {
+            continue;
+        }
         if let Some(src) = image_src_for_node(dom, node) {
-            if !box_is_exposed(fused, index) {
-                continue;
-            }
             let resolved = resolve_resource_url(base_url, &src);
             let Some(image) = images.iter().find(|image| image.url == resolved) else {
                 continue;
@@ -807,9 +807,6 @@ pub(crate) fn append_image_display_items(
                 image: image.surface.clone(),
             });
         } else if let Some(image) = canvas_surface_image(dom, node) {
-            if !box_is_exposed(fused, index) {
-                continue;
-            }
             let Some(rect) = fused_node_rect(fused, node) else {
                 continue;
             };
@@ -818,9 +815,6 @@ pub(crate) fn append_image_display_items(
             }
             items.push(silksurf_render::DisplayItem::Image { rect, image });
         } else if let Some(rect) = svg_paint_rect(dom, fused, node) {
-            if !box_is_exposed(fused, index) {
-                continue;
-            }
             let Some(surface) = svg_cache.surface(dom, node, rect) else {
                 continue;
             };
@@ -1206,6 +1200,66 @@ mod tests {
     }
 
     #[test]
+    fn hidden_canvas_surfaces_emit_no_image_items() {
+        let mut dom = silksurf_dom::Dom::new();
+        let document = dom.create_document();
+        let html = dom.create_element("html");
+        let body = dom.create_element("body");
+        let hidden_parent = dom.create_element("div");
+        let hidden_canvas = dom.create_element("canvas");
+        let hidden_child = dom.create_element("canvas");
+        let visible_canvas = dom.create_element("canvas");
+        dom.set_attribute(hidden_parent, "style", "display:none")
+            .expect("parent style attaches");
+        dom.set_attribute(hidden_canvas, "style", "display:none")
+            .expect("canvas style attaches");
+        dom.append_child(document, html).expect("html attaches");
+        dom.append_child(html, body).expect("body attaches");
+        dom.append_child(body, hidden_parent)
+            .expect("hidden parent attaches");
+        dom.append_child(hidden_parent, hidden_child)
+            .expect("hidden child attaches");
+        dom.append_child(body, hidden_canvas)
+            .expect("hidden canvas attaches");
+        dom.append_child(body, visible_canvas)
+            .expect("visible canvas attaches");
+        for node in [hidden_child, hidden_canvas, visible_canvas] {
+            dom.ensure_canvas_surface(node, 4, 4);
+        }
+        let stylesheet = test_stylesheet(&dom);
+        let viewport = silksurf_layout::Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 800.0,
+            height: 600.0,
+        };
+        let replaced = collect_image_replaced_sizes(&dom, document, "http://example.test/", &[]);
+        let fused = silksurf_engine::fused_pipeline::fused_style_layout_paint_with_replaced_sizes(
+            &dom,
+            &stylesheet,
+            document,
+            viewport,
+            &replaced,
+        );
+        let mut items = fused.display_items.clone();
+        append_image_display_items(
+            &dom,
+            &fused,
+            "http://example.test/",
+            &[],
+            &mut SvgSurfaceCache::default(),
+            &mut items,
+        );
+        assert_eq!(
+            items
+                .iter()
+                .filter(|item| matches!(item, silksurf_render::DisplayItem::Image { .. }))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
     fn background_modulepreload_caps_large_rounds() {
         assert!(background_modulepreload_round_fits(
             MAX_BACKGROUND_MODULEPRELOAD_ROUND_URLS
@@ -1542,6 +1596,9 @@ mod tests {
              <svg style='display:none' viewBox='0 0 4 4'><rect width='4' height='4'/></svg>\
              </div><div style='display:none'>\
              <svg viewBox='0 0 4 4'><rect width='4' height='4'/></svg></div>\
+             <svg style='display:contents' viewBox='0 0 4 4'>\
+             <svg viewBox='0 0 4 4' width='16' height='16'>\
+             <rect width='4' height='4'/></svg></svg>\
              <svg viewBox='0 0 4 4' width='16' height='16'>\
              <rect width='4' height='4'/></svg></body></html>",
         )

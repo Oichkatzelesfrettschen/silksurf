@@ -363,6 +363,7 @@ mod page_geometry_tests {
             div,
             FusedResult {
                 styles: vec![None; table.len()],
+                rendered: vec![false; table.len()],
                 display_items: Vec::new(),
                 node_rects,
                 node_borders,

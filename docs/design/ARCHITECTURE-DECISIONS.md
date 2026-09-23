@@ -3706,14 +3706,20 @@ child list in tree order. Paint and page geometry omit the wrapper. A reused
 scratch stack grows with the flattened child frontier and avoids recursive
 box-tree flattening in the fused path.
 
-CSS Display 3 computes `display: contents` to `block` on the document root and
-to `none` on replaced HTML elements and the listed form controls. The cascade
-applies those computed-value changes before either layout path sees the style.
+CSS Display 3 computes `display: contents` to `block` on the document root.
+Its Appendix B computes the value to `none` on replaced HTML elements, the
+listed form controls, and outer SVG elements whose parent establishes an HTML
+or document CSS box. The cascade applies those computed-value changes before
+either layout path sees the style.
+The fused result carries the BFS rendered flags computed during paint. Page
+resource paint and hit testing read those flags before handling a replaced
+surface, so hidden canvas pixels stay outside the snapshot path.
 
 The `display_contents` regressions check computed values, block flow, nested
 flex children, positioned descendants, and wrapper paint exclusion. The
 page-geometry test checks the boxless DOM geometry boundary. Inline formatting
-and SVG box-generation exceptions remain separate CSS Display obligations.
+and remaining SVG box-generation exceptions remain separate CSS Display
+obligations.
 
 Anonymous text generates an inline box even when its DOM parent computes to
 `contents`. MathML elements compute `contents` to `none`. A boxless wrapper

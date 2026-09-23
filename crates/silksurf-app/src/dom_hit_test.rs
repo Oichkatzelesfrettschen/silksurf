@@ -89,27 +89,12 @@ fn contents_editor_rect(
 }
 
 pub(crate) fn box_is_exposed(fused: &FusedResult, index: usize) -> bool {
-    let mut current = index;
-    loop {
-        let Some(style) = fused.styles.get(current).and_then(Option::as_ref) else {
-            return false;
-        };
-        if style.display == silksurf_css::Display::None
-            || (current == index && style.display == silksurf_css::Display::Contents)
-        {
-            return false;
-        }
-        let parent = fused
-            .table
-            .parent_idx
-            .get(current)
-            .copied()
-            .unwrap_or(u32::MAX);
-        if parent == u32::MAX {
-            return true;
-        }
-        current = parent as usize;
-    }
+    fused.rendered.get(index).copied().unwrap_or(false)
+        && fused
+            .styles
+            .get(index)
+            .and_then(Option::as_ref)
+            .is_some_and(|style| style.display != silksurf_css::Display::Contents)
 }
 
 pub(crate) fn is_editable_input_node(dom: &silksurf_dom::Dom, node: silksurf_dom::NodeId) -> bool {
