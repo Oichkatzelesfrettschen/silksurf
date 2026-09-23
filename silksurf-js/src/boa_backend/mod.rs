@@ -1592,7 +1592,8 @@ impl SilkContext {
         root_url: &str,
         modules: &[(String, String)],
     ) -> Result<(), String> {
-        self.prepare_module_graph(root_url, modules)?;
+        self.module_loader.clear();
+        self.prepare_document_modules(root_url, modules)?;
         let module = self
             .module_loader
             .get(root_url)?
@@ -1600,17 +1601,25 @@ impl SilkContext {
         self.evaluate_module(&module)
     }
 
-    fn prepare_module_graph(
+    /// Seed the document registry before classic scripts can import modules.
+    /// Each URL retains its first module record or parse failure for the context.
+    pub fn prepare_document_modules(
         &mut self,
         document_url: &str,
         modules: &[(String, String)],
     ) -> Result<(), String> {
-        self.module_loader.clear();
         self.module_loader.ensure_document_url(document_url);
         let mut seen = std::collections::HashSet::new();
         for (module_url, source_text) in modules {
             if !seen.insert(module_url) {
                 return Err(format!("duplicate module source URL: {module_url}"));
+            }
+            if !self
+                .module_loader
+                .get(module_url)
+                .is_ok_and(|module| module.is_none())
+            {
+                continue;
             }
             match self.parse_module(module_url, source_text) {
                 Ok(module) => self.module_loader.insert(module_url, module),
@@ -1627,6 +1636,11 @@ impl SilkContext {
             .map_err(|error| format!("module parse {url}: {error}"))
     }
 
+    /// Register an import map while the document has performed zero specifier resolutions.
+    pub fn update_unresolved_import_map(&self, map: ImportMap) {
+        self.module_loader.update_unresolved_import_map(map);
+    }
+
     /// Evaluate ordered roots against one URL-keyed dependency registry.
     /// Inline roots expose the document URL through `import.meta.url`.
     pub fn eval_document_modules(
@@ -1635,15 +1649,15 @@ impl SilkContext {
         roots: &[ModuleScript],
         modules: &[(String, String)],
     ) -> Result<Vec<Result<(), String>>, String> {
-        self.prepare_module_graph(document_url, modules)?;
+        self.prepare_document_modules(document_url, modules)?;
         Ok(roots
             .iter()
             .map(|root| {
                 let module = match root {
                     ModuleScript::External(url) => self
                         .module_loader
-                        .get(url)?
-                        .ok_or_else(|| format!("module root {url} was not fetched")),
+                        .get_or_fetch(url, &std::cell::RefCell::new(&mut self.ctx))
+                        .map_err(|error| error.to_string()),
                     ModuleScript::Inline(text) => self.parse_module(document_url, text),
                 }?;
                 self.evaluate_module(&module)

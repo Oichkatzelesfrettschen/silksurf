@@ -1,6 +1,46 @@
 use silksurf_js::{ModuleScript, SilkContext};
 
 #[test]
+fn classic_import_and_later_roots_retain_one_record_and_consumed_budget() {
+    use silksurf_js::ModuleFetchBudget;
+    let mut context = SilkContext::new();
+    let base = "https://example.test/app/";
+    let source =
+        "globalThis.executions = (globalThis.executions || 0) + 1; export const value = 42;";
+    context.set_document_url(base);
+    context.set_module_fetcher(Box::new(move |url| {
+        assert_eq!(url, "https://example.test/app/shared.js");
+        Ok(source.into())
+    }));
+    context.set_module_fetch_budget(ModuleFetchBudget {
+        urls: 1,
+        bytes: source.len(),
+    });
+    context
+        .prepare_document_modules(base, &[])
+        .expect("empty registry");
+    context
+        .eval("import('./shared.js').then(m => globalThis.imported = m.value);")
+        .expect("classic import");
+    let roots = [ModuleScript::External(
+        "https://example.test/app/shared.js".into(),
+    )];
+    let sources = [(
+        "https://example.test/app/shared.js".into(),
+        "throw new Error('replacement source');".into(),
+    )];
+    let results = context
+        .eval_document_modules(base, &roots, &sources)
+        .expect("document roots");
+    assert!(results.iter().all(Result::is_ok), "{results:?}");
+    context
+        .eval("if (executions !== 1 || imported !== 42) throw new Error('module identity');")
+        .expect("same module record");
+    assert_eq!(context.module_fetch_budget().urls, 0);
+    assert_eq!(context.module_fetch_budget().bytes, 0);
+}
+
+#[test]
 fn document_roots_share_dependencies_and_keep_inline_document_url() {
     let mut context = SilkContext::new();
     let base = "https://example.test/app/page";
@@ -60,4 +100,92 @@ fn external_parse_failure_affects_importers_and_preserves_independent_roots() {
     context
         .eval("if (!independent) throw new Error('independent root skipped');")
         .expect("independent root executes");
+}
+
+#[test]
+fn late_external_root_fetches_through_document_allowance() {
+    let mut context = SilkContext::new();
+    let source = "globalThis.lateRoot = 42;";
+    context.set_document_url("https://example.test/");
+    context.set_module_fetch_budget(silksurf_js::ModuleFetchBudget {
+        urls: 1,
+        bytes: source.len(),
+    });
+    context.set_module_fetcher(Box::new(move |url| {
+        assert_eq!(url, "https://example.test/late.js");
+        Ok(source.into())
+    }));
+    let result = context
+        .eval_document_modules(
+            "https://example.test/",
+            &[ModuleScript::External(
+                "https://example.test/late.js".into(),
+            )],
+            &[],
+        )
+        .unwrap();
+    assert!(result[0].is_ok(), "{result:?}");
+    context
+        .eval("if (lateRoot !== 42) throw new Error('late root');")
+        .unwrap();
+    assert_eq!(context.module_fetch_budget().urls, 0);
+}
+
+#[test]
+fn fetched_parse_failure_is_cached_across_imports() {
+    use std::{cell::Cell, rc::Rc};
+    let calls = Rc::new(Cell::new(0));
+    let observed = Rc::clone(&calls);
+    let mut context = SilkContext::new();
+    context.set_document_url("https://example.test/");
+    context.set_module_fetch_budget(silksurf_js::ModuleFetchBudget {
+        urls: 2,
+        bytes: 100,
+    });
+    context.set_module_fetcher(Box::new(move |_| {
+        observed.set(observed.get() + 1);
+        Ok("export const = ;".into())
+    }));
+    context
+        .eval("globalThis.rejections = 0; import('./bad.js').catch(() => rejections++);")
+        .unwrap();
+    context
+        .eval("import('./bad.js').catch(() => rejections++);")
+        .unwrap();
+    assert_eq!(calls.get(), 1);
+    context
+        .eval("if (rejections !== 2) throw new Error('cached parse rejection');")
+        .unwrap();
+}
+
+#[test]
+fn import_map_registration_precedes_resolution_and_freezes_afterward() {
+    let mut context = SilkContext::new();
+    context.set_document_url("https://example.test/");
+    context
+        .prepare_document_modules(
+            "https://example.test/",
+            &[(
+                "https://example.test/a.js".into(),
+                "export const value = 42;".into(),
+            )],
+        )
+        .unwrap();
+    context.update_unresolved_import_map(silksurf_js::ImportMap::from_imports(vec![(
+        "dep".into(),
+        "/a.js".into(),
+    )]));
+    context
+        .eval("import('dep').then(m => globalThis.first = m.value);")
+        .unwrap();
+    context.update_unresolved_import_map(silksurf_js::ImportMap::from_imports(vec![(
+        "dep".into(),
+        "/missing.js".into(),
+    )]));
+    context
+        .eval("import('dep').then(m => globalThis.second = m.value);")
+        .unwrap();
+    context
+        .eval("if (first !== 42 || second !== 42) throw new Error('map registration');")
+        .unwrap();
 }
