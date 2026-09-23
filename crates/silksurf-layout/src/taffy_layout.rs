@@ -42,7 +42,9 @@ use taffy::{
     },
 };
 
-use crate::{EdgeSizes, Rect, neighbor_table::LayoutNeighborTable, unresolved_font_relative_px};
+use crate::{
+    EdgeSizes, Rect, ReplacedSize, neighbor_table::LayoutNeighborTable, unresolved_font_relative_px,
+};
 
 pub struct SilkTaffy {
     styles: Vec<Style>,
@@ -510,6 +512,26 @@ fn record_elapsed(total: &mut std::time::Duration, start: Option<std::time::Inst
     }
 }
 
+fn intrinsic_ratio_map(replaced_sizes: &[ReplacedSize]) -> FxHashMap<DomNodeId, f32> {
+    replaced_sizes
+        .iter()
+        .filter_map(|size| {
+            (size.width.is_finite()
+                && size.height.is_finite()
+                && size.width > 0.0
+                && size.height > 0.0)
+                .then_some((size.node, size.width / size.height))
+        })
+        .collect()
+}
+
+fn replaced_node_is_leaf(dom: &Dom, node: DomNodeId, aspect_ratio: Option<f32>) -> bool {
+    aspect_ratio.is_some()
+        && dom.element_name(node).ok().flatten().is_some_and(|name| {
+            matches!(TagName::from_str(name), TagName::Img | TagName::Canvas) || name == "svg"
+        })
+}
+
 impl TaffyLayout {
     #[must_use]
     pub fn new() -> Self {
@@ -712,7 +734,18 @@ impl TaffyLayout {
         table: &LayoutNeighborTable,
         styles: &[Option<ComputedStyle>],
     ) {
+        self.rebuild_with_replaced_sizes(dom, table, styles, &[]);
+    }
+
+    pub fn rebuild_with_replaced_sizes(
+        &mut self,
+        dom: &Dom,
+        table: &LayoutNeighborTable,
+        styles: &[Option<ComputedStyle>],
+        replaced_sizes: &[ReplacedSize],
+    ) {
         let trace_taffy = std::env::var_os("SILKSURF_TRACE_TAFFY").is_some();
+        let intrinsic_ratios = intrinsic_ratio_map(replaced_sizes);
         let mut stats = TaffyRebuildStats::default();
         let n = table.len();
         if self.taffy_nodes.capacity() < n {
@@ -746,25 +779,30 @@ impl TaffyLayout {
             }
             self.create_static_placeholder(table, styles, i);
             let style_start = trace_start(trace_taffy);
-            let taffy_style = css_to_taffy_style_for_index(
+            let mut taffy_style = css_to_taffy_style_for_index(
                 table,
                 styles,
                 i,
                 &mut self.flattened_children_scratch,
             );
+            let aspect_ratio = intrinsic_ratios.get(&table.bfs_order[i]).copied();
+            taffy_style.aspect_ratio = aspect_ratio;
             record_elapsed(&mut stats.style_time, style_start);
             let child_start = trace_start(trace_taffy);
             self.child_ids_scratch.clear();
-            self.collect_flow_children(table, styles, i);
-            // An absolute box whose nearest positioned ancestor is not its DOM
-            // parent joins that ancestor's taffy children instead, so taffy
-            // resolves its insets against the box CSS names.
-            let adopted_run = adopted_run_bounds(&self.adopted_start, i);
-            self.child_ids_scratch.extend(
-                self.adopted[adopted_run]
-                    .iter()
-                    .filter_map(|&adopted| self.taffy_nodes[adopted as usize]),
-            );
+            let is_replaced_leaf = replaced_node_is_leaf(dom, table.bfs_order[i], aspect_ratio);
+            if !is_replaced_leaf {
+                self.collect_flow_children(table, styles, i);
+                // An absolute box whose nearest positioned ancestor is not its DOM
+                // parent joins that ancestor's taffy children instead, so taffy
+                // resolves its insets against the box CSS names.
+                let adopted_run = adopted_run_bounds(&self.adopted_start, i);
+                self.child_ids_scratch.extend(
+                    self.adopted[adopted_run]
+                        .iter()
+                        .filter_map(|&adopted| self.taffy_nodes[adopted as usize]),
+                );
+            }
             record_elapsed(&mut stats.child_time, child_start);
 
             if trace_taffy {

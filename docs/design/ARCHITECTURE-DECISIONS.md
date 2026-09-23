@@ -3358,6 +3358,15 @@ The rasterized result is an `ImageSurface`, which puts an `<svg>` on the path
 rasterizer arm, and no ARGB arm of its own, and the direct ARGB fast path
 composes it unchanged.
 
+`ReplacedSize` carries intrinsic dimensions into `TaffyLayout`. A replaced
+SVG contributes one leaf box, and the intrinsic width-to-height ratio reaches
+Taffy's `aspect_ratio` when CSS specifies one dimension and leaves the other
+auto. The `FusedWorkspace` rebuild key includes the dimensions, so a loaded
+image or changed SVG size updates geometry with the same DOM and stylesheet.
+The native ChatGPT wordmark probe supplied a 357:62 `viewBox` and a 110 px
+computed width; the earlier 110 by 133 px box exposed SVG children and text
+content to block layout instead of sizing the replaced box by its ratio.
+
 `SvgSurfaceCache` holds surfaces across frames, keyed by node and painted box.
 The DOM's structure and style generations clear it, rather than each entry
 proving itself. A rejection caches as a rejection, because retrying it every
