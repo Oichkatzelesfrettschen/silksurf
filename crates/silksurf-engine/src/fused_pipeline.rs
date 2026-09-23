@@ -1309,7 +1309,11 @@ fn accumulate_paint_transforms(
             .filter(|&parent| (parent as usize) < transforms.len());
         let inherited = parent.map_or(PaintTransform::IDENTITY, |p| transforms[p as usize]);
         let combined = styles[i].as_ref().map_or(inherited, |style| {
-            inherited.then(local_paint_transform(style, node_rects[i]))
+            if matches!(style.display, Display::None | Display::Contents) {
+                inherited
+            } else {
+                inherited.then(local_paint_transform(style, node_rects[i]))
+            }
         });
         any |= !combined.is_identity();
         transforms[i] = combined;

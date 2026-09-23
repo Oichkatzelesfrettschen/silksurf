@@ -88,6 +88,32 @@ fn direct_text_inside_contents_wrapper_keeps_its_inline_box() {
 }
 
 #[test]
+fn contents_wrapper_transform_does_not_move_descendant_paint() {
+    let parsed =
+        parse_html("<html><body><div id='wrapper'><div id='child'></div></div></body></html>")
+            .expect("fixture parses");
+    let stylesheet = parse_stylesheet(
+        "body { margin: 0 } #wrapper { display: contents; transform: translateX(50px) } \
+         #child { width: 20px; height: 10px; background: #00ff00 }",
+    )
+    .expect("stylesheet parses");
+    let fused = fused_style_layout_paint(&parsed.dom, &stylesheet, parsed.document, VIEWPORT);
+    let rect = fused
+        .display_items
+        .iter()
+        .find_map(|item| match item {
+            DisplayItem::SolidColor { rect, color }
+                if color.r == 0 && color.g == 255 && color.b == 0 =>
+            {
+                Some(rect)
+            }
+            _ => None,
+        })
+        .expect("child paints");
+    assert_close(rect.x, 0.0, "child paint x");
+}
+
+#[test]
 fn nested_contents_children_keep_order_in_a_flex_container() {
     let parsed = parse_html(
         "<html><body><div id='row'><div id='outer'><div id='left'></div>\
