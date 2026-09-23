@@ -152,9 +152,11 @@ defects that the narrow gates had hidden:
   `crates/silksurf-html/src/tree_builder.rs` held its only construction site,
   and `parse_html` discards parse errors. It stays as the home for `treesink`
   parse errors once that path surfaces them.
-- 192 fragment cases skip in tree construction; `parse_html` is document-mode
-  only, and `parse_fragment_into` takes a context element the `.dat` harness
-  does not yet thread through.
+- The 192 fragment cases were skipped because the `.dat` harness called only
+  document-mode parsing. Resolution on 2026-09-23: the harness now passes each
+  context namespace and scripting flag through the production fragment adapter.
+  The pinned 1,918-case run executes all cases with 1,792 passes, 126 recorded
+  failures, zero unexpected results, and zero skips.
 - 166 tokenizer cases need `initialStates` beyond the data state or a
   `lastStartTag`, neither of which `silksurf_html::Tokenizer` exposes.
 
