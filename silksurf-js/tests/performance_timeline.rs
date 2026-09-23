@@ -267,13 +267,14 @@ fn a_natively_recorded_entry_joins_the_page_timeline() {
     )
     .expect("observe");
     ctx.record_performance_entry(PerformanceEntryType::LongTask, "timer", 100.0, 72.0);
-    ctx.eval("performance.mark('page-side');").expect("mark");
+    ctx.eval("performance.mark('page-side', { startTime: 0 });")
+        .expect("mark");
     assert_eq!(ctx.deliver_performance_entries(), 1);
     ctx.eval(
         r"
         eq(globalThis.seen.length, 2, 'both entries delivered');
-        // The timeline orders by start time, so the page's mark at ~0 sorts
-        // ahead of the long task recorded at 100.
+        // The timeline orders by start time, so the page's mark sorts ahead
+        // of the later native entry.
         eq(globalThis.seen[1], 'longtask:timer:72', 'the native entry');
         eq(globalThis.seen[0].indexOf('mark:page-side'), 0, 'the mark sorts first');
         eq(performance.getEntriesByType('longtask').length, 1, 'the buffer holds it');
