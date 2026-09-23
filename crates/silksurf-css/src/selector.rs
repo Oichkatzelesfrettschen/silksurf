@@ -385,15 +385,26 @@ impl<'a> SelectorParser<'a> {
         let mut selectors = SmallVec::new();
         self.consume_whitespace();
         while !self.is_eof() {
-            if let Some(selector) = self.parse_selector() {
-                selectors.push(selector);
-            } else {
-                self.next();
-            }
+            let Some(selector) = self.parse_selector() else {
+                return SelectorList {
+                    selectors: SmallVec::new(),
+                };
+            };
             self.consume_whitespace();
+            if !matches!(self.peek(), Some(CssToken::Comma | CssToken::Eof) | None) {
+                return SelectorList {
+                    selectors: SmallVec::new(),
+                };
+            }
+            selectors.push(selector);
             if matches!(self.peek(), Some(CssToken::Comma)) {
                 self.next();
                 self.consume_whitespace();
+                if self.is_eof() {
+                    return SelectorList {
+                        selectors: SmallVec::new(),
+                    };
+                }
             }
         }
         SelectorList { selectors }
@@ -663,7 +674,7 @@ impl<'a> SelectorParser<'a> {
         let mut depth = 0usize;
         while let Some(token) = self.next() {
             match token {
-                CssToken::ParenOpen => depth += 1,
+                CssToken::ParenOpen | CssToken::Function(_) => depth += 1,
                 CssToken::ParenClose => {
                     if depth == 0 {
                         break;
@@ -684,16 +695,16 @@ impl<'a> SelectorParser<'a> {
         }
     }
 
-    // Collect tokens inside matching parens (the opening paren was already
-    // consumed by the Function token). Stops and discards the closing paren.
+    // CSS Function tokens include their opening parenthesis, so nested functions
+    // contribute one level just like explicit ParenOpen tokens.
     fn collect_paren_tokens(&mut self) -> Vec<CssToken> {
         let mut tokens = Vec::new();
         let mut depth = 0usize;
         while let Some(token) = self.next() {
             match token {
-                CssToken::ParenOpen => {
+                CssToken::ParenOpen | CssToken::Function(_) => {
                     depth += 1;
-                    tokens.push(CssToken::ParenOpen);
+                    tokens.push(token);
                 }
                 CssToken::ParenClose => {
                     if depth == 0 {
