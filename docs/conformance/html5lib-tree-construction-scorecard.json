@@ -1,24 +1,24 @@
 {
   "corpus": "wpt html/syntax/parsing/resources",
   "corpus_revision": "1924c6e9784b3c1da4ad5bfcbfeea64b2a886e7b",
-  "executed": 1726,
+  "executed": 1918,
   "expected_fail": 126,
   "fail": 0,
   "oracle": "The production parse tree serialized in html5lib format equals the corpus #document. Expected failures remain failures; unexpected passes count as genuine passes and fail the strict expectation gate.",
-  "pass": 1600,
-  "rate_executed": 0.9269988412514485,
-  "rate_total": 0.8342022940563086,
+  "pass": 1792,
+  "rate_executed": 0.9343065693430657,
+  "rate_total": 0.9343065693430657,
   "runner": "html5lib_tree_construction",
   "runner_kind": "wpt-tree-construction",
-  "skip": 192,
+  "skip": 0,
   "total": 1918,
   "unexpected_pass": 0,
   "measurement_environment": {
     "schema_version": 1,
-    "timestamp_utc": "2026-09-23T05:28:20Z",
+    "timestamp_utc": "2026-09-23T16:39:29Z",
     "git": {
-      "commit": "e5b206483447455dffa36809c9057aa9fe13c4a0",
-      "branch": "fix/html-colon-local-name",
+      "commit": "3dd53da71c459e6cb29c8979ed4bc4d25ac85cb5",
+      "branch": "fix/html-fragment-tree-conformance",
       "dirty": false
     },
     "toolchain": {
@@ -45,9 +45,9 @@
         11
       ],
       "load_average": [
-        12.20361328125,
-        14.041015625,
-        19.89697265625
+        17.92529296875,
+        17.81982421875,
+        12.42919921875
       ],
       "cpu_governors": [
         "performance"

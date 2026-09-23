@@ -76,15 +76,18 @@ remain open program items.
 
 ## Conformance evidence
 
-### HTML tree construction (upstream corpus, production parse path)
+### HTML tree construction (upstream corpus, production document and fragment paths)
 
 - runner kind: `wpt-tree-construction`
 - corpus: WPT `html/syntax/parsing/resources`, the home html5lib moved its
   tree-construction `.dat` files to
-- result: 1,600 / 1,726 executed = **92.70%**; 1,600 / 1,918 total = **83.42%**
-- path under test: `silksurf_html::parse_html`, the html5ever entry point
+- result: 1,792 / 1,918 executed = **93.43%**; 1,792 / 1,918 total = **93.43%**
+- document path: `silksurf_html::parse_html`, the html5ever entry point
   `silksurf-engine` uses
-- 192 fragment cases count as skipped; `parse_html` is document-mode only
+- fragment path: `parse_fragment_into_in_context` supplies the context
+  namespace and scripting state used by fragment insertion
+- all 192 fragment cases execute; 126 parser gaps remain expected failures and
+  the run records zero skips
 - 126 recorded gaps sit in
   `crates/silksurf-html/tests/html5lib-tree-construction.expectations`. HTML
   templates own detached content fragments, resolving 109 adapter failures.
