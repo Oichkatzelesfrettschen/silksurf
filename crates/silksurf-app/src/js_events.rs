@@ -14,7 +14,7 @@
  */
 
 use crate::browser_types::{BrowserFrame, BrowserPageRuntime, BrowserRedrawMode, BrowserState};
-use crate::dom_hit_test::rect_contains;
+use crate::dom_hit_test::{box_is_exposed, rect_contains};
 use crate::runtime_repaint::repaint_runtime_dirty_nodes;
 use silksurf_js::{SyntheticEvent, SyntheticField};
 
@@ -65,6 +65,9 @@ pub(crate) fn hit_test_event_target(
             continue;
         }
         if !rect_contains(*rect, window_x, document_y) {
+            continue;
+        }
+        if !box_is_exposed(&runtime.fused, idx) {
             continue;
         }
         let area = rect.width * rect.height;
@@ -353,6 +356,29 @@ mod tests {
         )
         .expect("point inside inner hits a node");
         assert_eq!(hit, inner);
+    }
+
+    #[test]
+    fn hit_test_skips_a_contents_wrapper_without_a_box() {
+        let page = page_with_script(
+            "<!doctype html><html><body><div id='outer' style='width:100px;height:100px'>\
+             <div id='wrapper' style='display:contents'><div style='width:10px;height:10px'></div>\
+             </div></div></body></html>",
+            "",
+        );
+        let outer = node_by_id(&page, "outer");
+        let wrapper = node_by_id(&page, "wrapper");
+        let index = page.runtime.fused.table.node_to_bfs_idx[&outer] as usize;
+        let rect = page.runtime.fused.node_rects[index];
+        let hit = hit_test_event_target(
+            &page.runtime,
+            rect.x + rect.width - 2.0,
+            rect.y + rect.height - 2.0,
+            0.0,
+            0,
+        );
+        assert_eq!(hit, Some(outer));
+        assert_ne!(hit, Some(wrapper));
     }
 
     #[test]

@@ -25,8 +25,8 @@ pub(crate) fn collect_input_targets(
     fused: &FusedResult,
 ) -> Vec<InputTarget> {
     let mut targets = Vec::new();
-    for &node in &fused.table.bfs_order {
-        if !is_editable_input_node(dom, node) {
+    for (index, &node) in fused.table.bfs_order.iter().enumerate() {
+        if !is_editable_input_node(dom, node) || !box_is_exposed(fused, index) {
             continue;
         }
         let Some(rect) = fused_node_rect(fused, node) else {
@@ -37,6 +37,30 @@ pub(crate) fn collect_input_targets(
         }
     }
     targets
+}
+
+pub(crate) fn box_is_exposed(fused: &FusedResult, index: usize) -> bool {
+    let mut current = index;
+    loop {
+        let Some(style) = fused.styles.get(current).and_then(Option::as_ref) else {
+            return false;
+        };
+        if style.display == silksurf_css::Display::None
+            || (current == index && style.display == silksurf_css::Display::Contents)
+        {
+            return false;
+        }
+        let parent = fused
+            .table
+            .parent_idx
+            .get(current)
+            .copied()
+            .unwrap_or(u32::MAX);
+        if parent == u32::MAX {
+            return true;
+        }
+        current = parent as usize;
+    }
 }
 
 pub(crate) fn is_editable_input_node(dom: &silksurf_dom::Dom, node: silksurf_dom::NodeId) -> bool {

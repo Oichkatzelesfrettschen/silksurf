@@ -2350,6 +2350,27 @@ mod tests {
     }
 
     #[test]
+    fn input_targets_skip_boxless_and_hidden_subtrees() {
+        let document = parse_html(concat!(
+            "<!doctype html><html><body>",
+            "<input style='display:contents'>",
+            "<div style='display:none'><input></div>",
+            "</body></html>"
+        ))
+        .expect("html parses");
+        let stylesheet = test_stylesheet(&document.dom);
+        let viewport = Rect {
+            x: 0.0,
+            y: BROWSER_CHROME_HEIGHT,
+            width: FRAME_WIDTH as f32,
+            height: FRAME_HEIGHT as f32 - BROWSER_CHROME_HEIGHT,
+        };
+        let fused =
+            fused_style_layout_paint(&document.dom, &stylesheet, document.document, viewport);
+        assert!(collect_input_targets(&document.dom, &fused).is_empty());
+    }
+
+    #[test]
     fn focused_input_typing_updates_value_with_damage_redraw() {
         let payload = BrowserPagePayload {
             url: "https://example.com/".to_string(),

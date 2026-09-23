@@ -3715,6 +3715,12 @@ flex children, positioned descendants, and wrapper paint exclusion. The
 page-geometry test checks the boxless DOM geometry boundary. Inline formatting
 and SVG box-generation exceptions remain separate CSS Display obligations.
 
+Anonymous text generates an inline box even when its DOM parent computes to
+`contents`. MathML elements compute `contents` to `none`. A boxless wrapper
+passes inherited paint transforms through without composing its own transform.
+Grid lowering and item sizing use the flattened box-tree parent, and native
+input and event hit tests exclude boxless nodes and hidden subtrees.
+
 ## Future ADRs
 
 Planned (renumbered after the 2026-04-30 batch):
