@@ -172,7 +172,13 @@ fn collect_child_frame_candidates(
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let discovered = discover_iframes(&dom, runtime.document, &frame.url);
-    trace_child_frame_states(&dom, &runtime.geometry.borrow(), &discovered, &frame.url);
+    trace_child_frame_states(
+        &dom,
+        &runtime.geometry.borrow(),
+        &runtime.fused,
+        &discovered,
+        &frame.url,
+    );
     if std::env::var_os("SILKSURF_TRACE_CHILD_FRAMES").is_some()
         && !discovered.is_empty()
         && !CHILD_FRAME_TRACE_EMITTED.swap(true, std::sync::atomic::Ordering::Relaxed)
@@ -188,9 +194,25 @@ fn collect_child_frame_candidates(
                         .join(" ")
                 })
                 .unwrap_or_default();
+            let computed_style = runtime
+                .fused
+                .table
+                .node_to_bfs_idx
+                .get(owner)
+                .and_then(|index| runtime.fused.styles.get(*index as usize))
+                .and_then(Option::as_ref)
+                .map_or_else(
+                    || "computed_style=unavailable".to_string(),
+                    |style| {
+                        format!(
+                            "computed_width={:?} computed_height={:?}",
+                            style.width, style.height
+                        )
+                    },
+                );
             eprintln!(
-                "[SilkSurf] Child-frame candidate: owner={owner:?} source={source_url} attrs={attrs} bounds={:?}",
-                runtime.geometry.borrow().get(*owner)
+                "[SilkSurf] Child-frame candidate: owner={owner:?} source={source_url} attrs={attrs} bounds={:?} {computed_style}",
+                runtime.geometry.borrow().get(*owner),
             );
         }
     }
@@ -212,6 +234,7 @@ fn collect_child_frame_candidates(
 fn trace_child_frame_states(
     dom: &silksurf_dom::Dom,
     geometry: &PageGeometry,
+    fused: &FusedResult,
     frames: &[(silksurf_dom::NodeId, String)],
     document_url: &str,
 ) {
@@ -239,7 +262,25 @@ fn trace_child_frame_states(
                     .join(" ")
             })
             .unwrap_or_default();
-        let state = format!("{attributes} bounds={:?}", geometry.get(*owner));
+        let computed_style = fused
+            .table
+            .node_to_bfs_idx
+            .get(owner)
+            .and_then(|index| fused.styles.get(*index as usize))
+            .and_then(Option::as_ref)
+            .map_or_else(
+                || "computed_style=unavailable".to_string(),
+                |style| {
+                    format!(
+                        "computed_width={:?} computed_height={:?}",
+                        style.width, style.height
+                    )
+                },
+            );
+        let state = format!(
+            "{attributes} bounds={:?} {computed_style}",
+            geometry.get(*owner)
+        );
         let key = (document_url.to_string(), owner.raw());
         if snapshots.get(&key) != Some(&state) {
             eprintln!("[SilkSurf] Child-frame state: owner={owner:?} source={source_url} {state}");
@@ -553,5 +594,42 @@ mod tests {
             .expect("iframe receives a layout box");
         assert!((bounds[2] - 300.0).abs() < f32::EPSILON);
         assert!((bounds[3] - 150.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn iframe_css_height_overrides_html_intrinsic_dimensions() {
+        let page = build_browser_page(BrowserPagePayload {
+            url: "https://example.com/".to_string(),
+            html: "<!doctype html><html><body><iframe style='width:300px;height:65px;border:0'></iframe></body></html>".to_string(),
+            css_text: stylesheet_text_with_user_agent_defaults("body { margin: 0; }"),
+            sheet_bodies: Vec::new(),
+            script_texts: Vec::new(),
+            module_texts: Vec::new(),
+            images: Vec::new(),
+            render_config: BrowserRenderConfig::default(),
+            parsed_document: None,
+        })
+        .expect("parent page builds");
+        let dom = page
+            .runtime
+            .dom
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut pending = vec![page.runtime.document];
+        let owner = loop {
+            let node = pending.pop().expect("iframe exists");
+            if dom.element_name(node).ok().flatten() == Some("iframe") {
+                break node;
+            }
+            pending.extend(dom.children(node).expect("children read").iter().copied());
+        };
+        let bounds = page
+            .runtime
+            .geometry
+            .borrow()
+            .get(owner)
+            .expect("iframe receives a layout box");
+        assert!((bounds[2] - 300.0).abs() < f32::EPSILON);
+        assert!((bounds[3] - 65.0).abs() < f32::EPSILON);
     }
 }
