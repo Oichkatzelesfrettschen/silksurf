@@ -3807,7 +3807,9 @@ discovery runs after parent host callbacks so script-created and source-mutated
 iframe elements enter the same load path. Child fetches preserve the top-level
 site and cookie partition. The low-resource profile caps nesting at eight
 levels, the total number of active child contexts at sixteen, and each child
-viewport at 1,048,576 pixels.
+viewport at 1,048,576 pixels. The message hub releases a context's origin,
+pending queue, frame mappings, and queued source messages when the final
+context handle drops.
 
 This decision admits `iframe[src]` document rendering and queued parent/child
 `postMessage` delivery with origin checks. Direct same-origin DOM access,

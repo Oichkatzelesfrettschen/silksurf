@@ -20,6 +20,26 @@ pub struct WindowMessageContext {
     id: u64,
     origin: String,
     parent: Option<(u64, u64)>,
+    _registration: Arc<ContextRegistration>,
+}
+
+struct ContextRegistration {
+    hub: WindowMessageHub,
+    id: u64,
+}
+
+impl Drop for ContextRegistration {
+    fn drop(&mut self) {
+        let mut state = self.hub.0.lock().unwrap_or_else(PoisonError::into_inner);
+        state.origins.remove(&self.id);
+        state.pending.remove(&self.id);
+        state
+            .frame_contexts
+            .retain(|(parent, _), child| *parent != self.id && *child != self.id);
+        for queue in state.pending.values_mut() {
+            queue.retain(|message| message.source_context != self.id);
+        }
+    }
 }
 
 struct MessageHubState {
@@ -65,11 +85,16 @@ impl WindowMessageHub {
                 .frame_contexts
                 .insert((parent_context, owner_node), id);
         }
+        let registration = Arc::new(ContextRegistration {
+            hub: self.clone(),
+            id,
+        });
         WindowMessageContext {
             hub: self.clone(),
             id,
             origin,
             parent,
+            _registration: registration,
         }
     }
 }
@@ -471,5 +496,41 @@ mod tests {
         parent
             .eval("if (parentMessage !== 'ack:https://child.test:true:true') throw new Error(parentMessage);")
             .expect("parent event carries child origin and contentWindow identity");
+    }
+
+    #[test]
+    fn dropped_frame_context_releases_registry_entries_after_the_last_clone() {
+        let hub = WindowMessageHub::default();
+        let parent = hub.create_context("https://parent.test/", None);
+        let child = hub.create_context("https://child.test/", Some((parent.id(), 17)));
+        let child_id = child.id();
+        let child_clone = child.clone();
+        parent.post_to_frame(
+            17,
+            serde_json::json!({"event": "to-child"}),
+            "*".to_string(),
+        );
+        child.post(
+            parent.id(),
+            Some(17),
+            serde_json::json!({"event": "to-parent"}),
+            "*".to_string(),
+        );
+
+        drop(child);
+        assert!(
+            hub.0
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .origins
+                .contains_key(&child_id)
+        );
+        drop(child_clone);
+
+        let state = hub.0.lock().unwrap_or_else(PoisonError::into_inner);
+        assert_eq!(state.origins.len(), 1);
+        assert!(!state.pending.contains_key(&child_id));
+        assert!(state.frame_contexts.is_empty());
+        assert!(state.pending[&parent.id()].is_empty());
     }
 }
