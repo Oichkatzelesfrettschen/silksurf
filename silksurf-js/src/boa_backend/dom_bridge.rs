@@ -637,9 +637,30 @@ pub(super) fn node_to_js_object(
     if let Some(prototype) = super::dom_interfaces::interface_prototype(dom_arc, node_id, ctx) {
         wrapper.set_prototype(Some(prototype));
     }
+    if snap.tag_name.eq_ignore_ascii_case("iframe")
+        && let Some(proxy) = frame_window_proxy(node_id, ctx)
+    {
+        let _ = wrapper.set(js_string!("contentWindow"), proxy, false, ctx);
+    }
     let wrapper: JsValue = wrapper.into();
     store_wrapper(node_id, &wrapper, ctx);
     wrapper
+}
+
+fn frame_window_proxy(node_id: NodeId, ctx: &mut Context) -> Option<JsValue> {
+    let global = ctx.global_object().clone();
+    let factory = global
+        .get(js_string!("__silksurfWindowProxyForFrame"), ctx)
+        .ok()?
+        .as_object()?
+        .clone();
+    factory
+        .call(
+            &JsValue::from(global),
+            &[JsValue::from(JsString::from(node_id.raw().to_string()))],
+            ctx,
+        )
+        .ok()
 }
 
 struct NodeAccessors {

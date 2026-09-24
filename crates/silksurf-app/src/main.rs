@@ -62,6 +62,7 @@ mod accessibility;
 mod app_options;
 mod argb_raster;
 mod browser_types;
+mod child_frames;
 mod dom_hit_test;
 mod engine_process;
 mod input;
@@ -83,6 +84,8 @@ pub(crate) use app_options::*;
 pub(crate) use argb_raster::*;
 #[allow(clippy::wildcard_imports)]
 pub(crate) use browser_types::*;
+#[allow(clippy::wildcard_imports)]
+pub(crate) use child_frames::*;
 #[allow(clippy::wildcard_imports)]
 pub(crate) use dom_hit_test::*;
 #[allow(clippy::wildcard_imports)]
@@ -203,11 +206,9 @@ fn run_winit_browser_page(
         // A scroll marks the observation checkpoint and arms no timer, so an
         // otherwise idle page wakes now rather than sleeping through the
         // delivery its observers are waiting for.
-        if runtime.js_ctx.layout_observation_pending()
-            || runtime.js_ctx.performance_delivery_pending()
-        {
-            return Some(std::time::Instant::now());
-        }
+        let observation = (runtime.js_ctx.layout_observation_pending()
+            || runtime.js_ctx.performance_delivery_pending())
+        .then(std::time::Instant::now);
         // An animation whose value still changes with time needs the next
         // frame, and one held at a fill mode does not. A page whose animated
         // selectors match nothing reaches neither, so it keeps the idle cost
@@ -217,11 +218,15 @@ fn run_winit_browser_page(
             .animations_advance()
             .then(|| std::time::Instant::now() + ANIMATION_FRAME_INTERVAL);
         let timer = merge_deadline(runtime.js_ctx.next_host_callback_deadline(), animation);
-        if !runtime.sheets.has_pending_fetches() && !runtime.preloads.has_pending_fetches() {
-            return timer;
-        }
-        let poll = std::time::Instant::now() + STYLESHEET_FETCH_POLL_INTERVAL;
-        Some(timer.map_or(poll, |timer| timer.min(poll)))
+        let own_deadline = if let Some(observation) = observation {
+            Some(observation)
+        } else if !runtime.sheets.has_pending_fetches() && !runtime.preloads.has_pending_fetches() {
+            timer
+        } else {
+            let poll = std::time::Instant::now() + STYLESHEET_FETCH_POLL_INTERVAL;
+            Some(timer.map_or(poll, |timer| timer.min(poll)))
+        };
+        merge_deadline(own_deadline, embedded_frame_work_deadline(runtime))
     });
 
     let render_state = Rc::clone(&browser_state);

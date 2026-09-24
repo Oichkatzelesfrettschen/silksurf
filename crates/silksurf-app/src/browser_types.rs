@@ -306,6 +306,8 @@ pub(crate) struct BrowserRenderConfig {
     /// drives SameSite enforcement. Empty means "unknown": cookies fall back to
     /// the unpartitioned store with no enforcement.
     pub(crate) top_level_site: String,
+    pub(crate) window_message_hub: silksurf_js::WindowMessageHub,
+    pub(crate) window_parent: Option<(u64, u64)>,
 }
 
 pub(crate) struct BrowserFrame {
@@ -457,6 +459,8 @@ pub(crate) struct BrowserPageRuntime {
     pub(crate) preloads: PreloadLinks,
     pub(crate) style_index: StyleIndex,
     pub(crate) viewport: Rect,
+    pub(crate) render_config: BrowserRenderConfig,
+    pub(crate) child_frames: Vec<EmbeddedBrowserFrame>,
     pub(crate) js_ctx: SilkContext,
     /// The border boxes the layout-reading DOM accessors answer from, shared
     /// with the JS context the way `provider_stylesheet` is. The repaint path
@@ -481,6 +485,12 @@ pub(crate) struct BrowserPageRuntime {
     /// element added later would need as
     /// `animation-start-time-per-element`.
     pub(crate) timeline_origin: std::time::Instant,
+}
+
+pub(crate) struct EmbeddedBrowserFrame {
+    pub(crate) owner: silksurf_dom::NodeId,
+    pub(crate) source_url: String,
+    pub(crate) page: Box<BrowserPage>,
 }
 
 pub(crate) struct BrowserState {

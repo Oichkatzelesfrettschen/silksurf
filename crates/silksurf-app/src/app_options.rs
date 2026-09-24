@@ -103,6 +103,8 @@ pub(crate) fn parse_app_options(args: &[String]) -> Result<AppOptions, String> {
             cookie_jar: std::sync::Arc::default(),
             // Set per navigation from the destination URL (see load_navigation_payload).
             top_level_site: String::new(),
+            window_message_hub: silksurf_js::WindowMessageHub::default(),
+            window_parent: None,
         },
     })
 }

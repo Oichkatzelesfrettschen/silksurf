@@ -43,10 +43,15 @@ pub(crate) fn tick_browser_runtime(state: &mut BrowserState) -> bool {
             eprintln!("[SilkSurf] Runtime callback error: {err}");
             set_browser_status(state, "error");
             mark_redraw(state, BrowserRedrawMode::Chrome);
+            let child_frames_changed = sync_child_frames(&mut runtime, &mut state.frame, 0);
             state.runtime = Some(runtime);
+            if child_frames_changed {
+                mark_redraw(state, BrowserRedrawMode::Full);
+            }
             return true;
         }
     };
+    let child_frames_changed = sync_child_frames(&mut runtime, &mut state.frame, 0);
 
     // Same-document navigations from history.pushState/replaceState: record
     // them in session history and reflect the address bar, no reload.
@@ -82,6 +87,10 @@ pub(crate) fn tick_browser_runtime(state: &mut BrowserState) -> bool {
     }
     if let Some(redraw_mode) = redraw_mode {
         mark_redraw(state, redraw_mode);
+        return true;
+    }
+    if child_frames_changed {
+        mark_redraw(state, BrowserRedrawMode::Full);
         return true;
     }
     chrome_changed
@@ -455,6 +464,7 @@ fn repaint_runtime_document(
         BrowserRedrawMode::Full
     };
     runtime.display_list = display_list;
+    composite_child_frames(runtime, frame);
 
     let old_fused = std::mem::replace(&mut runtime.fused, new_fused);
     // The layout the DOM's geometry accessors report is the one that just
@@ -1404,6 +1414,8 @@ mod tests {
                 stylesheet,
                 style_index,
                 viewport,
+                render_config: BrowserRenderConfig::default(),
+                child_frames: Vec::new(),
                 js_ctx,
                 geometry: std::rc::Rc::default(),
                 fused,
@@ -1531,6 +1543,8 @@ mod tests {
                 stylesheet,
                 style_index,
                 viewport,
+                render_config: BrowserRenderConfig::default(),
+                child_frames: Vec::new(),
                 js_ctx,
                 geometry: std::rc::Rc::default(),
                 fused,

@@ -941,12 +941,26 @@ pub(crate) fn collect_image_replaced_sizes_for_node(
     images: &[DecodedPageImage],
     sizes: &mut Vec<ReplacedSize>,
 ) {
-    if let Some(size) = image_replaced_size_for_node(dom, node, base_url, images) {
+    if dom.element_name(node).ok().flatten() == Some("iframe") {
+        let (width, height) = image_dimension_attrs(dom, node);
+        sizes.push(ReplacedSize {
+            node,
+            width: width.unwrap_or(300.0),
+            height: height.unwrap_or(150.0),
+        });
+    } else if let Some(size) = image_replaced_size_for_node(dom, node, base_url, images) {
         sizes.push(size);
     } else if let Some(size) = svg_replaced_size_for_node(dom, node) {
         sizes.push(size);
     }
     if let Ok(children) = dom.children(node) {
+        for &child in children {
+            collect_image_replaced_sizes_for_node(dom, child, base_url, images, sizes);
+        }
+    }
+    if let Some(shadow_root) = dom.shadow_root(node)
+        && let Ok(children) = dom.children(shadow_root)
+    {
         for &child in children {
             collect_image_replaced_sizes_for_node(dom, child, base_url, images, sizes);
         }
@@ -1132,6 +1146,31 @@ mod tests {
     // re-exports every module so sibling items resolve by bare name.
     #[allow(clippy::wildcard_imports)]
     use crate::*;
+
+    #[test]
+    fn closed_shadow_iframe_receives_html_intrinsic_dimensions() {
+        let mut dom = silksurf_dom::Dom::new();
+        let document = dom.create_document();
+        let html = dom.create_element("html");
+        let body = dom.create_element("body");
+        let host = dom.create_element("div");
+        let frame = dom.create_element("iframe");
+        dom.append_child(document, html).expect("html attaches");
+        dom.append_child(html, body).expect("body attaches");
+        dom.append_child(body, host).expect("host attaches");
+        let shadow_root = dom
+            .attach_shadow(host, true)
+            .expect("closed shadow root attaches");
+        dom.append_child(shadow_root, frame)
+            .expect("iframe attaches to shadow root");
+
+        let replaced = collect_image_replaced_sizes(&dom, document, "https://example.test/", &[]);
+        let frame_size = replaced
+            .iter()
+            .find(|size| size.node == frame)
+            .expect("closed shadow iframe contributes replaced dimensions");
+        assert_eq!((frame_size.width, frame_size.height), (300.0, 150.0));
+    }
 
     #[test]
     fn canvas_element_composites_as_image_display_item() {

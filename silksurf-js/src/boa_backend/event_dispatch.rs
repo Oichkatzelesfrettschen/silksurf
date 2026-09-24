@@ -625,6 +625,16 @@ pub(super) fn propagate_event(
     Ok(!event_flag(event, js_string!("defaultPrevented"), ctx))
 }
 
+pub(super) fn dispatch_window_message(
+    dom_arc: &Arc<Mutex<Dom>>,
+    event: &JsObject,
+    ctx: &mut Context,
+) -> JsResult<()> {
+    let global = ctx.global_object().clone();
+    propagate_event(dom_arc, WINDOW_TARGET, &JsValue::from(global), event, ctx)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use crate::boa_backend::{SilkContext, SyntheticEvent};

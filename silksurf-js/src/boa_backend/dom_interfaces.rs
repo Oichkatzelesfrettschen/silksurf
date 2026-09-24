@@ -686,6 +686,72 @@ const INTERFACE_BOOTSTRAP: &str = r"
     table.NodeList = NodeList.prototype;
     globalThis.__silksurfInterfacePrototypes = table;
 
+    Object.assign(Node, {
+        ELEMENT_NODE: 1, ATTRIBUTE_NODE: 2, TEXT_NODE: 3, CDATA_SECTION_NODE: 4,
+        PROCESSING_INSTRUCTION_NODE: 7, COMMENT_NODE: 8, DOCUMENT_NODE: 9,
+        DOCUMENT_TYPE_NODE: 10, DOCUMENT_FRAGMENT_NODE: 11
+    });
+    globalThis.NodeFilter = {
+        FILTER_ACCEPT: 1, FILTER_REJECT: 2, FILTER_SKIP: 3,
+        SHOW_ALL: 0xFFFFFFFF, SHOW_ELEMENT: 0x1, SHOW_ATTRIBUTE: 0x2,
+        SHOW_TEXT: 0x4, SHOW_CDATA_SECTION: 0x8,
+        SHOW_PROCESSING_INSTRUCTION: 0x40, SHOW_COMMENT: 0x80,
+        SHOW_DOCUMENT: 0x100, SHOW_DOCUMENT_TYPE: 0x200,
+        SHOW_DOCUMENT_FRAGMENT: 0x400, SHOW_NOTATION: 0x800
+    };
+    function treeNodes(root) {
+        var nodes = [];
+        function visit(node) {
+            nodes.push(node);
+            var children = node.childNodes;
+            for (var index = 0; index < children.length; index++) { visit(children[index]); }
+        }
+        visit(root);
+        return nodes;
+    }
+    function nodeFilterBit(nodeType) {
+        return nodeType > 0 && nodeType <= 32 ? (1 << (nodeType - 1)) : 0;
+    }
+    function iteratorAccepts(iterator, node) {
+        if ((iterator.whatToShow & nodeFilterBit(node.nodeType)) === 0) { return false; }
+        if (iterator.filter === null || iterator.filter === undefined) { return true; }
+        var result = typeof iterator.filter === 'function'
+            ? iterator.filter(node)
+            : iterator.filter.acceptNode(node);
+        return result === NodeFilter.FILTER_ACCEPT;
+    }
+    function NodeIterator() { throw new TypeError('Illegal constructor'); }
+    NodeIterator.prototype.nextNode = function () {
+        var nodes = treeNodes(this.root);
+        var reference = nodes.indexOf(this.referenceNode);
+        if (reference === -1) { return null; }
+        for (var index = this.pointerBeforeReferenceNode ? reference : reference + 1;
+             index < nodes.length; index++) {
+            if (iteratorAccepts(this, nodes[index])) {
+                this.referenceNode = nodes[index];
+                this.pointerBeforeReferenceNode = false;
+                return nodes[index];
+            }
+        }
+        return null;
+    };
+    NodeIterator.prototype.previousNode = function () {
+        var nodes = treeNodes(this.root);
+        var reference = nodes.indexOf(this.referenceNode);
+        if (reference === -1) { return null; }
+        for (var index = this.pointerBeforeReferenceNode ? reference - 1 : reference;
+             index >= 0; index--) {
+            if (iteratorAccepts(this, nodes[index])) {
+                this.referenceNode = nodes[index];
+                this.pointerBeforeReferenceNode = true;
+                return nodes[index];
+            }
+        }
+        return null;
+    };
+    NodeIterator.prototype.detach = function () {};
+    globalThis.NodeIterator = NodeIterator;
+
     function Event(type, init) {
         init = init || {};
         this.type = String(type);
@@ -788,6 +854,80 @@ const INTERFACE_BOOTSTRAP: &str = r"
     Element.prototype.hasAttributes = function () {
         return this.getAttributeNames().length > 0;
     };
+    function Attr(element, name) {
+        var owner = element;
+        var detachedValue = null;
+        Object.defineProperties(this, {
+            name: { value: name, enumerable: true },
+            localName: { value: name, enumerable: true },
+            namespaceURI: { value: null, enumerable: true },
+            prefix: { value: null, enumerable: true },
+            ownerElement: { get: function () { return owner; }, enumerable: true },
+            specified: { value: true, enumerable: true },
+            value: {
+                enumerable: true,
+                get: function () { return owner ? owner.getAttribute(name) : detachedValue; },
+                set: function (value) {
+                    if (owner) { owner.setAttribute(name, String(value)); }
+                    else { detachedValue = String(value); }
+                }
+            },
+            __detach: {
+                value: function () {
+                    detachedValue = owner ? owner.getAttribute(name) : detachedValue;
+                    owner = null;
+                }
+            }
+        });
+    }
+    function NamedNodeMap(element) {
+        this._element = element;
+        return new Proxy(this, {
+            get: function (target, property, receiver) {
+                if (typeof property === 'string' && /^(0|[1-9][0-9]*)$/.test(property)) {
+                    return target.item(Number(property));
+                }
+                var own = Reflect.get(target, property, receiver);
+                if (own !== undefined) { return own; }
+                return typeof property === 'string' ? target.getNamedItem(property) : undefined;
+            }
+        });
+    }
+    Object.defineProperty(NamedNodeMap.prototype, 'length', {
+        get: function () { return this._element.getAttributeNames().length; }
+    });
+    NamedNodeMap.prototype.item = function (index) {
+        var name = this._element.getAttributeNames()[Number(index)];
+        return name === undefined ? null : new Attr(this._element, name);
+    };
+    NamedNodeMap.prototype.getNamedItem = function (name) {
+        name = String(name);
+        return this._element.hasAttribute(name) ? new Attr(this._element, name) : null;
+    };
+    NamedNodeMap.prototype.removeNamedItem = function (name) {
+        var attribute = this.getNamedItem(name);
+        if (attribute === null) { throw new DOMException('Attribute not found', 'NotFoundError'); }
+        attribute.__detach();
+        this._element.removeAttribute(String(name));
+        return attribute;
+    };
+    NamedNodeMap.prototype.setNamedItem = function (attribute) {
+        if (!attribute || typeof attribute.name !== 'string') {
+            throw new TypeError('Attr required');
+        }
+        var previous = this.getNamedItem(attribute.name);
+        if (previous !== null) { previous.__detach(); }
+        this._element.setAttribute(attribute.name, attribute.value);
+        return previous;
+    };
+    NamedNodeMap.prototype[Symbol.iterator] = function* () {
+        for (var index = 0; index < this.length; index++) { yield this.item(index); }
+    };
+    globalThis.Attr = Attr;
+    globalThis.NamedNodeMap = NamedNodeMap;
+    Object.defineProperty(Element.prototype, 'attributes', {
+        get: function () { return new NamedNodeMap(this); }
+    });
     Object.defineProperty(Element.prototype, 'localName', {
         get: function () { return __silksurfNodeLocalName(this.nodeId); }
     });
@@ -953,6 +1093,15 @@ const INTERFACE_BOOTSTRAP: &str = r"
     document.createDocumentFragment = function () {
         var id = __silksurfCreateDetached('fragment', '');
         return id === null ? null : __silksurfWrapNode(id);
+    };
+    document.createNodeIterator = function (root, whatToShow, filter) {
+        var iterator = Object.create(NodeIterator.prototype);
+        iterator.root = root;
+        iterator.referenceNode = root;
+        iterator.pointerBeforeReferenceNode = true;
+        iterator.whatToShow = whatToShow === undefined ? NodeFilter.SHOW_ALL : Number(whatToShow) >>> 0;
+        iterator.filter = filter === undefined ? null : filter;
+        return iterator;
     };
     document.getElementsByClassName = function (names) {
         var selector = String(names).trim().split(/\s+/).map(function (n) {

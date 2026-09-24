@@ -57,15 +57,36 @@ pub(crate) fn load_navigation_payload(
     config: &BrowserRenderConfig,
     image_cache: &Arc<Mutex<ImageResourceCache>>,
 ) -> NavigationResult {
+    load_document_payload(request, config, image_cache, true)
+}
+
+pub(crate) fn load_embedded_navigation_payload(
+    url: &str,
+    config: &BrowserRenderConfig,
+    image_cache: &Arc<Mutex<ImageResourceCache>>,
+) -> NavigationResult {
+    let mut request = BrowserNavigationRequest::get(url.to_string());
+    request.initiator_site = Some(config.top_level_site.clone());
+    load_document_payload(&request, config, image_cache, false)
+}
+
+fn load_document_payload(
+    request: &BrowserNavigationRequest,
+    config: &BrowserRenderConfig,
+    image_cache: &Arc<Mutex<ImageResourceCache>>,
+    top_level_navigation: bool,
+) -> NavigationResult {
     // The destination is the top-level document; its site keys the cookie
     // partition and drives SameSite enforcement for this navigation and its
     // subresources. Every fetch below uses this nav_config, so subresource
     // fetchers inherit the top-level site.
     let mut config = config.clone();
-    config.top_level_site = url::Url::parse(&request.url)
-        .as_ref()
-        .map(silksurf_net::cookie::site_of_url)
-        .unwrap_or_default();
+    if top_level_navigation {
+        config.top_level_site = url::Url::parse(&request.url)
+            .as_ref()
+            .map(silksurf_net::cookie::site_of_url)
+            .unwrap_or_default();
+    }
     let config = &config;
     let mut renderer = renderer_from_config(config)?;
     let url = request.url.as_str();
@@ -223,6 +244,11 @@ pub(crate) fn build_browser_page_with_buffers_for_window(
         &payload.render_config.top_level_site,
         &cookie_host,
     );
+    let message_context = payload
+        .render_config
+        .window_message_hub
+        .create_context(&payload.url, payload.render_config.window_parent);
+    js_ctx.install_window_messages(message_context);
     js_ctx.set_document_url(&payload.url);
     match ephemeral_renderer_from_config(&payload.render_config) {
         Ok(renderer) => js_ctx.set_fetch_client(renderer.network_client()),
@@ -358,6 +384,9 @@ pub(crate) fn build_browser_page_with_buffers_for_window(
         trace_build,
     );
     trace_navigation_script_phase(trace_build, "module-total", module_start.elapsed());
+    if let Err(message) = dispatch_initial_document_lifecycle(&mut js_ctx, doc_node) {
+        return Err(BrowserPageBuildError { message, buffers });
+    }
 
     /*
      * The preload fetches start at build time so the event loop already has a
@@ -528,6 +557,8 @@ pub(crate) fn build_browser_page_with_buffers_for_window(
             preloads,
             style_index,
             viewport,
+            render_config: payload.render_config,
+            child_frames: Vec::new(),
             js_ctx,
             geometry,
             fused,
@@ -1292,6 +1323,19 @@ fn build_ephemeral_renderer_from_config(
         }
     }
     Ok(SpeculativeRenderer::new_ephemeral())
+}
+
+fn dispatch_initial_document_lifecycle(
+    js_ctx: &mut SilkContext,
+    document: silksurf_dom::NodeId,
+) -> Result<(), String> {
+    js_ctx.set_document_ready_state("interactive")?;
+    js_ctx.dispatch_dom_event(
+        document,
+        &silksurf_js::SyntheticEvent::new("DOMContentLoaded", true, false),
+    )?;
+    js_ctx.set_document_ready_state("complete")?;
+    js_ctx.dispatch_window_event("load")
 }
 
 #[cfg(test)]

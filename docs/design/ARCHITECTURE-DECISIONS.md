@@ -3788,6 +3788,32 @@ emitted by html5ever 0.38 in a `select` fragment because WPT
 records the execution count and remaining parser gaps in the tree-construction
 scorecard.
 
+## AD-051: Iframe Child Documents Composite Into Replaced Content Boxes
+
+**Status**: Accepted
+
+Each iframe source owns a separate `BrowserPageRuntime`, document, script
+context, stylesheet set, and viewport. The parent runtime retains its own DOM,
+layout, and raster. The compositor scales the child viewport into the iframe's
+content box and clips the result to the parent surface. A child repaint updates
+its retained surface and composites through the same parent frame; parent
+layout does not acquire child nodes.
+
+The HTML iframe default object size supplies a 300 by 150 CSS-pixel viewport
+when the document has no explicit dimensions. Frame discovery runs after parent
+host callbacks so script-created and source-mutated iframe elements enter the
+same load path. Child fetches preserve the top-level site and cookie partition.
+The low-resource profile caps nesting at eight levels, the total number of
+active child contexts at sixteen, and each child viewport at 1,048,576 pixels.
+
+This decision admits `iframe[src]` document rendering and queued parent/child
+`postMessage` delivery with origin checks. Direct same-origin DOM access,
+`srcdoc`, pointer and keyboard routing, and focus traversal stay outside the
+rendering boundary. The dynamic-frame local HTTP test exercises insertion,
+fetch, independent DOM ownership, and child pixels inside the owner box. The
+live Turnstile child completes its message handshake before Cloudflare returns
+`unsupported_browser`; checkbox acceptance remains a separate runtime gate.
+
 ## Future ADRs
 
 Planned (renumbered after the 2026-04-30 batch):

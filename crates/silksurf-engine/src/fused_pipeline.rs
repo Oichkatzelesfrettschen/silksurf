@@ -266,8 +266,11 @@ impl FusedWorkspace {
         let style_gen = dom.style_generation();
         let phase_start = std::time::Instant::now();
         if structure_gen != self.table_generation {
-            self.table
-                .rebuild_filtered(dom, root, node_starts_non_rendered_subtree);
+            self.table.rebuild_with_shadow_roots_filtered(
+                dom,
+                root,
+                node_starts_non_rendered_subtree,
+            );
             self.table_generation = structure_gen;
         }
         if style_gen != self.cascade_generation {
@@ -624,7 +627,11 @@ pub fn fused_style_layout_paint_with_replaced_sizes(
      * stay owned by the workspace.
      */
     let mut cascade_ws = CascadeWorkspace::new(style_index.active_rules.len());
-    let table = LayoutNeighborTable::build_filtered(dom, root, node_starts_non_rendered_subtree);
+    let table = LayoutNeighborTable::build_with_shadow_roots_filtered(
+        dom,
+        root,
+        node_starts_non_rendered_subtree,
+    );
     let n = table.len();
     trace_fused_phase(
         trace_fused,
@@ -861,7 +868,8 @@ fn image_replaced_height(node: NodeId, replaced_sizes: &[ReplacedSize]) -> Optio
 
 fn is_replaced_element(dom: &Dom, node: NodeId) -> bool {
     dom.element_name(node).ok().flatten().is_some_and(|name| {
-        matches!(TagName::from_str(name), TagName::Img | TagName::Canvas) || name == "svg"
+        matches!(TagName::from_str(name), TagName::Img | TagName::Canvas)
+            || matches!(name, "svg" | "iframe")
     })
 }
 
