@@ -43,14 +43,19 @@ AD-042 through AD-044 record the mechanisms and boundaries.
 - `iframe-child-document-rendering`: `iframe[src]` owns a separate document
   runtime and raster, then composites into the parent's iframe content box.
   Parent layout retains its own tree and raster under AD-051. Local dynamic
-  insertion and child-pixel evidence passes. The native Turnstile child loads
-  and exchanges lifecycle and message events; Cloudflare returns
-  `unsupported_browser`, so checkbox acceptance remains open.
+  insertion and child-pixel evidence passes. Explicit 300-by-65 iframe CSS
+  dimensions now override the HTML intrinsic 300-by-150 ratio. A fresh native
+  Turnstile run reaches a 300-by-65 child, then reports a child-script syntax
+  error and `forceFail`; an earlier run returned `unsupported_browser`.
+  Checkbox acceptance remains open pending a trace of the dynamic evaluation
+  source and the challenge child's browser-property reads.
 - `cloudflare-turnstile-interaction`: HTTP/2 subresource redirects now continue
   through the bounded HTTP/1.1 redirect path. The official interactive test key
-  loads the Turnstile API, creates a closed-shadow child frame, and reaches the
-  challenge `execute` message. Cloudflare then rejects SilkSurf as an
-  unsupported browser; the checkbox remains unavailable.
+  loads the Turnstile API and creates a closed-shadow child frame. Chromium 153
+  renders the visible test checkbox. SilkSurf reaches `execute` but later sends
+  `forceFail` after a child-script runtime error; an earlier run received
+  `unsupported_browser`. The rejection predicate and the runtime error's
+  dynamically evaluated source remain untraced.
 - `media-element-stack`: video and audio decoding and playback remain open
   under the media decision below. Image source selection has a separate path.
 - `responsive-image-source-selection`: `picture`, `source`, `srcset`, and

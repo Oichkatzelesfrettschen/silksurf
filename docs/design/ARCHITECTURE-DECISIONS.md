@@ -3800,19 +3800,24 @@ its retained surface and composites through the same parent frame; parent
 layout does not acquire child nodes.
 
 The HTML iframe default object size supplies a 300 by 150 CSS-pixel viewport
-when the document has no explicit dimensions. Frame discovery runs after parent
-host callbacks so script-created and source-mutated iframe elements enter the
-same load path. Child fetches preserve the top-level site and cookie partition.
-The low-resource profile caps nesting at eight levels, the total number of
-active child contexts at sixteen, and each child viewport at 1,048,576 pixels.
+when the document has no explicit dimensions. An intrinsic aspect ratio applies
+only while at least one computed CSS dimension remains `auto`, so explicit
+300-by-65 widget dimensions retain their specified child viewport. Frame
+discovery runs after parent host callbacks so script-created and source-mutated
+iframe elements enter the same load path. Child fetches preserve the top-level
+site and cookie partition. The low-resource profile caps nesting at eight
+levels, the total number of active child contexts at sixteen, and each child
+viewport at 1,048,576 pixels.
 
 This decision admits `iframe[src]` document rendering and queued parent/child
 `postMessage` delivery with origin checks. Direct same-origin DOM access,
 `srcdoc`, pointer and keyboard routing, and focus traversal stay outside the
 rendering boundary. The dynamic-frame local HTTP test exercises insertion,
-fetch, independent DOM ownership, and child pixels inside the owner box. The
-live Turnstile child completes its message handshake before Cloudflare returns
-`unsupported_browser`; checkbox acceptance remains a separate runtime gate.
+fetch, independent DOM ownership, and child pixels inside the owner box. An
+earlier live Turnstile run completes its message handshake before Cloudflare
+returns `unsupported_browser`. A later run after the explicit-dimension fix
+reaches a 300-by-65 child, then reports a child-script syntax error and
+`forceFail`; checkbox acceptance remains a separate runtime gate.
 
 ## Future ADRs
 
