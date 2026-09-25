@@ -12,8 +12,11 @@
  */
 
 use boa_engine::{
-    Context, JsResult, JsValue, NativeFunction, Source, js_string,
-    object::{ObjectInitializer, builtins::JsArray},
+    Context, JsNativeError, JsResult, JsValue, NativeFunction, Source, js_string,
+    object::{
+        ObjectInitializer,
+        builtins::{JsArray, JsPromise},
+    },
     property::Attribute,
 };
 
@@ -381,6 +384,195 @@ pub(super) fn set_document_url(ctx: &mut Context, url: &str) {
         let _ = document.set(js_string!("documentURI"), href.clone(), false, ctx);
         let _ = document.set(js_string!("baseURI"), href, false, ctx);
     }
+    install_user_agent_data(ctx, &parsed);
+}
+
+fn install_user_agent_data(ctx: &mut Context, url: &url::Url) {
+    let Some(navigator) = ctx
+        .global_object()
+        .get(js_string!("navigator"), ctx)
+        .ok()
+        .and_then(|value| value.as_object())
+    else {
+        return;
+    };
+    if !is_secure_context_url(url) {
+        let _ = navigator.delete_property_or_throw(js_string!("userAgentData"), ctx);
+        return;
+    }
+
+    let platform = user_agent_platform();
+    let mobile = cfg!(any(target_os = "android", target_os = "ios"));
+    let brands = JsArray::new(ctx);
+    let brand = ObjectInitializer::new(ctx)
+        .property(
+            js_string!("brand"),
+            js_string!("SilkSurf"),
+            Attribute::all(),
+        )
+        .property(js_string!("version"), js_string!("0"), Attribute::all())
+        .build();
+    let _ = brands.push(JsValue::from(brand), ctx);
+
+    let navigator_ua_data = ObjectInitializer::new(ctx)
+        .property(js_string!("brands"), brands, Attribute::all())
+        .property(js_string!("mobile"), mobile, Attribute::all())
+        .property(
+            js_string!("platform"),
+            js_string!(platform),
+            Attribute::all(),
+        )
+        .function(
+            NativeFunction::from_fn_ptr(user_agent_data_to_json),
+            js_string!("toJSON"),
+            0,
+        )
+        .function(
+            NativeFunction::from_fn_ptr(user_agent_data_get_high_entropy_values),
+            js_string!("getHighEntropyValues"),
+            1,
+        )
+        .build();
+    let _ = navigator.set(
+        js_string!("userAgentData"),
+        JsValue::from(navigator_ua_data),
+        false,
+        ctx,
+    );
+}
+
+fn is_secure_context_url(url: &url::Url) -> bool {
+    url.scheme() == "https"
+        || (url.scheme() == "http"
+            && url.host_str().is_some_and(|host| {
+                host.eq_ignore_ascii_case("localhost")
+                    || host.to_ascii_lowercase().ends_with(".localhost")
+                    || host
+                        .parse::<std::net::IpAddr>()
+                        .is_ok_and(|address| address.is_loopback())
+            }))
+}
+
+pub(super) fn user_agent_platform() -> &'static str {
+    match std::env::consts::OS {
+        "linux" => "Linux",
+        "macos" => "macOS",
+        "windows" => "Windows",
+        "android" => "Android",
+        "ios" => "iOS",
+        _ => "",
+    }
+}
+
+fn user_agent_architecture() -> &'static str {
+    match std::env::consts::ARCH {
+        "x86_64" | "x86" => "x86",
+        "aarch64" | "arm" => "arm",
+        _ => "",
+    }
+}
+
+fn user_agent_data_to_json(
+    this: &JsValue,
+    _args: &[JsValue],
+    ctx: &mut Context,
+) -> JsResult<JsValue> {
+    let user_agent_data = this
+        .as_object()
+        .ok_or_else(|| JsNativeError::typ().with_message("Illegal invocation"))?;
+    let brands = user_agent_data.get(js_string!("brands"), ctx)?;
+    let mobile = user_agent_data.get(js_string!("mobile"), ctx)?;
+    let platform = user_agent_data.get(js_string!("platform"), ctx)?;
+    let result = ObjectInitializer::new(ctx)
+        .property(js_string!("brands"), brands, Attribute::all())
+        .property(js_string!("mobile"), mobile, Attribute::all())
+        .property(js_string!("platform"), platform, Attribute::all())
+        .build();
+    Ok(result.into())
+}
+
+fn user_agent_data_get_high_entropy_values(
+    this: &JsValue,
+    args: &[JsValue],
+    ctx: &mut Context,
+) -> JsResult<JsValue> {
+    let user_agent_data = this
+        .as_object()
+        .ok_or_else(|| JsNativeError::typ().with_message("Illegal invocation"))?;
+    let brands = user_agent_data.get(js_string!("brands"), ctx)?;
+    let mobile = user_agent_data.get(js_string!("mobile"), ctx)?;
+    let platform = user_agent_data.get(js_string!("platform"), ctx)?;
+    let result = ObjectInitializer::new(ctx)
+        .property(js_string!("brands"), brands, Attribute::all())
+        .property(js_string!("mobile"), mobile, Attribute::all())
+        .property(js_string!("platform"), platform, Attribute::all())
+        .build();
+    let high_entropy = user_agent_high_entropy_values(ctx)?;
+    if let Some(hints) = args.first().and_then(JsValue::as_object) {
+        let hints = JsArray::from_object(hints.clone())?;
+        let length = hints.length(ctx)?;
+        for index in 0..length {
+            let hint = hints
+                .at(i64::try_from(index).unwrap_or(i64::MAX), ctx)?
+                .to_string(ctx)?
+                .to_std_string_lossy();
+            let value = high_entropy.get(js_string!(hint.as_str()), ctx)?;
+            if !value.is_undefined() {
+                result.set(js_string!(hint.as_str()), value, false, ctx)?;
+            }
+        }
+    }
+    Ok(JsValue::from(JsPromise::from_result::<
+        JsValue,
+        JsNativeError,
+    >(Ok(result.into()), ctx)))
+}
+
+fn user_agent_high_entropy_values(ctx: &mut Context) -> JsResult<boa_engine::JsObject> {
+    let brands = JsArray::new(ctx);
+    let brand = ObjectInitializer::new(ctx)
+        .property(
+            js_string!("brand"),
+            js_string!("SilkSurf"),
+            Attribute::all(),
+        )
+        .property(
+            js_string!("version"),
+            js_string!(env!("CARGO_PKG_VERSION")),
+            Attribute::all(),
+        )
+        .build();
+    brands.push(JsValue::from(brand), ctx)?;
+    let form_factors = JsArray::new(ctx);
+    form_factors.push(
+        JsValue::from(if cfg!(any(target_os = "android", target_os = "ios")) {
+            js_string!("Mobile")
+        } else {
+            js_string!("Desktop")
+        }),
+        ctx,
+    )?;
+    Ok(ObjectInitializer::new(ctx)
+        .property(
+            js_string!("architecture"),
+            js_string!(user_agent_architecture()),
+            Attribute::all(),
+        )
+        .property(
+            js_string!("bitness"),
+            js_string!(if usize::BITS == 64 { "64" } else { "32" }),
+            Attribute::all(),
+        )
+        .property(js_string!("formFactors"), form_factors, Attribute::all())
+        .property(js_string!("fullVersionList"), brands, Attribute::all())
+        .property(js_string!("model"), js_string!(""), Attribute::all())
+        .property(
+            js_string!("platformVersion"),
+            js_string!(""),
+            Attribute::all(),
+        )
+        .property(js_string!("wow64"), false, Attribute::all())
+        .build())
 }
 
 pub(super) fn set_document_origin_opaque(ctx: &mut Context) {
@@ -893,6 +1085,46 @@ mod tests {
              if (new URL(location.href).hostname !== 'example.com') throw new Error('URL disagrees');",
         )
             .expect("location reflects the document address");
+    }
+
+    #[test]
+    fn user_agent_data_matches_the_secure_context_request_profile() {
+        let mut context = context();
+        context.set_document_url("https://example.com/");
+        let platform = super::user_agent_platform();
+        let low_entropy_script = format!(
+            "if (navigator.userAgentData.platform !== '{platform}') throw new Error('platform'); \
+             if (navigator.userAgentData.mobile !== {}) throw new Error('mobile'); \
+             if (navigator.userAgentData.brands[0].brand !== 'SilkSurf') throw new Error('brand'); \
+             var highEntropy = null; \
+             navigator.userAgentData.getHighEntropyValues(['architecture', 'bitness', 'fullVersionList', 'model']) \
+               .then(value => highEntropy = value);",
+            cfg!(any(target_os = "android", target_os = "ios"))
+        );
+        context
+            .eval(low_entropy_script.as_str())
+            .expect("secure contexts expose navigator.userAgentData");
+        context.run_pending_jobs();
+        let high_entropy_script = format!(
+            "if (highEntropy.architecture !== 'x86' && highEntropy.architecture !== 'arm' && highEntropy.architecture !== '') \
+               throw new Error('architecture'); \
+             if (highEntropy.bitness !== '32' && highEntropy.bitness !== '64') throw new Error('bitness'); \
+             if (highEntropy.fullVersionList[0].version !== '{}') throw new Error('full version'); \
+             if (highEntropy.model !== '') throw new Error('model'); \
+             if (navigator.userAgentData.toJSON().brands[0].brand !== 'SilkSurf') throw new Error('toJSON');",
+            env!("CARGO_PKG_VERSION")
+        );
+        context
+            .eval(high_entropy_script.as_str())
+            .expect("high-entropy values resolve from the SilkSurf profile");
+        context.set_document_url("http://example.com/");
+        context
+            .eval("if ('userAgentData' in navigator) throw new Error('insecure context');")
+            .expect("insecure origins omit navigator.userAgentData");
+        context.set_document_url("http://127.0.0.1/");
+        context
+            .eval("if (navigator.userAgentData.platform !== 'Linux') throw new Error('loopback');")
+            .expect("loopback origins qualify as secure contexts");
     }
 
     #[test]
