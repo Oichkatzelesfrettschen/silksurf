@@ -745,7 +745,11 @@ files and the relevant ADRs.
 
 ### ParsedDocument
 **Type**: HTML parse output
-**Definition**: Output of `silksurf_engine::parse_html()`: the `Dom` tree plus the `NodeId` of the root document node. The dom has `resolve_table` already materialized.
+**Definition**: Output of `silksurf_engine::parse_html()` or `parse_html_with_scripting()`: the `Dom` tree plus the `NodeId` of the root document node. The DOM has `resolve_table` already materialized.
+
+### parse_html_with_scripting
+**Type**: HTML document parser
+**Definition**: Parses an HTML document with the browsing context's scripting flag, which selects the corresponding `noscript` tree-construction behavior.
 
 ### previous_sibling
 **Type**: DOM traversal function

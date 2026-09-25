@@ -45,17 +45,23 @@ AD-042 through AD-044 record the mechanisms and boundaries.
   Parent layout retains its own tree and raster under AD-051. Local dynamic
   insertion and child-pixel evidence passes. Explicit 300-by-65 iframe CSS
   dimensions now override the HTML intrinsic 300-by-150 ratio. A fresh native
-  Turnstile run reaches a 300-by-65 child, then reports a child-script syntax
-  error and `forceFail`; an earlier run returned `unsupported_browser`.
-  Checkbox acceptance remains open pending a trace of the dynamic evaluation
-  source and the challenge child's browser-property reads.
+  Turnstile run reaches a 300-by-65 child and sends `reject
+  reason=unsupported_browser` after `execute`; an earlier fresh run reports a
+  child-script syntax error and `forceFail`. Checkbox acceptance remains open
+  pending a trace of the dynamic evaluation source and the challenge child's
+  browser-property reads.
 - `cloudflare-turnstile-interaction`: HTTP/2 subresource redirects now continue
   through the bounded HTTP/1.1 redirect path. The official interactive test key
   loads the Turnstile API and creates a closed-shadow child frame. Chromium 153
-  renders the visible test checkbox. SilkSurf reaches `execute` but later sends
-  `forceFail` after a child-script runtime error; an earlier run received
-  `unsupported_browser`. The rejection predicate and the runtime error's
-  dynamically evaluated source remain untraced.
+  renders the visible test checkbox. A fresh SilkSurf run reaches `execute` and
+  receives `reject reason=unsupported_browser`; another fresh run reaches
+  `forceFail` after a child-script runtime error. The parent API handler checks
+  only that message's `reason`; the challenge child's browser-admission
+  predicate and the runtime error's dynamically evaluated source remain
+  untraced. SilkSurf's `SilkSurf/0.1`
+  JavaScript and HTTP user agents differ from Chromium's `Chrome/153` identity;
+  request-only and request-plus-JavaScript UA A/B runs preserve the same
+  rejection, so UA identity alone does not explain it.
 - `media-element-stack`: video and audio decoding and playback remain open
   under the media decision below. Image source selection has a separate path.
 - `responsive-image-source-selection`: `picture`, `source`, `srcset`, and
