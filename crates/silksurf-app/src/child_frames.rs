@@ -485,7 +485,16 @@ fn child_frame_viewport(
     owner: silksurf_dom::NodeId,
 ) -> Option<(u32, u32)> {
     let geometry = runtime.geometry.borrow();
-    let bounds = geometry.get(owner)?;
+    let Some(bounds) = geometry.get(owner) else {
+        drop(geometry);
+        let dom = runtime
+            .dom
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (width, height) = iframe_intrinsic_size(&dom, owner);
+        let (width, height) = bounded_viewport(width, height);
+        return (width > 0 && height > 0).then_some((width, height));
+    };
     let rect = iframe_content_rect(bounds);
     let (mut width, mut height) = bounded_viewport(rect.width, rect.height);
     if width == 0 || height == 0 {
@@ -910,6 +919,94 @@ mod tests {
         assert!(
             page.frame.argb.contains(&0xffff_0000),
             "parent raster omitted the ready iframe surface"
+        );
+    }
+
+    #[test]
+    fn hidden_iframe_loads_once_and_retains_its_context_when_shown() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("local listener binds");
+        let address = listener.local_addr().expect("listener address");
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("child request arrives");
+            let mut request = [0_u8; 4096];
+            let _ = stream.read(&mut request).expect("request reads");
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            let body = "<!doctype html><html><body>child</body></html>";
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .expect("response writes");
+        });
+        let url = format!("http://{address}/parent");
+        let mut page = build_browser_page(BrowserPagePayload {
+            url: url.clone(),
+            html: "<!doctype html><html><body><iframe src='/child' style='display:none'></iframe></body></html>".to_string(),
+            css_text: stylesheet_text_with_user_agent_defaults("body { margin: 0; }"),
+            sheet_bodies: Vec::new(),
+            script_texts: Vec::new(),
+            module_texts: Vec::new(),
+            images: Vec::new(),
+            render_config: BrowserRenderConfig::default(),
+            parsed_document: None,
+        })
+        .expect("parent page builds");
+
+        let started = std::time::Instant::now();
+        assert!(sync_child_frames(&mut page.runtime, &mut page.frame, 0));
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(250),
+            "hidden child fetch blocked the page tick for {:?}",
+            started.elapsed()
+        );
+        server.join().expect("child server exits");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while !matches!(
+            page.runtime.child_frames.first().map(|child| &child.state),
+            Some(EmbeddedFrameState::Ready { .. })
+        ) && std::time::Instant::now() < deadline
+        {
+            sync_child_frames(&mut page.runtime, &mut page.frame, 0);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let owner = page.runtime.child_frames[0].owner;
+        let context_id = match &page.runtime.child_frames[0].state {
+            EmbeddedFrameState::Ready { page, .. } => page.runtime.js_ctx.window_context_id(),
+            _ => panic!("hidden child frame did not finish loading"),
+        };
+        assert!(
+            !page.runtime.display_list.items.iter().any(|item| matches!(
+                item,
+                silksurf_render::DisplayItem::EmbeddedFrame { node, .. } if *node == owner
+            )),
+            "display:none iframe contributed a paint item"
+        );
+
+        page.runtime
+            .dom
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .set_attribute(owner, "style", "display:block;width:300px;height:150px")
+            .expect("iframe becomes visible");
+        repaint_runtime_full_document(&mut page.runtime, &mut page.frame);
+        sync_child_frames(&mut page.runtime, &mut page.frame, 0);
+        assert!(matches!(
+            page.runtime.child_frames[0].state,
+            EmbeddedFrameState::Ready { .. }
+        ));
+        let EmbeddedFrameState::Ready { page: child, .. } = &page.runtime.child_frames[0].state
+        else {
+            panic!("shown child frame lost its runtime");
+        };
+        assert_eq!(child.runtime.js_ctx.window_context_id(), context_id);
+        assert!(
+            page.runtime
+                .display_list
+                .items
+                .iter()
+                .any(|item| matches!(item, silksurf_render::DisplayItem::Image { .. }))
         );
     }
 

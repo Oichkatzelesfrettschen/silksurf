@@ -37,6 +37,10 @@ impl Drop for ContextRegistration {
         state
             .frame_contexts
             .retain(|(parent, _), child| *parent != self.id && *child != self.id);
+        state.pending_frames.retain(|(parent, _), queue| {
+            queue.retain(|message| message.source_context != self.id);
+            *parent != self.id && !queue.is_empty()
+        });
         for queue in state.pending.values_mut() {
             queue.retain(|message| message.source_context != self.id);
         }
@@ -49,7 +53,12 @@ struct MessageHubState {
     parents: HashMap<u64, u64>,
     frame_contexts: HashMap<(u64, u64), u64>,
     pending: HashMap<u64, VecDeque<WindowMessage>>,
+    pending_frames: HashMap<(u64, u64), VecDeque<WindowMessage>>,
 }
+
+const MAX_PENDING_FRAME_MESSAGES: usize = 64;
+const MAX_PENDING_FRAME_TARGETS: usize = 64;
+const MAX_PENDING_TOTAL_FRAME_MESSAGES: usize = 256;
 
 #[derive(Clone)]
 struct WindowMessage {
@@ -92,6 +101,7 @@ impl Default for MessageHubState {
             parents: HashMap::new(),
             frame_contexts: HashMap::new(),
             pending: HashMap::new(),
+            pending_frames: HashMap::new(),
         }
     }
 }
@@ -147,6 +157,14 @@ impl WindowMessageHub {
             state
                 .frame_contexts
                 .insert((parent_context, owner_node), id);
+            if let Some(messages) = state.pending_frames.remove(&(parent_context, owner_node)) {
+                let queue = state.pending.entry(id).or_default();
+                queue.extend(
+                    messages
+                        .into_iter()
+                        .filter(|message| message.target_origin.matches(&origin.key)),
+                );
+            }
         }
         let registration = Arc::new(ContextRegistration {
             hub: self.clone(),
@@ -239,9 +257,71 @@ impl WindowMessageContext {
         payload: MessagePayload,
         target_origin: MessageTargetOrigin,
     ) {
-        if let Some(target_context) = self.target_for_frame(owner_node) {
+        let target_context = self.target_for_frame(owner_node);
+        if let Some(target_context) = target_context {
             self.post(target_context, None, payload, target_origin);
+            return;
         }
+        let mut state = self.hub.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(target_context) = state.frame_contexts.get(&(self.id, owner_node)).copied() {
+            drop(state);
+            self.post(target_context, None, payload, target_origin);
+            return;
+        }
+        let key = (self.id, owner_node);
+        let total_pending = state
+            .pending_frames
+            .values()
+            .map(VecDeque::len)
+            .sum::<usize>();
+        if (!state.pending_frames.contains_key(&key)
+            && state.pending_frames.len() >= MAX_PENDING_FRAME_TARGETS)
+            || total_pending >= MAX_PENDING_TOTAL_FRAME_MESSAGES
+        {
+            trace_window_message(
+                "drop-frame-queue-full",
+                self.id,
+                owner_node,
+                &payload,
+                &target_origin.label(),
+            );
+            return;
+        }
+        let queue = state.pending_frames.entry(key).or_default();
+        if queue.len() >= MAX_PENDING_FRAME_MESSAGES {
+            trace_window_message(
+                "drop-frame-queue-full",
+                self.id,
+                owner_node,
+                &payload,
+                &target_origin.label(),
+            );
+            return;
+        }
+        trace_window_message(
+            "queue-frame-context-pending",
+            self.id,
+            owner_node,
+            &payload,
+            &target_origin.label(),
+        );
+        queue.push_back(WindowMessage {
+            source_context: self.id,
+            source_frame: None,
+            origin: self.origin.serialized.clone(),
+            target_origin,
+            payload,
+        });
+    }
+
+    pub(super) fn has_pending_messages(&self) -> bool {
+        self.hub
+            .0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .pending
+            .get(&self.id)
+            .is_some_and(|queue| !queue.is_empty())
     }
 
     fn take_messages(&self) -> Vec<WindowMessage> {
@@ -357,15 +437,19 @@ impl WindowMessageContext {
             if !message.target_origin.matches(&self.origin.key) {
                 continue;
             }
-            let source = if self
+            let source = if message.source_context == self.id {
+                JsValue::from(context.global_object().clone())
+            } else if self
                 .parent
                 .is_some_and(|(parent, _)| parent == message.source_context)
             {
                 self.proxy_for_context(message.source_context, context)?
+                    .into()
             } else if let Some(owner_node) = message.source_frame {
-                self.proxy_for_frame(owner_node, context)?
+                self.proxy_for_frame(owner_node, context)?.into()
             } else {
                 self.proxy_for_context(message.source_context, context)?
+                    .into()
             };
             trace_window_message(
                 "deliver",
@@ -460,6 +544,12 @@ impl SilkContext {
 
     pub fn window_context_id(&self) -> Option<u64> {
         self.window_messages.as_ref().map(WindowMessageContext::id)
+    }
+
+    pub(super) fn has_pending_window_messages(&self) -> bool {
+        self.window_messages
+            .as_ref()
+            .is_some_and(WindowMessageContext::has_pending_messages)
     }
 
     pub(super) fn deliver_window_messages(&mut self) -> Result<usize, String> {
@@ -629,6 +719,62 @@ mod tests {
         parent
             .eval("if (parentMessage !== 'ack:https://child.test:true:true') throw new Error(parentMessage);")
             .expect("parent event carries child origin and contentWindow identity");
+    }
+
+    #[test]
+    fn pending_frame_context_messages_are_delivered_after_registration() {
+        let hub = WindowMessageHub::default();
+        let parent_dom = Arc::new(Mutex::new(Dom::new()));
+        let child_dom = Arc::new(Mutex::new(Dom::new()));
+        let parent_messages = hub.create_context("https://parent.test/", None, false);
+        let child_id = parent_messages.id();
+        let mut parent = SilkContext::with_dom(&parent_dom);
+        parent.install_window_messages(parent_messages);
+        parent
+            .eval(
+                "__silksurfWindowProxyForFrame('17').postMessage('queued', 'https://child.test');",
+            )
+            .expect("parent queues a message before child runtime creation");
+
+        let child_messages = hub.create_context("https://child.test/", Some((child_id, 17)), false);
+        let mut child = SilkContext::with_dom(&child_dom);
+        child.install_window_messages(child_messages);
+        child
+            .eval("globalThis.received = ''; window.onmessage = event => { received = event.data + ':' + event.origin + ':' + (event.source === window.parent); };")
+            .expect("child onmessage handler installs");
+        assert!(child.has_pending_host_callbacks());
+        child
+            .run_ready_host_callbacks()
+            .expect("child receives message queued before its context existed");
+        child
+            .eval("if (received !== 'queued:https://parent.test:true') throw new Error(received);")
+            .expect("queued message preserves source origin and parent source");
+    }
+
+    #[test]
+    fn self_message_wakes_its_context_and_exposes_the_global_window_as_source() {
+        let hub = WindowMessageHub::default();
+        let dom = Arc::new(Mutex::new(Dom::new()));
+        let messages = hub.create_context("https://self.test/", None, false);
+        let mut context = SilkContext::with_dom(&dom);
+        context.install_window_messages(messages);
+        context
+            .eval("globalThis.selfMessage = false; window.onmessage = event => { selfMessage = event.data === 'self' && event.source === window; }; window.postMessage('self', 'https://self.test');")
+            .expect("context queues a same-window message");
+        assert!(context.has_pending_host_callbacks());
+        assert!(
+            context
+                .next_host_callback_deadline()
+                .is_some_and(|deadline| {
+                    deadline <= std::time::Instant::now() + std::time::Duration::from_millis(1)
+                })
+        );
+        context
+            .run_ready_host_callbacks()
+            .expect("context dispatches its queued message");
+        context
+            .eval("if (!selfMessage) throw new Error('MessageEvent.source is not window');")
+            .expect("self-posted MessageEvent identifies the actual window");
     }
 
     #[test]
