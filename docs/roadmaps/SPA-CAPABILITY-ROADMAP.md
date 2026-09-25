@@ -40,14 +40,28 @@ AD-042 through AD-044 record the mechanisms and boundaries.
 - `cross-origin-fetch-policy`: CORS, preflight, and credentialed cross-origin
   admission need a complete Fetch policy layer. Response readers still buffer
   the full body before exposing chunks.
-- `iframe-browsing-context`: child-document ownership, event routing, isolation,
-  and damage propagation remain open under the nested-context decision gate
-  below.
+- `iframe-child-document-rendering`: `iframe[src]` owns a separate document
+  runtime and raster, then composites into the parent's iframe content box.
+  Parent layout retains its own tree and raster under AD-051. Local dynamic
+  insertion and child-pixel evidence passes. Explicit 300-by-65 iframe CSS
+  dimensions now override the HTML intrinsic 300-by-150 ratio. A fresh native
+  Turnstile run reaches a 300-by-65 child and sends `reject
+  reason=unsupported_browser` after `execute`; an earlier fresh run reports a
+  child-script syntax error and `forceFail`. Checkbox acceptance remains open
+  pending a trace of the dynamic evaluation source and the challenge child's
+  browser-property reads.
 - `cloudflare-turnstile-interaction`: HTTP/2 subresource redirects now continue
   through the bounded HTTP/1.1 redirect path. The official interactive test key
-  loads the Turnstile API and returns a widget identifier, while the document
-  still has zero iframe elements; the checkbox remains behind the open nested
-  browsing-context boundary.
+  loads the Turnstile API and creates a closed-shadow child frame. Chromium 153
+  renders the visible test checkbox. A fresh SilkSurf run reaches `execute` and
+  receives `reject reason=unsupported_browser`; another fresh run reaches
+  `forceFail` after a child-script runtime error. The parent API handler checks
+  only that message's `reason`; the challenge child's browser-admission
+  predicate and the runtime error's dynamically evaluated source remain
+  untraced. SilkSurf's `SilkSurf/0.1`
+  JavaScript and HTTP user agents differ from Chromium's `Chrome/153` identity;
+  request-only and request-plus-JavaScript UA A/B runs preserve the same
+  rejection, so UA identity alone does not explain it.
 - `media-element-stack`: video and audio decoding and playback remain open
   under the media decision below. Image source selection has a separate path.
 - `responsive-image-source-selection`: `picture`, `source`, `srcset`, and
@@ -281,19 +295,12 @@ share files with the workstreams above and should land opportunistically:
 
 ## Named deferrals (not in this execution; each needs its own landing)
 
-- **nested-browsing-context-damage-model** -- OPEN for `iframe` and
-  document-backed `object` content. A nested browsing context needs its own
-  document, style tree,
-  layout root, and paint subtree, and the shell owns exactly one
-  BrowserPageRuntime. The question to answer before any element work is
-  whether the retained damage model survives a second document. A nested
-  context that forces full-page repaint puts the latency evidence
-  (~100 us text repaint, 190-260 us fused relayout) in direct conflict
-  with the capability, and that conflict is the finding. Deferred
-  because the conformance instrument reached real upstream corpora only
-  on 2026-08-06, and admitting embedded-content work before an
-  upstream-corpus number moves repeats the synthetic-scorecard failure
-  docs/findings/conformance-instrument-fidelity.md records.
+- **iframe-window-and-input-routing** -- OPEN. AD-051 renders `iframe[src]`
+  documents in independent runtimes and composites their viewport pixels into
+  the owner content box. Parent and child Window proxies, same-origin DOM
+  access, `srcdoc`, focus traversal, and pointer and keyboard routing still
+  need their own standards-grounded implementation and evidence. Native
+  Turnstile acceptance also depends on the widget's live runtime path.
 - **media-element-stack** -- OPEN. `video` and `audio` need demux,
   decode, and audio output the workspace does not have and does not target.
 - **responsive-image-source-selection** -- OPEN and independent of nested

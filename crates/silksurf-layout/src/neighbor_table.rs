@@ -85,6 +85,24 @@ impl LayoutNeighborTable {
         root: NodeId,
         skip_subtree: impl FnMut(&Dom, NodeId) -> bool,
     ) -> Self {
+        Self::build_internal(dom, root, skip_subtree, false)
+    }
+
+    /// Build a render tree that places shadow-root children under their host.
+    pub fn build_with_shadow_roots_filtered(
+        dom: &Dom,
+        root: NodeId,
+        skip_subtree: impl FnMut(&Dom, NodeId) -> bool,
+    ) -> Self {
+        Self::build_internal(dom, root, skip_subtree, true)
+    }
+
+    fn build_internal(
+        dom: &Dom,
+        root: NodeId,
+        skip_subtree: impl FnMut(&Dom, NodeId) -> bool,
+        include_shadow_roots: bool,
+    ) -> Self {
         let mut table = Self {
             level_starts: Vec::new(),
             parent_idx: Vec::new(),
@@ -93,7 +111,7 @@ impl LayoutNeighborTable {
             child_count: Vec::new(),
             node_to_bfs_idx: rustc_hash::FxHashMap::default(),
         };
-        table.rebuild_filtered(dom, root, skip_subtree);
+        table.rebuild_internal(dom, root, skip_subtree, include_shadow_roots);
         table
     }
 
@@ -133,6 +151,26 @@ impl LayoutNeighborTable {
         root: NodeId,
         mut skip_subtree: impl FnMut(&Dom, NodeId) -> bool,
     ) {
+        self.rebuild_internal(dom, root, &mut skip_subtree, false);
+    }
+
+    /// Rebuild a render tree that places shadow-root children under their host.
+    pub fn rebuild_with_shadow_roots_filtered(
+        &mut self,
+        dom: &Dom,
+        root: NodeId,
+        mut skip_subtree: impl FnMut(&Dom, NodeId) -> bool,
+    ) {
+        self.rebuild_internal(dom, root, &mut skip_subtree, true);
+    }
+
+    fn rebuild_internal(
+        &mut self,
+        dom: &Dom,
+        root: NodeId,
+        mut skip_subtree: impl FnMut(&Dom, NodeId) -> bool,
+        include_shadow_roots: bool,
+    ) {
         self.bfs_order.clear();
         self.parent_idx.clear();
         self.child_start.clear();
@@ -163,22 +201,36 @@ impl LayoutNeighborTable {
 
             for i in level_start..level_end {
                 let node = self.bfs_order[i];
-                let children = dom.children(node).unwrap_or(&[]);
                 let child_start = self.bfs_order.len();
                 let mut retained_children = 0usize;
-
                 let pidx = i as u32;
-                for &child in children {
-                    if skip_subtree(dom, child) {
-                        continue;
+                let append_child =
+                    |child: NodeId,
+                     this: &mut Self,
+                     retained_children: &mut usize,
+                     skip_subtree: &mut dyn FnMut(&Dom, NodeId) -> bool| {
+                        if !skip_subtree(dom, child) {
+                            let flat_idx = this.bfs_order.len() as u32;
+                            this.node_to_bfs_idx.insert(child, flat_idx);
+                            this.bfs_order.push(child);
+                            this.parent_idx.push(pidx);
+                            this.child_start.push(u32::MAX);
+                            this.child_count.push(0);
+                            *retained_children += 1;
+                        }
+                    };
+                if let Ok(children) = dom.children(node) {
+                    for &child in children {
+                        append_child(child, self, &mut retained_children, &mut skip_subtree);
                     }
-                    let flat_idx = self.bfs_order.len() as u32;
-                    self.node_to_bfs_idx.insert(child, flat_idx);
-                    self.bfs_order.push(child);
-                    self.parent_idx.push(pidx);
-                    self.child_start.push(u32::MAX); // placeholder, filled next iteration
-                    self.child_count.push(0); // placeholder, filled next iteration
-                    retained_children += 1;
+                }
+                if include_shadow_roots
+                    && let Some(shadow_root) = dom.shadow_root(node)
+                    && let Ok(children) = dom.children(shadow_root)
+                {
+                    for &child in children {
+                        append_child(child, self, &mut retained_children, &mut skip_subtree);
+                    }
                 }
                 self.child_start[i] = if retained_children == 0 {
                     u32::MAX

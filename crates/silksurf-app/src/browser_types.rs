@@ -306,6 +306,13 @@ pub(crate) struct BrowserRenderConfig {
     /// drives SameSite enforcement. Empty means "unknown": cookies fall back to
     /// the unpartitioned store with no enforcement.
     pub(crate) top_level_site: String,
+    pub(crate) window_message_hub: silksurf_js::WindowMessageHub,
+    pub(crate) window_parent: Option<(u64, u64)>,
+    /// HTML iframe sandbox flags inherited by this browsing context.
+    pub(crate) scripts_disabled: bool,
+    pub(crate) origin_sandboxed: bool,
+    /// Runtime contexts defer `load` until active iframe documents settle.
+    pub(crate) defer_initial_load: bool,
 }
 
 pub(crate) struct BrowserFrame {
@@ -457,6 +464,9 @@ pub(crate) struct BrowserPageRuntime {
     pub(crate) preloads: PreloadLinks,
     pub(crate) style_index: StyleIndex,
     pub(crate) viewport: Rect,
+    pub(crate) render_config: BrowserRenderConfig,
+    pub(crate) child_frames: Vec<EmbeddedBrowserFrame>,
+    pub(crate) initial_document_load_pending: bool,
     pub(crate) js_ctx: SilkContext,
     /// The border boxes the layout-reading DOM accessors answer from, shared
     /// with the JS context the way `provider_stylesheet` is. The repaint path
@@ -481,6 +491,28 @@ pub(crate) struct BrowserPageRuntime {
     /// element added later would need as
     /// `animation-start-time-per-element`.
     pub(crate) timeline_origin: std::time::Instant,
+}
+
+pub(crate) struct EmbeddedBrowserFrame {
+    pub(crate) owner: silksurf_dom::NodeId,
+    pub(crate) source_url: String,
+    pub(crate) sandbox: crate::IframeSandboxPolicy,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) scripts_disabled: bool,
+    pub(crate) origin_sandboxed: bool,
+    pub(crate) state: EmbeddedFrameState,
+}
+
+pub(crate) enum EmbeddedFrameState {
+    Pending,
+    Loading(std::sync::mpsc::Receiver<NavigationResult>),
+    Failed,
+    Ready {
+        page: Box<BrowserPage>,
+        surface: silksurf_render::ImageSurface,
+        load_event_dispatched: bool,
+    },
 }
 
 pub(crate) struct BrowserState {

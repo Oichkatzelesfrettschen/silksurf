@@ -11,6 +11,9 @@
     function members(collection) {
         const state = states.get(collection);
         if (!state) { throw new TypeError('Invalid collection receiver'); }
+        if (state.querySelector !== undefined) {
+            return state.form.querySelectorAll(state.querySelector);
+        }
         const nodes = __silksurfFormControls(state.form.nodeId);
         return state.name === null ? nodes : nodes.filter(function (node) {
             return node.id === state.name || node.getAttribute('name') === state.name;
@@ -31,6 +34,7 @@
         });
         if (matches.length === 0) { return null; }
         if (matches.length === 1) { return matches[0]; }
+        if (state.querySelector !== undefined) { return matches[0]; }
         return create(state.form, name);
     }
     function supportedNames(collection) {
@@ -42,10 +46,11 @@
         });
         return names;
     }
-    function create(form, name) {
-        const prototype = name === null ? HTMLFormControlsCollection.prototype : RadioNodeList.prototype;
+    function create(form, name, querySelector) {
+        const prototype = querySelector !== undefined ? HTMLCollection.prototype :
+            name === null ? HTMLFormControlsCollection.prototype : RadioNodeList.prototype;
         const target = Object.create(prototype);
-        const state = { form: form, name: name };
+        const state = { form: form, name: name, querySelector: querySelector };
         const proxy = new Proxy(target, {
             get: function (target, property, receiver) {
                 const index = indexOfProperty(property);
@@ -155,4 +160,13 @@
     globalThis.HTMLCollection = HTMLCollection;
     globalThis.HTMLFormControlsCollection = HTMLFormControlsCollection;
     globalThis.RadioNodeList = RadioNodeList;
+    const documentScripts = new WeakMap();
+    Object.defineProperty(document, 'scripts', {
+        get: function () {
+            if (!documentScripts.has(this)) {
+                documentScripts.set(this, create(this, null, 'script'));
+            }
+            return documentScripts.get(this);
+        }
+    });
 })();

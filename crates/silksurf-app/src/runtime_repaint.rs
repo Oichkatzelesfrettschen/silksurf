@@ -43,10 +43,15 @@ pub(crate) fn tick_browser_runtime(state: &mut BrowserState) -> bool {
             eprintln!("[SilkSurf] Runtime callback error: {err}");
             set_browser_status(state, "error");
             mark_redraw(state, BrowserRedrawMode::Chrome);
+            let child_frames_changed = sync_child_frames(&mut runtime, &mut state.frame, 0);
             state.runtime = Some(runtime);
+            if child_frames_changed {
+                mark_redraw(state, BrowserRedrawMode::Full);
+            }
             return true;
         }
     };
+    let child_frames_changed = sync_child_frames(&mut runtime, &mut state.frame, 0);
 
     // Same-document navigations from history.pushState/replaceState: record
     // them in session history and reflect the address bar, no reload.
@@ -72,7 +77,9 @@ pub(crate) fn tick_browser_runtime(state: &mut BrowserState) -> bool {
     }
 
     // localStorage writeback: flush dirtied entries to the origin store.
-    if let Some(entries) = runtime.js_ctx.take_local_storage_if_dirty() {
+    if let Some(entries) = runtime.js_ctx.take_local_storage_if_dirty()
+        && !runtime.render_config.origin_sandboxed
+    {
         crate::profile::flush_local_storage(&state.frame.url, &entries);
     }
 
@@ -82,6 +89,10 @@ pub(crate) fn tick_browser_runtime(state: &mut BrowserState) -> bool {
     }
     if let Some(redraw_mode) = redraw_mode {
         mark_redraw(state, redraw_mode);
+        return true;
+    }
+    if child_frames_changed {
+        mark_redraw(state, BrowserRedrawMode::Full);
         return true;
     }
     chrome_changed
@@ -408,6 +419,7 @@ fn repaint_runtime_document(
         &mut runtime.svg_cache,
         &mut display_list.items,
     );
+    resolve_child_frame_display_items(runtime, &mut display_list.items);
     frame.link_targets = collect_link_targets(&dom, &display_list.items, &frame.url);
     frame.input_targets = collect_input_targets(&dom, &new_fused);
     let damage = dirty_nodes
@@ -455,7 +467,6 @@ fn repaint_runtime_document(
         BrowserRedrawMode::Full
     };
     runtime.display_list = display_list;
-
     let old_fused = std::mem::replace(&mut runtime.fused, new_fused);
     // The layout the DOM's geometry accessors report is the one that just
     // completed, and this is the one place the runtime's fused result becomes
@@ -902,7 +913,8 @@ pub(crate) fn text_damage_background_argb(
             }
             silksurf_render::DisplayItem::LinearGradient { .. }
             | silksurf_render::DisplayItem::BackdropFilter { .. }
-            | silksurf_render::DisplayItem::Image { .. } => return None,
+            | silksurf_render::DisplayItem::Image { .. }
+            | silksurf_render::DisplayItem::EmbeddedFrame { .. } => return None,
             silksurf_render::DisplayItem::Text { .. }
             | silksurf_render::DisplayItem::BoxShadow { .. } => {}
         }
@@ -1404,6 +1416,9 @@ mod tests {
                 stylesheet,
                 style_index,
                 viewport,
+                render_config: BrowserRenderConfig::default(),
+                child_frames: Vec::new(),
+                initial_document_load_pending: false,
                 js_ctx,
                 geometry: std::rc::Rc::default(),
                 fused,
@@ -1531,6 +1546,9 @@ mod tests {
                 stylesheet,
                 style_index,
                 viewport,
+                render_config: BrowserRenderConfig::default(),
+                child_frames: Vec::new(),
+                initial_document_load_pending: false,
                 js_ctx,
                 geometry: std::rc::Rc::default(),
                 fused,

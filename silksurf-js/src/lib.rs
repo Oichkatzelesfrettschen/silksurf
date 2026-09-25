@@ -52,5 +52,6 @@ pub mod boa_backend;
 pub use boa_backend::{
     AsyncCompletion, ComputedStyleProvider, DispatchOutcome, ElementBox, GeometryProvider,
     HistoryIntent, ImportMap, ModuleFetchBudget, ModuleFetcher, ModuleScript, PerformanceEntryType,
-    SilkContext, SyntheticEvent, SyntheticField, module_import_specifiers,
+    SilkContext, SyntheticEvent, SyntheticField, WindowMessageContext, WindowMessageHub,
+    module_import_specifiers,
 };

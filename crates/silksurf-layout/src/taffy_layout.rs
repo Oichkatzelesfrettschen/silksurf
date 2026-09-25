@@ -785,7 +785,13 @@ impl TaffyLayout {
                 i,
                 &mut self.flattened_children_scratch,
             );
-            let aspect_ratio = intrinsic_ratios.get(&table.bfs_order[i]).copied();
+            let computed_style = styles.get(i).and_then(Option::as_ref);
+            let has_auto_dimension = computed_style.is_some_and(|style| {
+                style.width == LengthOrAuto::Auto || style.height == LengthOrAuto::Auto
+            });
+            let aspect_ratio = has_auto_dimension
+                .then(|| intrinsic_ratios.get(&table.bfs_order[i]).copied())
+                .flatten();
             taffy_style.aspect_ratio = aspect_ratio;
             record_elapsed(&mut stats.style_time, style_start);
             let child_start = trace_start(trace_taffy);

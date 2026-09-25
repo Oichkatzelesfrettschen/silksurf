@@ -3788,6 +3788,49 @@ emitted by html5ever 0.38 in a `select` fragment because WPT
 records the execution count and remaining parser gaps in the tree-construction
 scorecard.
 
+## AD-051: Iframe Child Documents Composite Into Replaced Content Boxes
+
+**Status**: Accepted
+
+Each iframe source owns a separate `BrowserPageRuntime`, document, script
+context, stylesheet set, and viewport. The parent runtime retains its own DOM,
+layout, and raster. A bounded worker performs child navigation while runtime
+ticks poll a `Pending`, `Loading`, `Failed`, or `Ready` state. The child surface
+replaces the iframe display-list item, preserving sibling paint order and
+clipping through the parent raster. The fused painter emits that item for
+closed-shadow iframe owners and omits it when computed visibility is hidden.
+Child repaint refreshes its retained surface; parent layout does not acquire
+child nodes.
+
+The HTML iframe default object size supplies a 300 by 150 CSS-pixel viewport
+when the document has no explicit dimensions. An intrinsic aspect ratio applies
+only while at least one computed CSS dimension remains `auto`, so explicit
+300-by-65 widget dimensions retain their specified child viewport. Frame
+discovery runs after parent host callbacks so script-created and source-mutated
+iframe elements enter the same asynchronous load path. Hidden frames continue
+navigation and lifecycle dispatch while the paint list omits their pixels.
+Parent `load` waits for each initial child to settle; the iframe `load` event
+precedes the parent's event. Child fetches preserve the top-level site and
+cookie partition. Sandbox flags block script execution and assign an opaque
+origin unless their corresponding allow token appears; opaque contexts
+serialize `location.origin` as `null` and deny storage operations. The
+low-resource profile caps nesting at eight levels, the total number of active
+child contexts at sixteen, and each child viewport at 1,048,576 pixels. The
+message hub releases a context's origin, pending queue, frame mappings, and
+queued source messages when the final context handle drops. `postMessage`
+defaults to the sender's origin, preserves top-level `undefined` data, and
+gives nested contexts distinct `parent` and root `top` proxies.
+
+This decision admits `iframe[src]` document rendering and queued parent/child
+`postMessage` delivery with origin checks. Direct same-origin DOM access,
+`srcdoc`, pointer and keyboard routing, and focus traversal stay outside the
+rendering boundary. Focused tests exercise insertion, asynchronous fetch,
+independent DOM ownership, child pixels, hidden paint, sibling stacking,
+sandbox execution/origin/storage restrictions, message targeting, and load
+ordering. The compositor replaces ordered iframe placeholders without adding
+out-of-order fallback surfaces. Turnstile checkbox acceptance remains a
+separate runtime gate.
+
 ## Future ADRs
 
 Planned (renumbered after the 2026-04-30 batch):

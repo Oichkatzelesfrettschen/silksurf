@@ -59,6 +59,8 @@ mod net_queue;
 mod performance_timeline;
 mod platform_globals;
 mod style_sheets;
+mod window_messages;
+pub use window_messages::{WindowMessageContext, WindowMessageHub};
 
 const HOST_CALLBACKS_REGISTRY: &str = "__silksurfHostCallbacks";
 const DEFAULT_HOST_CALLBACK_BUDGET: usize = 256;
@@ -260,13 +262,15 @@ type StorageMap = Rc<RefCell<HashMap<String, String>>>;
 type CookieJar = Arc<Mutex<silksurf_net::cookie::PartitionedCookieStore>>;
 
 type StorageDirtyFlag = Rc<std::cell::Cell<bool>>;
+type StorageAccessFlag = Rc<std::cell::Cell<bool>>;
 
 /// Install localStorage/sessionStorage; returns the localStorage map and its
 /// dirty flag so the embedder can preload persisted entries and flush writes.
-fn install_storage_objects(ctx: &mut Context) -> (StorageMap, StorageDirtyFlag) {
+fn install_storage_objects(ctx: &mut Context) -> (StorageMap, StorageDirtyFlag, StorageAccessFlag) {
     let dirty = Rc::new(std::cell::Cell::new(false));
-    let (local_storage, local_map) = storage_object(ctx, Some(&dirty));
-    let (session_storage, _session_map) = storage_object(ctx, None);
+    let access_allowed = Rc::new(std::cell::Cell::new(true));
+    let (local_storage, local_map) = storage_object(ctx, Some(&dirty), &access_allowed);
+    let (session_storage, _session_map) = storage_object(ctx, None, &access_allowed);
     ctx.register_global_property(js_string!("localStorage"), local_storage, Attribute::all())
         // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
 
@@ -279,13 +283,18 @@ fn install_storage_objects(ctx: &mut Context) -> (StorageMap, StorageDirtyFlag) 
     // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
 
     .expect("sessionStorage: install on fresh context cannot fail");
-    (local_map, dirty)
+    (local_map, dirty, access_allowed)
 }
 
-fn storage_object(ctx: &mut Context, dirty: Option<&StorageDirtyFlag>) -> (JsObject, StorageMap) {
+fn storage_object(
+    ctx: &mut Context,
+    dirty: Option<&StorageDirtyFlag>,
+    access_allowed: &StorageAccessFlag,
+) -> (JsObject, StorageMap) {
     let storage = Rc::new(RefCell::new(HashMap::new()));
     let length_getter =
-        FunctionObjectBuilder::new(ctx.realm(), storage_length_native(&storage)).build();
+        FunctionObjectBuilder::new(ctx.realm(), storage_length_native(&storage, access_allowed))
+            .build();
 
     let object = ObjectInitializer::new(ctx)
         .accessor(
@@ -294,25 +303,43 @@ fn storage_object(ctx: &mut Context, dirty: Option<&StorageDirtyFlag>) -> (JsObj
             None,
             Attribute::CONFIGURABLE | Attribute::ENUMERABLE,
         )
-        .function(storage_get_item_native(&storage), js_string!("getItem"), 1)
         .function(
-            storage_set_item_native(&storage, dirty),
+            storage_get_item_native(&storage, access_allowed),
+            js_string!("getItem"),
+            1,
+        )
+        .function(
+            storage_set_item_native(&storage, dirty, access_allowed),
             js_string!("setItem"),
             2,
         )
         .function(
-            storage_remove_item_native(&storage, dirty),
+            storage_remove_item_native(&storage, dirty, access_allowed),
             js_string!("removeItem"),
             1,
         )
         .function(
-            storage_clear_native(&storage, dirty),
+            storage_clear_native(&storage, dirty, access_allowed),
             js_string!("clear"),
             0,
         )
-        .function(storage_key_native(&storage), js_string!("key"), 1)
+        .function(
+            storage_key_native(&storage, access_allowed),
+            js_string!("key"),
+            1,
+        )
         .build();
     (object, storage)
+}
+
+fn ensure_storage_access(access_allowed: &StorageAccessFlag) -> boa_engine::JsResult<()> {
+    if access_allowed.get() {
+        Ok(())
+    } else {
+        Err(boa_engine::JsNativeError::error()
+            .with_message("SecurityError: storage is unavailable to an opaque origin")
+            .into())
+    }
 }
 
 fn storage_string_arg(arg: Option<&JsValue>, ctx: &mut Context) -> boa_engine::JsResult<String> {
@@ -322,23 +349,33 @@ fn storage_string_arg(arg: Option<&JsValue>, ctx: &mut Context) -> boa_engine::J
     }
 }
 
-fn storage_length_native(storage: &StorageMap) -> NativeFunction {
+fn storage_length_native(
+    storage: &StorageMap,
+    access_allowed: &StorageAccessFlag,
+) -> NativeFunction {
     let storage = Rc::clone(storage);
+    let access_allowed = Rc::clone(access_allowed);
     // SAFETY: Boa stores the native closure with owned Rust captures for the JS function lifetime.
 
     unsafe {
         NativeFunction::from_closure(move |_this, _args, _ctx| {
+            ensure_storage_access(&access_allowed)?;
             Ok(JsValue::from(storage.borrow().len() as u32))
         })
     }
 }
 
-fn storage_get_item_native(storage: &StorageMap) -> NativeFunction {
+fn storage_get_item_native(
+    storage: &StorageMap,
+    access_allowed: &StorageAccessFlag,
+) -> NativeFunction {
     let storage = Rc::clone(storage);
+    let access_allowed = Rc::clone(access_allowed);
     // SAFETY: Boa stores the native closure with owned Rust captures for the JS function lifetime.
 
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
+            ensure_storage_access(&access_allowed)?;
             let key = storage_string_arg(args.first(), ctx)?;
             Ok(storage
                 .borrow()
@@ -353,13 +390,16 @@ fn storage_get_item_native(storage: &StorageMap) -> NativeFunction {
 fn storage_set_item_native(
     storage: &StorageMap,
     dirty: Option<&StorageDirtyFlag>,
+    access_allowed: &StorageAccessFlag,
 ) -> NativeFunction {
     let storage = Rc::clone(storage);
     let dirty = dirty.map(Rc::clone);
+    let access_allowed = Rc::clone(access_allowed);
     // SAFETY: Boa stores the native closure with owned Rust captures for the JS function lifetime.
 
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
+            ensure_storage_access(&access_allowed)?;
             let key = storage_string_arg(args.first(), ctx)?;
             let value = storage_string_arg(args.get(1), ctx)?;
             storage.borrow_mut().insert(key, value);
@@ -374,13 +414,16 @@ fn storage_set_item_native(
 fn storage_remove_item_native(
     storage: &StorageMap,
     dirty: Option<&StorageDirtyFlag>,
+    access_allowed: &StorageAccessFlag,
 ) -> NativeFunction {
     let storage = Rc::clone(storage);
     let dirty = dirty.map(Rc::clone);
+    let access_allowed = Rc::clone(access_allowed);
     // SAFETY: Boa stores the native closure with owned Rust captures for the JS function lifetime.
 
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
+            ensure_storage_access(&access_allowed)?;
             let key = storage_string_arg(args.first(), ctx)?;
             storage.borrow_mut().remove(&key);
             if let Some(flag) = &dirty {
@@ -391,13 +434,19 @@ fn storage_remove_item_native(
     }
 }
 
-fn storage_clear_native(storage: &StorageMap, dirty: Option<&StorageDirtyFlag>) -> NativeFunction {
+fn storage_clear_native(
+    storage: &StorageMap,
+    dirty: Option<&StorageDirtyFlag>,
+    access_allowed: &StorageAccessFlag,
+) -> NativeFunction {
     let storage = Rc::clone(storage);
     let dirty = dirty.map(Rc::clone);
+    let access_allowed = Rc::clone(access_allowed);
     // SAFETY: Boa stores the native closure with owned Rust captures for the JS function lifetime.
 
     unsafe {
         NativeFunction::from_closure(move |_this, _args, _ctx| {
+            ensure_storage_access(&access_allowed)?;
             storage.borrow_mut().clear();
             if let Some(flag) = &dirty {
                 flag.set(true);
@@ -407,12 +456,14 @@ fn storage_clear_native(storage: &StorageMap, dirty: Option<&StorageDirtyFlag>) 
     }
 }
 
-fn storage_key_native(storage: &StorageMap) -> NativeFunction {
+fn storage_key_native(storage: &StorageMap, access_allowed: &StorageAccessFlag) -> NativeFunction {
     let storage = Rc::clone(storage);
+    let access_allowed = Rc::clone(access_allowed);
     // SAFETY: Boa stores the native closure with owned Rust captures for the JS function lifetime.
 
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
+            ensure_storage_access(&access_allowed)?;
             let index = args
                 .first()
                 .map(|value| value.to_u32(ctx))
@@ -867,6 +918,7 @@ pub struct SilkContext {
     /// and flushes writes signaled by `storage_dirty`.
     local_storage: StorageMap,
     storage_dirty: StorageDirtyFlag,
+    storage_access_allowed: StorageAccessFlag,
     /// Viewport dimensions backing matchMedia (and future viewport units).
     viewport: ViewportRef,
     /// Live layout observations, written by the JS half's observe and
@@ -881,6 +933,7 @@ pub struct SilkContext {
     performance_pending: performance_timeline::EntryPending,
     /// Whether the frame's geometry moved since the last delivery.
     observation_pending: layout_observers::ObservationPending,
+    window_messages: Option<window_messages::WindowMessageContext>,
 }
 
 /// Extra payload field on a synthetic event object.
@@ -1232,7 +1285,8 @@ impl SilkContext {
             time_origin_ms,
         );
 
-        let (local_storage, storage_dirty) = install_storage_objects(&mut ctx);
+        let (local_storage, storage_dirty, storage_access_allowed) =
+            install_storage_objects(&mut ctx);
         let async_done = Rc::new(RefCell::new(AsyncDoneCell::default()));
         install_async_done(&mut ctx, &async_done);
 
@@ -1255,6 +1309,8 @@ impl SilkContext {
             observation_pending,
             local_storage,
             storage_dirty,
+            storage_access_allowed,
+            window_messages: None,
         }
     }
 
@@ -1377,10 +1433,22 @@ impl SilkContext {
         Some(self.local_storage.borrow().clone())
     }
 
-    /// Update the viewport dimensions matchMedia evaluates against.
-    /// The embedder calls this on window resize.
+    /// Update the viewport dimensions exposed by CSSOM View and `matchMedia`.
     pub fn set_viewport(&mut self, width: f32, height: f32) {
         self.viewport.set((width, height));
+        let global = self.ctx.global_object().clone();
+        let _ = global.set(
+            js_string!("innerWidth"),
+            JsValue::from(f64::from(width)),
+            false,
+            &mut self.ctx,
+        );
+        let _ = global.set(
+            js_string!("innerHeight"),
+            JsValue::from(f64::from(height)),
+            false,
+            &mut self.ctx,
+        );
     }
 
     /// Point `location`, `document.URL`, and the module loader's base at the
@@ -1401,6 +1469,11 @@ impl SilkContext {
         platform_globals::set_document_url(&mut self.ctx, url);
         self.module_loader.set_document_url(url);
         self.net.shared.borrow_mut().document_url = url::Url::parse(url).ok();
+    }
+
+    pub fn set_document_origin_opaque(&mut self) {
+        platform_globals::set_document_origin_opaque(&mut self.ctx);
+        self.storage_access_allowed.set(false);
     }
 
     /// Share the embedder's TLS configuration and cookie partition with fetch.
@@ -1543,7 +1616,16 @@ impl SilkContext {
                 let _ = self.ctx.run_jobs();
                 Ok(())
             }
-            Err(e) => Err(format!("{e}")),
+            Err(error) => {
+                if std::env::var_os("SILKSURF_TRACE_SCRIPT_ERRORS").is_some() {
+                    eprintln!(
+                        "[SilkSurf] Script evaluation error source ({} bytes):\n{}",
+                        script.len(),
+                        script
+                    );
+                }
+                Err(format!("{error}"))
+            }
         }
     }
 
@@ -1788,6 +1870,7 @@ impl SilkContext {
         ran += self.drain_net_completions()?;
         ran += self.drain_ws_events()?;
         ran += self.drain_sse_events()?;
+        ran += self.deliver_window_messages()?;
         // A record left queued by a mutation path that did not enqueue its own
         // delivery reaches its callback at this checkpoint rather than never.
         if let Some(dom) = self.dom.clone() {
@@ -2151,6 +2234,55 @@ impl SilkContext {
         Ok(DispatchOutcome {
             default_prevented: !proceed,
         })
+    }
+
+    /// Set the live document's loading state and dispatch `readystatechange`.
+    ///
+    /// The navigation host advances this value after parser-blocking scripts
+    /// and document resources reach their corresponding lifecycle boundary.
+    pub fn set_document_ready_state(&mut self, ready_state: &str) -> Result<(), String> {
+        let document = self
+            .ctx
+            .global_object()
+            .clone()
+            .get(js_string!("document"), &mut self.ctx)
+            .map_err(|err| format!("document.readyState lookup failed: {err}"))?
+            .as_object()
+            .ok_or_else(|| "document.readyState target is not an object".to_string())?;
+        document
+            .set(
+                js_string!("readyState"),
+                JsValue::from(JsString::from(ready_state)),
+                false,
+                &mut self.ctx,
+            )
+            .map_err(|err| format!("document.readyState update failed: {err}"))?;
+        let document_node = silksurf_dom::NodeId::from_raw(0);
+        self.dispatch_dom_event(
+            document_node,
+            &SyntheticEvent::new("readystatechange", false, false),
+        )?;
+        Ok(())
+    }
+
+    /// Dispatch a trusted event at the global window target.
+    pub fn dispatch_window_event(&mut self, event_type: &str) -> Result<(), String> {
+        let dom = self
+            .dom
+            .clone()
+            .ok_or_else(|| "dispatch_window_event: context has no DOM bridge".to_string())?;
+        let event =
+            event_dispatch::build_event_object(event_type, false, false, true, &mut self.ctx);
+        event_dispatch::propagate_event(
+            &dom,
+            event_dispatch::WINDOW_TARGET,
+            &self.ctx.global_object().clone().into(),
+            &event,
+            &mut self.ctx,
+        )
+        .map_err(|err| format!("{err}"))?;
+        self.run_pending_jobs();
+        Ok(())
     }
 
     /// True when any listener for `event_type` is registered on any node.
@@ -4079,6 +4211,40 @@ mod tests {
         (Arc::new(Mutex::new(dom)), document)
     }
 
+    #[test]
+    fn document_lifecycle_advances_ready_state_and_event_order() {
+        let (dom, document) = minimal_document();
+        let mut ctx = SilkContext::with_dom(&dom);
+        ctx.eval(
+            "globalThis.lifecycle = []; \
+             document.addEventListener('readystatechange', () => lifecycle.push(document.readyState)); \
+             document.addEventListener('DOMContentLoaded', () => lifecycle.push('domcontentloaded')); \
+             window.addEventListener('load', () => lifecycle.push('load:' + document.readyState)); \
+             globalThis.initialReadyState = document.readyState;",
+        )
+        .expect("lifecycle listeners install");
+        assert_eq!(global_string(&mut ctx, "initialReadyState"), "loading");
+
+        ctx.set_document_ready_state("interactive")
+            .expect("interactive state dispatches readystatechange");
+        ctx.dispatch_dom_event(
+            document,
+            &SyntheticEvent::new("DOMContentLoaded", true, false),
+        )
+        .expect("DOMContentLoaded dispatches");
+        ctx.set_document_ready_state("complete")
+            .expect("complete state dispatches readystatechange");
+        ctx.dispatch_window_event("load")
+            .expect("window load dispatches");
+        ctx.eval("globalThis.lifecycleResult = lifecycle.join('|');")
+            .expect("lifecycle result serializes");
+
+        assert_eq!(
+            global_string(&mut ctx, "lifecycleResult"),
+            "interactive|domcontentloaded|complete|load:complete"
+        );
+    }
+
     fn start_websocket_echo_server() -> (String, std::thread::JoinHandle<()>) {
         use futures_util::{SinkExt, StreamExt};
         use std::net::TcpListener;
@@ -4601,6 +4767,28 @@ mod tests {
         ctx.eval("globalThis.nowWide = matchMedia('(min-width: 900px)').matches;")
             .expect("script re-evaluates");
         assert!(global_bool(&mut ctx, "nowWide"));
+    }
+
+    #[test]
+    fn window_inner_dimensions_follow_set_viewport() {
+        let mut ctx = SilkContext::new();
+        ctx.set_viewport(800.0, 600.0);
+        ctx.eval(
+            "globalThis.initialWidth = window.innerWidth; \
+             globalThis.initialHeight = window.innerHeight;",
+        )
+        .expect("window dimensions evaluate");
+        assert!((global_number(&mut ctx, "initialWidth") - 800.0).abs() < f64::EPSILON);
+        assert!((global_number(&mut ctx, "initialHeight") - 600.0).abs() < f64::EPSILON);
+
+        ctx.set_viewport(300.0, 150.0);
+        ctx.eval(
+            "globalThis.resizedWidth = window.innerWidth; \
+             globalThis.resizedHeight = window.innerHeight;",
+        )
+        .expect("resized window dimensions evaluate");
+        assert!((global_number(&mut ctx, "resizedWidth") - 300.0).abs() < f64::EPSILON);
+        assert!((global_number(&mut ctx, "resizedHeight") - 150.0).abs() < f64::EPSILON);
     }
 
     #[test]

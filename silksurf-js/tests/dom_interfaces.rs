@@ -81,6 +81,63 @@ fn attribute_members_read_and_write_the_dom() {
 }
 
 #[test]
+fn named_node_map_reflects_live_element_attributes() {
+    let mut ctx = context_with_document();
+    ctx.eval(
+        "var div = document.getElementById('target'); \
+         var attributes = div.attributes; \
+         if (!(attributes instanceof NamedNodeMap)) throw new Error('NamedNodeMap'); \
+         if (attributes.length !== 2 || attributes.item(0).name !== 'id') \
+             throw new Error('initial items'); \
+         if (attributes.class.value !== 'one two') throw new Error('named lookup'); \
+         div.setAttribute('data-turnstile', 'ready'); \
+         if (attributes.length !== 3 || attributes[2].name !== 'data-turnstile') \
+             throw new Error('live indexed access'); \
+         if (Array.from(attributes).map(function (attribute) { return attribute.name; }).join(',') !== 'id,class,data-turnstile') \
+             throw new Error('iteration'); \
+         if (attributes.removeNamedItem('data-turnstile').value !== 'ready') \
+             throw new Error('removeNamedItem'); \
+         if (attributes.length !== 2) throw new Error('live removal');",
+    )
+    .expect("NamedNodeMap reflects element attributes by name and index");
+}
+
+#[test]
+fn document_node_iterator_filters_elements_and_text_in_tree_order() {
+    let mut ctx = context_with_document();
+    ctx.eval(
+        "var div = document.getElementById('target'); \
+         div.appendChild(document.createTextNode('child text')); \
+         var iterator = document.createNodeIterator( \
+             document.body, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT); \
+         var nodes = []; var node; \
+         while ((node = iterator.nextNode()) !== null) { nodes.push(node); } \
+         if (nodes.map(function (item) { return item.nodeName; }).join(',') !== 'BODY,DIV,#text,LINK') \
+             throw new Error(nodes.map(function (item) { return item.nodeName; }).join(',')); \
+         if (iterator.previousNode().nodeName !== 'LINK') throw new Error('previousNode'); \
+         if (Node.TEXT_NODE !== 3 || NodeFilter.SHOW_TEXT !== 4) throw new Error('node constants');",
+    )
+    .expect("NodeIterator traverses selected nodes in document order");
+}
+
+#[test]
+fn document_scripts_is_a_live_html_collection() {
+    let mut ctx = context_with_document();
+    ctx.eval(
+        "var scripts = document.scripts; \
+         if (!(scripts instanceof HTMLCollection) || scripts !== document.scripts) \
+             throw new Error('HTMLCollection identity'); \
+         if (scripts.length !== 0) throw new Error('initial collection ' + scripts.length); \
+         var script = document.createElement('script'); script.id = 'turnstile-loader'; \
+         document.body.appendChild(script); \
+         if (scripts.length !== 1 || scripts[0] !== script || scripts.item(0) !== script) \
+             throw new Error('live indexed collection'); \
+         if (scripts.namedItem('turnstile-loader') !== script) throw new Error('namedItem');",
+    )
+    .expect("document.scripts tracks parser-created and inserted script elements");
+}
+
+#[test]
 fn class_list_is_a_live_view_over_class_name() {
     let mut ctx = context_with_document();
     ctx.eval(
