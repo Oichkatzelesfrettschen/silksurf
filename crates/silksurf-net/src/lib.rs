@@ -82,6 +82,24 @@ pub const MAX_RESPONSE_BODY_BYTES: usize = 16 * 1024 * 1024;
 #[cfg(feature = "content-encoding")]
 const ACCEPT_ENCODING_VALUE: &str = "br, gzip, deflate";
 
+const USER_AGENT_BRANDS: &str = "\"SilkSurf\";v=\"0\"";
+const USER_AGENT_PLATFORM: &str = if cfg!(target_os = "macos") {
+    "\"macOS\""
+} else if cfg!(target_os = "windows") {
+    "\"Windows\""
+} else if cfg!(target_os = "android") {
+    "\"Android\""
+} else if cfg!(target_os = "ios") {
+    "\"iOS\""
+} else {
+    "\"Linux\""
+};
+const USER_AGENT_MOBILE: &str = if cfg!(any(target_os = "android", target_os = "ios")) {
+    "?1"
+} else {
+    "?0"
+};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HttpMethod {
     Get,
@@ -467,6 +485,9 @@ fn build_http1_request(
 ) -> Result<Vec<u8>, NetError> {
     let mut request_bytes = Vec::with_capacity(512);
     write_request_line(&mut request_bytes, request, target)?;
+    if target.is_https {
+        write_user_agent_client_hints(&mut request_bytes, &request.headers)?;
+    }
     write_content_encoding_header(&mut request_bytes, &request.headers)?;
     write_custom_headers(&mut request_bytes, &request.headers)?;
     if let Some(cookie_header) = cookie_header {
@@ -477,6 +498,23 @@ fn build_http1_request(
     request_bytes.extend_from_slice(b"\r\n");
     request_bytes.extend_from_slice(&request.body);
     Ok(request_bytes)
+}
+
+fn write_user_agent_client_hints(
+    request_bytes: &mut Vec<u8>,
+    headers: &[(String, String)],
+) -> Result<(), NetError> {
+    for (name, value) in [
+        ("sec-ch-ua", USER_AGENT_BRANDS),
+        ("sec-ch-ua-mobile", USER_AGENT_MOBILE),
+        ("sec-ch-ua-platform", USER_AGENT_PLATFORM),
+    ] {
+        if !has_header(headers, name) {
+            write!(request_bytes, "{name}: {value}\r\n")
+                .map_err(|error| NetError::new(format!("Write error: {error}")))?;
+        }
+    }
+    Ok(())
 }
 
 fn write_request_line(
@@ -763,7 +801,6 @@ fn same_https_host(urls: &[url::Url]) -> Option<(String, u16)> {
     Some((host, port))
 }
 
-#[cfg(feature = "content-encoding")]
 fn has_header(headers: &[(String, String)], name: &str) -> bool {
     headers
         .iter()
@@ -1014,7 +1051,10 @@ fn read_decoded_body(reader: &mut dyn Read, coding: &str) -> Result<Vec<u8>, Net
 
 #[cfg(test)]
 mod tests {
-    use super::{BasicClient, HttpMethod, HttpRequest, HttpResponse, parse_response};
+    use super::{
+        BasicClient, HttpMethod, HttpRequest, HttpResponse, RequestTarget, build_http1_request,
+        parse_response,
+    };
     #[cfg(feature = "content-encoding")]
     use super::{decode_response, has_header};
 
@@ -1024,6 +1064,60 @@ mod tests {
     use flate2::write::{DeflateEncoder, GzEncoder};
     #[cfg(feature = "content-encoding")]
     use std::io::Write;
+
+    #[test]
+    fn https_requests_send_low_entropy_user_agent_client_hints() {
+        let request = HttpRequest {
+            method: HttpMethod::Get,
+            url: "https://example.com/".to_string(),
+            headers: Vec::new(),
+            body: Vec::new(),
+        };
+        let target = RequestTarget::parse(&request.url).expect("HTTPS URL parses");
+        let wire = build_http1_request(&request, &target, None).expect("request serializes");
+        let wire = String::from_utf8(wire).expect("request headers use UTF-8");
+
+        assert!(wire.contains("sec-ch-ua: \"SilkSurf\";v=\"0\"\r\n"));
+        assert!(wire.contains(&format!(
+            "sec-ch-ua-mobile: {}\r\n",
+            super::USER_AGENT_MOBILE
+        )));
+        assert!(wire.contains(&format!(
+            "sec-ch-ua-platform: {}\r\n",
+            super::USER_AGENT_PLATFORM
+        )));
+    }
+
+    #[test]
+    fn explicit_client_hints_override_generated_values() {
+        let request = HttpRequest {
+            method: HttpMethod::Get,
+            url: "https://example.com/".to_string(),
+            headers: vec![("Sec-CH-UA".to_string(), "\"Custom\";v=\"1\"".to_string())],
+            body: Vec::new(),
+        };
+        let target = RequestTarget::parse(&request.url).expect("HTTPS URL parses");
+        let wire = build_http1_request(&request, &target, None).expect("request serializes");
+        let wire = String::from_utf8(wire).expect("request headers use UTF-8");
+
+        assert_eq!(wire.matches("sec-ch-ua:").count(), 0);
+        assert_eq!(wire.matches("Sec-CH-UA:").count(), 1);
+    }
+
+    #[test]
+    fn insecure_http_requests_omit_client_hints() {
+        let request = HttpRequest {
+            method: HttpMethod::Get,
+            url: "http://example.com/".to_string(),
+            headers: Vec::new(),
+            body: Vec::new(),
+        };
+        let target = RequestTarget::parse(&request.url).expect("HTTP URL parses");
+        let wire = build_http1_request(&request, &target, None).expect("request serializes");
+        let wire = String::from_utf8(wire).expect("request headers use UTF-8");
+
+        assert!(!wire.to_ascii_lowercase().contains("sec-ch-ua"));
+    }
 
     #[cfg(feature = "content-encoding")]
     #[test]

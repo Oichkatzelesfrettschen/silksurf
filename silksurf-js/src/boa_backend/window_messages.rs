@@ -433,8 +433,15 @@ fn trace_window_message(
             .and_then(serde_json::Value::as_str)
             .map(|reason| format!(" reason={reason}"))
             .unwrap_or_default();
+        let payload_values = if event == "extraParams"
+            && std::env::var_os("SILKSURF_TRACE_WINDOW_MESSAGE_VALUES").is_some()
+        {
+            value.map_or_else(String::new, |value| format!(" values={value}"))
+        } else {
+            String::new()
+        };
         eprintln!(
-            "[SilkSurf] Window message {action}: {event} {shape}{reason} source={source_context} target={target_context} origin={origin}"
+            "[SilkSurf] Window message {action}: {event} {shape}{reason} source={source_context} target={target_context} origin={origin}{payload_values}"
         );
     }
 }

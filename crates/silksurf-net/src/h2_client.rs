@@ -16,6 +16,8 @@ use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 
+use super::{USER_AGENT_BRANDS, USER_AGENT_MOBILE, USER_AGENT_PLATFORM};
+
 #[cfg(feature = "content-encoding")]
 const ACCEPT_ENCODING_VALUE: &str = "br, gzip, deflate";
 
@@ -162,6 +164,15 @@ fn build_h2_request(host: &str, req: &H2Request) -> Result<Request<()>, String> 
         .version(Version::HTTP_2)
         .header("accept", "text/css,*/*")
         .header("user-agent", "SilkSurf/0.1 (X11; Linux x86_64)");
+    for (name, value) in [
+        ("sec-ch-ua", USER_AGENT_BRANDS),
+        ("sec-ch-ua-mobile", USER_AGENT_MOBILE),
+        ("sec-ch-ua-platform", USER_AGENT_PLATFORM),
+    ] {
+        if !has_header(&req.extra_headers, name) {
+            builder = builder.header(name, value);
+        }
+    }
     #[cfg(feature = "content-encoding")]
     if !has_header(&req.extra_headers, "accept-encoding") {
         builder = builder.header("accept-encoding", ACCEPT_ENCODING_VALUE);
@@ -211,9 +222,50 @@ async fn collect_h2_response(resp_future: ResponseFuture) -> Result<H2Response, 
     })
 }
 
-#[cfg(feature = "content-encoding")]
 fn has_header(headers: &[(String, String)], name: &str) -> bool {
     headers
         .iter()
         .any(|(header_name, _)| header_name.eq_ignore_ascii_case(name))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::H2Request;
+    use super::build_h2_request;
+
+    #[test]
+    fn https_requests_include_low_entropy_user_agent_client_hints() {
+        let request = H2Request {
+            path: "/".to_string(),
+            query: None,
+            extra_headers: Vec::new(),
+        };
+        let request = build_h2_request("example.com", &request).expect("request builds");
+        let headers = request.headers();
+
+        assert_eq!(headers["sec-ch-ua"], "\"SilkSurf\";v=\"0\"");
+        assert_eq!(headers["sec-ch-ua-mobile"], super::super::USER_AGENT_MOBILE);
+        assert_eq!(
+            headers["sec-ch-ua-platform"],
+            super::super::USER_AGENT_PLATFORM
+        );
+    }
+
+    #[test]
+    fn explicit_client_hints_override_generated_values() {
+        let request = H2Request {
+            path: "/".to_string(),
+            query: None,
+            extra_headers: vec![("sec-ch-ua".to_string(), "\"Custom\";v=\"1\"".to_string())],
+        };
+        let request = build_h2_request("example.com", &request).expect("request builds");
+        let headers = request.headers();
+
+        assert_eq!(headers["sec-ch-ua"], "\"Custom\";v=\"1\"");
+        assert_eq!(headers["sec-ch-ua-mobile"], super::super::USER_AGENT_MOBILE);
+        assert_eq!(
+            headers["sec-ch-ua-platform"],
+            super::super::USER_AGENT_PLATFORM
+        );
+    }
 }

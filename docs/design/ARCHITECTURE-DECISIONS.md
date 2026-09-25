@@ -3831,6 +3831,23 @@ ordering. The compositor replaces ordered iframe placeholders without adding
 out-of-order fallback surfaces. Turnstile checkbox acceptance remains a
 separate runtime gate.
 
+## AD-052: User-Agent Client Hints Share the SilkSurf Browser Profile
+
+**Status**: Accepted
+
+The HTTP and JavaScript identity surfaces share SilkSurf's own browser profile.
+HTTPS and localhost/loopback HTTP contexts expose `navigator.userAgentData` with
+the SilkSurf brand, platform, mobile classification, and available high-entropy
+values. HTTPS requests send `Sec-CH-UA`, `Sec-CH-UA-Mobile`, and
+`Sec-CH-UA-Platform`; explicit request headers override the generated low-
+entropy values. The profile reports the engine's architecture and package
+version instead of Chromium identity.
+
+High-entropy request headers remain gated on origin `Accept-CH` policy and
+persisted per-origin opt-in. The current network layer sends the low-entropy
+set only, while script callers can request the supported high-entropy fields
+through `getHighEntropyValues()`.
+
 ## Future ADRs
 
 Planned (renumbered after the 2026-04-30 batch):
