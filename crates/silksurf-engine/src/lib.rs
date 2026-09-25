@@ -17,7 +17,9 @@ use silksurf_css::{
     ComputedStyle, CssError, StyleCache, Stylesheet, parse_stylesheet_with_interner,
 };
 use silksurf_dom::{Dom, NodeId};
-use silksurf_html::parse_html as html5ever_parse;
+use silksurf_html::{
+    parse_html as html5ever_parse, parse_html_with_scripting as html5ever_parse_with_scripting,
+};
 use silksurf_layout::{LayoutTree, Rect, build_layout_tree, build_layout_tree_incremental};
 use silksurf_render::{DisplayList, build_display_list};
 use std::sync::Arc;
@@ -202,6 +204,16 @@ impl Default for EnginePipeline {
 pub fn parse_html(input: &str) -> Result<ParsedDocument, EngineError> {
     let dom = html5ever_parse(input);
     // html5ever always produces a well-formed tree rooted at NodeId(0).
+    let document = NodeId::from_raw(0);
+    Ok(ParsedDocument { dom, document })
+}
+
+/// Parse an HTML document with the embedding context's scripting flag.
+pub fn parse_html_with_scripting(
+    input: &str,
+    scripting_enabled: bool,
+) -> Result<ParsedDocument, EngineError> {
+    let dom = html5ever_parse_with_scripting(input, scripting_enabled);
     let document = NodeId::from_raw(0);
     Ok(ParsedDocument { dom, document })
 }

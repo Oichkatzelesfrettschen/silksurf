@@ -1418,6 +1418,7 @@ fn emit_workspace_paint(
     emit_rounded_background(style, content_rect, display_items);
     emit_text_content(dom, node, style, content_rect, font_scale, display_items);
     emit_form_control_text(dom, node, style, content_rect, font_scale, display_items);
+    emit_embedded_frame(dom, node, style, content_rect, display_items);
 }
 
 fn emit_allocating_paint(
@@ -1434,6 +1435,25 @@ fn emit_allocating_paint(
     emit_square_background(style, content_rect, display_items);
     emit_text_content(dom, node, style, content_rect, font_scale, display_items);
     emit_form_control_text(dom, node, style, content_rect, font_scale, display_items);
+    emit_embedded_frame(dom, node, style, content_rect, display_items);
+}
+
+fn emit_embedded_frame(
+    dom: &Dom,
+    node: NodeId,
+    style: &ComputedStyle,
+    rect: Rect,
+    display_items: &mut Vec<DisplayItem>,
+) {
+    if style.visibility == silksurf_css::Visibility::Visible
+        && dom
+            .element_name(node)
+            .ok()
+            .flatten()
+            .is_some_and(|name| name.eq_ignore_ascii_case("iframe"))
+    {
+        display_items.push(DisplayItem::EmbeddedFrame { rect, node });
+    }
 }
 
 fn emit_box_shadow(style: &ComputedStyle, rect: Rect, display_items: &mut Vec<DisplayItem>) {
@@ -1794,6 +1814,97 @@ mod tests {
         // BFS index 0 is always the root node; its style must be computed.
         assert_eq!(result.table.bfs_order[0], root);
         assert!(result.styles[0].is_some());
+    }
+
+    #[test]
+    fn closed_shadow_iframe_keeps_its_stacking_order() {
+        let mut dom = Dom::new();
+        let root = dom.create_document();
+        let html = dom.create_element("html");
+        let body = dom.create_element("body");
+        let host = dom.create_element("div");
+        let overlay = dom.create_element("div");
+        for (parent, child) in [(root, html), (html, body), (body, host), (body, overlay)] {
+            dom.append_child(parent, child).expect("DOM nodes attach");
+        }
+        dom.set_attribute(host, "id", "host")
+            .expect("host receives an id");
+        dom.set_attribute(overlay, "id", "overlay")
+            .expect("overlay receives an id");
+        let shadow_root = dom.attach_shadow(host, true).expect("closed root attaches");
+        let iframe = dom.create_element("iframe");
+        dom.set_attribute(iframe, "id", "frame")
+            .expect("iframe receives an id");
+        dom.append_child(shadow_root, iframe)
+            .expect("iframe enters the closed root");
+
+        let stylesheet = silksurf_css::parse_stylesheet(
+            "html, body, div, iframe { display: block; } \
+             #host { position: relative; width: 100px; height: 100px; } \
+             #frame { position: absolute; z-index: 1; width: 20px; height: 20px; } \
+             #overlay { position: absolute; z-index: 2; width: 20px; height: 20px; \
+                        background-color: red; }",
+        )
+        .expect("stacking fixture stylesheet parses");
+        let viewport = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 100.0,
+        };
+
+        let result = fused_style_layout_paint(&dom, &stylesheet, root, viewport);
+        let frame_index = result
+            .display_items
+            .iter()
+            .position(
+                |item| matches!(item, DisplayItem::EmbeddedFrame { node, .. } if *node == iframe),
+            )
+            .expect("closed-root iframe emits a placeholder in its paint slot");
+        let overlay_index = result
+            .display_items
+            .iter()
+            .position(|item| {
+                matches!(item, DisplayItem::SolidColor { color, .. } if *color == (silksurf_css::Color { r: 255, g: 0, b: 0, a: 255 }))
+            })
+            .expect("higher z-index sibling paints its background");
+
+        assert!(frame_index < overlay_index);
+    }
+
+    #[test]
+    fn hidden_closed_shadow_iframe_emits_no_paint_item() {
+        let mut dom = Dom::new();
+        let root = dom.create_document();
+        let html = dom.create_element("html");
+        let body = dom.create_element("body");
+        let host = dom.create_element("div");
+        for (parent, child) in [(root, html), (html, body), (body, host)] {
+            dom.append_child(parent, child).expect("DOM nodes attach");
+        }
+        let shadow_root = dom.attach_shadow(host, true).expect("closed root attaches");
+        let iframe = dom.create_element("iframe");
+        dom.append_child(shadow_root, iframe)
+            .expect("iframe enters the closed root");
+
+        let stylesheet = silksurf_css::parse_stylesheet(
+            "html, body, div, iframe { display: block; } \
+             #host { width: 100px; height: 100px; } \
+             iframe { visibility: hidden; width: 20px; height: 20px; }",
+        )
+        .expect("hidden iframe stylesheet parses");
+        let viewport = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 100.0,
+        };
+
+        let result = fused_style_layout_paint(&dom, &stylesheet, root, viewport);
+
+        assert!(result.display_items.iter().all(
+            |item| !matches!(item, DisplayItem::EmbeddedFrame { node, .. } if *node == iframe)
+        ));
     }
 
     #[test]

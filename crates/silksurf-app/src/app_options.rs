@@ -105,6 +105,9 @@ pub(crate) fn parse_app_options(args: &[String]) -> Result<AppOptions, String> {
             top_level_site: String::new(),
             window_message_hub: silksurf_js::WindowMessageHub::default(),
             window_parent: None,
+            scripts_disabled: false,
+            origin_sandboxed: false,
+            defer_initial_load: !headless,
         },
     })
 }

@@ -703,7 +703,8 @@ pub(crate) fn viewport_argb_direct_item_supported(item: &silksurf_render::Displa
         silksurf_render::DisplayItem::Image { image, .. } => image_has_full_rgba_argb(image),
         silksurf_render::DisplayItem::BoxShadow { .. }
         | silksurf_render::DisplayItem::LinearGradient { .. }
-        | silksurf_render::DisplayItem::BackdropFilter { .. } => false,
+        | silksurf_render::DisplayItem::BackdropFilter { .. }
+        | silksurf_render::DisplayItem::EmbeddedFrame { .. } => false,
     }
 }
 
@@ -809,7 +810,8 @@ pub(crate) fn paint_viewport_argb_direct_item(
         }
         silksurf_render::DisplayItem::BoxShadow { .. }
         | silksurf_render::DisplayItem::LinearGradient { .. }
-        | silksurf_render::DisplayItem::BackdropFilter { .. } => {}
+        | silksurf_render::DisplayItem::BackdropFilter { .. }
+        | silksurf_render::DisplayItem::EmbeddedFrame { .. } => {}
     }
 }
 
@@ -866,7 +868,8 @@ pub(crate) fn paint_viewport_argb_direct_item_clipped(
         }
         silksurf_render::DisplayItem::BoxShadow { .. }
         | silksurf_render::DisplayItem::LinearGradient { .. }
-        | silksurf_render::DisplayItem::BackdropFilter { .. } => {}
+        | silksurf_render::DisplayItem::BackdropFilter { .. }
+        | silksurf_render::DisplayItem::EmbeddedFrame { .. } => {}
     }
 }
 
@@ -1387,7 +1390,8 @@ pub(crate) fn display_item_rect(item: &silksurf_render::DisplayItem) -> Rect {
         | silksurf_render::DisplayItem::RoundedRect { rect, .. }
         | silksurf_render::DisplayItem::LinearGradient { rect, .. }
         | silksurf_render::DisplayItem::BackdropFilter { rect, .. }
-        | silksurf_render::DisplayItem::Image { rect, .. } => *rect,
+        | silksurf_render::DisplayItem::Image { rect, .. }
+        | silksurf_render::DisplayItem::EmbeddedFrame { rect, .. } => *rect,
         silksurf_render::DisplayItem::BoxShadow { rect, shadow } => Rect {
             x: rect.x + shadow.offset_x - shadow.spread_radius,
             y: rect.y + shadow.offset_y - shadow.spread_radius,
@@ -1423,7 +1427,8 @@ pub(crate) fn shift_display_item_y(
         | silksurf_render::DisplayItem::BoxShadow { rect, .. }
         | silksurf_render::DisplayItem::LinearGradient { rect, .. }
         | silksurf_render::DisplayItem::BackdropFilter { rect, .. }
-        | silksurf_render::DisplayItem::Image { rect, .. } => {
+        | silksurf_render::DisplayItem::Image { rect, .. }
+        | silksurf_render::DisplayItem::EmbeddedFrame { rect, .. } => {
             rect.y += delta_y;
         }
     }
@@ -1451,7 +1456,8 @@ pub(crate) fn display_item_bottom(item: &silksurf_render::DisplayItem) -> f32 {
         | silksurf_render::DisplayItem::BoxShadow { rect, .. }
         | silksurf_render::DisplayItem::LinearGradient { rect, .. }
         | silksurf_render::DisplayItem::BackdropFilter { rect, .. }
-        | silksurf_render::DisplayItem::Image { rect, .. } => rect.y + rect.height,
+        | silksurf_render::DisplayItem::Image { rect, .. }
+        | silksurf_render::DisplayItem::EmbeddedFrame { rect, .. } => rect.y + rect.height,
     }
 }
 

@@ -18,7 +18,7 @@ pub struct WindowMessageHub(Arc<Mutex<MessageHubState>>);
 pub struct WindowMessageContext {
     hub: WindowMessageHub,
     id: u64,
-    origin: String,
+    origin: WindowOrigin,
     parent: Option<(u64, u64)>,
     _registration: Arc<ContextRegistration>,
 }
@@ -32,6 +32,7 @@ impl Drop for ContextRegistration {
     fn drop(&mut self) {
         let mut state = self.hub.0.lock().unwrap_or_else(PoisonError::into_inner);
         state.origins.remove(&self.id);
+        state.parents.remove(&self.id);
         state.pending.remove(&self.id);
         state
             .frame_contexts
@@ -44,7 +45,8 @@ impl Drop for ContextRegistration {
 
 struct MessageHubState {
     next_context_id: u64,
-    origins: HashMap<u64, String>,
+    origins: HashMap<u64, WindowOrigin>,
+    parents: HashMap<u64, u64>,
     frame_contexts: HashMap<(u64, u64), u64>,
     pending: HashMap<u64, VecDeque<WindowMessage>>,
 }
@@ -54,8 +56,32 @@ struct WindowMessage {
     source_context: u64,
     source_frame: Option<u64>,
     origin: String,
-    target_origin: String,
-    payload: serde_json::Value,
+    target_origin: MessageTargetOrigin,
+    payload: MessagePayload,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum OriginKey {
+    Tuple(String),
+    Opaque(u64),
+}
+
+#[derive(Clone, Debug)]
+struct WindowOrigin {
+    key: OriginKey,
+    serialized: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum MessageTargetOrigin {
+    Any,
+    Exact(OriginKey),
+}
+
+#[derive(Clone)]
+enum MessagePayload {
+    Undefined,
+    Json(serde_json::Value),
 }
 
 impl Default for MessageHubState {
@@ -63,24 +89,61 @@ impl Default for MessageHubState {
         Self {
             next_context_id: 1,
             origins: HashMap::new(),
+            parents: HashMap::new(),
             frame_contexts: HashMap::new(),
             pending: HashMap::new(),
         }
     }
 }
 
+impl MessageTargetOrigin {
+    fn matches(&self, target: &OriginKey) -> bool {
+        matches!(self, Self::Any) || matches!(self, Self::Exact(origin) if origin == target)
+    }
+
+    fn label(&self) -> String {
+        match self {
+            Self::Any => "*".to_string(),
+            Self::Exact(OriginKey::Tuple(origin)) => origin.clone(),
+            Self::Exact(OriginKey::Opaque(_)) => "null".to_string(),
+        }
+    }
+}
+
 impl WindowMessageHub {
-    pub fn create_context(&self, url: &str, parent: Option<(u64, u64)>) -> WindowMessageContext {
-        let origin = url::Url::parse(url)
-            .ok()
-            .map(|url| url.origin().ascii_serialization())
-            .unwrap_or_default();
+    pub fn create_context(
+        &self,
+        url: &str,
+        parent: Option<(u64, u64)>,
+        opaque_origin: bool,
+    ) -> WindowMessageContext {
         let mut state = self.0.lock().unwrap_or_else(PoisonError::into_inner);
         let id = state.next_context_id;
         state.next_context_id = state.next_context_id.saturating_add(1);
+        let origin = if opaque_origin {
+            WindowOrigin {
+                key: OriginKey::Opaque(id),
+                serialized: "null".to_string(),
+            }
+        } else if let Some(serialized) = url::Url::parse(url)
+            .ok()
+            .map(|url| url.origin().ascii_serialization())
+            .filter(|origin| origin != "null")
+        {
+            WindowOrigin {
+                key: OriginKey::Tuple(serialized.clone()),
+                serialized,
+            }
+        } else {
+            WindowOrigin {
+                key: OriginKey::Opaque(id),
+                serialized: "null".to_string(),
+            }
+        };
         state.origins.insert(id, origin.clone());
         state.pending.insert(id, VecDeque::new());
         if let Some((parent_context, owner_node)) = parent {
+            state.parents.insert(id, parent_context);
             state
                 .frame_contexts
                 .insert((parent_context, owner_node), id);
@@ -115,12 +178,21 @@ impl WindowMessageContext {
             .copied()
     }
 
+    fn top_context_id(&self) -> u64 {
+        let state = self.hub.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut context_id = self.id;
+        while let Some(parent_context) = state.parents.get(&context_id) {
+            context_id = *parent_context;
+        }
+        context_id
+    }
+
     fn post(
         &self,
         target_context: u64,
         source_frame: Option<u64>,
-        payload: serde_json::Value,
-        target_origin: String,
+        payload: MessagePayload,
+        target_origin: MessageTargetOrigin,
     ) {
         let mut state = self.hub.0.lock().unwrap_or_else(PoisonError::into_inner);
         let Some(origin) = state.origins.get(&target_context).cloned() else {
@@ -129,33 +201,44 @@ impl WindowMessageContext {
                 self.id,
                 target_context,
                 &payload,
-                &self.origin,
+                &self.origin.serialized,
             );
             return;
         };
-        if target_origin != "*" && target_origin != origin {
+        if !target_origin.matches(&origin.key) {
             trace_window_message(
                 "drop-origin",
                 self.id,
                 target_context,
                 &payload,
-                &target_origin,
+                &target_origin.label(),
             );
             return;
         }
         if let Some(queue) = state.pending.get_mut(&target_context) {
-            trace_window_message("queue", self.id, target_context, &payload, &target_origin);
+            trace_window_message(
+                "queue",
+                self.id,
+                target_context,
+                &payload,
+                &target_origin.label(),
+            );
             queue.push_back(WindowMessage {
                 source_context: self.id,
                 source_frame,
-                origin: self.origin.clone(),
+                origin: self.origin.serialized.clone(),
                 target_origin,
                 payload,
             });
         }
     }
 
-    fn post_to_frame(&self, owner_node: u64, payload: serde_json::Value, target_origin: String) {
+    fn post_to_frame(
+        &self,
+        owner_node: u64,
+        payload: MessagePayload,
+        target_origin: MessageTargetOrigin,
+    ) {
         if let Some(target_context) = self.target_for_frame(owner_node) {
             self.post(target_context, None, payload, target_origin);
         }
@@ -175,8 +258,13 @@ impl WindowMessageContext {
         cached_proxy(&format!("context:{context_id}"), ctx).map_or_else(
             || {
                 let endpoint = self.clone();
-                let parent_owner = self.parent.map(|(_, owner)| owner);
+                let source_origin = self.origin.key.clone();
+                let parent_owner = self
+                    .parent
+                    .filter(|(parent_context, _)| *parent_context == context_id)
+                    .map(|(_, owner)| owner);
                 let object = make_window_proxy(
+                    source_origin,
                     move |payload, target_origin| {
                         endpoint.post(context_id, parent_owner, payload, target_origin);
                     },
@@ -194,6 +282,7 @@ impl WindowMessageContext {
             || {
                 let endpoint = self.clone();
                 let object = make_window_proxy(
+                    self.origin.key.clone(),
                     move |payload, target_origin| {
                         endpoint.post_to_frame(owner_node, payload, target_origin);
                     },
@@ -233,7 +322,8 @@ impl WindowMessageContext {
         let own_post_message = unsafe {
             NativeFunction::from_closure(move |_this, args, ctx| {
                 let payload = message_data(args.first(), ctx)?;
-                let target_origin = parse_target_origin(args.get(1), &endpoint.origin, ctx)?;
+                let target_origin =
+                    parse_post_message_target_origin(args.get(1), &endpoint.origin.key, ctx)?;
                 endpoint.post(endpoint.id, None, payload, target_origin);
                 Ok(JsValue::undefined())
             })
@@ -245,12 +335,18 @@ impl WindowMessageContext {
             Some((parent_context, _)) => self.proxy_for_context(parent_context, context)?,
             None => global.clone(),
         };
+        let top_context_id = self.top_context_id();
+        let top_window = if top_context_id == self.id {
+            global
+        } else {
+            self.proxy_for_context(top_context_id, context)?
+        };
         context.register_global_property(
             js_string!("parent"),
             parent_window.clone(),
             Attribute::all(),
         )?;
-        context.register_global_property(js_string!("top"), parent_window, Attribute::all())?;
+        context.register_global_property(js_string!("top"), top_window, Attribute::all())?;
         Ok(())
     }
 
@@ -258,7 +354,7 @@ impl WindowMessageContext {
         let messages = self.take_messages();
         let mut delivered = 0;
         for message in messages {
-            if message.target_origin != "*" && message.target_origin != self.origin {
+            if !message.target_origin.matches(&self.origin.key) {
                 continue;
             }
             let source = if self
@@ -278,7 +374,10 @@ impl WindowMessageContext {
                 &message.payload,
                 &message.origin,
             );
-            let payload = JsValue::from_json(&message.payload, context)?;
+            let payload = match &message.payload {
+                MessagePayload::Undefined => JsValue::undefined(),
+                MessagePayload::Json(value) => JsValue::from_json(value, context)?,
+            };
             let event = ObjectInitializer::new(context)
                 .property(js_string!("type"), js_string!("message"), Attribute::all())
                 .property(js_string!("data"), payload, Attribute::all())
@@ -301,27 +400,36 @@ fn trace_window_message(
     action: &str,
     source_context: u64,
     target_context: u64,
-    payload: &serde_json::Value,
+    payload: &MessagePayload,
     origin: &str,
 ) {
     if std::env::var_os("SILKSURF_TRACE_WINDOW_MESSAGES").is_some() {
-        let event = payload
-            .get("event")
+        let value = match payload {
+            MessagePayload::Undefined => None,
+            MessagePayload::Json(value) => Some(value),
+        };
+        let event = value
+            .and_then(|value| value.get("event"))
             .and_then(serde_json::Value::as_str)
             .unwrap_or("other");
-        let shape = payload.as_object().map_or_else(
-            || json_value_kind(payload).to_string(),
-            |fields| {
-                let mut names = fields
-                    .iter()
-                    .map(|(name, value)| format!("{name}:{}", json_value_kind(value)))
-                    .collect::<Vec<_>>();
-                names.sort();
-                format!("{{{}}}", names.join(","))
+        let shape = value.map_or_else(
+            || "undefined".to_string(),
+            |value| {
+                value.as_object().map_or_else(
+                    || json_value_kind(value).to_string(),
+                    |fields| {
+                        let mut names = fields
+                            .iter()
+                            .map(|(name, value)| format!("{name}:{}", json_value_kind(value)))
+                            .collect::<Vec<_>>();
+                        names.sort();
+                        format!("{{{}}}", names.join(","))
+                    },
+                )
             },
         );
-        let reason = payload
-            .get("reason")
+        let reason = value
+            .and_then(|value| value.get("reason"))
             .and_then(serde_json::Value::as_str)
             .map(|reason| format!(" reason={reason}"))
             .unwrap_or_default();
@@ -364,39 +472,63 @@ impl SilkContext {
     }
 }
 
-fn message_data(value: Option<&JsValue>, context: &mut Context) -> JsResult<serde_json::Value> {
+fn message_data(value: Option<&JsValue>, context: &mut Context) -> JsResult<MessagePayload> {
+    let Some(value) = value else {
+        return Ok(MessagePayload::Undefined);
+    };
+    if value.is_undefined() {
+        return Ok(MessagePayload::Undefined);
+    }
     value
-        .unwrap_or(&JsValue::undefined())
         .to_json(context)?
+        .map(MessagePayload::Json)
         .ok_or_else(|| {
             boa_engine::JsNativeError::typ()
-                .with_message("message data is undefined")
+                .with_message("message data cannot be cloned")
                 .into()
         })
 }
 
-fn parse_target_origin(
+fn parse_post_message_target_origin(
     value: Option<&JsValue>,
-    source_origin: &str,
+    source_origin: &OriginKey,
     context: &mut Context,
-) -> JsResult<String> {
-    let Some(value) = value else {
-        return Ok(source_origin.to_string());
+) -> JsResult<MessageTargetOrigin> {
+    let target = if let Some(value) = value {
+        if value.is_undefined() {
+            return Ok(MessageTargetOrigin::Exact(source_origin.clone()));
+        }
+        if let Some(options) = value.as_object() {
+            let target_origin = options.get(js_string!("targetOrigin"), context)?;
+            if target_origin.is_undefined() {
+                return Ok(MessageTargetOrigin::Exact(source_origin.clone()));
+            }
+            target_origin.to_string(context)?.to_std_string_lossy()
+        } else {
+            value.to_string(context)?.to_std_string_lossy()
+        }
+    } else {
+        return Ok(MessageTargetOrigin::Exact(source_origin.clone()));
     };
-    let target = value.to_string(context)?.to_std_string_lossy();
     if target == "*" {
-        return Ok(target);
+        return Ok(MessageTargetOrigin::Any);
     }
     if target == "/" {
-        return Ok(source_origin.to_string());
+        return Ok(MessageTargetOrigin::Exact(source_origin.clone()));
     }
-    Ok(url::Url::parse(&target)
-        .map(|url| url.origin().ascii_serialization())
-        .unwrap_or_default())
+    let parsed = url::Url::parse(&target).map_err(|error| {
+        boa_engine::JsNativeError::syntax().with_message(format!("invalid targetOrigin: {error}"))
+    })?;
+    let serialized = parsed.origin().ascii_serialization();
+    if serialized == "null" {
+        return Ok(MessageTargetOrigin::Exact(OriginKey::Opaque(u64::MAX)));
+    }
+    Ok(MessageTargetOrigin::Exact(OriginKey::Tuple(serialized)))
 }
 
 fn make_window_proxy(
-    send: impl Fn(serde_json::Value, String) + Send + 'static,
+    source_origin: OriginKey,
+    send: impl Fn(MessagePayload, MessageTargetOrigin) + Send + 'static,
     context: &mut Context,
 ) -> JsObject {
     let send = Arc::new(send);
@@ -404,7 +536,7 @@ fn make_window_proxy(
     let post_message = unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let payload = message_data(args.first(), ctx)?;
-            let target_origin = parse_target_origin(args.get(1), "*", ctx)?;
+            let target_origin = parse_post_message_target_origin(args.get(1), &source_origin, ctx)?;
             send(payload, target_origin);
             Ok(JsValue::undefined())
         })
@@ -461,10 +593,11 @@ mod tests {
         let parent_dom = Arc::new(Mutex::new(dom));
         let child_dom = Arc::new(Mutex::new(Dom::new()));
         let hub = WindowMessageHub::default();
-        let parent_messages = hub.create_context("https://parent.test/", None);
+        let parent_messages = hub.create_context("https://parent.test/", None, false);
         let child_messages = hub.create_context(
             "https://child.test/",
             Some((parent_messages.id(), frame.raw() as u64)),
+            false,
         );
         let mut parent = SilkContext::with_dom(&parent_dom);
         let mut child = SilkContext::with_dom(&child_dom);
@@ -499,22 +632,110 @@ mod tests {
     }
 
     #[test]
+    fn post_message_defaults_to_sender_origin_and_accepts_undefined_data() {
+        let parent_dom = Arc::new(Mutex::new(Dom::new()));
+        let child_dom = Arc::new(Mutex::new(Dom::new()));
+        let hub = WindowMessageHub::default();
+        let parent_messages = hub.create_context("https://parent.test/", None, false);
+        let child_messages = hub.create_context(
+            "https://child.test/",
+            Some((parent_messages.id(), 17)),
+            false,
+        );
+        let mut parent = SilkContext::with_dom(&parent_dom);
+        let mut child = SilkContext::with_dom(&child_dom);
+        parent.install_window_messages(parent_messages);
+        child.install_window_messages(child_messages);
+
+        parent
+            .eval(
+                "globalThis.contentWindow = __silksurfWindowProxyForFrame('17'); contentWindow.postMessage('blocked'); contentWindow.postMessage('blocked-undefined', undefined); contentWindow.postMessage('allowed', '*');",
+            )
+            .expect("cross-origin posts evaluate");
+        child
+            .eval(
+                "globalThis.received = []; window.addEventListener('message', event => received.push([event.data, event.origin])); parent.postMessage(undefined, 'https://parent.test');",
+            )
+            .expect("undefined data posts");
+        child
+            .run_ready_host_callbacks()
+            .expect("child dispatches allowed cross-origin message");
+        child
+            .eval(
+                "if (received.length !== 1 || received[0][0] !== 'allowed' || received[0][1] !== 'https://parent.test') throw new Error(JSON.stringify(received));",
+            )
+            .expect("omitted and undefined target origins use sender origin");
+
+        parent
+            .eval(
+                "globalThis.undefinedReceived = false; window.addEventListener('message', event => { undefinedReceived = event.data === undefined && event.origin === 'https://child.test'; });",
+            )
+            .expect("parent installs undefined receiver");
+        parent
+            .run_ready_host_callbacks()
+            .expect("child undefined post reaches matching parent origin");
+        parent
+            .eval("if (!undefinedReceived) throw new Error('undefined data was not preserved');")
+            .expect("undefined data survives delivery");
+    }
+
+    #[test]
+    fn nested_top_targets_the_root_context_while_parent_targets_the_direct_context() {
+        let hub = WindowMessageHub::default();
+        let root_dom = Arc::new(Mutex::new(Dom::new()));
+        let middle_dom = Arc::new(Mutex::new(Dom::new()));
+        let child_dom = Arc::new(Mutex::new(Dom::new()));
+        let root_messages = hub.create_context("https://root.test/", None, false);
+        let middle_messages =
+            hub.create_context("https://middle.test/", Some((root_messages.id(), 1)), false);
+        let child_messages = hub.create_context(
+            "https://child.test/",
+            Some((middle_messages.id(), 2)),
+            false,
+        );
+        let mut root = SilkContext::with_dom(&root_dom);
+        let mut middle = SilkContext::with_dom(&middle_dom);
+        let mut child = SilkContext::with_dom(&child_dom);
+        root.install_window_messages(root_messages);
+        middle.install_window_messages(middle_messages);
+        child.install_window_messages(child_messages);
+
+        root.eval("globalThis.rootMessages = []; window.addEventListener('message', event => rootMessages.push(event.data));")
+            .expect("root listener installs");
+        middle.eval("globalThis.middleMessages = []; window.addEventListener('message', event => middleMessages.push(event.data));")
+            .expect("middle listener installs");
+        middle.eval("if (window.top !== window.parent) throw new Error('direct child top differs from direct parent'); window.top.postMessage('middle-to-root', 'https://root.test');")
+            .expect("middle posts to top");
+        child.eval("if (window.parent === window.top || window.top !== window.top) throw new Error('nested window aliases are unstable'); window.parent.postMessage('child-to-middle', 'https://middle.test'); window.top.postMessage('child-to-root', 'https://root.test');")
+            .expect("grandchild posts to parent and top");
+        middle
+            .run_ready_host_callbacks()
+            .expect("middle receives direct-child message");
+        root.run_ready_host_callbacks()
+            .expect("root receives top-level messages");
+        middle.eval("if (middleMessages.length !== 1 || middleMessages[0] !== 'child-to-middle') throw new Error(JSON.stringify(middleMessages));")
+            .expect("parent proxy addresses immediate parent");
+        root.eval("if (rootMessages.length !== 2 || rootMessages[0] !== 'middle-to-root' || rootMessages[1] !== 'child-to-root') throw new Error(JSON.stringify(rootMessages));")
+            .expect("top proxy addresses root browsing context");
+    }
+
+    #[test]
     fn dropped_frame_context_releases_registry_entries_after_the_last_clone() {
         let hub = WindowMessageHub::default();
-        let parent = hub.create_context("https://parent.test/", None);
-        let child = hub.create_context("https://child.test/", Some((parent.id(), 17)));
+        let parent = hub.create_context("https://parent.test/", None, false);
+        let child = hub.create_context("https://child.test/", Some((parent.id(), 17)), false);
         let child_id = child.id();
         let child_clone = child.clone();
         parent.post_to_frame(
             17,
-            serde_json::json!({"event": "to-child"}),
-            "*".to_string(),
+            MessagePayload::Json(serde_json::json!({"event": "to-child"})),
+            MessageTargetOrigin::Any,
         );
         child.post(
             parent.id(),
             Some(17),
-            serde_json::json!({"event": "to-parent"}),
-            "*".to_string(),
+            MessagePayload::Json(serde_json::json!({"event": "to-parent"})),
+            MessageTargetOrigin::Any,
         );
 
         drop(child);

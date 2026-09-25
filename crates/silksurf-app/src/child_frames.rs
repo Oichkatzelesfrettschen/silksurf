@@ -7,6 +7,7 @@ static CHILD_FRAME_TRACE_STATES: std::sync::OnceLock<
     std::sync::Mutex<std::collections::HashMap<(String, usize), String>>,
 > = std::sync::OnceLock::new();
 
+#[cfg(test)]
 pub(crate) fn composite_child_frame(
     parent: &mut [u32],
     parent_size: (u32, u32),
@@ -63,6 +64,44 @@ const MAX_EMBEDDED_FRAME_DEPTH: u8 = 8;
 const MAX_EMBEDDED_VIEWPORT_DIMENSION: u32 = 4096;
 const MAX_EMBEDDED_VIEWPORT_PIXELS: u64 = 1_048_576;
 const MAX_EMBEDDED_FRAME_COUNT: usize = 16;
+const MAX_EMBEDDED_FETCH_JOBS: usize = 16;
+static ACTIVE_EMBEDDED_FETCH_JOBS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct IframeSandboxPolicy {
+    pub(crate) present: bool,
+    pub(crate) allow_scripts: bool,
+    pub(crate) allow_same_origin: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct IframeCandidate {
+    owner: silksurf_dom::NodeId,
+    source_url: String,
+    sandbox: IframeSandboxPolicy,
+}
+
+struct EmbeddedFetchPermit;
+
+impl EmbeddedFetchPermit {
+    fn acquire() -> Option<Self> {
+        ACTIVE_EMBEDDED_FETCH_JOBS
+            .fetch_update(
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+                |active| (active < MAX_EMBEDDED_FETCH_JOBS).then_some(active + 1),
+            )
+            .ok()
+            .map(|_| Self)
+    }
+}
+
+impl Drop for EmbeddedFetchPermit {
+    fn drop(&mut self) {
+        ACTIVE_EMBEDDED_FETCH_JOBS.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+    }
+}
 
 pub(crate) fn embedded_frame_work_deadline(
     runtime: &BrowserPageRuntime,
@@ -87,7 +126,14 @@ pub(crate) fn embedded_frame_work_deadline(
         }
     };
     runtime.child_frames.iter().fold(own, |deadline, child| {
-        merge_deadline(deadline, embedded_frame_work_deadline(&child.page.runtime))
+        let child_deadline = match &child.state {
+            EmbeddedFrameState::Pending | EmbeddedFrameState::Loading(_) => {
+                Some(now + STYLESHEET_FETCH_POLL_INTERVAL)
+            }
+            EmbeddedFrameState::Ready { page, .. } => embedded_frame_work_deadline(&page.runtime),
+            EmbeddedFrameState::Failed => None,
+        };
+        merge_deadline(deadline, child_deadline)
     })
 }
 
@@ -112,61 +158,274 @@ fn sync_child_frames_inner(
         let mut old_frames = std::mem::take(&mut runtime.child_frames);
         let old_frame_count = old_frames.len();
         let mut next_frames = Vec::with_capacity(candidates.len().min(*remaining_frames));
-        for (owner, source_url, width, height) in candidates.into_iter().take(*remaining_frames) {
-            *remaining_frames -= 1;
-            let reusable_index = old_frames.iter().position(|child| {
-                child.owner == owner
-                    && child.source_url == source_url
-                    && (child.page.runtime.viewport.width - width as f32).abs() < f32::EPSILON
-                    && (child.page.runtime.viewport.height - height as f32).abs() < f32::EPSILON
-            });
-            let mut child = if let Some(index) = reusable_index {
-                old_frames.remove(index)
-            } else {
-                changed = true;
-                let mut child_config = runtime.render_config.clone();
-                child_config.window_parent = runtime
-                    .js_ctx
-                    .window_context_id()
-                    .map(|parent| (parent, owner.raw() as u64));
-                match build_embedded_page(&source_url, &child_config, width, height) {
-                    Ok(child) => EmbeddedBrowserFrame {
-                        owner,
-                        source_url,
-                        page: Box::new(child),
-                    },
-                    Err(error) => {
-                        eprintln!("[SilkSurf] Embedded frame load failed: {error}");
-                        continue;
-                    }
-                }
+        let accepted_count = candidates.len().min(*remaining_frames);
+        for candidate in candidates.iter().take(accepted_count).cloned() {
+            let Some((child, child_changed)) =
+                update_child_frame(runtime, candidate, &mut old_frames, depth, remaining_frames)
+            else {
+                continue;
             };
-            if let Ok(Some(_)) =
-                repaint_runtime_host_callbacks(&mut child.page.runtime, &mut child.page.frame)
-            {
-                changed = true;
-            }
-            changed |= sync_child_frames_inner(
-                &mut child.page.runtime,
-                &mut child.page.frame,
-                depth + 1,
-                remaining_frames,
-            );
             next_frames.push(child);
+            changed |= child_changed;
+        }
+        for candidate in candidates.iter().skip(accepted_count) {
+            dispatch_iframe_event(runtime, candidate.owner, "error");
+            changed = true;
         }
         if next_frames.len() != old_frame_count {
             changed = true;
         }
         runtime.child_frames = next_frames;
     }
-    composite_child_frames(runtime, frame);
+    changed | dispatch_initial_load_when_settled(runtime)
+}
+
+fn update_child_frame(
+    runtime: &mut BrowserPageRuntime,
+    candidate: IframeCandidate,
+    old_frames: &mut Vec<EmbeddedBrowserFrame>,
+    depth: u8,
+    remaining_frames: &mut usize,
+) -> Option<(EmbeddedBrowserFrame, bool)> {
+    let IframeCandidate {
+        owner,
+        source_url,
+        sandbox,
+    } = candidate;
+    let (width, height) = child_frame_viewport(runtime, owner)?;
+    *remaining_frames -= 1;
+    let child_config = child_render_config(runtime, owner, sandbox);
+    let mut child = take_reusable_child(
+        old_frames,
+        owner,
+        &source_url,
+        sandbox,
+        width,
+        height,
+        &child_config,
+    );
+    let mut changed = resize_child_frame(&mut child, width, height);
+    child.width = width;
+    child.height = height;
+    changed |= advance_child_fetch(runtime, &mut child, &child_config);
+    changed |= advance_ready_child(runtime, owner, &mut child, depth, remaining_frames);
+    Some((child, changed))
+}
+
+fn child_render_config(
+    runtime: &BrowserPageRuntime,
+    owner: silksurf_dom::NodeId,
+    sandbox: IframeSandboxPolicy,
+) -> BrowserRenderConfig {
+    let mut config = runtime.render_config.clone();
+    config.scripts_disabled |= sandbox.present && !sandbox.allow_scripts;
+    config.origin_sandboxed |= sandbox.present && !sandbox.allow_same_origin;
+    config.defer_initial_load = true;
+    config.window_parent = runtime
+        .js_ctx
+        .window_context_id()
+        .map(|parent| (parent, owner.raw() as u64));
+    config
+}
+
+fn take_reusable_child(
+    old_frames: &mut Vec<EmbeddedBrowserFrame>,
+    owner: silksurf_dom::NodeId,
+    source_url: &str,
+    sandbox: IframeSandboxPolicy,
+    width: u32,
+    height: u32,
+    config: &BrowserRenderConfig,
+) -> EmbeddedBrowserFrame {
+    let reusable_index = old_frames.iter().position(|child| {
+        child.owner == owner
+            && child.source_url == source_url
+            && child.sandbox == sandbox
+            && child.scripts_disabled == config.scripts_disabled
+            && child.origin_sandboxed == config.origin_sandboxed
+    });
+    reusable_index.map_or_else(
+        || EmbeddedBrowserFrame {
+            owner,
+            source_url: source_url.to_string(),
+            sandbox,
+            width,
+            height,
+            scripts_disabled: config.scripts_disabled,
+            origin_sandboxed: config.origin_sandboxed,
+            state: EmbeddedFrameState::Pending,
+        },
+        |index| old_frames.remove(index),
+    )
+}
+
+fn resize_child_frame(child: &mut EmbeddedBrowserFrame, width: u32, height: u32) -> bool {
+    if child.width == width && child.height == height {
+        return false;
+    }
+    let EmbeddedFrameState::Ready { page, surface, .. } = &mut child.state else {
+        return false;
+    };
+    let chrome_height = BROWSER_CHROME_HEIGHT as u32;
+    let viewport = browser_layout_viewport(Some((width, height.saturating_add(chrome_height))));
+    page.frame.bitmap_height = height.saturating_add(chrome_height);
+    reflow_runtime_for_viewport(&mut page.runtime, &mut page.frame, viewport);
+    if let Err(error) = page.runtime.js_ctx.dispatch_window_event("resize") {
+        eprintln!("[SilkSurf] Embedded frame resize event failed: {error}");
+    }
+    *surface = embedded_frame_surface(&page.frame);
+    true
+}
+
+fn advance_child_fetch(
+    runtime: &mut BrowserPageRuntime,
+    child: &mut EmbeddedBrowserFrame,
+    config: &BrowserRenderConfig,
+) -> bool {
+    let width = child.width;
+    let height = child.height;
+    match &mut child.state {
+        EmbeddedFrameState::Pending => match start_embedded_fetch(&child.source_url, config) {
+            Ok(Some(receiver)) => {
+                child.state = EmbeddedFrameState::Loading(receiver);
+                true
+            }
+            Ok(None) => false,
+            Err(error) => fail_child_frame(runtime, child, "worker", &error),
+        },
+        EmbeddedFrameState::Loading(receiver) => match receiver.try_recv() {
+            Ok(Ok(payload)) => match build_embedded_page(payload, width, height) {
+                Ok(page) => {
+                    child.state = EmbeddedFrameState::Ready {
+                        surface: embedded_frame_surface(&page.frame),
+                        page: Box::new(page),
+                        load_event_dispatched: false,
+                    };
+                    true
+                }
+                Err(error) => fail_child_frame(runtime, child, "build", &error),
+            },
+            Ok(Err(error)) => fail_child_frame(runtime, child, "load", &error),
+            Err(std::sync::mpsc::TryRecvError::Empty) => false,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => fail_child_frame(
+                runtime,
+                child,
+                "load",
+                "worker exited before returning a payload",
+            ),
+        },
+        EmbeddedFrameState::Failed | EmbeddedFrameState::Ready { .. } => false,
+    }
+}
+
+fn fail_child_frame(
+    runtime: &mut BrowserPageRuntime,
+    child: &mut EmbeddedBrowserFrame,
+    stage: &str,
+    error: &str,
+) -> bool {
+    eprintln!("[SilkSurf] Embedded frame {stage} failed: {error}");
+    child.state = EmbeddedFrameState::Failed;
+    dispatch_iframe_event(runtime, child.owner, "error");
+    true
+}
+
+fn advance_ready_child(
+    runtime: &mut BrowserPageRuntime,
+    owner: silksurf_dom::NodeId,
+    child: &mut EmbeddedBrowserFrame,
+    depth: u8,
+    remaining_frames: &mut usize,
+) -> bool {
+    let EmbeddedFrameState::Ready {
+        page,
+        surface,
+        load_event_dispatched,
+    } = &mut child.state
+    else {
+        return false;
+    };
+    let mut changed = repaint_runtime_host_callbacks(&mut page.runtime, &mut page.frame)
+        .is_ok_and(|redraw| redraw.is_some());
+    changed |= sync_child_frames_inner(
+        &mut page.runtime,
+        &mut page.frame,
+        depth + 1,
+        remaining_frames,
+    );
+    if changed {
+        *surface = embedded_frame_surface(&page.frame);
+    }
+    if !*load_event_dispatched && !page.runtime.initial_document_load_pending {
+        dispatch_iframe_event(runtime, owner, "load");
+        *load_event_dispatched = true;
+        changed = true;
+    }
     changed
+}
+
+fn dispatch_initial_load_when_settled(runtime: &mut BrowserPageRuntime) -> bool {
+    if !runtime.initial_document_load_pending
+        || !runtime.child_frames.iter().all(embedded_frame_load_settled)
+    {
+        return false;
+    }
+    if let Err(error) = dispatch_document_load(&mut runtime.js_ctx) {
+        eprintln!("[SilkSurf] Document load event failed: {error}");
+    }
+    runtime.initial_document_load_pending = false;
+    true
+}
+
+fn embedded_frame_load_settled(child: &EmbeddedBrowserFrame) -> bool {
+    match &child.state {
+        EmbeddedFrameState::Pending | EmbeddedFrameState::Loading(_) => false,
+        EmbeddedFrameState::Failed => true,
+        EmbeddedFrameState::Ready {
+            page,
+            load_event_dispatched,
+            ..
+        } => !page.runtime.initial_document_load_pending && *load_event_dispatched,
+    }
+}
+
+fn dispatch_iframe_event(
+    runtime: &mut BrowserPageRuntime,
+    owner: silksurf_dom::NodeId,
+    event_name: &str,
+) {
+    let event = silksurf_js::SyntheticEvent::new(event_name, false, false);
+    if let Err(error) = runtime.js_ctx.dispatch_dom_event(owner, &event) {
+        eprintln!("[SilkSurf] Iframe {event_name} event failed: {error}");
+    }
+}
+
+fn start_embedded_fetch(
+    source_url: &str,
+    config: &BrowserRenderConfig,
+) -> Result<Option<std::sync::mpsc::Receiver<NavigationResult>>, String> {
+    let Some(permit) = EmbeddedFetchPermit::acquire() else {
+        return Ok(None);
+    };
+    let source_url = source_url.to_string();
+    let config = config.clone();
+    let image_cache = std::sync::Arc::new(std::sync::Mutex::new(ImageResourceCache::new()));
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name("silksurf-embedded-fetch".to_string())
+        .spawn(move || {
+            let _permit = permit;
+            let result = load_embedded_navigation_payload(&source_url, &config, &image_cache);
+            let _ = sender.send(result);
+        })
+        .map_err(|error| format!("cannot start embedded fetch worker: {error}"))?;
+    Ok(Some(receiver))
 }
 
 fn collect_child_frame_candidates(
     runtime: &BrowserPageRuntime,
     frame: &BrowserFrame,
-) -> Vec<(silksurf_dom::NodeId, String, u32, u32)> {
+) -> Vec<IframeCandidate> {
     let dom = runtime
         .dom
         .lock()
@@ -183,9 +442,11 @@ fn collect_child_frame_candidates(
         && !discovered.is_empty()
         && !CHILD_FRAME_TRACE_EMITTED.swap(true, std::sync::atomic::Ordering::Relaxed)
     {
-        for (owner, source_url) in &discovered {
+        for candidate in &discovered {
+            let owner = candidate.owner;
+            let source_url = &candidate.source_url;
             let attrs = dom
-                .attributes(*owner)
+                .attributes(owner)
                 .map(|attrs| {
                     attrs
                         .iter()
@@ -198,7 +459,7 @@ fn collect_child_frame_candidates(
                 .fused
                 .table
                 .node_to_bfs_idx
-                .get(owner)
+                .get(&owner)
                 .and_then(|index| runtime.fused.styles.get(*index as usize))
                 .and_then(Option::as_ref)
                 .map_or_else(
@@ -212,30 +473,37 @@ fn collect_child_frame_candidates(
                 );
             eprintln!(
                 "[SilkSurf] Child-frame candidate: owner={owner:?} source={source_url} attrs={attrs} bounds={:?} {computed_style}",
-                runtime.geometry.borrow().get(*owner),
+                runtime.geometry.borrow().get(owner),
             );
         }
     }
     discovered
-        .into_iter()
-        .filter_map(|(owner, source_url)| {
-            let bounds = runtime.geometry.borrow().get(owner)?;
-            let rect = iframe_content_rect(bounds);
-            let (mut width, mut height) = bounded_viewport(rect.width, rect.height);
-            if width == 0 || height == 0 {
-                let (intrinsic_width, intrinsic_height) = iframe_intrinsic_size(&dom, owner);
-                (width, height) = bounded_viewport(intrinsic_width, intrinsic_height);
-            }
-            (width > 0 && height > 0).then_some((owner, source_url, width, height))
-        })
-        .collect()
+}
+
+fn child_frame_viewport(
+    runtime: &BrowserPageRuntime,
+    owner: silksurf_dom::NodeId,
+) -> Option<(u32, u32)> {
+    let geometry = runtime.geometry.borrow();
+    let bounds = geometry.get(owner)?;
+    let rect = iframe_content_rect(bounds);
+    let (mut width, mut height) = bounded_viewport(rect.width, rect.height);
+    if width == 0 || height == 0 {
+        let dom = runtime
+            .dom
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (intrinsic_width, intrinsic_height) = iframe_intrinsic_size(&dom, owner);
+        (width, height) = bounded_viewport(intrinsic_width, intrinsic_height);
+    }
+    (width > 0 && height > 0).then_some((width, height))
 }
 
 fn trace_child_frame_states(
     dom: &silksurf_dom::Dom,
     geometry: &PageGeometry,
     fused: &FusedResult,
-    frames: &[(silksurf_dom::NodeId, String)],
+    frames: &[IframeCandidate],
     document_url: &str,
 ) {
     if std::env::var_os("SILKSURF_TRACE_CHILD_FRAMES").is_none() {
@@ -245,7 +513,9 @@ fn trace_child_frame_states(
     let mut snapshots = snapshots
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    for (owner, source_url) in frames {
+    for candidate in frames {
+        let owner = &candidate.owner;
+        let source_url = &candidate.source_url;
         let attributes = dom
             .attributes(*owner)
             .map(|attributes| {
@@ -254,7 +524,7 @@ fn trace_child_frame_states(
                     .filter(|attribute| {
                         matches!(
                             attribute.name.as_str(),
-                            "src" | "style" | "width" | "height"
+                            "src" | "style" | "width" | "height" | "sandbox"
                         )
                     })
                     .map(|attribute| format!("{}={:?}", attribute.name.as_str(), attribute.value))
@@ -290,13 +560,10 @@ fn trace_child_frame_states(
 }
 
 fn build_embedded_page(
-    source_url: &str,
-    config: &BrowserRenderConfig,
+    payload: BrowserPagePayload,
     width: u32,
     height: u32,
 ) -> Result<BrowserPage, String> {
-    let image_cache = std::sync::Arc::new(std::sync::Mutex::new(ImageResourceCache::new()));
-    let payload = load_embedded_navigation_payload(source_url, config, &image_cache)?;
     let chrome_height = BROWSER_CHROME_HEIGHT as u32;
     let page = build_browser_page_with_buffers_for_window(
         payload,
@@ -314,25 +581,51 @@ fn build_embedded_page(
     Ok(page)
 }
 
-pub(crate) fn composite_child_frames(runtime: &BrowserPageRuntime, frame: &mut BrowserFrame) {
-    let geometry = runtime.geometry.borrow();
-    for child in &runtime.child_frames {
-        let Some(bounds) = geometry.get(child.owner) else {
+pub(crate) fn resolve_child_frame_display_items(
+    runtime: &BrowserPageRuntime,
+    items: &mut Vec<silksurf_render::DisplayItem>,
+) {
+    for item in items {
+        let silksurf_render::DisplayItem::EmbeddedFrame { rect, node } = item else {
             continue;
         };
-        let mut rect = iframe_content_rect(bounds);
-        rect.y -= frame.bitmap_scroll_y as f32;
-        composite_child_frame(
-            &mut frame.argb,
-            (frame.raster_width, frame.bitmap_height),
-            &child.page.frame.argb,
-            (
-                child.page.frame.raster_width,
-                child.page.frame.bitmap_height,
-            ),
-            BROWSER_CHROME_HEIGHT as u32,
-            rect,
-        );
+        if let Some(EmbeddedBrowserFrame {
+            state: EmbeddedFrameState::Ready { surface, .. },
+            ..
+        }) = runtime
+            .child_frames
+            .iter()
+            .find(|child| child.owner == *node)
+        {
+            *item = silksurf_render::DisplayItem::Image {
+                rect: *rect,
+                image: surface.clone(),
+            };
+        }
+    }
+}
+
+fn embedded_frame_surface(frame: &BrowserFrame) -> silksurf_render::ImageSurface {
+    let content_top = BROWSER_CHROME_HEIGHT as u32;
+    let width = frame.raster_width;
+    let height = frame.bitmap_height.saturating_sub(content_top);
+    let mut rgba = Vec::with_capacity((u64::from(width) * u64::from(height) * 4) as usize);
+    for pixel in frame
+        .argb
+        .iter()
+        .skip((u64::from(width) * u64::from(content_top)) as usize)
+    {
+        rgba.extend_from_slice(&[
+            (pixel >> 16) as u8,
+            (pixel >> 8) as u8,
+            *pixel as u8,
+            (pixel >> 24) as u8,
+        ]);
+    }
+    silksurf_render::ImageSurface {
+        width,
+        height,
+        rgba: Arc::from(rgba.into_boxed_slice()),
     }
 }
 
@@ -353,24 +646,31 @@ fn discover_iframes(
     dom: &silksurf_dom::Dom,
     document: silksurf_dom::NodeId,
     base_url: &str,
-) -> Vec<(silksurf_dom::NodeId, String)> {
+) -> Vec<IframeCandidate> {
     let mut pending = vec![document];
     let mut frames = Vec::new();
     while let Some(node) = pending.pop() {
         if dom.element_name(node).ok().flatten() == Some("iframe") {
-            let source = dom.attributes(node).ok().and_then(|attributes| {
+            let attributes = dom.attributes(node).ok();
+            let source = attributes.as_ref().and_then(|attributes| {
                 attributes
                     .iter()
                     .find(|attribute| attribute.name.as_str() == "src")
-                    .map(|attribute| attribute.value.as_str())
-                    .filter(|source| !source.is_empty())
             });
             if let Some(source) = source
+                .map(|attribute| attribute.value.as_str())
+                .filter(|source| !source.is_empty())
                 && let Some(url) = url::Url::parse(base_url)
                     .ok()
                     .and_then(|base| base.join(source).ok())
             {
-                frames.push((node, url.to_string()));
+                frames.push(IframeCandidate {
+                    owner: node,
+                    source_url: url.to_string(),
+                    sandbox: attributes.map_or_else(IframeSandboxPolicy::default, |attributes| {
+                        parse_iframe_sandbox(attributes)
+                    }),
+                });
             }
         }
         if let Ok(children) = dom.children(node) {
@@ -383,6 +683,25 @@ fn discover_iframes(
         }
     }
     frames
+}
+
+fn parse_iframe_sandbox(attributes: &[silksurf_dom::Attribute]) -> IframeSandboxPolicy {
+    let Some(value) = attributes
+        .iter()
+        .find(|attribute| attribute.name.as_str().eq_ignore_ascii_case("sandbox"))
+        .map(|attribute| attribute.value.as_str())
+    else {
+        return IframeSandboxPolicy::default();
+    };
+    let tokens = value
+        .split_ascii_whitespace()
+        .map(str::to_ascii_lowercase)
+        .collect::<std::collections::HashSet<_>>();
+    IframeSandboxPolicy {
+        present: true,
+        allow_scripts: tokens.contains("allow-scripts"),
+        allow_same_origin: tokens.contains("allow-same-origin"),
+    }
 }
 
 fn bounded_viewport(width: f32, height: f32) -> (u32, u32) {
@@ -417,6 +736,7 @@ fn iframe_intrinsic_size(dom: &silksurf_dom::Dom, owner: silksurf_dom::NodeId) -
     dimensions.unwrap_or((300.0, 150.0))
 }
 
+#[cfg(test)]
 fn composite_argb(source: u32, destination: u32) -> u32 {
     let alpha = (source >> 24) & 0xff;
     if alpha == 0xff {
@@ -440,6 +760,38 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::sync::Arc;
+
+    #[test]
+    fn iframe_sandbox_tokens_only_clear_script_and_origin_restrictions() {
+        let mut dom = silksurf_dom::Dom::new();
+        let frame = dom.create_element("iframe");
+        let empty = parse_iframe_sandbox(dom.attributes(frame).expect("attributes exist"));
+        assert_eq!(empty, IframeSandboxPolicy::default());
+
+        dom.set_attribute(frame, "sandbox", "")
+            .expect("sandbox sets");
+        let sandboxed = parse_iframe_sandbox(dom.attributes(frame).expect("attributes exist"));
+        assert_eq!(
+            sandboxed,
+            IframeSandboxPolicy {
+                present: true,
+                allow_scripts: false,
+                allow_same_origin: false,
+            }
+        );
+
+        dom.set_attribute(frame, "sandbox", "allow-SCRIPTS unknown allow-same-origin")
+            .expect("sandbox tokens update");
+        let allowed = parse_iframe_sandbox(dom.attributes(frame).expect("attributes exist"));
+        assert_eq!(
+            allowed,
+            IframeSandboxPolicy {
+                present: true,
+                allow_scripts: true,
+                allow_same_origin: true,
+            }
+        );
+    }
 
     #[test]
     fn child_surface_composites_clipped_into_owner_box() {
@@ -527,29 +879,129 @@ mod tests {
 
         assert!(sync_child_frames(&mut page.runtime, &mut page.frame, 0));
         server.join().expect("child server exits");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while !matches!(
+            page.runtime.child_frames.first().map(|child| &child.state),
+            Some(EmbeddedFrameState::Ready { .. })
+        ) && std::time::Instant::now() < deadline
+        {
+            sync_child_frames(&mut page.runtime, &mut page.frame, 0);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
         assert_eq!(page.runtime.child_frames.len(), 1);
-        assert!(!Arc::ptr_eq(
-            &page.runtime.child_frames[0].page.runtime.dom,
-            &page.runtime.dom
-        ));
+        let EmbeddedFrameState::Ready { page: child, .. } = &page.runtime.child_frames[0].state
+        else {
+            panic!("child frame fetch did not reach Ready");
+        };
+        assert!(!Arc::ptr_eq(&child.runtime.dom, &page.runtime.dom));
         assert!(
-            page.runtime.child_frames[0]
-                .page
-                .frame
-                .argb
-                .contains(&0xffff_0000),
+            child.frame.argb.contains(&0xffff_0000),
             "child frame has no red paint"
         );
-        let frame_box = page
+        repaint_runtime_full_document(&mut page.runtime, &mut page.frame);
+        assert!(
+            page.runtime.display_list.items.iter().any(|item| matches!(
+                item,
+                silksurf_render::DisplayItem::Image { image, .. }
+                    if image.rgba.chunks_exact(4).any(|pixel| pixel == [255, 0, 0, 255])
+            )),
+            "parent display list omitted the ready child surface"
+        );
+        assert!(
+            page.frame.argb.contains(&0xffff_0000),
+            "parent raster omitted the ready iframe surface"
+        );
+    }
+
+    #[test]
+    fn parent_load_waits_for_child_load_and_fires_after_iframe_load() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("local listener binds");
+        let address = listener.local_addr().expect("listener address");
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("child request arrives");
+            let mut request = [0_u8; 4096];
+            let _ = stream.read(&mut request).expect("request reads");
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            let body = "<!doctype html><html><body><script>window.addEventListener('message', event => { globalThis.receivedMessage = event.data; }); window.addEventListener('resize', () => { globalThis.resizedViewport = innerWidth + 'x' + innerHeight; });</script>child</body></html>";
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .expect("response writes");
+        });
+        let url = format!("http://{address}/parent");
+        let render_config = BrowserRenderConfig {
+            defer_initial_load: true,
+            ..BrowserRenderConfig::default()
+        };
+        let mut page = build_browser_page(BrowserPagePayload {
+            url,
+            html: "<!doctype html><html><body><script>globalThis.loadOrder=[]; document.querySelector('iframe').addEventListener('load', function () { loadOrder.push('iframe'); }); window.addEventListener('load', function () { loadOrder.push('parent'); });</script><iframe src='/child' style='width:20px;height:20px'></iframe></body></html>".to_string(),
+            css_text: stylesheet_text_with_user_agent_defaults("body { margin: 0; }"),
+            sheet_bodies: Vec::new(),
+            script_texts: Vec::new(),
+            module_texts: Vec::new(),
+            images: Vec::new(),
+            render_config,
+            parsed_document: None,
+        })
+        .expect("parent page builds");
+
+        assert!(page.runtime.initial_document_load_pending);
+        sync_child_frames(&mut page.runtime, &mut page.frame, 0);
+        assert!(page.runtime.initial_document_load_pending);
+        server.join().expect("child server exits");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while page.runtime.initial_document_load_pending && std::time::Instant::now() < deadline {
+            sync_child_frames(&mut page.runtime, &mut page.frame, 0);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(!page.runtime.initial_document_load_pending);
+        page.runtime
+            .js_ctx
+            .eval("if (loadOrder.join(',') !== 'iframe,parent') throw new Error(loadOrder.join(','));")
+            .expect("iframe load precedes the parent's load event");
+        let frame_context_id = match &page.runtime.child_frames[0].state {
+            EmbeddedFrameState::Ready { page, .. } => page.runtime.js_ctx.window_context_id(),
+            _ => panic!("loaded child frame retains its runtime"),
+        };
+        page.runtime
+            .js_ctx
+            .eval("document.querySelector('iframe').contentWindow.postMessage('execute', '*');")
+            .expect("parent queues a message to the loaded child");
+        let owner = page.runtime.child_frames[0].owner;
+        page.runtime
+            .dom
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .set_attribute(owner, "style", "width:30px;height:10px")
+            .expect("iframe dimensions update");
+        repaint_runtime_full_document(&mut page.runtime, &mut page.frame);
+        sync_child_frames(&mut page.runtime, &mut page.frame, 0);
+
+        assert_eq!(
+            (
+                page.runtime.child_frames[0].width,
+                page.runtime.child_frames[0].height
+            ),
+            (30, 10)
+        );
+        let EmbeddedFrameState::Ready { page: child, .. } = &mut page.runtime.child_frames[0].state
+        else {
+            panic!("resized child frame retains its runtime");
+        };
+        assert_eq!(child.runtime.js_ctx.window_context_id(), frame_context_id);
+        child
             .runtime
-            .geometry
-            .borrow()
-            .get(page.runtime.child_frames[0].owner)
-            .expect("owner has a layout box");
-        let pixel_x = frame_box[0].floor() as usize;
-        let pixel_y = frame_box[1].floor() as usize;
-        let pixel = page.frame.argb[pixel_y * page.frame.raster_width as usize + pixel_x];
-        assert_eq!(pixel, 0xffff_0000);
+            .js_ctx
+            .run_host_callbacks(64)
+            .expect("child delivers the queued execute message");
+        child.runtime.js_ctx.eval(
+            "if (receivedMessage !== 'execute') throw new Error('message lost across resize'); if (resizedViewport !== '30x10') throw new Error(resizedViewport);",
+        ).expect("resize preserves message target and updates child viewport");
     }
 
     #[test]

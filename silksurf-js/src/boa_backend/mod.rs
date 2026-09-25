@@ -262,13 +262,15 @@ type StorageMap = Rc<RefCell<HashMap<String, String>>>;
 type CookieJar = Arc<Mutex<silksurf_net::cookie::PartitionedCookieStore>>;
 
 type StorageDirtyFlag = Rc<std::cell::Cell<bool>>;
+type StorageAccessFlag = Rc<std::cell::Cell<bool>>;
 
 /// Install localStorage/sessionStorage; returns the localStorage map and its
 /// dirty flag so the embedder can preload persisted entries and flush writes.
-fn install_storage_objects(ctx: &mut Context) -> (StorageMap, StorageDirtyFlag) {
+fn install_storage_objects(ctx: &mut Context) -> (StorageMap, StorageDirtyFlag, StorageAccessFlag) {
     let dirty = Rc::new(std::cell::Cell::new(false));
-    let (local_storage, local_map) = storage_object(ctx, Some(&dirty));
-    let (session_storage, _session_map) = storage_object(ctx, None);
+    let access_allowed = Rc::new(std::cell::Cell::new(true));
+    let (local_storage, local_map) = storage_object(ctx, Some(&dirty), &access_allowed);
+    let (session_storage, _session_map) = storage_object(ctx, None, &access_allowed);
     ctx.register_global_property(js_string!("localStorage"), local_storage, Attribute::all())
         // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
 
@@ -281,13 +283,18 @@ fn install_storage_objects(ctx: &mut Context) -> (StorageMap, StorageDirtyFlag) 
     // UNWRAP-OK: The preceding initialization operation is invariant for this construction path.
 
     .expect("sessionStorage: install on fresh context cannot fail");
-    (local_map, dirty)
+    (local_map, dirty, access_allowed)
 }
 
-fn storage_object(ctx: &mut Context, dirty: Option<&StorageDirtyFlag>) -> (JsObject, StorageMap) {
+fn storage_object(
+    ctx: &mut Context,
+    dirty: Option<&StorageDirtyFlag>,
+    access_allowed: &StorageAccessFlag,
+) -> (JsObject, StorageMap) {
     let storage = Rc::new(RefCell::new(HashMap::new()));
     let length_getter =
-        FunctionObjectBuilder::new(ctx.realm(), storage_length_native(&storage)).build();
+        FunctionObjectBuilder::new(ctx.realm(), storage_length_native(&storage, access_allowed))
+            .build();
 
     let object = ObjectInitializer::new(ctx)
         .accessor(
@@ -296,25 +303,43 @@ fn storage_object(ctx: &mut Context, dirty: Option<&StorageDirtyFlag>) -> (JsObj
             None,
             Attribute::CONFIGURABLE | Attribute::ENUMERABLE,
         )
-        .function(storage_get_item_native(&storage), js_string!("getItem"), 1)
         .function(
-            storage_set_item_native(&storage, dirty),
+            storage_get_item_native(&storage, access_allowed),
+            js_string!("getItem"),
+            1,
+        )
+        .function(
+            storage_set_item_native(&storage, dirty, access_allowed),
             js_string!("setItem"),
             2,
         )
         .function(
-            storage_remove_item_native(&storage, dirty),
+            storage_remove_item_native(&storage, dirty, access_allowed),
             js_string!("removeItem"),
             1,
         )
         .function(
-            storage_clear_native(&storage, dirty),
+            storage_clear_native(&storage, dirty, access_allowed),
             js_string!("clear"),
             0,
         )
-        .function(storage_key_native(&storage), js_string!("key"), 1)
+        .function(
+            storage_key_native(&storage, access_allowed),
+            js_string!("key"),
+            1,
+        )
         .build();
     (object, storage)
+}
+
+fn ensure_storage_access(access_allowed: &StorageAccessFlag) -> boa_engine::JsResult<()> {
+    if access_allowed.get() {
+        Ok(())
+    } else {
+        Err(boa_engine::JsNativeError::error()
+            .with_message("SecurityError: storage is unavailable to an opaque origin")
+            .into())
+    }
 }
 
 fn storage_string_arg(arg: Option<&JsValue>, ctx: &mut Context) -> boa_engine::JsResult<String> {
@@ -324,23 +349,33 @@ fn storage_string_arg(arg: Option<&JsValue>, ctx: &mut Context) -> boa_engine::J
     }
 }
 
-fn storage_length_native(storage: &StorageMap) -> NativeFunction {
+fn storage_length_native(
+    storage: &StorageMap,
+    access_allowed: &StorageAccessFlag,
+) -> NativeFunction {
     let storage = Rc::clone(storage);
+    let access_allowed = Rc::clone(access_allowed);
     // SAFETY: Boa stores the native closure with owned Rust captures for the JS function lifetime.
 
     unsafe {
         NativeFunction::from_closure(move |_this, _args, _ctx| {
+            ensure_storage_access(&access_allowed)?;
             Ok(JsValue::from(storage.borrow().len() as u32))
         })
     }
 }
 
-fn storage_get_item_native(storage: &StorageMap) -> NativeFunction {
+fn storage_get_item_native(
+    storage: &StorageMap,
+    access_allowed: &StorageAccessFlag,
+) -> NativeFunction {
     let storage = Rc::clone(storage);
+    let access_allowed = Rc::clone(access_allowed);
     // SAFETY: Boa stores the native closure with owned Rust captures for the JS function lifetime.
 
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
+            ensure_storage_access(&access_allowed)?;
             let key = storage_string_arg(args.first(), ctx)?;
             Ok(storage
                 .borrow()
@@ -355,13 +390,16 @@ fn storage_get_item_native(storage: &StorageMap) -> NativeFunction {
 fn storage_set_item_native(
     storage: &StorageMap,
     dirty: Option<&StorageDirtyFlag>,
+    access_allowed: &StorageAccessFlag,
 ) -> NativeFunction {
     let storage = Rc::clone(storage);
     let dirty = dirty.map(Rc::clone);
+    let access_allowed = Rc::clone(access_allowed);
     // SAFETY: Boa stores the native closure with owned Rust captures for the JS function lifetime.
 
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
+            ensure_storage_access(&access_allowed)?;
             let key = storage_string_arg(args.first(), ctx)?;
             let value = storage_string_arg(args.get(1), ctx)?;
             storage.borrow_mut().insert(key, value);
@@ -376,13 +414,16 @@ fn storage_set_item_native(
 fn storage_remove_item_native(
     storage: &StorageMap,
     dirty: Option<&StorageDirtyFlag>,
+    access_allowed: &StorageAccessFlag,
 ) -> NativeFunction {
     let storage = Rc::clone(storage);
     let dirty = dirty.map(Rc::clone);
+    let access_allowed = Rc::clone(access_allowed);
     // SAFETY: Boa stores the native closure with owned Rust captures for the JS function lifetime.
 
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
+            ensure_storage_access(&access_allowed)?;
             let key = storage_string_arg(args.first(), ctx)?;
             storage.borrow_mut().remove(&key);
             if let Some(flag) = &dirty {
@@ -393,13 +434,19 @@ fn storage_remove_item_native(
     }
 }
 
-fn storage_clear_native(storage: &StorageMap, dirty: Option<&StorageDirtyFlag>) -> NativeFunction {
+fn storage_clear_native(
+    storage: &StorageMap,
+    dirty: Option<&StorageDirtyFlag>,
+    access_allowed: &StorageAccessFlag,
+) -> NativeFunction {
     let storage = Rc::clone(storage);
     let dirty = dirty.map(Rc::clone);
+    let access_allowed = Rc::clone(access_allowed);
     // SAFETY: Boa stores the native closure with owned Rust captures for the JS function lifetime.
 
     unsafe {
         NativeFunction::from_closure(move |_this, _args, _ctx| {
+            ensure_storage_access(&access_allowed)?;
             storage.borrow_mut().clear();
             if let Some(flag) = &dirty {
                 flag.set(true);
@@ -409,12 +456,14 @@ fn storage_clear_native(storage: &StorageMap, dirty: Option<&StorageDirtyFlag>) 
     }
 }
 
-fn storage_key_native(storage: &StorageMap) -> NativeFunction {
+fn storage_key_native(storage: &StorageMap, access_allowed: &StorageAccessFlag) -> NativeFunction {
     let storage = Rc::clone(storage);
+    let access_allowed = Rc::clone(access_allowed);
     // SAFETY: Boa stores the native closure with owned Rust captures for the JS function lifetime.
 
     unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
+            ensure_storage_access(&access_allowed)?;
             let index = args
                 .first()
                 .map(|value| value.to_u32(ctx))
@@ -869,6 +918,7 @@ pub struct SilkContext {
     /// and flushes writes signaled by `storage_dirty`.
     local_storage: StorageMap,
     storage_dirty: StorageDirtyFlag,
+    storage_access_allowed: StorageAccessFlag,
     /// Viewport dimensions backing matchMedia (and future viewport units).
     viewport: ViewportRef,
     /// Live layout observations, written by the JS half's observe and
@@ -1235,7 +1285,8 @@ impl SilkContext {
             time_origin_ms,
         );
 
-        let (local_storage, storage_dirty) = install_storage_objects(&mut ctx);
+        let (local_storage, storage_dirty, storage_access_allowed) =
+            install_storage_objects(&mut ctx);
         let async_done = Rc::new(RefCell::new(AsyncDoneCell::default()));
         install_async_done(&mut ctx, &async_done);
 
@@ -1258,6 +1309,7 @@ impl SilkContext {
             observation_pending,
             local_storage,
             storage_dirty,
+            storage_access_allowed,
             window_messages: None,
         }
     }
@@ -1419,6 +1471,11 @@ impl SilkContext {
         self.net.shared.borrow_mut().document_url = url::Url::parse(url).ok();
     }
 
+    pub fn set_document_origin_opaque(&mut self) {
+        platform_globals::set_document_origin_opaque(&mut self.ctx);
+        self.storage_access_allowed.set(false);
+    }
+
     /// Share the embedder's TLS configuration and cookie partition with fetch.
     pub fn set_fetch_client(&mut self, client: Arc<silksurf_net::BasicClient>) {
         self.net.shared.borrow_mut().client = client;
@@ -1559,7 +1616,16 @@ impl SilkContext {
                 let _ = self.ctx.run_jobs();
                 Ok(())
             }
-            Err(e) => Err(format!("{e}")),
+            Err(error) => {
+                if std::env::var_os("SILKSURF_TRACE_SCRIPT_ERRORS").is_some() {
+                    eprintln!(
+                        "[SilkSurf] Script evaluation error source ({} bytes):\n{}",
+                        script.len(),
+                        script
+                    );
+                }
+                Err(format!("{error}"))
+            }
         }
     }
 

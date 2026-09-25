@@ -124,6 +124,10 @@ pub enum DisplayItem {
         rect: Rect,
         image: ImageSurface,
     },
+    EmbeddedFrame {
+        rect: Rect,
+        node: NodeId,
+    },
     /// CSS `backdrop-filter` over the pixels already painted beneath the
     /// element.
     ///
@@ -186,55 +190,63 @@ fn build_display_list_for_box(
         | silksurf_layout::BoxType::InlineNode(node_id) => {
             if let Some(style) = styles.get(&node_id) {
                 let content_rect = layout.dimensions().content;
-                // The filter reads the backdrop, so it precedes every item
-                // this element paints for itself.
-                if !style.backdrop_filter.is_empty() {
-                    list.items.push(DisplayItem::BackdropFilter {
-                        rect: content_rect,
-                        radii: [style.border_radius; 4],
-                        filters: style.backdrop_filter.clone(),
-                    });
-                }
-                // Box-shadow paints below the background (CSS paint order).
-                if let Some(shadow) = style.box_shadow {
-                    if !shadow.inset {
-                        list.items.push(DisplayItem::BoxShadow {
-                            rect: content_rect,
-                            shadow,
-                        });
-                    }
-                }
-                if style.background_color.a > 0 {
-                    if style.border_radius > 0.0 {
-                        list.items.push(DisplayItem::RoundedRect {
+                if style.visibility == silksurf_css::Visibility::Visible {
+                    // The filter reads the backdrop, so it precedes every item
+                    // this element paints for itself.
+                    if !style.backdrop_filter.is_empty() {
+                        list.items.push(DisplayItem::BackdropFilter {
                             rect: content_rect,
                             radii: [style.border_radius; 4],
-                            color: style.background_color,
-                        });
-                    } else {
-                        list.items.push(DisplayItem::SolidColor {
-                            rect: content_rect,
-                            color: style.background_color,
+                            filters: style.backdrop_filter.clone(),
                         });
                     }
-                }
-                if let Ok(node) = dom.node(node_id) {
-                    if let NodeKind::Text { .. } = node.kind() {
-                        let (text_len, text_content) = match node.kind() {
-                            NodeKind::Text { text } => (text.len() as u32, text.clone()),
-                            _ => (0, String::new()),
-                        };
-                        let font_size_px = match style.font_size {
-                            silksurf_css::Length::Px(px) => px,
-                            _ => 16.0,
-                        };
-                        list.items.push(DisplayItem::Text {
+                    // Box-shadow paints below the background (CSS paint order).
+                    if let Some(shadow) = style.box_shadow {
+                        if !shadow.inset {
+                            list.items.push(DisplayItem::BoxShadow {
+                                rect: content_rect,
+                                shadow,
+                            });
+                        }
+                    }
+                    if style.background_color.a > 0 {
+                        if style.border_radius > 0.0 {
+                            list.items.push(DisplayItem::RoundedRect {
+                                rect: content_rect,
+                                radii: [style.border_radius; 4],
+                                color: style.background_color,
+                            });
+                        } else {
+                            list.items.push(DisplayItem::SolidColor {
+                                rect: content_rect,
+                                color: style.background_color,
+                            });
+                        }
+                    }
+                    if let Ok(node) = dom.node(node_id) {
+                        if let NodeKind::Text { .. } = node.kind() {
+                            let (text_len, text_content) = match node.kind() {
+                                NodeKind::Text { text } => (text.len() as u32, text.clone()),
+                                _ => (0, String::new()),
+                            };
+                            let font_size_px = match style.font_size {
+                                silksurf_css::Length::Px(px) => px,
+                                _ => 16.0,
+                            };
+                            list.items.push(DisplayItem::Text {
+                                rect: content_rect,
+                                node: node_id,
+                                text_len,
+                                text: text_content,
+                                font_size: font_size_px,
+                                color: style.color,
+                            });
+                        }
+                    }
+                    if dom.element_name(node_id).ok().flatten() == Some("iframe") {
+                        list.items.push(DisplayItem::EmbeddedFrame {
                             rect: content_rect,
                             node: node_id,
-                            text_len,
-                            text: text_content,
-                            font_size: font_size_px,
-                            color: style.color,
                         });
                     }
                 }
@@ -243,8 +255,33 @@ fn build_display_list_for_box(
         silksurf_layout::BoxType::Anonymous => {}
     }
 
-    for child in &layout.children {
+    let mut children = layout.children.iter().collect::<Vec<_>>();
+    children.sort_by_key(|child| layout_box_paint_order(child, styles));
+    for child in children {
         build_display_list_for_box(dom, styles, child, list);
+    }
+}
+
+fn layout_box_paint_order(
+    layout: &silksurf_layout::LayoutBox<'_>,
+    styles: &FxHashMap<NodeId, ComputedStyle>,
+) -> (u8, i32) {
+    let node = match layout.box_type {
+        silksurf_layout::BoxType::BlockNode(node) | silksurf_layout::BoxType::InlineNode(node) => {
+            node
+        }
+        silksurf_layout::BoxType::Anonymous => return (1, 0),
+    };
+    let Some(style) = styles.get(&node) else {
+        return (1, 0);
+    };
+    if style.position == silksurf_css::Position::Static {
+        return (1, 0);
+    }
+    match style.z_index.cmp(&0) {
+        std::cmp::Ordering::Less => (0, style.z_index),
+        std::cmp::Ordering::Equal => (2, 0),
+        std::cmp::Ordering::Greater => (3, style.z_index),
     }
 }
 
@@ -314,6 +351,7 @@ pub fn rasterize_damage(
             DisplayItem::Image { rect, image } => {
                 blit_image_nearest(&mut buffer, width, height, *rect, image);
             }
+            DisplayItem::EmbeddedFrame { .. } => {}
             DisplayItem::BackdropFilter {
                 rect,
                 radii,
@@ -355,7 +393,8 @@ fn item_rect(item: &DisplayItem) -> Rect {
         | DisplayItem::Text { rect, .. }
         | DisplayItem::RoundedRect { rect, .. }
         | DisplayItem::LinearGradient { rect, .. }
-        | DisplayItem::Image { rect, .. } => *rect,
+        | DisplayItem::Image { rect, .. }
+        | DisplayItem::EmbeddedFrame { rect, .. } => *rect,
         DisplayItem::BoxShadow { rect, shadow } => box_shadow_rect(*rect, shadow),
         DisplayItem::BackdropFilter { rect, .. } => *rect,
     }
@@ -913,7 +952,7 @@ pub fn rasterize_parallel_into(
                     },
                     |pair| pair.1,
                 ),
-                DisplayItem::Image { .. } => continue,
+                DisplayItem::Image { .. } | DisplayItem::EmbeddedFrame { .. } => continue,
             };
 
             // Clip to tile bounds
@@ -1286,6 +1325,7 @@ fn trace_damage_item(
         DisplayItem::BoxShadow { .. } => "box-shadow",
         DisplayItem::LinearGradient { .. } => "linear-gradient",
         DisplayItem::Image { .. } => "image",
+        DisplayItem::EmbeddedFrame { .. } => "embedded-frame",
         DisplayItem::BackdropFilter { .. } => "backdrop-filter",
     };
     let text_len = match item {
@@ -1433,6 +1473,7 @@ fn paint_skia_item(pixmap: &mut PixmapMut<'_>, item: &DisplayItem, offset: (f32,
             let (width, height) = (pixmap.width(), pixmap.height());
             blit_image_nearest(pixmap.data_mut(), width, height, rect, image);
         }
+        DisplayItem::EmbeddedFrame { .. } => {}
         DisplayItem::BackdropFilter {
             rect,
             radii,
@@ -1715,9 +1756,126 @@ mod tests {
     use super::*;
     use rustc_hash::FxHashMap;
     use silksurf_core::SilkArena;
-    use silksurf_css::{ComputedStyle, Display};
+    use silksurf_css::{ComputedStyle, Display, Position, Visibility};
     use silksurf_dom::Dom;
     use silksurf_layout::build_layout_tree;
+
+    #[test]
+    fn hidden_iframe_has_no_replaced_content_paint_item() {
+        let mut dom = Dom::new();
+        let document = dom.create_document();
+        let html = dom.create_element("html");
+        let body = dom.create_element("body");
+        let iframe = dom.create_element("iframe");
+        dom.append_child(document, html).unwrap();
+        dom.append_child(html, body).unwrap();
+        dom.append_child(body, iframe).unwrap();
+        let mut styles = FxHashMap::default();
+        for node in [document, html, body] {
+            styles.insert(
+                node,
+                ComputedStyle {
+                    display: Display::Block,
+                    ..Default::default()
+                },
+            );
+        }
+        styles.insert(
+            iframe,
+            ComputedStyle {
+                display: Display::Block,
+                visibility: Visibility::Hidden,
+                ..Default::default()
+            },
+        );
+
+        let arena = SilkArena::new();
+        let viewport = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 800.0,
+            height: 600.0,
+        };
+        let layout = build_layout_tree(&arena, &dom, &styles, document, viewport).unwrap();
+        let display_list = build_display_list(&dom, &styles, &layout);
+
+        assert!(display_list.items.iter().all(|item| !matches!(
+            item,
+            DisplayItem::EmbeddedFrame { node, .. } if *node == iframe
+        )));
+    }
+
+    #[test]
+    fn sibling_iframe_paints_before_a_higher_z_index_sibling() {
+        let mut dom = Dom::new();
+        let document = dom.create_document();
+        let html = dom.create_element("html");
+        let body = dom.create_element("body");
+        let iframe = dom.create_element("iframe");
+        let overlay = dom.create_element("div");
+        dom.append_child(document, html).unwrap();
+        dom.append_child(html, body).unwrap();
+        dom.append_child(body, iframe).unwrap();
+        dom.append_child(body, overlay).unwrap();
+        let mut styles = FxHashMap::default();
+        for node in [document, html, body] {
+            styles.insert(
+                node,
+                ComputedStyle {
+                    display: Display::Block,
+                    ..Default::default()
+                },
+            );
+        }
+        styles.insert(
+            iframe,
+            ComputedStyle {
+                display: Display::Block,
+                position: Position::Absolute,
+                z_index: 1,
+                ..Default::default()
+            },
+        );
+        styles.insert(
+            overlay,
+            ComputedStyle {
+                display: Display::Block,
+                position: Position::Absolute,
+                z_index: 2,
+                background_color: Color {
+                    r: 255,
+                    g: 0,
+                    b: 0,
+                    a: 255,
+                },
+                ..Default::default()
+            },
+        );
+
+        let arena = SilkArena::new();
+        let viewport = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 800.0,
+            height: 600.0,
+        };
+        let layout = build_layout_tree(&arena, &dom, &styles, document, viewport).unwrap();
+        let display_list = build_display_list(&dom, &styles, &layout);
+        let iframe_index = display_list
+            .items
+            .iter()
+            .position(
+                |item| matches!(item, DisplayItem::EmbeddedFrame { node, .. } if *node == iframe),
+            )
+            .expect("iframe paint item");
+        let overlay_index = display_list
+            .items
+            .iter()
+            .position(|item| matches!(item, DisplayItem::SolidColor { .. }))
+            .expect("overlay background");
+
+        assert!(iframe_index < overlay_index);
+    }
 
     /// A computed `backdrop-filter` reaches the display list as an item that
     /// precedes the element's own background, so a rasterizer reading it has

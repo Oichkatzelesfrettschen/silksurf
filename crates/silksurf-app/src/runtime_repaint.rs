@@ -77,7 +77,9 @@ pub(crate) fn tick_browser_runtime(state: &mut BrowserState) -> bool {
     }
 
     // localStorage writeback: flush dirtied entries to the origin store.
-    if let Some(entries) = runtime.js_ctx.take_local_storage_if_dirty() {
+    if let Some(entries) = runtime.js_ctx.take_local_storage_if_dirty()
+        && !runtime.render_config.origin_sandboxed
+    {
         crate::profile::flush_local_storage(&state.frame.url, &entries);
     }
 
@@ -417,6 +419,7 @@ fn repaint_runtime_document(
         &mut runtime.svg_cache,
         &mut display_list.items,
     );
+    resolve_child_frame_display_items(runtime, &mut display_list.items);
     frame.link_targets = collect_link_targets(&dom, &display_list.items, &frame.url);
     frame.input_targets = collect_input_targets(&dom, &new_fused);
     let damage = dirty_nodes
@@ -464,8 +467,6 @@ fn repaint_runtime_document(
         BrowserRedrawMode::Full
     };
     runtime.display_list = display_list;
-    composite_child_frames(runtime, frame);
-
     let old_fused = std::mem::replace(&mut runtime.fused, new_fused);
     // The layout the DOM's geometry accessors report is the one that just
     // completed, and this is the one place the runtime's fused result becomes
@@ -912,7 +913,8 @@ pub(crate) fn text_damage_background_argb(
             }
             silksurf_render::DisplayItem::LinearGradient { .. }
             | silksurf_render::DisplayItem::BackdropFilter { .. }
-            | silksurf_render::DisplayItem::Image { .. } => return None,
+            | silksurf_render::DisplayItem::Image { .. }
+            | silksurf_render::DisplayItem::EmbeddedFrame { .. } => return None,
             silksurf_render::DisplayItem::Text { .. }
             | silksurf_render::DisplayItem::BoxShadow { .. } => {}
         }
@@ -1416,6 +1418,7 @@ mod tests {
                 viewport,
                 render_config: BrowserRenderConfig::default(),
                 child_frames: Vec::new(),
+                initial_document_load_pending: false,
                 js_ctx,
                 geometry: std::rc::Rc::default(),
                 fused,
@@ -1545,6 +1548,7 @@ mod tests {
                 viewport,
                 render_config: BrowserRenderConfig::default(),
                 child_frames: Vec::new(),
+                initial_document_load_pending: false,
                 js_ctx,
                 geometry: std::rc::Rc::default(),
                 fused,

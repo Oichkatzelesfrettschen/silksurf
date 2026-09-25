@@ -383,6 +383,17 @@ pub(super) fn set_document_url(ctx: &mut Context, url: &str) {
     }
 }
 
+pub(super) fn set_document_origin_opaque(ctx: &mut Context) {
+    let global = ctx.global_object().clone();
+    let Ok(location) = global.get(js_string!("location"), ctx) else {
+        return;
+    };
+    let Some(location) = location.as_object() else {
+        return;
+    };
+    let _ = location.set(js_string!("origin"), js_string!("null"), false, ctx);
+}
+
 // ---- bootstrap --------------------------------------------------------------
 
 /*
@@ -881,7 +892,19 @@ mod tests {
              if (location.search !== '?q=1') throw new Error(location.search); \
              if (new URL(location.href).hostname !== 'example.com') throw new Error('URL disagrees');",
         )
-        .expect("location reflects the document address");
+            .expect("location reflects the document address");
+    }
+
+    #[test]
+    fn opaque_document_origin_keeps_the_address_and_serializes_origin_as_null() {
+        let mut ctx = context();
+        ctx.set_document_url("https://example.com/frame");
+        ctx.set_document_origin_opaque();
+        ctx.eval(
+            "if (location.href !== 'https://example.com/frame') throw new Error(location.href); \
+             if (location.origin !== 'null') throw new Error(location.origin);",
+        )
+        .expect("sandboxed document retains its address and opaque origin");
     }
 
     #[test]

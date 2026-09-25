@@ -137,7 +137,8 @@ fn load_document_payload(
     }
 
     let html = String::from_utf8_lossy(&response.body).to_string();
-    let document = parse_html(&html).map_err(|err| format!("{url}: parse error: {err:?}"))?;
+    let document = silksurf_engine::parse_html_with_scripting(&html, !config.scripts_disabled)
+        .map_err(|err| format!("{url}: parse error: {err:?}"))?;
     let doc_node = document.document;
     let dom = &document.dom;
 
@@ -154,8 +155,14 @@ fn load_document_payload(
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         fetch_decoded_images(&mut renderer, &mut image_cache, &image_urls)
     };
-    let script_texts = load_document_script_texts(&mut renderer, dom, doc_node, url);
-    let module_texts = load_document_module_texts(&mut renderer, dom, doc_node, url)?;
+    let (script_texts, module_texts) = if config.scripts_disabled {
+        (Vec::new(), Vec::new())
+    } else {
+        (
+            load_document_script_texts(&mut renderer, dom, doc_node, url),
+            load_document_module_texts(&mut renderer, dom, doc_node, url)?,
+        )
+    };
 
     Ok(BrowserPagePayload {
         url: url.to_string(),
@@ -184,6 +191,161 @@ pub(crate) fn build_browser_page_with_buffers(
     build_browser_page_with_buffers_for_window(payload, buffers, None)
 }
 
+fn parse_page_document(payload: &mut BrowserPagePayload) -> Result<ParsedDocument, String> {
+    if let Some(document) = payload.parsed_document.take() {
+        return Ok(document);
+    }
+    silksurf_engine::parse_html_with_scripting(
+        &payload.html,
+        !payload.render_config.scripts_disabled,
+    )
+    .map_err(|error| format!("{}: parse error: {error:?}", payload.url))
+}
+
+fn parse_page_stylesheet(
+    dom: &silksurf_dom::Dom,
+    payload: &BrowserPagePayload,
+) -> Result<silksurf_css::Stylesheet, String> {
+    dom.with_interner_mut(|interner| {
+        silksurf_css::parse_stylesheet_with_interner(&payload.css_text, interner)
+            .map_err(|_| format!("{}: CSS parse failed", payload.url))
+    })
+}
+
+fn initial_page_scripts(
+    payload: &mut BrowserPagePayload,
+    dom: &silksurf_dom::Dom,
+    document: silksurf_dom::NodeId,
+) -> Vec<(Option<silksurf_dom::NodeId>, String)> {
+    if payload.render_config.scripts_disabled {
+        Vec::new()
+    } else if payload.script_texts.is_empty() {
+        extract_document_script_nodes(dom, document, &payload.url)
+            .into_iter()
+            .filter_map(|script| match script.source {
+                DocumentScriptRef::Inline(text) => Some((Some(script.node), text)),
+                DocumentScriptRef::External(_) => None,
+            })
+            .collect()
+    } else {
+        std::mem::take(&mut payload.script_texts)
+    }
+}
+
+fn page_cookie_host(payload: &BrowserPagePayload) -> String {
+    if payload.render_config.origin_sandboxed {
+        String::new()
+    } else {
+        url::Url::parse(&payload.url)
+            .ok()
+            .and_then(|parsed| parsed.host_str().map(str::to_string))
+            .unwrap_or_default()
+    }
+}
+
+fn execute_initial_page_scripts(
+    payload: &BrowserPagePayload,
+    dom: &Arc<Mutex<silksurf_dom::Dom>>,
+    document: silksurf_dom::NodeId,
+    scripts: &[(Option<silksurf_dom::NodeId>, String)],
+    reserved_inline_bytes: usize,
+    js_ctx: &mut SilkContext,
+    trace_build: bool,
+) -> Result<HashSet<silksurf_dom::NodeId>, String> {
+    let mut executed_script_nodes = initial_executed_script_nodes(
+        &dom.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+        document,
+        &payload.url,
+    );
+    let script_phase_start = std::time::Instant::now();
+    let static_eval_start = std::time::Instant::now();
+    for (idx, (node, script)) in scripts.iter().enumerate() {
+        if let Some(node) = node {
+            let map = {
+                let dom = dom
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                document_import_map_before(&dom, document, *node)
+            };
+            js_ctx.update_unresolved_import_map(map);
+        }
+        if script.len() > max_navigation_script_bytes() {
+            eprintln!(
+                "[SilkSurf] Navigation script {idx}: {} bytes skipped",
+                script.len()
+            );
+            continue;
+        }
+        trace_navigation_script(trace_build, idx, script.len(), "start", None);
+        let script_start = std::time::Instant::now();
+        js_ctx.set_current_script(*node);
+        if let Err(err) = js_ctx.eval(script) {
+            eprintln!("[SilkSurf] Navigation script {idx} error: {err}");
+        }
+        js_ctx.set_current_script(None);
+        trace_navigation_script(
+            trace_build,
+            idx,
+            script.len(),
+            "done",
+            Some(script_start.elapsed()),
+        );
+    }
+    trace_navigation_script_phase(trace_build, "static-eval", static_eval_start.elapsed());
+    let jobs_start = std::time::Instant::now();
+    js_ctx.run_pending_jobs();
+    trace_navigation_script_phase(trace_build, "static-jobs", jobs_start.elapsed());
+    let host_callbacks_start = std::time::Instant::now();
+    drain_initial_host_callbacks(js_ctx);
+    trace_navigation_script_phase(
+        trace_build,
+        "static-host-callbacks",
+        host_callbacks_start.elapsed(),
+    );
+    let dirty_drain_start = std::time::Instant::now();
+    let dynamic_dirty_nodes = take_dom_dirty_nodes(dom);
+    trace_navigation_script_phase(trace_build, "dirty-drain", dirty_drain_start.elapsed());
+    let dynamic_start = std::time::Instant::now();
+    if !payload.render_config.scripts_disabled {
+        execute_dynamic_classic_scripts(
+            &payload.url,
+            &payload.render_config,
+            dom,
+            js_ctx,
+            &mut executed_script_nodes,
+            dynamic_dirty_nodes,
+            trace_build,
+        );
+    }
+    trace_navigation_script_phase(trace_build, "dynamic-total", dynamic_start.elapsed());
+    let module_start = std::time::Instant::now();
+    if !payload.render_config.scripts_disabled {
+        execute_static_module_scripts(
+            &payload.url,
+            dom,
+            document,
+            js_ctx,
+            &payload.module_texts,
+            reserved_inline_bytes,
+            trace_build,
+        );
+    }
+    trace_navigation_script_phase(trace_build, "module-total", module_start.elapsed());
+    dispatch_initial_document_lifecycle(
+        js_ctx,
+        document,
+        payload.render_config.defer_initial_load,
+    )?;
+    trace_navigation_build_phase(
+        trace_build,
+        &payload.url,
+        "scripts",
+        script_phase_start.elapsed(),
+    );
+    Ok(executed_script_nodes)
+}
+
 pub(crate) fn build_browser_page_with_buffers_for_window(
     mut payload: BrowserPagePayload,
     buffers: BrowserFrameBuffers,
@@ -194,78 +356,62 @@ pub(crate) fn build_browser_page_with_buffers_for_window(
         || std::env::var_os("SILKSURF_TRACE_NAV_BUILD").is_some();
     let build_start = std::time::Instant::now();
     let phase_start = std::time::Instant::now();
-    let document = match payload.parsed_document.take() {
-        Some(document) => document,
-        None => match parse_html(&payload.html) {
-            Ok(document) => document,
-            Err(err) => {
-                return Err(BrowserPageBuildError {
-                    message: format!("{}: parse error: {err:?}", payload.url),
-                    buffers,
-                });
-            }
-        },
+    let document = match parse_page_document(&mut payload) {
+        Ok(document) => document,
+        Err(message) => return Err(BrowserPageBuildError { message, buffers }),
     };
     trace_navigation_build_phase(trace_build, &payload.url, "html", phase_start.elapsed());
     let doc_node = document.document;
     let dom = document.dom;
     let phase_start = std::time::Instant::now();
-    let Some(stylesheet) = dom.with_interner_mut(|interner| {
-        silksurf_css::parse_stylesheet_with_interner(&payload.css_text, interner).ok()
-    }) else {
-        return Err(BrowserPageBuildError {
-            message: format!("{}: CSS parse failed", payload.url),
-            buffers,
-        });
+    let stylesheet = match parse_page_stylesheet(&dom, &payload) {
+        Ok(stylesheet) => stylesheet,
+        Err(message) => return Err(BrowserPageBuildError { message, buffers }),
     };
     trace_navigation_build_phase(trace_build, &payload.url, "css", phase_start.elapsed());
-    let scripts = if payload.script_texts.is_empty() {
-        extract_document_script_nodes(&dom, doc_node, &payload.url)
-            .into_iter()
-            .filter_map(|script| match script.source {
-                DocumentScriptRef::Inline(text) => Some((Some(script.node), text)),
-                DocumentScriptRef::External(_) => None,
-            })
-            .collect()
-    } else {
-        payload.script_texts
-    };
-    let mut executed_script_nodes = initial_executed_script_nodes(&dom, doc_node, &payload.url);
+    let scripts = initial_page_scripts(&mut payload, &dom, doc_node);
     let viewport = browser_layout_viewport(live_window_size);
     let style_index = StyleIndex::for_viewport(&stylesheet, viewport.width, viewport.height);
     let dom_arc = Arc::new(Mutex::new(dom));
-    let cookie_host = url::Url::parse(&payload.url)
-        .ok()
-        .and_then(|parsed| parsed.host_str().map(str::to_string))
-        .unwrap_or_default();
+    let cookie_host = page_cookie_host(&payload);
     let mut js_ctx = SilkContext::with_dom_and_cookies(
         &dom_arc,
         &payload.render_config.cookie_jar,
         &payload.render_config.top_level_site,
         &cookie_host,
     );
-    let message_context = payload
-        .render_config
-        .window_message_hub
-        .create_context(&payload.url, payload.render_config.window_parent);
+    let message_context = payload.render_config.window_message_hub.create_context(
+        &payload.url,
+        payload.render_config.window_parent,
+        payload.render_config.origin_sandboxed,
+    );
     js_ctx.install_window_messages(message_context);
     js_ctx.set_document_url(&payload.url);
+    if payload.render_config.origin_sandboxed {
+        js_ctx.set_document_origin_opaque();
+    }
     match ephemeral_renderer_from_config(&payload.render_config) {
         Ok(renderer) => js_ctx.set_fetch_client(renderer.network_client()),
         Err(message) => return Err(BrowserPageBuildError { message, buffers }),
     }
-    let reserved_inline_bytes = match prepare_document_module_runtime(
-        &payload.url,
-        &dom_arc,
-        doc_node,
-        &mut js_ctx,
-        &payload.module_texts,
-        &payload.render_config,
-    ) {
-        Ok(bytes) => bytes,
-        Err(message) => return Err(BrowserPageBuildError { message, buffers }),
+    let reserved_inline_bytes = if payload.render_config.scripts_disabled {
+        0
+    } else {
+        match prepare_document_module_runtime(
+            &payload.url,
+            &dom_arc,
+            doc_node,
+            &mut js_ctx,
+            &payload.module_texts,
+            &payload.render_config,
+        ) {
+            Ok(bytes) => bytes,
+            Err(message) => return Err(BrowserPageBuildError { message, buffers }),
+        }
     };
-    js_ctx.preload_local_storage(crate::profile::load_local_storage(&payload.url));
+    if !payload.render_config.origin_sandboxed {
+        js_ctx.preload_local_storage(crate::profile::load_local_storage(&payload.url));
+    }
     js_ctx.set_viewport(viewport.width, viewport.height);
     /*
      * The set collects after the page's scripts have run, so a document that
@@ -279,7 +425,7 @@ pub(crate) fn build_browser_page_with_buffers_for_window(
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         StyleSheetSet::new(
             collect_style_sources(&dom, doc_node, &payload.url),
-            payload.sheet_bodies,
+            std::mem::take(&mut payload.sheet_bodies),
             &payload.url,
             &payload.render_config,
             &dom,
@@ -313,80 +459,18 @@ pub(crate) fn build_browser_page_with_buffers_for_window(
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let _ = dom.take_dirty_nodes();
     }
-    let phase_start = std::time::Instant::now();
-    let script_phase_start = phase_start;
-    let static_eval_start = std::time::Instant::now();
-    for (idx, (node, script)) in scripts.iter().enumerate() {
-        if let Some(node) = node {
-            let map = {
-                let dom = dom_arc
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                document_import_map_before(&dom, doc_node, *node)
-            };
-            js_ctx.update_unresolved_import_map(map);
-        }
-        if script.len() > max_navigation_script_bytes() {
-            eprintln!(
-                "[SilkSurf] Navigation script {idx}: {} bytes skipped",
-                script.len()
-            );
-            continue;
-        }
-        trace_navigation_script(trace_build, idx, script.len(), "start", None);
-        let script_start = std::time::Instant::now();
-        js_ctx.set_current_script(*node);
-        if let Err(err) = js_ctx.eval(script) {
-            eprintln!("[SilkSurf] Navigation script {idx} error: {err}");
-        }
-        js_ctx.set_current_script(None);
-        trace_navigation_script(
-            trace_build,
-            idx,
-            script.len(),
-            "done",
-            Some(script_start.elapsed()),
-        );
-    }
-    trace_navigation_script_phase(trace_build, "static-eval", static_eval_start.elapsed());
-    let jobs_start = std::time::Instant::now();
-    js_ctx.run_pending_jobs();
-    trace_navigation_script_phase(trace_build, "static-jobs", jobs_start.elapsed());
-    let host_callbacks_start = std::time::Instant::now();
-    drain_initial_host_callbacks(&mut js_ctx);
-    trace_navigation_script_phase(
-        trace_build,
-        "static-host-callbacks",
-        host_callbacks_start.elapsed(),
-    );
-    let dirty_drain_start = std::time::Instant::now();
-    let dynamic_dirty_nodes = take_dom_dirty_nodes(&dom_arc);
-    trace_navigation_script_phase(trace_build, "dirty-drain", dirty_drain_start.elapsed());
-    let dynamic_start = std::time::Instant::now();
-    execute_dynamic_classic_scripts(
-        &payload.url,
-        &payload.render_config,
-        &dom_arc,
-        &mut js_ctx,
-        &mut executed_script_nodes,
-        dynamic_dirty_nodes,
-        trace_build,
-    );
-    trace_navigation_script_phase(trace_build, "dynamic-total", dynamic_start.elapsed());
-    let module_start = std::time::Instant::now();
-    execute_static_module_scripts(
-        &payload.url,
+    let executed_script_nodes = match execute_initial_page_scripts(
+        &payload,
         &dom_arc,
         doc_node,
-        &mut js_ctx,
-        &payload.module_texts,
+        &scripts,
         reserved_inline_bytes,
+        &mut js_ctx,
         trace_build,
-    );
-    trace_navigation_script_phase(trace_build, "module-total", module_start.elapsed());
-    if let Err(message) = dispatch_initial_document_lifecycle(&mut js_ctx, doc_node) {
-        return Err(BrowserPageBuildError { message, buffers });
-    }
+    ) {
+        Ok(nodes) => nodes,
+        Err(message) => return Err(BrowserPageBuildError { message, buffers }),
+    };
 
     /*
      * The preload fetches start at build time so the event loop already has a
@@ -412,13 +496,6 @@ pub(crate) fn build_browser_page_with_buffers_for_window(
         "trace-script-nodes",
         trace_scripts_start.elapsed(),
     );
-    trace_navigation_build_phase(
-        trace_build,
-        &payload.url,
-        "scripts",
-        script_phase_start.elapsed(),
-    );
-
     let phase_start = std::time::Instant::now();
     let dom_guard = dom_arc
         .lock()
@@ -527,6 +604,7 @@ pub(crate) fn build_browser_page_with_buffers_for_window(
         let _ = dom.take_dirty_nodes();
     }
     trace_navigation_build_phase(trace_build, &payload.url, "total", build_start.elapsed());
+    let initial_document_load_pending = payload.render_config.defer_initial_load;
     Ok(BrowserPage {
         frame: BrowserFrame {
             url: payload.url,
@@ -559,6 +637,7 @@ pub(crate) fn build_browser_page_with_buffers_for_window(
             viewport,
             render_config: payload.render_config,
             child_frames: Vec::new(),
+            initial_document_load_pending,
             js_ctx,
             geometry,
             fused,
@@ -668,6 +747,9 @@ pub(crate) fn execute_dynamic_classic_scripts(
     mut dirty_nodes: Vec<silksurf_dom::NodeId>,
     trace_build: bool,
 ) {
+    if config.scripts_disabled {
+        return;
+    }
     for round in 0..MAX_DYNAMIC_SCRIPT_ROUNDS {
         let round_start = std::time::Instant::now();
         let find_start = std::time::Instant::now();
@@ -1328,12 +1410,20 @@ fn build_ephemeral_renderer_from_config(
 fn dispatch_initial_document_lifecycle(
     js_ctx: &mut SilkContext,
     document: silksurf_dom::NodeId,
+    defer_load: bool,
 ) -> Result<(), String> {
     js_ctx.set_document_ready_state("interactive")?;
     js_ctx.dispatch_dom_event(
         document,
         &silksurf_js::SyntheticEvent::new("DOMContentLoaded", true, false),
     )?;
+    if !defer_load {
+        dispatch_document_load(js_ctx)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn dispatch_document_load(js_ctx: &mut SilkContext) -> Result<(), String> {
     js_ctx.set_document_ready_state("complete")?;
     js_ctx.dispatch_window_event("load")
 }
@@ -1799,6 +1889,53 @@ mod tests {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         assert!(find_text_node(&dom, page.runtime.document, "Dynamic").is_some());
     }
+
+    #[test]
+    fn sandboxed_child_blocks_classic_dynamic_and_module_scripts() {
+        let render_config = BrowserRenderConfig {
+            scripts_disabled: true,
+            origin_sandboxed: true,
+            ..BrowserRenderConfig::default()
+        };
+        let payload = BrowserPagePayload {
+            url: "https://example.com/".to_string(),
+            html: "<!doctype html><html><body><p id='msg'>Safe</p><script>document.body.setAttribute('data-classic', 'ran');</script><script type='module'>document.body.setAttribute('data-module', 'ran');</script></body></html>".to_string(),
+            css_text: stylesheet_text_with_user_agent_defaults(""),
+            sheet_bodies: Vec::new(),
+            script_texts: vec![(None, "document.body.setAttribute('data-external', 'ran');".to_string())],
+            module_texts: vec![("https://example.com/module.js".to_string(), "document.body.setAttribute('data-external-module', 'ran');".to_string())],
+            images: Vec::new(),
+            render_config,
+            parsed_document: None,
+        };
+
+        let mut page = build_browser_page(payload).expect("sandboxed child page builds");
+        let dom = page
+            .runtime
+            .dom
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let body = first_element_by_name(&dom, page.runtime.document, "body").expect("body exists");
+        let attributes = dom.attributes(body).expect("body has attributes");
+        assert!(
+            attributes
+                .iter()
+                .all(|attribute| { !attribute.name.as_str().starts_with("data-") })
+        );
+        drop(dom);
+        assert!(
+            page.runtime
+                .js_ctx
+                .eval("localStorage.getItem('token')")
+                .is_err(),
+            "opaque-origin localStorage access must raise a security error"
+        );
+        assert!(
+            page.runtime.js_ctx.eval("sessionStorage.length").is_err(),
+            "opaque-origin sessionStorage access must raise a security error"
+        );
+    }
+
     #[test]
     fn browser_page_keeps_template_scripts_inert() {
         let payload = BrowserPagePayload {
