@@ -655,6 +655,28 @@ mod tests {
 
     #[test]
     fn a_rel_swapped_to_stylesheet_changes_the_source_list() {
+        use std::io::{Read, Write};
+
+        // The swapped link fetches from a loopback server the test owns, and
+        // the test drains that fetch, so no worker thread outlives it.
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("local listener binds");
+        let base_url = format!(
+            "http://{}/",
+            listener.local_addr().expect("listener address")
+        );
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("stylesheet request arrives");
+            let mut request = [0_u8; 4096];
+            let _ = stream.read(&mut request).expect("request reads");
+            let body = "p{color:red}";
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: text/css\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .expect("response writes");
+        });
         let mut document = parse_html(
             "<!doctype html><html><head>\
              <link rel=\"preload\" as=\"style\" href=\"/one.css\">\
@@ -664,9 +686,9 @@ mod tests {
         let link = find_element_by_tag(&document.dom, document.document, "link")
             .expect("fixture holds a link");
         let mut set = StyleSheetSet::new(
-            collect_style_sources(&document.dom, document.document, "https://example.com/"),
+            collect_style_sources(&document.dom, document.document, &base_url),
             Vec::new(),
-            "https://example.com/",
+            &base_url,
             &BrowserRenderConfig::default(),
             &document.dom,
         );
@@ -678,6 +700,14 @@ mod tests {
             .expect("rel rewrites");
         assert!(set.refresh(&document.dom, document.document, &[link]));
         assert_eq!(set.source_count(), 1);
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while set.has_pending_fetches() && std::time::Instant::now() < deadline {
+            set.refresh(&document.dom, document.document, &[]);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        server.join().expect("stylesheet server exits");
+        assert!(set.css_text().contains("p{color:red}"));
     }
 
     #[test]
