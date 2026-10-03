@@ -1231,7 +1231,7 @@ impl SilkContext {
             )
             .property(
                 js_string!("platform"),
-                js_string!("Linux"),
+                js_string!(silksurf_net::client_hints::PLATFORM),
                 Attribute::all(),
             )
             .property(js_string!("language"), js_string!("en"), Attribute::all())

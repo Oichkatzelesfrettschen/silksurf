@@ -12,10 +12,14 @@
  */
 
 use boa_engine::{
-    Context, JsResult, JsValue, NativeFunction, Source, js_string,
-    object::{ObjectInitializer, builtins::JsArray},
+    Context, JsNativeError, JsResult, JsValue, NativeFunction, Source, js_string,
+    object::{
+        ObjectInitializer,
+        builtins::{JsArray, JsPromise},
+    },
     property::Attribute,
 };
+use silksurf_net::client_hints;
 
 /// Install every platform global. Call once per context, before page script.
 pub(super) fn install_platform_globals(ctx: &mut Context) {
@@ -381,6 +385,147 @@ pub(super) fn set_document_url(ctx: &mut Context, url: &str) {
         let _ = document.set(js_string!("documentURI"), href.clone(), false, ctx);
         let _ = document.set(js_string!("baseURI"), href, false, ctx);
     }
+    install_user_agent_data(ctx, &parsed);
+}
+
+fn install_user_agent_data(ctx: &mut Context, url: &url::Url) {
+    let Some(navigator) = ctx
+        .global_object()
+        .get(js_string!("navigator"), ctx)
+        .ok()
+        .and_then(|value| value.as_object())
+    else {
+        return;
+    };
+    if !client_hints::is_potentially_trustworthy(url) {
+        let _ = navigator.delete_property_or_throw(js_string!("userAgentData"), ctx);
+        return;
+    }
+    let Ok(brands) = brand_list(&client_hints::BRANDS, ctx) else {
+        return;
+    };
+
+    let navigator_ua_data = ObjectInitializer::new(ctx)
+        .property(js_string!("brands"), brands, Attribute::all())
+        .property(js_string!("mobile"), client_hints::MOBILE, Attribute::all())
+        .property(
+            js_string!("platform"),
+            js_string!(client_hints::PLATFORM),
+            Attribute::all(),
+        )
+        .function(
+            NativeFunction::from_fn_ptr(user_agent_data_to_json),
+            js_string!("toJSON"),
+            0,
+        )
+        .function(
+            NativeFunction::from_fn_ptr(user_agent_data_get_high_entropy_values),
+            js_string!("getHighEntropyValues"),
+            1,
+        )
+        .build();
+    let _ = navigator.set(
+        js_string!("userAgentData"),
+        JsValue::from(navigator_ua_data),
+        false,
+        ctx,
+    );
+}
+
+/// A fresh `NavigatorUABrandVersion` array for one `client_hints` brand table.
+fn brand_list(entries: &[client_hints::BrandVersion], ctx: &mut Context) -> JsResult<JsArray> {
+    let brands = JsArray::new(ctx);
+    for entry in entries {
+        let brand = ObjectInitializer::new(ctx)
+            .property(
+                js_string!("brand"),
+                js_string!(entry.brand),
+                Attribute::all(),
+            )
+            .property(
+                js_string!("version"),
+                js_string!(entry.version),
+                Attribute::all(),
+            )
+            .build();
+        brands.push(JsValue::from(brand), ctx)?;
+    }
+    Ok(brands)
+}
+
+fn user_agent_data_to_json(
+    this: &JsValue,
+    _args: &[JsValue],
+    ctx: &mut Context,
+) -> JsResult<JsValue> {
+    let user_agent_data = this
+        .as_object()
+        .ok_or_else(|| JsNativeError::typ().with_message("Illegal invocation"))?;
+    let brands = user_agent_data.get(js_string!("brands"), ctx)?;
+    let mobile = user_agent_data.get(js_string!("mobile"), ctx)?;
+    let platform = user_agent_data.get(js_string!("platform"), ctx)?;
+    let result = ObjectInitializer::new(ctx)
+        .property(js_string!("brands"), brands, Attribute::all())
+        .property(js_string!("mobile"), mobile, Attribute::all())
+        .property(js_string!("platform"), platform, Attribute::all())
+        .build();
+    Ok(result.into())
+}
+
+fn user_agent_data_get_high_entropy_values(
+    this: &JsValue,
+    args: &[JsValue],
+    ctx: &mut Context,
+) -> JsResult<JsValue> {
+    let user_agent_data = this
+        .as_object()
+        .ok_or_else(|| JsNativeError::typ().with_message("Illegal invocation"))?;
+    let brands = user_agent_data.get(js_string!("brands"), ctx)?;
+    let mobile = user_agent_data.get(js_string!("mobile"), ctx)?;
+    let platform = user_agent_data.get(js_string!("platform"), ctx)?;
+    let result = ObjectInitializer::new(ctx)
+        .property(js_string!("brands"), brands, Attribute::all())
+        .property(js_string!("mobile"), mobile, Attribute::all())
+        .property(js_string!("platform"), platform, Attribute::all())
+        .build();
+    if let Some(hints) = args.first().and_then(JsValue::as_object) {
+        let hints = JsArray::from_object(hints.clone())?;
+        let length = hints.length(ctx)?;
+        for index in 0..length {
+            let hint = hints
+                .at(i64::try_from(index).unwrap_or(i64::MAX), ctx)?
+                .to_string(ctx)?
+                .to_std_string_lossy();
+            if let Some(value) = high_entropy_value(&hint, ctx)? {
+                result.set(js_string!(hint.as_str()), value, false, ctx)?;
+            }
+        }
+    }
+    Ok(JsValue::from(JsPromise::from_result::<
+        JsValue,
+        JsNativeError,
+    >(Ok(result.into()), ctx)))
+}
+
+/// The value of one UA-CH `getHighEntropyValues` hint name. A name outside
+/// the `UADataValues` dictionary contributes nothing, so an inherited property
+/// name such as `constructor` stays off the result.
+fn high_entropy_value(hint: &str, ctx: &mut Context) -> JsResult<Option<JsValue>> {
+    let value = match hint {
+        "architecture" => js_string!(client_hints::ARCHITECTURE).into(),
+        "bitness" => js_string!(client_hints::BITNESS).into(),
+        "formFactors" => {
+            let form_factors = JsArray::new(ctx);
+            form_factors.push(JsValue::from(js_string!(client_hints::FORM_FACTOR)), ctx)?;
+            form_factors.into()
+        }
+        "fullVersionList" => brand_list(&client_hints::FULL_VERSION_LIST, ctx)?.into(),
+        "model" | "platformVersion" => js_string!("").into(),
+        "uaFullVersion" => js_string!(client_hints::FULL_VERSION).into(),
+        "wow64" => false.into(),
+        _ => return Ok(None),
+    };
+    Ok(Some(value))
 }
 
 pub(super) fn set_document_origin_opaque(ctx: &mut Context) {
@@ -893,6 +1038,73 @@ mod tests {
              if (new URL(location.href).hostname !== 'example.com') throw new Error('URL disagrees');",
         )
             .expect("location reflects the document address");
+    }
+
+    #[test]
+    fn user_agent_data_matches_the_secure_context_request_profile() {
+        let mut context = context();
+        context.set_document_url("https://example.com/");
+        let platform = silksurf_net::client_hints::PLATFORM;
+        let low_entropy_script = format!(
+            "if (navigator.userAgentData.platform !== '{platform}') throw new Error('platform'); \
+             if (navigator.userAgentData.mobile !== {}) throw new Error('mobile'); \
+             if (navigator.userAgentData.brands[0].brand !== 'SilkSurf') throw new Error('brand'); \
+             if (navigator.userAgentData.brands.length !== 2 || navigator.userAgentData.brands[1].brand !== 'Not_A Brand') \
+               throw new Error('grease brand'); \
+             var highEntropy = null; \
+             navigator.userAgentData.getHighEntropyValues(['architecture', 'bitness', 'fullVersionList', 'model']) \
+               .then(value => highEntropy = value);",
+            silksurf_net::client_hints::MOBILE
+        );
+        context
+            .eval(low_entropy_script.as_str())
+            .expect("secure contexts expose navigator.userAgentData");
+        context.run_pending_jobs();
+        let high_entropy_script = format!(
+            "if (highEntropy.architecture !== 'x86' && highEntropy.architecture !== 'arm' && highEntropy.architecture !== '') \
+               throw new Error('architecture'); \
+             if (highEntropy.bitness !== '32' && highEntropy.bitness !== '64') throw new Error('bitness'); \
+             if (highEntropy.fullVersionList[0].version !== '{}') throw new Error('full version'); \
+             if (highEntropy.fullVersionList.length !== navigator.userAgentData.brands.length) \
+               throw new Error('full version list'); \
+             if (highEntropy.model !== '') throw new Error('model'); \
+             if (navigator.userAgentData.toJSON().brands[0].brand !== 'SilkSurf') throw new Error('toJSON');",
+            silksurf_net::client_hints::FULL_VERSION
+        );
+        context
+            .eval(high_entropy_script.as_str())
+            .expect("high-entropy values resolve from the SilkSurf profile");
+        context.set_document_url("http://example.com/");
+        context
+            .eval("if ('userAgentData' in navigator) throw new Error('insecure context');")
+            .expect("insecure origins omit navigator.userAgentData");
+        context.set_document_url("http://127.0.0.1/");
+        context
+            .eval("if (navigator.userAgentData.brands[0].brand !== 'SilkSurf') throw new Error('loopback');")
+            .expect("loopback origins qualify as secure contexts");
+        context.set_document_url("http://[::1]:8080/");
+        context
+            .eval("if (!('userAgentData' in navigator)) throw new Error('ipv6 loopback');")
+            .expect("IPv6 loopback origins qualify as secure contexts");
+        context
+            .eval(
+                "var hintNames = null; \
+                 navigator.userAgentData.getHighEntropyValues(['constructor', 'toString', 'uaFullVersion', 'formFactors']) \
+                   .then(value => hintNames = value);",
+            )
+            .expect("getHighEntropyValues accepts unknown hint names");
+        context.run_pending_jobs();
+        let hint_names_script = format!(
+            "if (Object.prototype.hasOwnProperty.call(hintNames, 'constructor')) throw new Error('constructor'); \
+             if (Object.prototype.hasOwnProperty.call(hintNames, 'toString')) throw new Error('toString'); \
+             if (hintNames.uaFullVersion !== '{}') throw new Error('uaFullVersion'); \
+             if (hintNames.formFactors[0] !== '{}') throw new Error('formFactors');",
+            silksurf_net::client_hints::FULL_VERSION,
+            silksurf_net::client_hints::FORM_FACTOR
+        );
+        context
+            .eval(hint_names_script.as_str())
+            .expect("only UA-CH hint names reach the resolved values");
     }
 
     #[test]
