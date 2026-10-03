@@ -546,10 +546,14 @@ impl SilkContext {
         self.window_messages.as_ref().map(WindowMessageContext::id)
     }
 
+    /// Delivery requires a bound DOM, so a context without one reports no
+    /// pending messages and the host loop schedules no wakeup for them.
     pub(super) fn has_pending_window_messages(&self) -> bool {
-        self.window_messages
-            .as_ref()
-            .is_some_and(WindowMessageContext::has_pending_messages)
+        self.dom.is_some()
+            && self
+                .window_messages
+                .as_ref()
+                .is_some_and(WindowMessageContext::has_pending_messages)
     }
 
     pub(super) fn deliver_window_messages(&mut self) -> Result<usize, String> {
@@ -793,6 +797,19 @@ mod tests {
         context
             .eval("if (calls.join() !== 'listener') throw new Error(calls.join());")
             .expect("stopImmediatePropagation halts dispatch before onmessage");
+    }
+
+    #[test]
+    fn context_without_dom_schedules_no_message_wakeup() {
+        let hub = WindowMessageHub::default();
+        let messages = hub.create_context("https://self.test/", None, false);
+        let mut context = SilkContext::new();
+        context.install_window_messages(messages);
+        context
+            .eval("window.postMessage('undeliverable', '*');")
+            .expect("context queues a same-window message");
+        assert!(!context.has_pending_host_callbacks());
+        assert!(context.next_host_callback_deadline().is_none());
     }
 
     #[test]
