@@ -778,6 +778,24 @@ mod tests {
     }
 
     #[test]
+    fn stop_immediate_propagation_skips_the_onmessage_handler() {
+        let hub = WindowMessageHub::default();
+        let dom = Arc::new(Mutex::new(Dom::new()));
+        let messages = hub.create_context("https://self.test/", None, false);
+        let mut context = SilkContext::with_dom(&dom);
+        context.install_window_messages(messages);
+        context
+            .eval("globalThis.calls = []; window.addEventListener('message', event => { calls.push('listener'); event.stopImmediatePropagation(); }); window.onmessage = () => calls.push('handler'); window.postMessage('stop', '*');")
+            .expect("context installs listener, handler, and message");
+        context
+            .run_ready_host_callbacks()
+            .expect("context dispatches its queued message");
+        context
+            .eval("if (calls.join() !== 'listener') throw new Error(calls.join());")
+            .expect("stopImmediatePropagation halts dispatch before onmessage");
+    }
+
+    #[test]
     fn post_message_defaults_to_sender_origin_and_accepts_undefined_data() {
         let parent_dom = Arc::new(Mutex::new(Dom::new()));
         let child_dom = Arc::new(Mutex::new(Dom::new()));

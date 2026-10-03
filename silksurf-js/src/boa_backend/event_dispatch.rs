@@ -632,6 +632,11 @@ pub(super) fn dispatch_window_message(
 ) -> JsResult<()> {
     let global = ctx.global_object().clone();
     propagate_event(dom_arc, WINDOW_TARGET, &JsValue::from(global), event, ctx)?;
+    // The onmessage handler is a listener on the window target, so a
+    // stopImmediatePropagation() call from an earlier window listener skips it.
+    if event_flag(event, js_string!("__stopImmediate"), ctx) {
+        return Ok(());
+    }
     let global = ctx.global_object().clone();
     let handler = global.get(js_string!("onmessage"), ctx)?;
     if let Some(handler) = handler.as_callable() {
