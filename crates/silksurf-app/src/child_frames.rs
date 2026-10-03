@@ -926,11 +926,14 @@ mod tests {
     fn hidden_iframe_loads_once_and_retains_its_context_when_shown() {
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("local listener binds");
         let address = listener.local_addr().expect("listener address");
+        // The server answers only after the test observes the first tick, so
+        // a tick that blocked on the child fetch returns Ready instead of Loading.
+        let (release, released) = std::sync::mpsc::channel::<()>();
         let server = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().expect("child request arrives");
             let mut request = [0_u8; 4096];
             let _ = stream.read(&mut request).expect("request reads");
-            std::thread::sleep(std::time::Duration::from_millis(400));
+            let _ = released.recv_timeout(std::time::Duration::from_secs(10));
             let body = "<!doctype html><html><body>child</body></html>";
             write!(
                 stream,
@@ -954,13 +957,15 @@ mod tests {
         })
         .expect("parent page builds");
 
-        let started = std::time::Instant::now();
         assert!(sync_child_frames(&mut page.runtime, &mut page.frame, 0));
         assert!(
-            started.elapsed() < std::time::Duration::from_millis(250),
-            "hidden child fetch blocked the page tick for {:?}",
-            started.elapsed()
+            matches!(
+                page.runtime.child_frames.first().map(|child| &child.state),
+                Some(EmbeddedFrameState::Loading(_))
+            ),
+            "hidden child fetch completed inside the page tick"
         );
+        release.send(()).expect("child server waits for release");
         server.join().expect("child server exits");
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
         while !matches!(
