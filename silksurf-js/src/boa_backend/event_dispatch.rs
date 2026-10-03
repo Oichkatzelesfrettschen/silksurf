@@ -632,6 +632,27 @@ pub(super) fn dispatch_window_message(
 ) -> JsResult<()> {
     let global = ctx.global_object().clone();
     propagate_event(dom_arc, WINDOW_TARGET, &JsValue::from(global), event, ctx)?;
+    // The onmessage handler is a listener on the window target, so a
+    // stopImmediatePropagation() call from an earlier window listener skips it.
+    if event_flag(event, js_string!("__stopImmediate"), ctx) {
+        return Ok(());
+    }
+    let global = ctx.global_object().clone();
+    let handler = global.get(js_string!("onmessage"), ctx)?;
+    if let Some(handler) = handler.as_callable() {
+        event.set(js_string!("currentTarget"), global.clone(), false, ctx)?;
+        event.set(js_string!("eventPhase"), AT_TARGET, false, ctx)?;
+        let event_value = JsValue::from(event.clone());
+        if let Err(error) = handler.call(
+            &JsValue::from(global.clone()),
+            std::slice::from_ref(&event_value),
+            ctx,
+        ) {
+            eprintln!("silksurf-js: window onmessage handler error: {error}");
+        }
+        event.set(js_string!("eventPhase"), 0, false, ctx)?;
+        event.set(js_string!("currentTarget"), JsValue::null(), false, ctx)?;
+    }
     Ok(())
 }
 

@@ -44,14 +44,18 @@ pub(crate) fn tick_browser_runtime(state: &mut BrowserState) -> bool {
             set_browser_status(state, "error");
             mark_redraw(state, BrowserRedrawMode::Chrome);
             let child_frames_changed = sync_child_frames(&mut runtime, &mut state.frame, 0);
+            let child_redraw_mode = child_frames_changed
+                .then(|| repaint_runtime_full_document(&mut runtime, &mut state.frame));
             state.runtime = Some(runtime);
-            if child_frames_changed {
-                mark_redraw(state, BrowserRedrawMode::Full);
+            if let Some(redraw_mode) = child_redraw_mode {
+                mark_redraw(state, redraw_mode);
             }
             return true;
         }
     };
     let child_frames_changed = sync_child_frames(&mut runtime, &mut state.frame, 0);
+    let child_redraw_mode =
+        child_frames_changed.then(|| repaint_runtime_full_document(&mut runtime, &mut state.frame));
 
     // Same-document navigations from history.pushState/replaceState: record
     // them in session history and reflect the address bar, no reload.
@@ -87,12 +91,8 @@ pub(crate) fn tick_browser_runtime(state: &mut BrowserState) -> bool {
     if chrome_changed {
         mark_redraw(state, BrowserRedrawMode::AddressChrome);
     }
-    if let Some(redraw_mode) = redraw_mode {
+    if let Some(redraw_mode) = child_redraw_mode.or(redraw_mode) {
         mark_redraw(state, redraw_mode);
-        return true;
-    }
-    if child_frames_changed {
-        mark_redraw(state, BrowserRedrawMode::Full);
         return true;
     }
     chrome_changed

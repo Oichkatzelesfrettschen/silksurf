@@ -1812,6 +1812,7 @@ impl SilkContext {
             || self.net.in_flight() > 0
             || !self.ws_sessions.borrow().is_empty()
             || !self.sse_subscriptions.borrow().is_empty()
+            || self.has_pending_window_messages()
     }
 
     /// Earliest instant at which a scheduled host callback becomes due.
@@ -1829,10 +1830,11 @@ impl SilkContext {
             !self.ws_sessions.borrow().is_empty() || !self.sse_subscriptions.borrow().is_empty();
         let net_deadline = (self.net.in_flight() > 0 || live_push_channels)
             .then(|| Instant::now() + std::time::Duration::from_millis(10));
-        match (timer_deadline, net_deadline) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (deadline, None) | (None, deadline) => deadline,
-        }
+        let message_deadline = self.has_pending_window_messages().then(Instant::now);
+        [timer_deadline, net_deadline, message_deadline]
+            .into_iter()
+            .flatten()
+            .min()
     }
 
     /// Run queued setTimeout, setInterval, and requestAnimationFrame callbacks.
