@@ -19,6 +19,7 @@ use boa_engine::{
     },
     property::Attribute,
 };
+use silksurf_net::client_hints;
 
 /// Install every platform global. Call once per context, before page script.
 pub(super) fn install_platform_globals(ctx: &mut Context) {
@@ -400,26 +401,16 @@ fn install_user_agent_data(ctx: &mut Context, url: &url::Url) {
         let _ = navigator.delete_property_or_throw(js_string!("userAgentData"), ctx);
         return;
     }
-
-    let platform = user_agent_platform();
-    let mobile = cfg!(any(target_os = "android", target_os = "ios"));
-    let brands = JsArray::new(ctx);
-    let brand = ObjectInitializer::new(ctx)
-        .property(
-            js_string!("brand"),
-            js_string!("SilkSurf"),
-            Attribute::all(),
-        )
-        .property(js_string!("version"), js_string!("0"), Attribute::all())
-        .build();
-    let _ = brands.push(JsValue::from(brand), ctx);
+    let Ok(brands) = brand_list(&client_hints::BRANDS, ctx) else {
+        return;
+    };
 
     let navigator_ua_data = ObjectInitializer::new(ctx)
         .property(js_string!("brands"), brands, Attribute::all())
-        .property(js_string!("mobile"), mobile, Attribute::all())
+        .property(js_string!("mobile"), client_hints::MOBILE, Attribute::all())
         .property(
             js_string!("platform"),
-            js_string!(platform),
+            js_string!(client_hints::PLATFORM),
             Attribute::all(),
         )
         .function(
@@ -453,23 +444,25 @@ fn is_secure_context_url(url: &url::Url) -> bool {
             }))
 }
 
-pub(super) fn user_agent_platform() -> &'static str {
-    match std::env::consts::OS {
-        "linux" => "Linux",
-        "macos" => "macOS",
-        "windows" => "Windows",
-        "android" => "Android",
-        "ios" => "iOS",
-        _ => "",
+/// A fresh `NavigatorUABrandVersion` array for one `client_hints` brand table.
+fn brand_list(entries: &[client_hints::BrandVersion], ctx: &mut Context) -> JsResult<JsArray> {
+    let brands = JsArray::new(ctx);
+    for entry in entries {
+        let brand = ObjectInitializer::new(ctx)
+            .property(
+                js_string!("brand"),
+                js_string!(entry.brand),
+                Attribute::all(),
+            )
+            .property(
+                js_string!("version"),
+                js_string!(entry.version),
+                Attribute::all(),
+            )
+            .build();
+        brands.push(JsValue::from(brand), ctx)?;
     }
-}
-
-fn user_agent_architecture() -> &'static str {
-    match std::env::consts::ARCH {
-        "x86_64" | "x86" => "x86",
-        "aarch64" | "arm" => "arm",
-        _ => "",
-    }
+    Ok(brands)
 }
 
 fn user_agent_data_to_json(
@@ -529,42 +522,26 @@ fn user_agent_data_get_high_entropy_values(
 }
 
 fn user_agent_high_entropy_values(ctx: &mut Context) -> JsResult<boa_engine::JsObject> {
-    let brands = JsArray::new(ctx);
-    let brand = ObjectInitializer::new(ctx)
-        .property(
-            js_string!("brand"),
-            js_string!("SilkSurf"),
-            Attribute::all(),
-        )
-        .property(
-            js_string!("version"),
-            js_string!(env!("CARGO_PKG_VERSION")),
-            Attribute::all(),
-        )
-        .build();
-    brands.push(JsValue::from(brand), ctx)?;
+    let full_version_list = brand_list(&client_hints::FULL_VERSION_LIST, ctx)?;
     let form_factors = JsArray::new(ctx);
-    form_factors.push(
-        JsValue::from(if cfg!(any(target_os = "android", target_os = "ios")) {
-            js_string!("Mobile")
-        } else {
-            js_string!("Desktop")
-        }),
-        ctx,
-    )?;
+    form_factors.push(JsValue::from(js_string!(client_hints::FORM_FACTOR)), ctx)?;
     Ok(ObjectInitializer::new(ctx)
         .property(
             js_string!("architecture"),
-            js_string!(user_agent_architecture()),
+            js_string!(client_hints::ARCHITECTURE),
             Attribute::all(),
         )
         .property(
             js_string!("bitness"),
-            js_string!(if usize::BITS == 64 { "64" } else { "32" }),
+            js_string!(client_hints::BITNESS),
             Attribute::all(),
         )
         .property(js_string!("formFactors"), form_factors, Attribute::all())
-        .property(js_string!("fullVersionList"), brands, Attribute::all())
+        .property(
+            js_string!("fullVersionList"),
+            full_version_list,
+            Attribute::all(),
+        )
         .property(js_string!("model"), js_string!(""), Attribute::all())
         .property(
             js_string!("platformVersion"),
@@ -1091,15 +1068,17 @@ mod tests {
     fn user_agent_data_matches_the_secure_context_request_profile() {
         let mut context = context();
         context.set_document_url("https://example.com/");
-        let platform = super::user_agent_platform();
+        let platform = silksurf_net::client_hints::PLATFORM;
         let low_entropy_script = format!(
             "if (navigator.userAgentData.platform !== '{platform}') throw new Error('platform'); \
              if (navigator.userAgentData.mobile !== {}) throw new Error('mobile'); \
              if (navigator.userAgentData.brands[0].brand !== 'SilkSurf') throw new Error('brand'); \
+             if (navigator.userAgentData.brands.length !== 2 || navigator.userAgentData.brands[1].brand !== 'Not_A Brand') \
+               throw new Error('grease brand'); \
              var highEntropy = null; \
              navigator.userAgentData.getHighEntropyValues(['architecture', 'bitness', 'fullVersionList', 'model']) \
                .then(value => highEntropy = value);",
-            cfg!(any(target_os = "android", target_os = "ios"))
+            silksurf_net::client_hints::MOBILE
         );
         context
             .eval(low_entropy_script.as_str())
@@ -1110,9 +1089,11 @@ mod tests {
                throw new Error('architecture'); \
              if (highEntropy.bitness !== '32' && highEntropy.bitness !== '64') throw new Error('bitness'); \
              if (highEntropy.fullVersionList[0].version !== '{}') throw new Error('full version'); \
+             if (highEntropy.fullVersionList.length !== navigator.userAgentData.brands.length) \
+               throw new Error('full version list'); \
              if (highEntropy.model !== '') throw new Error('model'); \
              if (navigator.userAgentData.toJSON().brands[0].brand !== 'SilkSurf') throw new Error('toJSON');",
-            env!("CARGO_PKG_VERSION")
+            silksurf_net::client_hints::FULL_VERSION
         );
         context
             .eval(high_entropy_script.as_str())
@@ -1123,7 +1104,7 @@ mod tests {
             .expect("insecure origins omit navigator.userAgentData");
         context.set_document_url("http://127.0.0.1/");
         context
-            .eval("if (navigator.userAgentData.platform !== 'Linux') throw new Error('loopback');")
+            .eval("if (navigator.userAgentData.brands[0].brand !== 'SilkSurf') throw new Error('loopback');")
             .expect("loopback origins qualify as secure contexts");
     }
 

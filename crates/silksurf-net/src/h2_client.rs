@@ -16,7 +16,7 @@ use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 
-use super::{USER_AGENT_BRANDS, USER_AGENT_MOBILE, USER_AGENT_PLATFORM};
+use super::client_hints;
 
 #[cfg(feature = "content-encoding")]
 const ACCEPT_ENCODING_VALUE: &str = "br, gzip, deflate";
@@ -164,11 +164,7 @@ fn build_h2_request(host: &str, req: &H2Request) -> Result<Request<()>, String> 
         .version(Version::HTTP_2)
         .header("accept", "text/css,*/*")
         .header("user-agent", "SilkSurf/0.1 (X11; Linux x86_64)");
-    for (name, value) in [
-        ("sec-ch-ua", USER_AGENT_BRANDS),
-        ("sec-ch-ua-mobile", USER_AGENT_MOBILE),
-        ("sec-ch-ua-platform", USER_AGENT_PLATFORM),
-    ] {
+    for (name, value) in client_hints::low_entropy_headers() {
         if !has_header(&req.extra_headers, name) {
             builder = builder.header(name, value);
         }
@@ -243,12 +239,9 @@ mod tests {
         let request = build_h2_request("example.com", &request).expect("request builds");
         let headers = request.headers();
 
-        assert_eq!(headers["sec-ch-ua"], "\"SilkSurf\";v=\"0\"");
-        assert_eq!(headers["sec-ch-ua-mobile"], super::super::USER_AGENT_MOBILE);
-        assert_eq!(
-            headers["sec-ch-ua-platform"],
-            super::super::USER_AGENT_PLATFORM
-        );
+        for (name, value) in super::client_hints::low_entropy_headers() {
+            assert_eq!(headers[name], value, "{name}");
+        }
     }
 
     #[test]
@@ -262,10 +255,13 @@ mod tests {
         let headers = request.headers();
 
         assert_eq!(headers["sec-ch-ua"], "\"Custom\";v=\"1\"");
-        assert_eq!(headers["sec-ch-ua-mobile"], super::super::USER_AGENT_MOBILE);
+        assert_eq!(
+            headers["sec-ch-ua-mobile"],
+            super::client_hints::sec_ch_ua_mobile()
+        );
         assert_eq!(
             headers["sec-ch-ua-platform"],
-            super::super::USER_AGENT_PLATFORM
+            super::client_hints::sec_ch_ua_platform()
         );
     }
 }

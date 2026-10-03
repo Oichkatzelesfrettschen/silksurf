@@ -37,6 +37,7 @@
 #![allow(clippy::collapsible_if)]
 
 pub mod cache;
+pub mod client_hints;
 pub mod cookie;
 pub mod h2_client;
 pub mod sse;
@@ -81,24 +82,6 @@ pub const MAX_RESPONSE_BODY_BYTES: usize = 16 * 1024 * 1024;
 
 #[cfg(feature = "content-encoding")]
 const ACCEPT_ENCODING_VALUE: &str = "br, gzip, deflate";
-
-const USER_AGENT_BRANDS: &str = "\"SilkSurf\";v=\"0\"";
-const USER_AGENT_PLATFORM: &str = if cfg!(target_os = "macos") {
-    "\"macOS\""
-} else if cfg!(target_os = "windows") {
-    "\"Windows\""
-} else if cfg!(target_os = "android") {
-    "\"Android\""
-} else if cfg!(target_os = "ios") {
-    "\"iOS\""
-} else {
-    "\"Linux\""
-};
-const USER_AGENT_MOBILE: &str = if cfg!(any(target_os = "android", target_os = "ios")) {
-    "?1"
-} else {
-    "?0"
-};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HttpMethod {
@@ -504,11 +487,7 @@ fn write_user_agent_client_hints(
     request_bytes: &mut Vec<u8>,
     headers: &[(String, String)],
 ) -> Result<(), NetError> {
-    for (name, value) in [
-        ("sec-ch-ua", USER_AGENT_BRANDS),
-        ("sec-ch-ua-mobile", USER_AGENT_MOBILE),
-        ("sec-ch-ua-platform", USER_AGENT_PLATFORM),
-    ] {
+    for (name, value) in client_hints::low_entropy_headers() {
         if !has_header(headers, name) {
             write!(request_bytes, "{name}: {value}\r\n")
                 .map_err(|error| NetError::new(format!("Write error: {error}")))?;
@@ -1077,15 +1056,9 @@ mod tests {
         let wire = build_http1_request(&request, &target, None).expect("request serializes");
         let wire = String::from_utf8(wire).expect("request headers use UTF-8");
 
-        assert!(wire.contains("sec-ch-ua: \"SilkSurf\";v=\"0\"\r\n"));
-        assert!(wire.contains(&format!(
-            "sec-ch-ua-mobile: {}\r\n",
-            super::USER_AGENT_MOBILE
-        )));
-        assert!(wire.contains(&format!(
-            "sec-ch-ua-platform: {}\r\n",
-            super::USER_AGENT_PLATFORM
-        )));
+        for (name, value) in super::client_hints::low_entropy_headers() {
+            assert!(wire.contains(&format!("{name}: {value}\r\n")), "{name}");
+        }
     }
 
     #[test]
