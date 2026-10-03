@@ -488,7 +488,6 @@ fn user_agent_data_get_high_entropy_values(
         .property(js_string!("mobile"), mobile, Attribute::all())
         .property(js_string!("platform"), platform, Attribute::all())
         .build();
-    let high_entropy = user_agent_high_entropy_values(ctx)?;
     if let Some(hints) = args.first().and_then(JsValue::as_object) {
         let hints = JsArray::from_object(hints.clone())?;
         let length = hints.length(ctx)?;
@@ -497,8 +496,7 @@ fn user_agent_data_get_high_entropy_values(
                 .at(i64::try_from(index).unwrap_or(i64::MAX), ctx)?
                 .to_string(ctx)?
                 .to_std_string_lossy();
-            let value = high_entropy.get(js_string!(hint.as_str()), ctx)?;
-            if !value.is_undefined() {
+            if let Some(value) = high_entropy_value(&hint, ctx)? {
                 result.set(js_string!(hint.as_str()), value, false, ctx)?;
             }
         }
@@ -509,35 +507,25 @@ fn user_agent_data_get_high_entropy_values(
     >(Ok(result.into()), ctx)))
 }
 
-fn user_agent_high_entropy_values(ctx: &mut Context) -> JsResult<boa_engine::JsObject> {
-    let full_version_list = brand_list(&client_hints::FULL_VERSION_LIST, ctx)?;
-    let form_factors = JsArray::new(ctx);
-    form_factors.push(JsValue::from(js_string!(client_hints::FORM_FACTOR)), ctx)?;
-    Ok(ObjectInitializer::new(ctx)
-        .property(
-            js_string!("architecture"),
-            js_string!(client_hints::ARCHITECTURE),
-            Attribute::all(),
-        )
-        .property(
-            js_string!("bitness"),
-            js_string!(client_hints::BITNESS),
-            Attribute::all(),
-        )
-        .property(js_string!("formFactors"), form_factors, Attribute::all())
-        .property(
-            js_string!("fullVersionList"),
-            full_version_list,
-            Attribute::all(),
-        )
-        .property(js_string!("model"), js_string!(""), Attribute::all())
-        .property(
-            js_string!("platformVersion"),
-            js_string!(""),
-            Attribute::all(),
-        )
-        .property(js_string!("wow64"), false, Attribute::all())
-        .build())
+/// The value of one UA-CH `getHighEntropyValues` hint name. A name outside
+/// the `UADataValues` dictionary contributes nothing, so an inherited property
+/// name such as `constructor` stays off the result.
+fn high_entropy_value(hint: &str, ctx: &mut Context) -> JsResult<Option<JsValue>> {
+    let value = match hint {
+        "architecture" => js_string!(client_hints::ARCHITECTURE).into(),
+        "bitness" => js_string!(client_hints::BITNESS).into(),
+        "formFactors" => {
+            let form_factors = JsArray::new(ctx);
+            form_factors.push(JsValue::from(js_string!(client_hints::FORM_FACTOR)), ctx)?;
+            form_factors.into()
+        }
+        "fullVersionList" => brand_list(&client_hints::FULL_VERSION_LIST, ctx)?.into(),
+        "model" | "platformVersion" => js_string!("").into(),
+        "uaFullVersion" => js_string!(client_hints::FULL_VERSION).into(),
+        "wow64" => false.into(),
+        _ => return Ok(None),
+    };
+    Ok(Some(value))
 }
 
 pub(super) fn set_document_origin_opaque(ctx: &mut Context) {
@@ -1098,6 +1086,25 @@ mod tests {
         context
             .eval("if (!('userAgentData' in navigator)) throw new Error('ipv6 loopback');")
             .expect("IPv6 loopback origins qualify as secure contexts");
+        context
+            .eval(
+                "var hintNames = null; \
+                 navigator.userAgentData.getHighEntropyValues(['constructor', 'toString', 'uaFullVersion', 'formFactors']) \
+                   .then(value => hintNames = value);",
+            )
+            .expect("getHighEntropyValues accepts unknown hint names");
+        context.run_pending_jobs();
+        let hint_names_script = format!(
+            "if (Object.prototype.hasOwnProperty.call(hintNames, 'constructor')) throw new Error('constructor'); \
+             if (Object.prototype.hasOwnProperty.call(hintNames, 'toString')) throw new Error('toString'); \
+             if (hintNames.uaFullVersion !== '{}') throw new Error('uaFullVersion'); \
+             if (hintNames.formFactors[0] !== '{}') throw new Error('formFactors');",
+            silksurf_net::client_hints::FULL_VERSION,
+            silksurf_net::client_hints::FORM_FACTOR
+        );
+        context
+            .eval(hint_names_script.as_str())
+            .expect("only UA-CH hint names reach the resolved values");
     }
 
     #[test]
