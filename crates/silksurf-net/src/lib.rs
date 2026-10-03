@@ -468,7 +468,7 @@ fn build_http1_request(
 ) -> Result<Vec<u8>, NetError> {
     let mut request_bytes = Vec::with_capacity(512);
     write_request_line(&mut request_bytes, request, target)?;
-    if target.is_https {
+    if client_hints::is_potentially_trustworthy(&target.parsed) {
         write_user_agent_client_hints(&mut request_bytes, &request.headers)?;
     }
     write_content_encoding_header(&mut request_bytes, &request.headers)?;
@@ -1090,6 +1090,32 @@ mod tests {
         let wire = String::from_utf8(wire).expect("request headers use UTF-8");
 
         assert!(!wire.to_ascii_lowercase().contains("sec-ch-ua"));
+    }
+
+    #[test]
+    fn loopback_http_requests_send_client_hints() {
+        for url in [
+            "http://127.0.0.1/",
+            "http://[::1]:8080/",
+            "http://localhost/",
+        ] {
+            let request = HttpRequest {
+                method: HttpMethod::Get,
+                url: url.to_string(),
+                headers: Vec::new(),
+                body: Vec::new(),
+            };
+            let target = RequestTarget::parse(&request.url).expect("loopback URL parses");
+            let wire = build_http1_request(&request, &target, None).expect("request serializes");
+            let wire = String::from_utf8(wire).expect("request headers use UTF-8");
+
+            for (name, value) in super::client_hints::low_entropy_headers() {
+                assert!(
+                    wire.contains(&format!("{name}: {value}\r\n")),
+                    "{url} {name}"
+                );
+            }
+        }
     }
 
     #[cfg(feature = "content-encoding")]

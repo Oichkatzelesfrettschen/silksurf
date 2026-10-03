@@ -397,7 +397,7 @@ fn install_user_agent_data(ctx: &mut Context, url: &url::Url) {
     else {
         return;
     };
-    if !is_secure_context_url(url) {
+    if !client_hints::is_potentially_trustworthy(url) {
         let _ = navigator.delete_property_or_throw(js_string!("userAgentData"), ctx);
         return;
     }
@@ -430,18 +430,6 @@ fn install_user_agent_data(ctx: &mut Context, url: &url::Url) {
         false,
         ctx,
     );
-}
-
-fn is_secure_context_url(url: &url::Url) -> bool {
-    url.scheme() == "https"
-        || (url.scheme() == "http"
-            && url.host_str().is_some_and(|host| {
-                host.eq_ignore_ascii_case("localhost")
-                    || host.to_ascii_lowercase().ends_with(".localhost")
-                    || host
-                        .parse::<std::net::IpAddr>()
-                        .is_ok_and(|address| address.is_loopback())
-            }))
 }
 
 /// A fresh `NavigatorUABrandVersion` array for one `client_hints` brand table.
@@ -1106,6 +1094,10 @@ mod tests {
         context
             .eval("if (navigator.userAgentData.brands[0].brand !== 'SilkSurf') throw new Error('loopback');")
             .expect("loopback origins qualify as secure contexts");
+        context.set_document_url("http://[::1]:8080/");
+        context
+            .eval("if (!('userAgentData' in navigator)) throw new Error('ipv6 loopback');")
+            .expect("IPv6 loopback origins qualify as secure contexts");
     }
 
     #[test]

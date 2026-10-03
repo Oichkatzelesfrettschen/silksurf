@@ -63,12 +63,20 @@ AD-042 through AD-044 record the mechanisms and boundaries.
   request-only and request-plus-JavaScript UA A/B runs preserve the same
   rejection, so UA identity alone does not explain it. SilkSurf now exposes
   `navigator.userAgentData` in secure contexts and sends its truthful
-  low-entropy Client Hints on HTTPS requests. A fresh diagnostic run with
+  low-entropy Client Hints on requests to HTTPS and loopback URLs. A fresh
+  diagnostic run with
   Chromium's three low-entropy request values still receives
   `reject reason=unsupported_browser`; those headers are a compatibility gap,
   not the demonstrated cause. The challenge's server-side admission predicate
   remains opaque. High-entropy request hints still need `Accept-CH` policy and
   per-origin opt-in state.
+- `user-agent-client-hints-policy`: `silksurf_net::client_hints` sends the
+  low-entropy set only, because the network layer parses no `Accept-CH`
+  response header and keeps no per-origin opt-in cache for high-entropy request
+  hints. `navigator.userAgentData` follows the document's own URL, because
+  `set_document_url` receives no top-level creation URL; HTML's secure-context
+  rule reads the top-level URL, so an HTTPS frame inside an HTTP top-level
+  document still exposes the interface.
 - `media-element-stack`: video and audio decoding and playback remain open
   under the media decision below. Image source selection has a separate path.
 - `responsive-image-source-selection`: `picture`, `source`, `srcset`, and

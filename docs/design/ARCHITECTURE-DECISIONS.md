@@ -3839,10 +3839,12 @@ The HTTP and JavaScript identity surfaces share SilkSurf's own browser profile.
 `silksurf_net::client_hints` holds the one table both read: the brand list,
 platform, mobile classification, and high-entropy values. HTTPS and
 localhost/loopback HTTP contexts expose `navigator.userAgentData` from that
-table. HTTPS requests send `Sec-CH-UA`, `Sec-CH-UA-Mobile`, and
+table. Requests to potentially trustworthy URLs -- HTTPS, and HTTP to loopback
+addresses and `localhost` names -- send `Sec-CH-UA`, `Sec-CH-UA-Mobile`, and
 `Sec-CH-UA-Platform` serialized from it; explicit request headers override the
-generated low-entropy values. The profile reports the engine's architecture
-and package version instead of Chromium identity.
+generated low-entropy values. `client_hints::is_potentially_trustworthy` decides both the request set and
+`navigator.userAgentData` exposure. The profile reports the engine's
+architecture and package version instead of Chromium identity.
 
 The brand list carries the SilkSurf brand at the package major version and the
 GREASE brand `Not_A Brand`, because UA-CH section 8.2 requires more than one
@@ -3851,10 +3853,10 @@ significant version, which the UA-CH caching note permits. The platform comes
 from the UA-CH `Sec-CH-UA-Platform` value list and resolves to `Unknown` on an
 operating system outside it.
 
-High-entropy request headers remain gated on origin `Accept-CH` policy and
-persisted per-origin opt-in. The current network layer sends the low-entropy
-set only, while script callers can request the supported high-entropy fields
-through `getHighEntropyValues()`.
+The network layer sends the low-entropy set only. High-entropy request headers
+require origin `Accept-CH` policy and a persisted per-origin opt-in, and the
+`user-agent-client-hints-policy` roadmap entry tracks both. Script callers read
+the supported high-entropy fields through `getHighEntropyValues()`.
 
 ## Future ADRs
 

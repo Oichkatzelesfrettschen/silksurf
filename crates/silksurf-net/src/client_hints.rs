@@ -126,6 +126,28 @@ pub fn low_entropy_headers() -> [(&'static str, &'static str); 3] {
     ]
 }
 
+/// Secure Contexts "is origin potentially trustworthy?" over a URL with a
+/// tuple origin: `https` and `wss`, loopback IP hosts, and `localhost` names.
+/// Client Hints reach only these URLs, and silksurf-js exposes
+/// `navigator.userAgentData` only to documents at them.
+#[must_use]
+pub fn is_potentially_trustworthy(url: &url::Url) -> bool {
+    match url.scheme() {
+        "https" | "wss" => true,
+        "http" | "ws" => match url.host() {
+            Some(url::Host::Ipv4(address)) => address.is_loopback(),
+            Some(url::Host::Ipv6(address)) => address.is_loopback(),
+            Some(url::Host::Domain(host)) => {
+                let host = host.strip_suffix('.').unwrap_or(host);
+                host.eq_ignore_ascii_case("localhost")
+                    || host.to_ascii_lowercase().ends_with(".localhost")
+            }
+            None => false,
+        },
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -143,5 +165,32 @@ mod tests {
         assert!(grease.len() <= 20 && grease.contains(' '));
         assert_eq!(grease.trim(), grease);
         assert_eq!(BRANDS.len(), FULL_VERSION_LIST.len());
+    }
+
+    #[test]
+    fn potentially_trustworthy_urls_cover_secure_schemes_and_loopback_hosts() {
+        for url in [
+            "https://example.com/",
+            "wss://example.com/",
+            "http://localhost/",
+            "http://LOCALHOST./",
+            "http://app.localhost:8080/",
+            "http://127.0.0.1/",
+            "http://127.8.9.10/",
+            "http://[::1]/",
+        ] {
+            let parsed = url::Url::parse(url).expect("test URL parses");
+            assert!(is_potentially_trustworthy(&parsed), "{url}");
+        }
+        for url in [
+            "http://example.com/",
+            "http://localhost.example/",
+            "http://10.0.0.1/",
+            "data:text/html,x",
+            "about:blank",
+        ] {
+            let parsed = url::Url::parse(url).expect("test URL parses");
+            assert!(!is_potentially_trustworthy(&parsed), "{url}");
+        }
     }
 }
